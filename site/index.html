@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC — a coding-agent CLI for the models you run</title>
+<meta name="description" content="DGC is an interactive coding-agent CLI for the models you run — local (Ollama, llama.cpp, LM Studio, vLLM) or any OpenAI-compatible cloud. Permission modes, plan mode, thinking levels, memory and skills. Built by Mohit Kalra.">
+<meta property="og:title" content="DGC — a coding-agent CLI for the models you run">
+<meta property="og:description" content="Your machine, your model, your data. An interactive coding agent for Ollama, llama.cpp, LM Studio, vLLM and any OpenAI-compatible cloud.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14110c;
+    --bg2: #0d0b08;
+    --panel: #1b1712;
+    --panel2: #211c15;
+    --border: #2c261d;
+    --border-soft: #241f17;
+    --text: #f3efe8;
+    --muted: #a8a294;
+    --dim: #6f685c;
+    --accent: #e8a08c;
+    --accent-strong: #d97b5e;
+    --cyan: #22d3ee;
+    --green: #7dd8a3;
+    --yellow: #e5c07b;
+    --red: #e06c5b;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ::selection { background: rgba(232, 160, 140, .25); }
+
+  .glow {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(900px 480px at 82% -8%, rgba(232, 76, 198, .10), transparent 60%),
+      radial-gradient(760px 520px at -12% 30%, rgba(34, 211, 238, .07), transparent 60%),
+      radial-gradient(700px 500px at 50% 115%, rgba(217, 123, 94, .08), transparent 60%);
+  }
+  .grid-lines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35;
+    background-image:
+      linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
+  }
+
+  .wrap { position: relative; z-index: 1; width: min(1080px, 92vw); margin: 0 auto; }
+  header.hero > *, .split > * { min-width: 0; }
+  pre.logo { overflow-x: auto; scrollbar-width: none; }
+  pre.logo::-webkit-scrollbar { display: none; }
+  body { overflow-x: clip; }
+
+  /* ---------------- nav ---------------- */
+  nav {
+    display: flex; align-items: center; gap: 1.5rem;
+    padding: 1.1rem 0; font-size: .88rem;
+  }
+  .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: .02em; }
+  .brand .mark {
+    font-family: var(--mono); font-size: .72rem; font-weight: 700; padding: .28rem .45rem;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: linear-gradient(135deg, rgba(34,211,238,.14), rgba(232,76,198,.14));
+  }
+  nav .links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
+  nav .links a { color: var(--muted); }
+  nav .links a:hover { color: var(--text); text-decoration: none; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .45rem;
+    background: var(--accent-strong); color: #fff; border: 0; border-radius: 9px;
+    padding: .5rem .95rem; font-weight: 650; font-size: .85rem; cursor: pointer;
+    transition: background .15s ease, transform .15s ease;
+  }
+  .btn:hover { background: #c46a4f; text-decoration: none; transform: translateY(-1px); }
+  .btn.ghost {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  .btn.ghost:hover { background: var(--panel); }
+
+  /* ---------------- hero ---------------- */
+  header.hero { padding: 3.5rem 0 3rem; display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
+  pre.logo {
+    font-family: var(--mono); line-height: 1.05; margin: 0 0 1.2rem;
+    font-size: clamp(8px, 1.35vw, 12px); font-weight: 700;
+    background: linear-gradient(90deg, var(--cyan), #9b84e8, #e84cc6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: .9rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.2vw, 2.9rem); font-weight: 720; letter-spacing: -.025em;
+    line-height: 1.12; margin: 0 0 1rem;
+  }
+  h1 .grad {
+    background: linear-gradient(90deg, var(--cyan), #9b84e8, #e84cc6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lede { color: var(--muted); font-size: 1.02rem; max-width: 34rem; margin: 0 0 1.6rem; }
+  .lede b { color: var(--text); font-weight: 600; }
+
+  .cmd {
+    display: flex; align-items: center; gap: .7rem;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 11px;
+    padding: .8rem .95rem; font-family: var(--mono); font-size: .84rem;
+    max-width: 34rem;
+  }
+  .cmd .d { color: var(--dim); user-select: none; }
+  .cmd code { color: var(--text); white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .cmd code::-webkit-scrollbar { display: none; }
+  .cmd button {
+    margin-left: auto; background: var(--panel2); color: var(--accent); border: 1px solid var(--border);
+    border-radius: 7px; padding: .35rem .7rem; font: 600 .72rem var(--mono); cursor: pointer; flex-shrink: 0;
+  }
+  .cmd button:hover { border-color: var(--accent-strong); }
+  .hero-meta { display: flex; gap: 1.2rem; margin-top: 1.1rem; font-size: .8rem; color: var(--dim); font-family: var(--mono); flex-wrap: wrap; }
+  .hero-meta span::before { content: "✓ "; color: var(--green); }
+
+  /* ---------------- terminal ---------------- */
+  .term {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 24px 60px -24px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset;
+    overflow: hidden; font-family: var(--mono); font-size: .76rem; line-height: 1.55;
+  }
+  .term-bar { display: flex; align-items: center; gap: .45rem; padding: .6rem .9rem; border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,.015); }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+  .term-bar i:nth-child(1) { background: #3d332a; }
+  .term-bar i:nth-child(2) { background: #3d332a; }
+  .term-bar i:nth-child(3) { background: #3d332a; }
+  .term-bar span { margin-left: .5rem; color: var(--dim); font-size: .7rem; }
+  .term-body { padding: .9rem 1rem 1.1rem; min-height: 330px; white-space: pre-wrap; }
+  .term-body .row { display: block; }
+  .t-dim { color: var(--dim); }
+  .t-muted { color: var(--muted); }
+  .t-accent { color: var(--accent); }
+  .t-cyan { color: var(--cyan); }
+  .t-green { color: var(--green); }
+  .t-yellow { color: var(--yellow); }
+  .t-add { color: var(--green); }
+  .t-del { color: var(--red); }
+  .cursor { display: inline-block; width: .55em; height: 1.05em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---------------- sections ---------------- */
+  section { padding: 3.2rem 0; border-top: 1px solid var(--border-soft); }
+  .sec-head { margin-bottom: 2rem; max-width: 40rem; }
+  h2 { font-size: clamp(1.35rem, 2.6vw, 1.8rem); font-weight: 700; letter-spacing: -.02em; margin: 0 0 .55rem; }
+  .sec-head p { color: var(--muted); margin: 0; font-size: .95rem; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .pill {
+    font-family: var(--mono); font-size: .8rem; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: .4rem .9rem;
+    background: var(--panel); transition: color .15s, border-color .15s;
+  }
+  .pill:hover { color: var(--text); border-color: var(--accent-strong); }
+  .pill b { color: var(--text); font-weight: 600; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .9rem; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 13px;
+    padding: 1.15rem 1.2rem; transition: border-color .15s ease, transform .15s ease;
+  }
+  .card:hover { border-color: #3d3423; transform: translateY(-2px); }
+  .card h3 { margin: 0 0 .4rem; font-size: .95rem; font-weight: 650; display: flex; align-items: center; gap: .5rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .85rem; line-height: 1.55; }
+  .card code, .inline-code {
+    font-family: var(--mono); font-size: .82em; background: rgba(255,255,255,.055);
+    padding: .1em .4em; border-radius: 5px; color: var(--accent);
+  }
+  .mode-tag { font-family: var(--mono); font-size: .68rem; padding: .18rem .5rem; border-radius: 6px; border: 1px solid var(--border); }
+  .m-default { color: var(--cyan); border-color: rgba(34,211,238,.35); }
+  .m-edits { color: var(--green); border-color: rgba(125,216,163,.35); }
+  .m-plan { color: var(--yellow); border-color: rgba(229,192,123,.35); }
+  .m-auto { color: var(--red); border-color: rgba(224,108,91,.4); }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: start; }
+  pre.codeblock {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem 1.1rem; font-family: var(--mono); font-size: .78rem; line-height: 1.65;
+    overflow-x: auto; margin: 0; color: var(--muted);
+  }
+  pre.codeblock .c-dim { color: var(--dim); }
+  pre.codeblock .c-acc { color: var(--accent); }
+  pre.codeblock .c-grn { color: var(--green); }
+  pre.codeblock .c-cyn { color: var(--cyan); }
+  pre.codeblock .c-red { color: var(--red); }
+
+  .tools { display: flex; flex-wrap: wrap; gap: .45rem; }
+  .tool {
+    font-family: var(--mono); font-size: .74rem; color: var(--muted);
+    background: var(--bg2); border: 1px solid var(--border-soft); border-radius: 7px; padding: .3rem .6rem;
+  }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .9rem; counter-reset: step; }
+  .step { background: var(--panel); border: 1px solid var(--border); border-radius: 13px; padding: 1.15rem 1.2rem; }
+  .step::before {
+    counter-increment: step; content: counter(step);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.6rem; height: 1.6rem; border-radius: 8px; margin-bottom: .7rem;
+    background: linear-gradient(135deg, rgba(34,211,238,.16), rgba(232,76,198,.16));
+    border: 1px solid var(--border); font: 700 .8rem var(--mono); color: var(--text);
+  }
+  .step h3 { margin: 0 0 .35rem; font-size: .92rem; }
+  .step p { margin: 0; color: var(--muted); font-size: .84rem; }
+  .step code { font-family: var(--mono); font-size: .82em; color: var(--accent); }
+
+  footer {
+    border-top: 1px solid var(--border-soft); padding: 2rem 0 2.6rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    color: var(--dim); font-size: .8rem; font-family: var(--mono);
+  }
+  footer .right { margin-left: auto; }
+
+  @media (max-width: 900px) {
+    header.hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 2rem; }
+    .split { grid-template-columns: 1fr; }
+    nav .links a:not(.btn) { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .cursor { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="grid-lines"></div>
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="mark">▓▓▓</span> DGC</div>
+    <div class="links">
+      <a href="#providers">Providers</a>
+      <a href="#modes">Permissions</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quickstart</a>
+      <a class="btn" href="#install">Install</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="install">
+    <div>
+      <pre class="logo">██████╗   ██████╗   ██████╗
+██╔══██╗ ██╔════╝  ██╔════╝
+██║  ██║ ██║  ███╗ ██║
+██║  ██║ ██║   ██║ ██║
+██████╔╝ ╚██████╔╝ ╚██████╗
+╚═════╝   ╚═════╝   ╚═════╝</pre>
+      <h1>A coding agent for the <span class="grad">models you run</span>.</h1>
+      <p class="lede">DGC lives in your terminal and drives <b>your</b> model — Ollama, llama.cpp,
+        LM Studio, vLLM, or any OpenAI-compatible cloud. Permission modes, plan mode, thinking
+        levels, memory and skills. <b>Your machine, your model, your data.</b></p>
+      <div class="cmd">
+        <span class="d">$</span>
+        <code id="cmd">curl -fsSL https://dagucchicode.com/install.sh | bash</code>
+        <button id="copy">copy</button>
+      </div>
+      <div class="hero-meta">
+        <span>pure python, 3 deps</span>
+        <span>no root needed</span>
+        <span>MIT licensed</span>
+      </div>
+    </div>
+
+    <div class="term" aria-label="DGC session demo">
+      <div class="term-bar"><i></i><i></i><i></i><span>dgc — ~/my-project</span></div>
+      <div class="term-body" id="term"></div>
+    </div>
+  </header>
+
+  <section id="providers">
+    <div class="sec-head">
+      <div class="eyebrow">Providers</div>
+      <h2>One command to connect anything.</h2>
+      <p><span class="inline-code">dgc setup</span> walks you through provider, key, model and context size.
+        Switch any time inside the session with <span class="inline-code">/connect</span>.</p>
+    </div>
+    <div class="pills">
+      <span class="pill"><b>Ollama</b> · local</span>
+      <span class="pill"><b>llama.cpp</b> · local</span>
+      <span class="pill"><b>LM Studio</b> · local</span>
+      <span class="pill"><b>vLLM</b> · local</span>
+      <span class="pill"><b>OpenAI</b> · cloud</span>
+      <span class="pill"><b>OpenRouter</b> · 100s of models</span>
+      <span class="pill"><b>Groq</b> · cloud</span>
+      <span class="pill"><b>DeepSeek</b> · cloud</span>
+      <span class="pill"><b>Together</b> · cloud</span>
+      <span class="pill"><b>Mistral</b> · cloud</span>
+    </div>
+  </section>
+
+  <section id="modes">
+    <div class="sec-head">
+      <div class="eyebrow">Permissions</div>
+      <h2>You decide how much rope it gets.</h2>
+      <p>Four permission modes, switchable live with <span class="inline-code">/mode</span> — from
+        ask-first to fully unattended.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3><span class="mode-tag m-default">default</span></h3>
+        <p>Reads and known-safe commands run free. Writes and other shell commands ask first — allow once, always, or never.</p>
+      </div>
+      <div class="card">
+        <h3><span class="mode-tag m-edits">acceptEdits</span></h3>
+        <p>File edits are auto-approved so flow isn't interrupted; shell commands still ask.</p>
+      </div>
+      <div class="card">
+        <h3><span class="mode-tag m-plan">plan</span></h3>
+        <p>Read-only. The agent researches your codebase and presents a concrete plan — approve it into any mode, or send it back to revise.</p>
+      </div>
+      <div class="card">
+        <h3><span class="mode-tag m-auto">auto</span></h3>
+        <p>Full-auto. Everything is approved and the agent builds, tests and verifies unattended until the task is done. Deny rules still fire.</p>
+      </div>
+    </div>
+    <div class="split" style="margin-top:1.6rem">
+      <div>
+        <h3 style="font-size:1.02rem;margin:0 0 .5rem">Fine-grained rules on top.</h3>
+        <p style="color:var(--muted);font-size:.9rem;margin:0">
+          Claude Code-style rules, evaluated <b style="color:var(--text)">deny → ask → allow</b>.
+          Compound shell commands are split and matched per subcommand; wrappers like
+          <span class="inline-code">timeout</span> are stripped; read-only commands
+          (<span class="inline-code">ls</span>, <span class="inline-code">git status</span>, …) never prompt.
+          Rules persist globally or per-project in <span class="inline-code">.dgc/permissions.json</span>.</p>
+      </div>
+      <pre class="codeblock"><span class="c-dim"># in the REPL</span>
+<span class="c-grn">/permissions allow</span> Bash(npm run *)
+<span class="c-grn">/permissions allow</span> Edit(src/**)
+<span class="c-grn">/permissions ask</span>   Bash(git push *)
+<span class="c-red">/permissions deny</span>  Bash(rm -rf *)
+<span class="c-red">/permissions deny</span>  Read(**/.env)</pre>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="sec-head">
+      <div class="eyebrow">Features</div>
+      <h2>A real harness, not a chat wrapper.</h2>
+      <p>The machinery the big agents have — pointed at whatever model you choose.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <h3>Plan mode</h3>
+        <p>Read-only research → a concrete step-by-step plan → approve into auto, acceptEdits or default. Reject with feedback and it revises.</p>
+      </div>
+      <div class="card">
+        <h3>Thinking modes</h3>
+        <p><code>/think off|low|medium|high</code>, with <code>think</code> / <code>think hard</code> / <code>ultrathink</code> keywords bumping a single turn. Reasoning streams dimmed.</p>
+      </div>
+      <div class="card">
+        <h3>Memory</h3>
+        <p><code>DGC.md</code> in your project and <code>~/.dgc/DGC.md</code> for you load into every session. <code>#a fact</code> quick-adds; <code>/init</code> writes the project guide.</p>
+      </div>
+      <div class="card">
+        <h3>Skills</h3>
+        <p>Drop a <code>SKILL.md</code> into <code>.dgc/skills/&lt;name&gt;/</code> — the model invokes it when the description matches, or call it directly with <code>/skill</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Runs tiny local models</h3>
+        <p>No native tool-calling on the endpoint? DGC auto-falls back to a text tool-call protocol and parses it, so small quantized models still work.</p>
+      </div>
+      <div class="card">
+        <h3>Context compaction</h3>
+        <p>Long sessions summarize older turns automatically near your model's context limit. <code>/compact</code> forces it, <code>/clear</code> resets.</p>
+      </div>
+    </div>
+    <div style="margin-top:1.6rem">
+      <p style="color:var(--dim);font-size:.78rem;font-family:var(--mono);margin:0 0 .6rem">TOOLS THE AGENT CAN CALL</p>
+      <div class="tools">
+        <span class="tool">read_file</span><span class="tool">write_file</span><span class="tool">edit_file</span>
+        <span class="tool">bash</span><span class="tool">glob</span><span class="tool">grep</span>
+        <span class="tool">web_fetch</span><span class="tool">todo</span><span class="tool">skill</span>
+        <span class="tool">save_memory</span><span class="tool">present_plan</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="sec-head">
+      <div class="eyebrow">Quickstart</div>
+      <h2>Coding in under a minute.</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>Install</h3>
+        <p><code>curl -fsSL https://dagucchicode.com/install.sh | bash</code> — self-contained venv, nothing needs root.</p>
+      </div>
+      <div class="step">
+        <h3>Connect a model</h3>
+        <p><code>dgc setup</code> picks a provider and model interactively; <code>dgc doctor</code> verifies the endpoint.</p>
+      </div>
+      <div class="step">
+        <h3>Start coding</h3>
+        <p><code>dgc</code> opens the agent in your project. <code>dgc -p "task" --mode auto</code> for one-shot unattended runs.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>DGC</span>
+    <span>Built by <a href="https://dagucchicode.com">Mohit Kalra</a></span>
+    <span>MIT License</span>
+    <span class="right">dagucchicode.com</span>
+  </footer>
+</div>
+
+<script>
+  // copy button
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this;
+    navigator.clipboard.writeText(document.getElementById('cmd').textContent).then(function () {
+      btn.textContent = 'copied'; setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+    });
+  });
+
+  // terminal demo — typed lines replay in a loop
+  (function () {
+    var LINES = [
+      { t: '$ dgc', cls: 't-muted', type: true },
+      { t: '  connected: ollama · qwen3.6:27b-q8_0', cls: 't-dim', pause: 350 },
+      { t: '  mode: default · thinking: off · memory: DGC.md', cls: 't-dim', pause: 600 },
+      { t: '', pause: 250 },
+      { t: 'dgc[default]> add rate limiting to the api, ultrathink', cls: 't-accent', type: true },
+      { t: '· thinking… mapping the middleware chain…', cls: 't-dim', pause: 900 },
+      { t: '⏺ read_file src/api/server.py', cls: 't-cyan', pause: 300 },
+      { t: '⏺ edit_file src/api/server.py', cls: 't-cyan', pause: 250 },
+      { t: '  @@ -14,2 +14,5 @@', cls: 't-dim', pause: 120 },
+      { t: '  +app.use(rate_limit(max=100, window="1m"))', cls: 't-add', pause: 450 },
+      { t: '⏺ bash pytest tests/', cls: 't-cyan', pause: 500 },
+      { t: '  ✓ 14 passed in 1.2s', cls: 't-green', pause: 600 },
+      { t: 'Done — token-bucket limiter (100 req/min per IP) wired in,', pause: 60 },
+      { t: 'tests green. Want it stricter on /auth?', pause: 2600 },
+    ];
+    var term = document.getElementById('term');
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function render(instant) {
+      term.innerHTML = '';
+      LINES.forEach(function (l) {
+        var row = document.createElement('span');
+        row.className = 'row ' + (l.cls || '');
+        row.textContent = l.t;
+        term.appendChild(row);
+      });
+    }
+
+    if (reduced) { render(true); return; }
+
+    function play() {
+      term.innerHTML = '';
+      var li = 0;
+      function nextLine() {
+        if (li >= LINES.length) { setTimeout(play, 5200); return; }
+        var line = LINES[li++];
+        var row = document.createElement('span');
+        row.className = 'row ' + (line.cls || '');
+        term.appendChild(row);
+        if (line.type) {
+          var i = 0;
+          var cursor = document.createElement('span');
+          cursor.className = 'cursor';
+          row.appendChild(cursor);
+          (function tick() {
+            if (i < line.t.length) {
+              cursor.before(document.createTextNode(line.t[i++]));
+              setTimeout(tick, 34 + Math.random() * 46);
+            } else {
+              cursor.remove();
+              setTimeout(nextLine, line.pause || 220);
+            }
+          })();
+        } else {
+          row.textContent = line.t;
+          setTimeout(nextLine, line.pause || 160);
+        }
+      }
+      nextLine();
+    }
+    play();
+  })();
+</script>
+</body>
+</html>
