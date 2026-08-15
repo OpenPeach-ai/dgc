@@ -3,384 +3,471 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DGC — a coding-agent CLI for the models you run</title>
-<meta name="description" content="DGC is an interactive coding-agent CLI for the models you run — local (Ollama, llama.cpp, LM Studio, vLLM) or any OpenAI-compatible cloud. Permission modes, plan mode, thinking levels, memory and skills. Built by Mohit Kalra.">
-<meta property="og:title" content="DGC — a coding-agent CLI for the models you run">
+<title>DGC — the coding agent for models you run</title>
+<meta name="description" content="DGC is an interactive coding-agent CLI for the models you run — local (Ollama, llama.cpp, LM Studio, vLLM) or any OpenAI-compatible cloud. Permission modes, plan mode, thinking levels, memory and skills.">
+<meta property="og:title" content="DGC — the coding agent for models you run">
 <meta property="og:description" content="Your machine, your model, your data. An interactive coding agent for Ollama, llama.cpp, LM Studio, vLLM and any OpenAI-compatible cloud.">
 <meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #14110c;
-    --bg2: #0d0b08;
-    --panel: #1b1712;
-    --panel2: #211c15;
-    --border: #2c261d;
-    --border-soft: #241f17;
-    --text: #f3efe8;
-    --muted: #a8a294;
-    --dim: #6f685c;
-    --accent: #e8a08c;
-    --accent-strong: #d97b5e;
-    --cyan: #22d3ee;
-    --green: #7dd8a3;
-    --yellow: #e5c07b;
-    --red: #e06c5b;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --bg: #0b0908;
+    --surface: rgba(255, 255, 255, .025);
+    --surface-2: rgba(255, 255, 255, .05);
+    --border: rgba(255, 255, 255, .075);
+    --border-soft: rgba(255, 255, 255, .045);
+    --text: #f5f2ec;
+    --muted: #9d968a;
+    --dim: #6b655b;
+    --coral: #e8987a;
+    --coral-strong: #d97b5e;
+    --cyan: #67e8f9;
+    --violet: #a78bfa;
+    --pink: #f472b6;
+    --green: #86efac;
+    --yellow: #fcd34d;
+    --red: #f87171;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --grad: linear-gradient(92deg, var(--cyan), var(--violet) 48%, var(--pink));
+    --ease: cubic-bezier(.22, .8, .3, 1);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: var(--sans); font-size: 16px; line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
+    -webkit-font-smoothing: antialiased; overflow-x: clip;
+    font-feature-settings: "ss01", "cv11";
   }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  ::selection { background: rgba(232, 160, 140, .25); }
+  a { color: var(--coral); text-decoration: none; }
+  ::selection { background: rgba(232, 152, 122, .28); }
 
-  .glow {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  /* backdrop layers */
+  .noise {
+    position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: .05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .aurora {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
     background:
-      radial-gradient(900px 480px at 82% -8%, rgba(232, 76, 198, .10), transparent 60%),
-      radial-gradient(760px 520px at -12% 30%, rgba(34, 211, 238, .07), transparent 60%),
-      radial-gradient(700px 500px at 50% 115%, rgba(217, 123, 94, .08), transparent 60%);
+      radial-gradient(1000px 480px at 50% -10%, rgba(167, 139, 250, .12), transparent 62%),
+      radial-gradient(820px 460px at 88% 6%, rgba(244, 114, 182, .09), transparent 60%),
+      radial-gradient(760px 500px at 6% 16%, rgba(103, 232, 249, .07), transparent 60%);
   }
   .grid-lines {
-    position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35;
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .5;
     background-image:
-      linear-gradient(rgba(255,255,255,.022) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,.022) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
-    -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black, transparent 75%);
+      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 100% 55% at 50% 0%, black 20%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 100% 55% at 50% 0%, black 20%, transparent 78%);
+  }
+  #spotlight {
+    position: fixed; z-index: 1; pointer-events: none; width: 700px; height: 700px;
+    left: 0; top: 0; transform: translate(-50%, -50%); border-radius: 50%;
+    background: radial-gradient(circle, rgba(232,152,122,.055), transparent 65%);
+    opacity: 0; transition: opacity .6s ease;
   }
 
-  .wrap { position: relative; z-index: 1; width: min(1080px, 92vw); margin: 0 auto; }
-  header.hero > *, .split > * { min-width: 0; }
-  pre.logo { overflow-x: auto; scrollbar-width: none; }
-  pre.logo::-webkit-scrollbar { display: none; }
-  body { overflow-x: clip; }
+  .wrap { position: relative; z-index: 2; width: min(1120px, 92vw); margin: 0 auto; }
+  .wrap > *, .hero > * { min-width: 0; }
 
   /* ---------------- nav ---------------- */
   nav {
-    display: flex; align-items: center; gap: 1.5rem;
-    padding: 1.1rem 0; font-size: .88rem;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    transition: background .3s ease, border-color .3s ease, backdrop-filter .3s ease;
+    border-bottom: 1px solid transparent;
   }
-  .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: .02em; }
+  nav.scrolled {
+    background: rgba(11, 9, 8, .72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom-color: var(--border-soft);
+  }
+  nav .inner {
+    width: min(1120px, 92vw); margin: 0 auto;
+    display: flex; align-items: center; gap: 2rem; padding: .85rem 0;
+  }
+  .brand { display: flex; align-items: center; gap: .6rem; font-weight: 700; font-size: .95rem; letter-spacing: .01em; }
   .brand .mark {
-    font-family: var(--mono); font-size: .72rem; font-weight: 700; padding: .28rem .45rem;
-    border: 1px solid var(--border); border-radius: 7px;
-    background: linear-gradient(135deg, rgba(34,211,238,.14), rgba(232,76,198,.14));
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    font: 700 .68rem var(--mono); color: var(--text);
+    background: linear-gradient(135deg, rgba(103,232,249,.18), rgba(167,139,250,.18), rgba(244,114,182,.18));
+    border: 1px solid var(--border);
   }
-  nav .links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
-  nav .links a { color: var(--muted); }
-  nav .links a:hover { color: var(--text); text-decoration: none; }
+  nav .links { margin-left: auto; display: flex; gap: 1.6rem; align-items: center; font-size: .86rem; }
+  nav .links a { color: var(--muted); transition: color .15s; }
+  nav .links a:hover { color: var(--text); }
   .btn {
     display: inline-flex; align-items: center; gap: .45rem;
-    background: var(--accent-strong); color: #fff; border: 0; border-radius: 9px;
-    padding: .5rem .95rem; font-weight: 650; font-size: .85rem; cursor: pointer;
-    transition: background .15s ease, transform .15s ease;
+    background: var(--text); color: #14110d; border: 0; border-radius: 9px;
+    padding: .48rem 1rem; font-weight: 600; font-size: .85rem; cursor: pointer;
+    transition: transform .18s var(--ease), box-shadow .18s ease, background .15s;
   }
-  .btn:hover { background: #c46a4f; text-decoration: none; transform: translateY(-1px); }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -8px rgba(245,242,236,.35); }
   .btn.ghost {
-    background: transparent; color: var(--text); border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   }
-  .btn.ghost:hover { background: var(--panel); }
+  .btn.ghost:hover { background: rgba(255,255,255,.08); box-shadow: none; }
 
   /* ---------------- hero ---------------- */
-  header.hero { padding: 3.5rem 0 3rem; display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
-  pre.logo {
-    font-family: var(--mono); line-height: 1.05; margin: 0 0 1.2rem;
-    font-size: clamp(8px, 1.35vw, 12px); font-weight: 700;
-    background: linear-gradient(90deg, var(--cyan), #9b84e8, #e84cc6);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
+  .hero { padding: 9.5rem 0 4rem; text-align: center; display: flex; flex-direction: column; align-items: center; }
+  .pill-eyebrow {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font: 500 .74rem var(--mono); letter-spacing: .04em; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: .38rem .95rem;
+    background: var(--surface); margin-bottom: 1.8rem;
   }
-  .eyebrow {
-    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--accent); margin-bottom: .9rem;
-  }
+  .pill-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
   h1 {
-    font-size: clamp(1.9rem, 4.2vw, 2.9rem); font-weight: 720; letter-spacing: -.025em;
-    line-height: 1.12; margin: 0 0 1rem;
+    font-size: clamp(2.6rem, 6.2vw, 4.4rem); font-weight: 800; letter-spacing: -.035em;
+    line-height: 1.04; margin: 0 0 1.3rem; max-width: 16ch;
   }
-  h1 .grad {
-    background: linear-gradient(90deg, var(--cyan), #9b84e8, #e84cc6);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  .lede { color: var(--muted); font-size: 1.02rem; max-width: 34rem; margin: 0 0 1.6rem; }
+  h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { color: var(--muted); font-size: 1.08rem; max-width: 37rem; margin: 0 0 2.2rem; line-height: 1.65; }
   .lede b { color: var(--text); font-weight: 600; }
 
+  .cta-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; justify-content: center; width: 100%; }
   .cmd {
-    display: flex; align-items: center; gap: .7rem;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 11px;
-    padding: .8rem .95rem; font-family: var(--mono); font-size: .84rem;
-    max-width: 34rem;
+    display: flex; align-items: center; gap: .75rem;
+    background: rgba(0,0,0,.45); border: 1px solid var(--border); border-radius: 11px;
+    padding: .72rem .9rem; font: 500 .84rem var(--mono);
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+    min-width: 0; max-width: 100%;
   }
   .cmd .d { color: var(--dim); user-select: none; }
   .cmd code { color: var(--text); white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
   .cmd code::-webkit-scrollbar { display: none; }
   .cmd button {
-    margin-left: auto; background: var(--panel2); color: var(--accent); border: 1px solid var(--border);
-    border-radius: 7px; padding: .35rem .7rem; font: 600 .72rem var(--mono); cursor: pointer; flex-shrink: 0;
+    margin-left: .25rem; background: var(--surface-2); color: var(--coral); border: 1px solid var(--border);
+    border-radius: 7px; padding: .34rem .7rem; font: 600 .7rem var(--mono); cursor: pointer; flex-shrink: 0;
+    transition: border-color .15s, color .15s;
   }
-  .cmd button:hover { border-color: var(--accent-strong); }
-  .hero-meta { display: flex; gap: 1.2rem; margin-top: 1.1rem; font-size: .8rem; color: var(--dim); font-family: var(--mono); flex-wrap: wrap; }
+  .cmd button:hover { border-color: var(--coral-strong); color: var(--text); }
+  .hero-meta {
+    display: flex; gap: 1.4rem; margin-top: 1.6rem; font: 500 .78rem var(--mono);
+    color: var(--dim); flex-wrap: wrap; justify-content: center;
+  }
   .hero-meta span::before { content: "✓ "; color: var(--green); }
 
-  /* ---------------- terminal ---------------- */
-  .term {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
-    box-shadow: 0 24px 60px -24px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset;
-    overflow: hidden; font-family: var(--mono); font-size: .76rem; line-height: 1.55;
+  /* ---------------- terminal showcase ---------------- */
+  .showcase { position: relative; margin-top: 4.5rem; width: min(880px, 100%); }
+  .showcase::before {
+    content: ""; position: absolute; inset: -1px; border-radius: 17px; z-index: -1;
+    background: linear-gradient(135deg, rgba(103,232,249,.35), rgba(167,139,250,.28) 40%, rgba(244,114,182,.3));
+    filter: blur(.5px);
   }
-  .term-bar { display: flex; align-items: center; gap: .45rem; padding: .6rem .9rem; border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,.015); }
-  .term-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; }
-  .term-bar i:nth-child(1) { background: #3d332a; }
-  .term-bar i:nth-child(2) { background: #3d332a; }
-  .term-bar i:nth-child(3) { background: #3d332a; }
-  .term-bar span { margin-left: .5rem; color: var(--dim); font-size: .7rem; }
-  .term-body { padding: .9rem 1rem 1.1rem; min-height: 330px; white-space: pre-wrap; }
+  .showcase::after {
+    content: ""; position: absolute; inset: 10% -8% -18% -8%; z-index: -2; border-radius: 50%;
+    background: radial-gradient(ellipse at 50% 0%, rgba(167,139,250,.16), transparent 65%);
+    filter: blur(30px);
+  }
+  .term {
+    background: #0d0b09; border-radius: 16px; overflow: hidden; text-align: left;
+    font: 400 .78rem/1.62 var(--mono);
+    box-shadow: 0 40px 90px -30px rgba(0,0,0,.85);
+  }
+  .term-bar {
+    display: flex; align-items: center; gap: .45rem; padding: .7rem 1rem;
+    border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,.02);
+  }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; display: block; background: #2e2820; }
+  .term-bar i:first-child { background: #453b2f; }
+  .term-bar span { margin-left: .6rem; color: var(--dim); font-size: .7rem; letter-spacing: .02em; }
+  .term-body { padding: 1.05rem 1.15rem 1.25rem; min-height: 348px; white-space: pre-wrap; }
   .term-body .row { display: block; }
-  .t-dim { color: var(--dim); }
-  .t-muted { color: var(--muted); }
-  .t-accent { color: var(--accent); }
-  .t-cyan { color: var(--cyan); }
-  .t-green { color: var(--green); }
-  .t-yellow { color: var(--yellow); }
-  .t-add { color: var(--green); }
-  .t-del { color: var(--red); }
-  .cursor { display: inline-block; width: .55em; height: 1.05em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  .t-dim { color: var(--dim); } .t-muted { color: var(--muted); }
+  .t-accent { color: var(--coral); } .t-cyan { color: var(--cyan); }
+  .t-green { color: var(--green); } .t-yellow { color: var(--yellow); }
+  .t-violet { color: var(--violet); }
+  .t-add { color: var(--green); } .t-del { color: var(--red); }
+  .cursor { display: inline-block; width: .55em; height: 1.05em; background: var(--coral); vertical-align: text-bottom; animation: blink 1.05s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
   /* ---------------- sections ---------------- */
-  section { padding: 3.2rem 0; border-top: 1px solid var(--border-soft); }
-  .sec-head { margin-bottom: 2rem; max-width: 40rem; }
-  h2 { font-size: clamp(1.35rem, 2.6vw, 1.8rem); font-weight: 700; letter-spacing: -.02em; margin: 0 0 .55rem; }
-  .sec-head p { color: var(--muted); margin: 0; font-size: .95rem; }
+  section { padding: 5rem 0; }
+  .sec-head { margin-bottom: 2.6rem; max-width: 44rem; }
+  .sec-head.center { margin-left: auto; margin-right: auto; text-align: center; }
+  .eyebrow {
+    font: 600 .72rem var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--coral); margin-bottom: .9rem;
+  }
+  h2 { font-size: clamp(1.7rem, 3.4vw, 2.35rem); font-weight: 750; letter-spacing: -.028em; line-height: 1.12; margin: 0 0 .8rem; }
+  .sec-head p { color: var(--muted); margin: 0; font-size: .98rem; }
+  h3 { letter-spacing: -.01em; }
 
-  .pills { display: flex; flex-wrap: wrap; gap: .55rem; }
+  /* providers */
+  .providers { border-top: 1px solid var(--border-soft); padding: 2.4rem 0; }
+  .providers .label { text-align: center; font: 600 .7rem var(--mono); letter-spacing: .18em; color: var(--dim); margin-bottom: 1.3rem; }
+  .pills { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; }
   .pill {
-    font-family: var(--mono); font-size: .8rem; color: var(--muted);
-    border: 1px solid var(--border); border-radius: 999px; padding: .4rem .9rem;
-    background: var(--panel); transition: color .15s, border-color .15s;
+    font: 500 .8rem var(--mono); color: var(--muted);
+    border: 1px solid var(--border-soft); border-radius: 999px; padding: .45rem 1rem;
+    background: var(--surface); transition: color .2s, border-color .2s, transform .2s var(--ease);
   }
-  .pill:hover { color: var(--text); border-color: var(--accent-strong); }
+  .pill:hover { color: var(--text); border-color: rgba(232,152,122,.4); transform: translateY(-2px); }
   .pill b { color: var(--text); font-weight: 600; }
+  .pill .sep { color: var(--dim); margin: 0 .3rem; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .9rem; }
+  /* cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 13px;
-    padding: 1.15rem 1.2rem; transition: border-color .15s ease, transform .15s ease;
+    position: relative; background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 16px; padding: 1.4rem 1.4rem 1.5rem; overflow: hidden;
+    transition: border-color .25s ease, transform .25s var(--ease), background .25s ease;
   }
-  .card:hover { border-color: #3d3423; transform: translateY(-2px); }
-  .card h3 { margin: 0 0 .4rem; font-size: .95rem; font-weight: 650; display: flex; align-items: center; gap: .5rem; }
-  .card p { margin: 0; color: var(--muted); font-size: .85rem; line-height: 1.55; }
+  .card:hover { border-color: var(--border); background: var(--surface-2); transform: translateY(-3px); }
+  .card .icon {
+    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; margin-bottom: 1rem;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--coral);
+  }
+  .card h3 { margin: 0 0 .45rem; font-size: .98rem; font-weight: 650; }
+  .card p { margin: 0; color: var(--muted); font-size: .86rem; line-height: 1.6; }
   .card code, .inline-code {
-    font-family: var(--mono); font-size: .82em; background: rgba(255,255,255,.055);
-    padding: .1em .4em; border-radius: 5px; color: var(--accent);
+    font: 500 .82em var(--mono); background: rgba(255,255,255,.06);
+    padding: .12em .42em; border-radius: 5px; color: var(--coral);
   }
-  .mode-tag { font-family: var(--mono); font-size: .68rem; padding: .18rem .5rem; border-radius: 6px; border: 1px solid var(--border); }
-  .m-default { color: var(--cyan); border-color: rgba(34,211,238,.35); }
-  .m-edits { color: var(--green); border-color: rgba(125,216,163,.35); }
-  .m-plan { color: var(--yellow); border-color: rgba(229,192,123,.35); }
-  .m-auto { color: var(--red); border-color: rgba(224,108,91,.4); }
+  .mode-tag {
+    font: 600 .7rem var(--mono); padding: .3rem .65rem; border-radius: 7px;
+    border: 1px solid; display: inline-block; margin-bottom: .9rem;
+  }
+  .m-default { color: var(--cyan); border-color: rgba(103,232,249,.3); background: rgba(103,232,249,.06); }
+  .m-edits { color: var(--green); border-color: rgba(134,239,172,.3); background: rgba(134,239,172,.06); }
+  .m-plan { color: var(--yellow); border-color: rgba(252,211,77,.3); background: rgba(252,211,77,.06); }
+  .m-auto { color: var(--red); border-color: rgba(248,113,113,.35); background: rgba(248,113,113,.07); }
+  .card .mode-line { height: 2px; width: 100%; position: absolute; top: 0; left: 0; opacity: .8; }
+  .m-default ~ .mode-line, .mode-line.l-default { background: linear-gradient(90deg, var(--cyan), transparent); }
+  .mode-line.l-edits { background: linear-gradient(90deg, var(--green), transparent); }
+  .mode-line.l-plan { background: linear-gradient(90deg, var(--yellow), transparent); }
+  .mode-line.l-auto { background: linear-gradient(90deg, var(--red), transparent); }
 
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: start; }
+  /* split + code window */
+  .split { display: grid; grid-template-columns: 1fr 1.1fr; gap: 3rem; align-items: center; }
+  .codewin {
+    background: #0d0b09; border: 1px solid var(--border-soft); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 24px 60px -30px rgba(0,0,0,.7);
+  }
+  .codewin .bar { display: flex; gap: .45rem; padding: .65rem .95rem; border-bottom: 1px solid var(--border-soft); background: rgba(255,255,255,.02); }
+  .codewin .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2e2820; }
+  .codewin .bar span { margin-left: .5rem; color: var(--dim); font: 500 .68rem var(--mono); }
   pre.codeblock {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1rem 1.1rem; font-family: var(--mono); font-size: .78rem; line-height: 1.65;
-    overflow-x: auto; margin: 0; color: var(--muted);
+    margin: 0; padding: 1.1rem 1.2rem; font: 400 .78rem/1.75 var(--mono);
+    overflow-x: auto; color: var(--muted);
   }
-  pre.codeblock .c-dim { color: var(--dim); }
-  pre.codeblock .c-acc { color: var(--accent); }
-  pre.codeblock .c-grn { color: var(--green); }
-  pre.codeblock .c-cyn { color: var(--cyan); }
-  pre.codeblock .c-red { color: var(--red); }
+  pre.codeblock .c-dim { color: var(--dim); } pre.codeblock .c-acc { color: var(--coral); }
+  pre.codeblock .c-grn { color: var(--green); } pre.codeblock .c-cyn { color: var(--cyan); }
+  pre.codeblock .c-red { color: var(--red); } pre.codeblock .c-yel { color: var(--yellow); }
+  .split h3 { font-size: 1.15rem; margin: 0 0 .7rem; }
+  .split p { color: var(--muted); font-size: .92rem; margin: 0 0 .8rem; }
 
-  .tools { display: flex; flex-wrap: wrap; gap: .45rem; }
+  /* tools */
+  .tools { display: flex; flex-wrap: wrap; gap: .5rem; }
   .tool {
-    font-family: var(--mono); font-size: .74rem; color: var(--muted);
-    background: var(--bg2); border: 1px solid var(--border-soft); border-radius: 7px; padding: .3rem .6rem;
+    font: 500 .75rem var(--mono); color: var(--muted);
+    background: rgba(0,0,0,.35); border: 1px solid var(--border-soft); border-radius: 8px; padding: .38rem .7rem;
+    transition: color .2s, border-color .2s;
   }
+  .tool:hover { color: var(--text); border-color: var(--border); }
 
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .9rem; counter-reset: step; }
-  .step { background: var(--panel); border: 1px solid var(--border); border-radius: 13px; padding: 1.15rem 1.2rem; }
-  .step::before {
-    counter-increment: step; content: counter(step);
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 1.6rem; height: 1.6rem; border-radius: 8px; margin-bottom: .7rem;
-    background: linear-gradient(135deg, rgba(34,211,238,.16), rgba(232,76,198,.16));
-    border: 1px solid var(--border); font: 700 .8rem var(--mono); color: var(--text);
+  /* steps */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; counter-reset: step; position: relative; }
+  .step {
+    background: var(--surface); border: 1px solid var(--border-soft); border-radius: 16px;
+    padding: 1.5rem 1.4rem; transition: border-color .25s, transform .25s var(--ease);
   }
-  .step h3 { margin: 0 0 .35rem; font-size: .92rem; }
-  .step p { margin: 0; color: var(--muted); font-size: .84rem; }
-  .step code { font-family: var(--mono); font-size: .82em; color: var(--accent); }
+  .step:hover { border-color: var(--border); transform: translateY(-3px); }
+  .step .num {
+    display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 10px; margin-bottom: 1rem;
+    background: linear-gradient(135deg, rgba(103,232,249,.14), rgba(167,139,250,.14), rgba(244,114,182,.14));
+    border: 1px solid var(--border); font: 700 .82rem var(--mono);
+  }
+  .step h3 { margin: 0 0 .4rem; font-size: .95rem; }
+  .step p { margin: 0; color: var(--muted); font-size: .85rem; }
+  .step code { font: 500 .8em var(--mono); color: var(--coral); word-break: break-all; }
 
+  /* footer */
   footer {
-    border-top: 1px solid var(--border-soft); padding: 2rem 0 2.6rem;
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-    color: var(--dim); font-size: .8rem; font-family: var(--mono);
+    border-top: 1px solid var(--border-soft); margin-top: 3rem; padding: 2.2rem 0 2.8rem;
+    display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+    color: var(--dim); font: 500 .78rem var(--mono);
   }
+  footer a { color: var(--muted); } footer a:hover { color: var(--text); }
   footer .right { margin-left: auto; }
 
+  /* reveal on scroll */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+  .reveal.in { opacity: 1; transform: none; }
+
   @media (max-width: 900px) {
-    header.hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 2rem; }
-    .split { grid-template-columns: 1fr; }
+    .split { grid-template-columns: 1fr; gap: 1.6rem; }
     nav .links a:not(.btn) { display: none; }
+    .hero { padding-top: 7.5rem; }
   }
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .cursor { animation: none; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    #spotlight { display: none; }
   }
 </style>
 </head>
 <body>
-<div class="glow"></div>
+<div class="aurora"></div>
 <div class="grid-lines"></div>
-<div class="wrap">
+<div class="noise"></div>
+<div id="spotlight"></div>
 
-  <nav>
-    <div class="brand"><span class="mark">▓▓▓</span> DGC</div>
+<nav id="nav">
+  <div class="inner">
+    <div class="brand"><span class="mark">▓▓</span> DGC</div>
     <div class="links">
-      <a href="#providers">Providers</a>
       <a href="#modes">Permissions</a>
       <a href="#features">Features</a>
       <a href="#quickstart">Quickstart</a>
       <a class="btn" href="#install">Install</a>
     </div>
-  </nav>
+  </div>
+</nav>
 
+<div class="wrap">
   <header class="hero" id="install">
-    <div>
-      <pre class="logo">██████╗   ██████╗   ██████╗
-██╔══██╗ ██╔════╝  ██╔════╝
-██║  ██║ ██║  ███╗ ██║
-██║  ██║ ██║   ██║ ██║
-██████╔╝ ╚██████╔╝ ╚██████╗
-╚═════╝   ╚═════╝   ╚═════╝</pre>
-      <h1>A coding agent for the <span class="grad">models you run</span>.</h1>
-      <p class="lede">DGC lives in your terminal and drives <b>your</b> model — Ollama, llama.cpp,
-        LM Studio, vLLM, or any OpenAI-compatible cloud. Permission modes, plan mode, thinking
-        levels, memory and skills. <b>Your machine, your model, your data.</b></p>
+    <div class="pill-eyebrow"><span class="dot"></span> open source · MIT · pure python, 3 deps</div>
+    <h1>The coding agent for <span class="grad">models you run</span>.</h1>
+    <p class="lede">DGC lives in your terminal and drives <b>your</b> model — Ollama, llama.cpp,
+      LM Studio, vLLM, or any OpenAI-compatible cloud. Permission modes, plan mode, thinking
+      levels, memory and skills. <b>Your machine, your model, your data.</b></p>
+    <div class="cta-row">
       <div class="cmd">
         <span class="d">$</span>
         <code id="cmd">curl -fsSL https://dagucchicode.com/install.sh | bash</code>
         <button id="copy">copy</button>
       </div>
-      <div class="hero-meta">
-        <span>pure python, 3 deps</span>
-        <span>no root needed</span>
-        <span>MIT licensed</span>
-      </div>
+      <a class="btn ghost" href="#modes">See how it works ↓</a>
+    </div>
+    <div class="hero-meta">
+      <span>no root needed</span>
+      <span>self-contained install</span>
+      <span>any OpenAI-compatible endpoint</span>
     </div>
 
-    <div class="term" aria-label="DGC session demo">
-      <div class="term-bar"><i></i><i></i><i></i><span>dgc — ~/my-project</span></div>
-      <div class="term-body" id="term"></div>
+    <div class="showcase">
+      <div class="term" aria-label="DGC session demo">
+        <div class="term-bar"><i></i><i></i><i></i><span>dgc — ~/my-project</span></div>
+        <div class="term-body" id="term"></div>
+      </div>
     </div>
   </header>
 
-  <section id="providers">
-    <div class="sec-head">
-      <div class="eyebrow">Providers</div>
-      <h2>One command to connect anything.</h2>
-      <p><span class="inline-code">dgc setup</span> walks you through provider, key, model and context size.
-        Switch any time inside the session with <span class="inline-code">/connect</span>.</p>
-    </div>
+  <div class="providers reveal">
+    <div class="label">WORKS WITH YOUR STACK — ONE COMMAND TO CONNECT</div>
     <div class="pills">
-      <span class="pill"><b>Ollama</b> · local</span>
-      <span class="pill"><b>llama.cpp</b> · local</span>
-      <span class="pill"><b>LM Studio</b> · local</span>
-      <span class="pill"><b>vLLM</b> · local</span>
-      <span class="pill"><b>OpenAI</b> · cloud</span>
-      <span class="pill"><b>OpenRouter</b> · 100s of models</span>
-      <span class="pill"><b>Groq</b> · cloud</span>
-      <span class="pill"><b>DeepSeek</b> · cloud</span>
-      <span class="pill"><b>Together</b> · cloud</span>
-      <span class="pill"><b>Mistral</b> · cloud</span>
+      <span class="pill"><b>Ollama</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>llama.cpp</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>LM Studio</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>vLLM</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>OpenAI</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>OpenRouter</b><span class="sep">·</span>100s of models</span>
+      <span class="pill"><b>Groq</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>DeepSeek</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>Together</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>Mistral</b><span class="sep">·</span>cloud</span>
     </div>
-  </section>
+  </div>
 
   <section id="modes">
-    <div class="sec-head">
+    <div class="sec-head center reveal">
       <div class="eyebrow">Permissions</div>
       <h2>You decide how much rope it gets.</h2>
-      <p>Four permission modes, switchable live with <span class="inline-code">/mode</span> — from
-        ask-first to fully unattended.</p>
+      <p>Four permission modes, switched live with <span class="inline-code">/mode</span> — from ask-first to fully unattended.</p>
     </div>
     <div class="cards">
-      <div class="card">
-        <h3><span class="mode-tag m-default">default</span></h3>
+      <div class="card reveal">
+        <div class="mode-line l-default"></div>
+        <span class="mode-tag m-default">default</span>
         <p>Reads and known-safe commands run free. Writes and other shell commands ask first — allow once, always, or never.</p>
       </div>
-      <div class="card">
-        <h3><span class="mode-tag m-edits">acceptEdits</span></h3>
-        <p>File edits are auto-approved so flow isn't interrupted; shell commands still ask.</p>
+      <div class="card reveal">
+        <div class="mode-line l-edits"></div>
+        <span class="mode-tag m-edits">acceptEdits</span>
+        <p>File edits are auto-approved so flow isn't interrupted; shell commands still ask for a yes.</p>
       </div>
-      <div class="card">
-        <h3><span class="mode-tag m-plan">plan</span></h3>
+      <div class="card reveal">
+        <div class="mode-line l-plan"></div>
+        <span class="mode-tag m-plan">plan</span>
         <p>Read-only. The agent researches your codebase and presents a concrete plan — approve it into any mode, or send it back to revise.</p>
       </div>
-      <div class="card">
-        <h3><span class="mode-tag m-auto">auto</span></h3>
-        <p>Full-auto. Everything is approved and the agent builds, tests and verifies unattended until the task is done. Deny rules still fire.</p>
+      <div class="card reveal">
+        <div class="mode-line l-auto"></div>
+        <span class="mode-tag m-auto">auto</span>
+        <p>Full-auto. Everything is approved — the agent builds, tests and verifies unattended until the task is done. Deny rules still fire.</p>
       </div>
     </div>
-    <div class="split" style="margin-top:1.6rem">
-      <div>
-        <h3 style="font-size:1.02rem;margin:0 0 .5rem">Fine-grained rules on top.</h3>
-        <p style="color:var(--muted);font-size:.9rem;margin:0">
-          Claude Code-style rules, evaluated <b style="color:var(--text)">deny → ask → allow</b>.
+    <div class="split" style="margin-top:3.5rem">
+      <div class="reveal">
+        <h3>Fine-grained rules on top.</h3>
+        <p>Claude Code-style rules, evaluated <b style="color:var(--text)">deny → ask → allow</b>.
           Compound shell commands are split and matched per subcommand; wrappers like
           <span class="inline-code">timeout</span> are stripped; read-only commands
-          (<span class="inline-code">ls</span>, <span class="inline-code">git status</span>, …) never prompt.
-          Rules persist globally or per-project in <span class="inline-code">.dgc/permissions.json</span>.</p>
+          (<span class="inline-code">ls</span>, <span class="inline-code">git status</span>, …) never prompt.</p>
+        <p>Rules persist globally in <span class="inline-code">~/.dgc/config.json</span> or per project in
+          <span class="inline-code">.dgc/permissions.json</span>.</p>
       </div>
-      <pre class="codeblock"><span class="c-dim"># in the REPL</span>
+      <div class="codewin reveal">
+        <div class="bar"><i></i><i></i><i></i><span>permission rules</span></div>
+<pre class="codeblock"><span class="c-dim"># in the REPL</span>
 <span class="c-grn">/permissions allow</span> Bash(npm run *)
 <span class="c-grn">/permissions allow</span> Edit(src/**)
-<span class="c-grn">/permissions ask</span>   Bash(git push *)
+<span class="c-yel">/permissions ask</span>   Bash(git push *)
 <span class="c-red">/permissions deny</span>  Bash(rm -rf *)
 <span class="c-red">/permissions deny</span>  Read(**/.env)</pre>
+      </div>
     </div>
   </section>
 
   <section id="features">
-    <div class="sec-head">
+    <div class="sec-head center reveal">
       <div class="eyebrow">Features</div>
       <h2>A real harness, not a chat wrapper.</h2>
       <p>The machinery the big agents have — pointed at whatever model you choose.</p>
     </div>
     <div class="cards">
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
         <h3>Plan mode</h3>
         <p>Read-only research → a concrete step-by-step plan → approve into auto, acceptEdits or default. Reject with feedback and it revises.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7z"/><path d="M9 22h6"/></svg></div>
         <h3>Thinking modes</h3>
         <p><code>/think off|low|medium|high</code>, with <code>think</code> / <code>think hard</code> / <code>ultrathink</code> keywords bumping a single turn. Reasoning streams dimmed.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
         <h3>Memory</h3>
         <p><code>DGC.md</code> in your project and <code>~/.dgc/DGC.md</code> for you load into every session. <code>#a fact</code> quick-adds; <code>/init</code> writes the project guide.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 7l-5 5 5 5"/><path d="M20 7l-5 5 5 5" opacity=".4"/></svg></div>
         <h3>Skills</h3>
         <p>Drop a <code>SKILL.md</code> into <code>.dgc/skills/&lt;name&gt;/</code> — the model invokes it when the description matches, or call it directly with <code>/skill</code>.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M4 10h-2M4 14h-2M22 10h-2M22 14h-2M10 4V2M14 4V2M10 22v-2M14 22v-2"/></svg></div>
         <h3>Runs tiny local models</h3>
         <p>No native tool-calling on the endpoint? DGC auto-falls back to a text tool-call protocol and parses it, so small quantized models still work.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
+        <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg></div>
         <h3>Context compaction</h3>
         <p>Long sessions summarize older turns automatically near your model's context limit. <code>/compact</code> forces it, <code>/clear</code> resets.</p>
       </div>
     </div>
-    <div style="margin-top:1.6rem">
-      <p style="color:var(--dim);font-size:.78rem;font-family:var(--mono);margin:0 0 .6rem">TOOLS THE AGENT CAN CALL</p>
+    <div style="margin-top:2.2rem" class="reveal">
+      <p style="color:var(--dim);font:600 .7rem var(--mono);letter-spacing:.16em;margin:0 0 .8rem">TOOLS THE AGENT CAN CALL</p>
       <div class="tools">
         <span class="tool">read_file</span><span class="tool">write_file</span><span class="tool">edit_file</span>
         <span class="tool">bash</span><span class="tool">glob</span><span class="tool">grep</span>
@@ -391,20 +478,23 @@
   </section>
 
   <section id="quickstart">
-    <div class="sec-head">
+    <div class="sec-head center reveal">
       <div class="eyebrow">Quickstart</div>
       <h2>Coding in under a minute.</h2>
     </div>
     <div class="steps">
-      <div class="step">
+      <div class="step reveal">
+        <span class="num">1</span>
         <h3>Install</h3>
         <p><code>curl -fsSL https://dagucchicode.com/install.sh | bash</code> — self-contained venv, nothing needs root.</p>
       </div>
-      <div class="step">
+      <div class="step reveal">
+        <span class="num">2</span>
         <h3>Connect a model</h3>
         <p><code>dgc setup</code> picks a provider and model interactively; <code>dgc doctor</code> verifies the endpoint.</p>
       </div>
-      <div class="step">
+      <div class="step reveal">
+        <span class="num">3</span>
         <h3>Start coding</h3>
         <p><code>dgc</code> opens the agent in your project. <code>dgc -p "task" --mode auto</code> for one-shot unattended runs.</p>
       </div>
@@ -412,7 +502,7 @@
   </section>
 
   <footer>
-    <span>DGC</span>
+    <span class="brand" style="font-size:.85rem"><span class="mark" style="width:22px;height:22px;font-size:.6rem">▓▓</span> DGC</span>
     <span>Built by <a href="https://dagucchicode.com">Mohit Kalra</a></span>
     <span>MIT License</span>
     <span class="right">dagucchicode.com</span>
@@ -420,6 +510,12 @@
 </div>
 
 <script>
+  // nav blur on scroll
+  var nav = document.getElementById('nav');
+  addEventListener('scroll', function () {
+    nav.classList.toggle('scrolled', scrollY > 24);
+  }, { passive: true });
+
   // copy button
   document.getElementById('copy').addEventListener('click', function () {
     var btn = this;
@@ -428,43 +524,71 @@
     });
   });
 
+  var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // scroll reveal with light stagger
+  (function () {
+    if (reduced || !('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        var el = e.target, siblings = Array.prototype.slice.call(el.parentNode.children).filter(function (s) { return s.classList.contains('reveal'); });
+        el.style.transitionDelay = Math.min(siblings.indexOf(el), 6) * 70 + 'ms';
+        el.classList.add('in');
+        io.unobserve(el);
+      });
+    }, { threshold: .12 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+  })();
+
+  // pointer spotlight (fine pointers only)
+  (function () {
+    if (reduced || !matchMedia('(pointer: fine)').matches) return;
+    var spot = document.getElementById('spotlight'), shown = false;
+    addEventListener('pointermove', function (e) {
+      if (!shown) { spot.style.opacity = '1'; shown = true; }
+      spot.style.left = e.clientX + 'px';
+      spot.style.top = e.clientY + 'px';
+    }, { passive: true });
+  })();
+
   // terminal demo — typed lines replay in a loop
   (function () {
     var LINES = [
       { t: '$ dgc', cls: 't-muted', type: true },
-      { t: '  connected: ollama · qwen3.6:27b-q8_0', cls: 't-dim', pause: 350 },
-      { t: '  mode: default · thinking: off · memory: DGC.md', cls: 't-dim', pause: 600 },
-      { t: '', pause: 250 },
+      { t: '  connected  ollama · qwen3.6:27b-q8_0', cls: 't-dim', pause: 320 },
+      { t: '  mode       default · thinking off · memory DGC.md', cls: 't-dim', pause: 550 },
+      { t: '', pause: 220 },
       { t: 'dgc[default]> add rate limiting to the api, ultrathink', cls: 't-accent', type: true },
-      { t: '· thinking… mapping the middleware chain…', cls: 't-dim', pause: 900 },
-      { t: '⏺ read_file src/api/server.py', cls: 't-cyan', pause: 300 },
-      { t: '⏺ edit_file src/api/server.py', cls: 't-cyan', pause: 250 },
-      { t: '  @@ -14,2 +14,5 @@', cls: 't-dim', pause: 120 },
-      { t: '  +app.use(rate_limit(max=100, window="1m"))', cls: 't-add', pause: 450 },
-      { t: '⏺ bash pytest tests/', cls: 't-cyan', pause: 500 },
-      { t: '  ✓ 14 passed in 1.2s', cls: 't-green', pause: 600 },
+      { t: '· thinking… mapping the middleware chain…', cls: 't-violet', pause: 850 },
+      { t: '⏺ read_file src/api/server.py', cls: 't-cyan', pause: 280 },
+      { t: '⏺ edit_file src/api/server.py', cls: 't-cyan', pause: 240 },
+      { t: '  @@ -14,2 +14,5 @@', cls: 't-dim', pause: 110 },
+      { t: '  +app.use(rate_limit(max=100, window="1m"))', cls: 't-add', pause: 420 },
+      { t: '⏺ bash pytest tests/', cls: 't-cyan', pause: 480 },
+      { t: '  ✓ 14 passed in 1.2s', cls: 't-green', pause: 550 },
       { t: 'Done — token-bucket limiter (100 req/min per IP) wired in,', pause: 60 },
       { t: 'tests green. Want it stricter on /auth?', pause: 2600 },
     ];
     var term = document.getElementById('term');
-    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    function render(instant) {
-      term.innerHTML = '';
+    if (reduced) {
       LINES.forEach(function (l) {
         var row = document.createElement('span');
         row.className = 'row ' + (l.cls || '');
         row.textContent = l.t;
         term.appendChild(row);
       });
+      return;
     }
-
-    if (reduced) { render(true); return; }
 
     function play() {
       term.innerHTML = '';
       var li = 0;
-      function nextLine() {
+      (function nextLine() {
         if (li >= LINES.length) { setTimeout(play, 5200); return; }
         var line = LINES[li++];
         var row = document.createElement('span');
@@ -478,7 +602,7 @@
           (function tick() {
             if (i < line.t.length) {
               cursor.before(document.createTextNode(line.t[i++]));
-              setTimeout(tick, 34 + Math.random() * 46);
+              setTimeout(tick, 30 + Math.random() * 45);
             } else {
               cursor.remove();
               setTimeout(nextLine, line.pause || 220);
@@ -486,10 +610,9 @@
           })();
         } else {
           row.textContent = line.t;
-          setTimeout(nextLine, line.pause || 160);
+          setTimeout(nextLine, line.pause || 150);
         }
-      }
-      nextLine();
+      })();
     }
     play();
   })();
