@@ -25,7 +25,7 @@ Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Yo
 One line — nothing needs root:
 
 ```bash
-curl -fsSL https://openpeach.ai/dgc/install.sh | bash
+curl -fsSL https://dagucchicode.com/install.sh | bash
 ```
 
 Then point it at a model and go:
@@ -125,7 +125,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 Paste this to your Claude Code / Codex / any coding agent:
 
-> Install DGC for me: run `curl -fsSL https://openpeach.ai/dgc/install.sh | bash`, then run `dgc setup` and connect it to my local Ollama (or ask me which provider). Verify with `dgc doctor`.
+> Install DGC for me: run `curl -fsSL https://dagucchicode.com/install.sh | bash`, then run `dgc setup` and connect it to my local Ollama (or ask me which provider). Verify with `dgc doctor`.
 
 ## Configuration
 

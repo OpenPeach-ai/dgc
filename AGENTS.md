@@ -36,4 +36,4 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 ## Releasing
 
-`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://openpeach.ai/dgc`). To cut a release, build a tarball of this tree (excluding `.venv`, `__pycache__`, `*.egg-info`) and publish it + `install.sh` at that base URL.
+`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://dagucchicode.com`). To cut a release, build a tarball of this tree (excluding `.venv`, `__pycache__`, `*.egg-info`) and publish it + `install.sh` at that base URL.

@@ -30,7 +30,7 @@ THINK_KEYWORDS = [
     ("think hard", "medium"), ("think", "low"),
 ]
 
-COMPACT_THRESHOLD = 0.70  # fraction of context_size
+COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
 
 
@@ -233,6 +233,14 @@ class Agent:
             target = self.exit_plan(choice)
             return f"Plan APPROVED. Plan mode exited; permission mode is now '{target}'. Execute the plan now."
 
+        if name == "propose_options":
+            question = str(args.get("question", ""))
+            options = [str(o) for o in (args.get("options") or [])]
+            if not options:
+                return "No options were provided. Ask a normal question or make the call yourself."
+            choice = self.ui.propose_options(question, options)
+            return f"The user chose: {choice!r}. Continue with that decision."
+
         perms = PermissionEngine(self.mode, self.config.permissions)  # fresh: mode may have just changed
         decision, reason = perms.decide(name, args)
         if decision == DENY:
@@ -255,7 +263,7 @@ class Agent:
         return sum(len(json.dumps(m, default=str)) for m in self.messages) // 4
 
     def maybe_compact(self, force: bool = False) -> None:
-        budget = int(self.config.get("context_size", 32768)) * COMPACT_THRESHOLD
+        budget = int(self.config.get("context_size", 32768)) * float(self.config.get("compact_threshold", COMPACT_THRESHOLD))
         if not force and self.estimate_tokens() < budget:
             return
         if len(self.messages) < KEEP_RECENT + 3:

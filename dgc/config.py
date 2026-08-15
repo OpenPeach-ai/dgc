@@ -20,6 +20,7 @@ DEFAULTS: dict = {
     "context_size": 32768,
     "max_turns": 40,                            # max tool-use iterations per user turn
     "bash_timeout": 120,
+    "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
 }
 
 # One-command connection presets — used by `dgc setup`, `/connect <name>`, and the docs.

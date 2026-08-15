@@ -68,6 +68,13 @@ TOOL_SCHEMAS = [
          "scope": {"type": "string", "enum": ["project", "user"], "default": "project"}}, ["memory"]),
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
+    _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
+        "(two valid approaches, an ambiguous request). Presents the choices and waits for their pick. "
+        "Don't use it for things you can decide yourself.",
+        {"question": {"type": "string", "description": "What you're asking them to decide"},
+         "options": {"type": "array", "items": {"type": "string"},
+                     "description": "The choices, most-recommended first"}},
+        ["question", "options"]),
 ]
 
 SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}

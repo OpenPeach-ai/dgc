@@ -130,6 +130,24 @@ class UI:
                     self.console.print("[dim]feedback noted — the agent will see your denial[/dim]")
                 return None
 
+    def propose_options(self, question: str, options: list[str]) -> str:
+        """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
+        self.console.print(Panel(question or "(choose one)", title="[bold cyan]▸ choose[/bold cyan]",
+                                 border_style="cyan", expand=False))
+        for i, o in enumerate(options, 1):
+            self.console.print(f"  [bold]{i}[/bold]) {o}")
+        self.console.print("  [dim](number, or type your own answer)[/dim]")
+        while True:
+            try:
+                raw = input("  › ").strip()
+            except EOFError:
+                return options[0]
+            if not raw:
+                return options[0]
+            if raw.isdigit() and 1 <= int(raw) <= len(options):
+                return options[int(raw) - 1]
+            return raw
+
     # ---------------------------------------------------------------- misc ---
     def on_todo(self, todos: list) -> None:
         if not todos:
@@ -521,16 +539,34 @@ def run_setup(config: Config) -> None:
     c.print("  run [bold]dgc[/bold] to start  ·  [bold]dgc doctor[/bold] to verify\n")
 
 
+def run_help() -> None:
+    """`dgc help` — CLI commands + in-REPL commands, for new users."""
+    c = Console()
+    c.print("\n[bold]DGC[/bold] — a coding-agent CLI for the models you run  [dim](Built by Mohit Kalra)[/dim]\n")
+    c.print("[bold]command line[/bold]")
+    c.print("  dgc                     start the interactive agent")
+    c.print("  dgc setup               configure provider / model / context")
+    c.print("  dgc doctor              check the endpoint + model are reachable")
+    c.print("  dgc help                this help")
+    c.print("  dgc -p \"<task>\"         run one task and exit  (add --mode auto for hands-off)")
+    c.print("  dgc --mode MODE         default | acceptEdits | plan | auto")
+    c.print("  dgc --model N --base-url URL --api-key KEY   set + persist a model\n")
+    c.print(HELP)
+
+
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor"):
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help"):
+        if raw_argv[0] == "help":
+            run_help()
+            return
         cfg = Config()
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
 
     parser = argparse.ArgumentParser(
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
-        epilog="commands: dgc setup (configure) · dgc doctor (check) · dgc (interactive) · dgc -p '<task>' (one-shot)")
+        epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
