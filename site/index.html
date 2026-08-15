@@ -8,6 +8,7 @@
 <meta property="og:title" content="DGC — a coding-agent CLI for the models you run">
 <meta property="og:description" content="Your machine, your model, your data. An interactive coding agent for Ollama, llama.cpp, LM Studio, vLLM and any OpenAI-compatible cloud.">
 <meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230e7490'/%3E%3Cstop offset='.5' stop-color='%236d28d9'/%3E%3Cstop offset='1' stop-color='%23be185d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='1' y='4' width='5.5' height='16' rx='2' fill='url(%23g)'/%3E%3Crect x='9.25' y='4' width='5.5' height='16' rx='2' fill='url(%23g)' opacity='.75'/%3E%3Crect x='17.5' y='4' width='5.5' height='16' rx='2' fill='url(%23g)' opacity='.5'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -32,7 +33,7 @@
     --red: #b91c1c;
     --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --grad: linear-gradient(92deg, #0891b2, #7c3aed 48%, #db2777);
+    --grad: linear-gradient(92deg, #0e7490, #6d28d9 48%, #be185d);
     --ease: cubic-bezier(.22, .8, .3, 1);
     /* dark panels (terminal / code) */
     --dk-bg: #12100c;
@@ -75,21 +76,17 @@
   /* ---------------- nav ---------------- */
   nav { display: flex; align-items: center; gap: 1.5rem; padding: 1.15rem 0; font-size: .88rem; }
   .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: .02em; }
-  .brand .mark {
-    font-family: var(--mono); font-size: .72rem; font-weight: 700; padding: .28rem .45rem;
-    border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
-    color: var(--accent);
-  }
+  .brand svg { display: block; border-radius: 7px; }
   nav .links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
   nav .links a { color: var(--muted); }
   nav .links a:hover { color: var(--text); text-decoration: none; }
   .btn {
     display: inline-flex; align-items: center; gap: .45rem;
-    background: var(--text); color: #faf8f4; border: 0; border-radius: 9px;
+    background: var(--accent); color: #fff; border: 0; border-radius: 9px;
     padding: .5rem 1rem; font-weight: 600; font-size: .85rem; cursor: pointer;
     transition: transform .18s var(--ease), box-shadow .18s ease, background .15s;
   }
-  .btn:hover { background: #000; text-decoration: none; transform: translateY(-1px); box-shadow: 0 10px 24px -12px rgba(29,25,18,.5); }
+  .btn:hover { background: var(--accent-strong); text-decoration: none; transform: translateY(-1px); box-shadow: 0 10px 24px -12px rgba(176,84,66,.6); }
   .btn.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   .btn.ghost:hover { background: var(--surface-2); box-shadow: none; }
 
@@ -247,7 +244,13 @@
   }
   .step h3 { margin: 0 0 .35rem; font-size: .94rem; }
   .step p { margin: 0; color: var(--muted); font-size: .85rem; }
-  .step code { font: 500 .8em var(--mono); color: var(--accent-strong); word-break: break-all; }
+  .step code { font: 500 .8em var(--mono); color: var(--accent-strong); }
+  .step code.cmdline {
+    display: block; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+    background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: .45rem .6rem; margin-bottom: .5rem; font-size: .74rem; color: var(--text);
+  }
+  .step code.cmdline::-webkit-scrollbar { display: none; }
 
   footer {
     border-top: 1px solid var(--border-soft); padding: 2.1rem 0 2.6rem;
@@ -278,7 +281,17 @@
 <div class="wrap">
 
   <nav>
-    <div class="brand"><span class="mark">▓▓▓</span> DGC</div>
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lg-nav" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#0e7490"/><stop offset=".5" stop-color="#6d28d9"/><stop offset="1" stop-color="#be185d"/>
+        </linearGradient></defs>
+        <rect x="1" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)"/>
+        <rect x="9.25" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)" opacity=".75"/>
+        <rect x="17.5" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)" opacity=".5"/>
+      </svg>
+      DGC
+    </div>
     <div class="links">
       <a href="#providers">Providers</a>
       <a href="#modes">Permissions</a>
@@ -443,7 +456,8 @@
       <div class="step reveal">
         <span class="num">1</span>
         <h3>Install</h3>
-        <p><code>curl -fsSL https://dagucchicode.com/install.sh | bash</code> — self-contained venv, nothing needs root.</p>
+        <p><code class="cmdline">curl -fsSL https://dagucchicode.com/install.sh | bash</code>
+          Self-contained venv, nothing needs root.</p>
       </div>
       <div class="step reveal">
         <span class="num">2</span>
@@ -453,7 +467,8 @@
       <div class="step reveal">
         <span class="num">3</span>
         <h3>Start coding</h3>
-        <p><code>dgc</code> opens the agent in your project. <code>dgc -p "task" --mode auto</code> for one-shot unattended runs.</p>
+        <p><code class="cmdline">dgc -p "task" --mode auto</code>
+          <code>dgc</code> opens the agent in your project; the line above runs one-shot, unattended.</p>
       </div>
     </div>
   </section>
