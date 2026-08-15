@@ -78,8 +78,9 @@
   .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: .02em; }
   .brand svg { display: block; border-radius: 7px; }
   nav .links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
-  nav .links a { color: var(--muted); }
-  nav .links a:hover { color: var(--text); text-decoration: none; }
+  nav .links a:not(.btn) { color: var(--muted); }
+  nav .links a:not(.btn):hover { color: var(--text); text-decoration: none; }
+  nav .links a.btn { color: #fff; }
   .btn {
     display: inline-flex; align-items: center; gap: .45rem;
     background: var(--accent); color: #fff; border: 0; border-radius: 9px;
