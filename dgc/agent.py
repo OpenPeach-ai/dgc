@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .checkpoints import CheckpointManager
 from .config import Config
 from .llm import LLMClient, LLMError, ToolCall
 from .memory import load_memories
@@ -127,6 +128,7 @@ class Agent:
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
+        self.checkpoints = CheckpointManager()
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -280,6 +282,8 @@ class Agent:
 
     def _run_turn(self, user_text: str) -> None:
         self._refresh_system()
+        if self.depth == 0:                        # checkpoints only for the top-level agent
+            self.checkpoints.open(len(self.messages), user_text)
         self.messages.append({"role": "user", "content": user_text})
         thinking = self._effective_thinking(user_text)
         effort = thinking if thinking != "off" else None
@@ -361,10 +365,21 @@ class Agent:
             if verdict == "always":
                 self.ui.add_permission_rule(name, args)
 
+        if name in ("write_file", "edit_file") and args.get("path"):
+            raw = str(args["path"])
+            abs_path = raw if Path(raw).is_absolute() else str(self.config.project_root / raw)
+            self.checkpoints.record_file(abs_path)     # snapshot before the edit, for rewind
         self.ui.tool_call(name, args)
         out = self.mcp.call(name, args) if name.startswith("mcp__") else execute(name, args, self.ctx)
         self.ui.tool_result(name, out)
         return out
+
+    def rewind(self, idx: int) -> tuple[int, int]:
+        """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
+        msg_count, n_files = self.checkpoints.rewind(idx)
+        if msg_count >= 0:
+            self.messages = self.messages[:msg_count]
+        return msg_count, n_files
 
     def _run_subagent(self, description: str, prompt: str) -> str:
         self.ui.info(f"⟳ sub-task: {description}")

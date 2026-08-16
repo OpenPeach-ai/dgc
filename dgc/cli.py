@@ -469,6 +469,16 @@ class CLI:
         elif cmd == "clear":
             self.agent.reset()
             self.ui.info("conversation cleared")
+        elif cmd == "rewind":
+            pts = self.agent.checkpoints.listing()
+            if not pts:
+                self.ui.info("no checkpoints yet — run a turn first")
+            else:
+                labels = [f"{prev}  [{nf} file{'' if nf == 1 else 's'}]" for (_i, prev, nf) in pts]
+                mi = select("Rewind to (restores code + conversation)", labels)
+                if mi is not None:
+                    _, nfiles = self.agent.rewind(pts[mi][0])
+                    self.ui.info(f"↩ rewound — restored {nfiles} file(s); conversation truncated")
         elif cmd == "search":
             self._search_cmd(rest)
         elif cmd == "resume":

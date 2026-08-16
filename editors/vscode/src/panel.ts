@@ -214,6 +214,25 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (pick) { be.send({ type: "resume_session", path: (pick as any).path }); this.post({ type: "cleared" }); }
   }
 
+  async rewind(): Promise<void> {
+    const be = this.ensureBackend();
+    const items: any[] = await new Promise((resolve) => {
+      const h = (ev: DgcEvent) => { if (ev.type === "checkpoints") { be.off("checkpoints", h); resolve(ev.items || []); } };
+      be.on("checkpoints", h);
+      be.send({ type: "list_checkpoints" });
+      setTimeout(() => { be.off("checkpoints", h); resolve([]); }, 2500);
+    });
+    if (!items.length) { vscode.window.showInformationMessage("No checkpoints yet — run a turn first."); return; }
+    const pick = await vscode.window.showQuickPick(
+      items.map((c) => ({ label: c.preview, description: `${c.files} file(s)`, index: c.index })),
+      { placeHolder: "Rewind code + conversation to…" });
+    if (pick) {
+      be.send({ type: "rewind", index: (pick as any).index });
+      this.post({ type: "cleared" });
+      vscode.window.showInformationMessage("↩ DGC rewound code + conversation.");
+    }
+  }
+
   // ---- native menus (QuickPicks) -------------------------------------------
   async selectModel(): Promise<void> {
     const be = this.ensureBackend();

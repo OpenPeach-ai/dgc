@@ -19,6 +19,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("dgc.addSelection", () => provider.addSelection()),
     vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
+    vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
   );
 
   checkForUpdates(context).catch(() => { /* never raise into activate */ });

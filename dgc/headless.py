@@ -221,6 +221,13 @@ class Backend:
                      for (p, ts, pv, c) in sessions_mod.listing(self.config.project_root)]
             self.em.emit("sessions", items=items)
 
+        elif t == "list_checkpoints":
+            items = [{"index": i, "preview": p, "files": nf}
+                     for (i, p, nf) in self.agent.checkpoints.listing()]
+            self.em.emit("checkpoints", items=items)
+        elif t == "rewind":
+            msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
+            self.em.emit("rewound", ok=(msgs >= 0), files_restored=nfiles)
         elif t == "compact":
             self.agent.maybe_compact(force=True)
         elif t in ("get_config", "status"):

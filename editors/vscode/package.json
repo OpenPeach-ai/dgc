@@ -36,7 +36,8 @@
       { "command": "dgc.setThinking", "title": "DGC: Set Thinking Level", "category": "DGC" },
       { "command": "dgc.addSelection", "title": "DGC: Add Selection to DGC", "category": "DGC" },
       { "command": "dgc.restart", "title": "DGC: Restart Backend", "category": "DGC" },
-      { "command": "dgc.resume", "title": "DGC: Resume Session", "category": "DGC", "icon": "$(history)" }
+      { "command": "dgc.resume", "title": "DGC: Resume Session", "category": "DGC", "icon": "$(history)" },
+      { "command": "dgc.rewind", "title": "DGC: Rewind (code + conversation)", "category": "DGC", "icon": "$(discard)" }
     ],
     "menus": {
       "view/title": [
