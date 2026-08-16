@@ -6,3 +6,6 @@ build/
 dist/
 .DS_Store
 dgc.tar.gz
+
+# maintainer-only tooling (kept local, not published)
+scripts/
