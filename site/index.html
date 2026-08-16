@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC — a coding-agent CLI for the models you run</title>
+<meta name="description" content="DGC is an interactive coding-agent CLI for the models you run — local (Ollama, llama.cpp, LM Studio, vLLM) or any OpenAI-compatible cloud. Permission modes, plan mode, thinking levels, memory and skills. Built by Mohit Kalra.">
+<meta property="og:title" content="DGC — a coding-agent CLI for the models you run">
+<meta property="og:description" content="Your machine, your model, your data. An interactive coding agent for Ollama, llama.cpp, LM Studio, vLLM and any OpenAI-compatible cloud.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230e7490'/%3E%3Cstop offset='.5' stop-color='%236d28d9'/%3E%3Cstop offset='1' stop-color='%23be185d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='1' y='4' width='5.5' height='16' rx='2' fill='url(%23g)'/%3E%3Crect x='9.25' y='4' width='5.5' height='16' rx='2' fill='url(%23g)' opacity='.75'/%3E%3Crect x='17.5' y='4' width='5.5' height='16' rx='2' fill='url(%23g)' opacity='.5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #faf8f4;
+    --surface: #ffffff;
+    --surface-2: #f4f0e9;
+    --border: #e7e0d3;
+    --border-soft: #efe9dd;
+    --text: #1d1912;
+    --muted: #6f6759;
+    --dim: #a39a89;
+    --accent: #b05442;
+    --accent-strong: #96432f;
+    --cyan: #0e7490;
+    --violet: #7c3aed;
+    --pink: #db2777;
+    --green: #15803d;
+    --yellow: #a16207;
+    --red: #b91c1c;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --grad: linear-gradient(92deg, #0e7490, #6d28d9 48%, #be185d);
+    --ease: cubic-bezier(.22, .8, .3, 1);
+    /* dark panels (terminal / code) */
+    --dk-bg: #12100c;
+    --dk-border: rgba(255,255,255,.09);
+    --dk-text: #f3efe8;
+    --dk-dim: #6f685c;
+    --dk-muted: #a8a294;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased; overflow-x: clip;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ::selection { background: rgba(176, 84, 66, .18); }
+
+  .glow {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(900px 480px at 85% -10%, rgba(219, 39, 119, .07), transparent 60%),
+      radial-gradient(720px 520px at -12% 30%, rgba(8, 145, 178, .06), transparent 60%),
+      radial-gradient(700px 480px at 50% 118%, rgba(176, 84, 66, .07), transparent 60%);
+  }
+  .grid-lines {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .6;
+    background-image:
+      linear-gradient(rgba(29,25,18,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(29,25,18,.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, black 15%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, black 15%, transparent 75%);
+  }
+
+  .wrap { position: relative; z-index: 1; width: min(1080px, 92vw); margin: 0 auto; }
+  .wrap > *, header.hero > *, .split > * { min-width: 0; }
+
+  /* ---------------- nav ---------------- */
+  nav { display: flex; align-items: center; gap: 1.5rem; padding: 1.15rem 0; font-size: .88rem; }
+  .brand { display: flex; align-items: center; gap: .55rem; font-weight: 700; letter-spacing: .02em; }
+  .brand svg { display: block; border-radius: 7px; }
+  nav .links { margin-left: auto; display: flex; gap: 1.4rem; align-items: center; }
+  nav .links a:not(.btn) { color: var(--muted); }
+  nav .links a:not(.btn):hover { color: var(--text); text-decoration: none; }
+  nav .links a.btn { color: #fff; }
+  .btn {
+    display: inline-flex; align-items: center; gap: .45rem;
+    background: var(--accent); color: #fff; border: 0; border-radius: 9px;
+    padding: .5rem 1rem; font-weight: 600; font-size: .85rem; cursor: pointer;
+    transition: transform .18s var(--ease), box-shadow .18s ease, background .15s;
+  }
+  .btn:hover { background: var(--accent-strong); text-decoration: none; transform: translateY(-1px); box-shadow: 0 10px 24px -12px rgba(176,84,66,.6); }
+  .btn.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn.ghost:hover { background: var(--surface-2); box-shadow: none; }
+
+  /* ---------------- hero (v1 split layout) ---------------- */
+  header.hero { padding: 3.5rem 0 3.2rem; display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
+  pre.logo {
+    font-family: var(--mono); line-height: 1.05; margin: 0 0 1.2rem;
+    font-size: clamp(8px, 1.35vw, 12px); font-weight: 700;
+    background: var(--grad);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  pre.logo::-webkit-scrollbar { display: none; }
+  .eyebrow {
+    font: 600 .72rem var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: .9rem;
+  }
+  h1 {
+    font-size: clamp(2rem, 4.4vw, 3rem); font-weight: 800; letter-spacing: -.03em;
+    line-height: 1.08; margin: 0 0 1rem;
+  }
+  h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { color: var(--muted); font-size: 1.02rem; max-width: 34rem; margin: 0 0 1.6rem; line-height: 1.65; }
+  .lede b { color: var(--text); font-weight: 600; }
+
+  .cmd {
+    display: flex; align-items: center; gap: .7rem; max-width: 34rem; min-width: 0;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    padding: .75rem .95rem; font: 500 .84rem var(--mono);
+    box-shadow: 0 1px 2px rgba(29,25,18,.05);
+  }
+  .cmd .d { color: var(--dim); user-select: none; }
+  .cmd code { color: var(--text); white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .cmd code::-webkit-scrollbar { display: none; }
+  .cmd button {
+    margin-left: auto; background: var(--surface-2); color: var(--accent); border: 1px solid var(--border);
+    border-radius: 7px; padding: .35rem .7rem; font: 600 .72rem var(--mono); cursor: pointer; flex-shrink: 0;
+    transition: border-color .15s, color .15s;
+  }
+  .cmd button:hover { border-color: var(--accent); }
+  .hero-meta { display: flex; gap: 1.3rem; margin-top: 1.15rem; font: 500 .78rem var(--mono); color: var(--dim); flex-wrap: wrap; }
+  .hero-meta span::before { content: "✓ "; color: var(--green); }
+
+  /* ---------------- terminal (dark panel on light page) ---------------- */
+  .showcase { position: relative; }
+  .showcase::before {
+    content: ""; position: absolute; inset: -1px; border-radius: 17px; z-index: -1;
+    background: linear-gradient(135deg, rgba(8,145,178,.5), rgba(124,58,237,.42) 40%, rgba(219,39,119,.45));
+  }
+  .showcase::after {
+    content: ""; position: absolute; inset: auto 6% -14px 6%; height: 40px; z-index: -2;
+    background: radial-gradient(ellipse at 50% 100%, rgba(29,25,18,.28), transparent 70%);
+    filter: blur(14px);
+  }
+  .term {
+    background: var(--dk-bg); border-radius: 16px; overflow: hidden;
+    font: 400 .76rem/1.6 var(--mono); color: var(--dk-text);
+    box-shadow: 0 30px 70px -28px rgba(29,25,18,.5);
+  }
+  .term-bar {
+    display: flex; align-items: center; gap: .45rem; padding: .65rem .95rem;
+    border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.03);
+  }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; display: block; background: #2e2820; }
+  .term-bar i:first-child { background: #453b2f; }
+  .term-bar span { margin-left: .55rem; color: var(--dk-dim); font-size: .7rem; }
+  .term-body { padding: 1rem 1.1rem 1.2rem; min-height: 336px; white-space: pre-wrap; }
+  .term-body .row { display: block; }
+  .t-dim { color: var(--dk-dim); } .t-muted { color: var(--dk-muted); }
+  .t-accent { color: #e8a08c; } .t-cyan { color: #67e8f9; }
+  .t-green { color: #86efac; } .t-violet { color: #c4b5fd; }
+  .t-add { color: #86efac; } .t-del { color: #f87171; }
+  .cursor { display: inline-block; width: .55em; height: 1.05em; background: #e8a08c; vertical-align: text-bottom; animation: blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---------------- sections ---------------- */
+  section { padding: 3.4rem 0; border-top: 1px solid var(--border-soft); }
+  .sec-head { margin-bottom: 2.2rem; max-width: 42rem; }
+  h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); font-weight: 750; letter-spacing: -.025em; line-height: 1.14; margin: 0 0 .6rem; }
+  .sec-head p { color: var(--muted); margin: 0; font-size: .96rem; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: .55rem; }
+  .pill {
+    font: 500 .8rem var(--mono); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: .45rem .95rem;
+    background: var(--surface); transition: color .2s, border-color .2s, transform .2s var(--ease);
+  }
+  .pill:hover { color: var(--text); border-color: var(--accent); transform: translateY(-2px); }
+  .pill b { color: var(--text); font-weight: 600; }
+  .pill .sep { color: var(--dim); margin: 0 .3rem; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .card {
+    position: relative; background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 15px; padding: 1.3rem 1.3rem 1.4rem; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(29,25,18,.04);
+    transition: border-color .25s ease, transform .25s var(--ease), box-shadow .25s ease;
+  }
+  .card:hover { border-color: var(--border); transform: translateY(-3px); box-shadow: 0 14px 30px -18px rgba(29,25,18,.25); }
+  .card h3 { margin: 0 0 .45rem; font-size: .95rem; font-weight: 650; display: flex; align-items: center; gap: .5rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .85rem; line-height: 1.6; }
+  .card code, .inline-code {
+    font: 500 .82em var(--mono); background: rgba(176,84,66,.08);
+    padding: .12em .42em; border-radius: 5px; color: var(--accent-strong);
+  }
+  .mode-tag {
+    font: 600 .7rem var(--mono); padding: .3rem .65rem; border-radius: 7px;
+    border: 1px solid; display: inline-block; margin-bottom: .85rem;
+  }
+  .m-default { color: var(--cyan); border-color: rgba(14,116,144,.35); background: rgba(14,116,144,.07); }
+  .m-edits { color: var(--green); border-color: rgba(21,128,61,.3); background: rgba(21,128,61,.07); }
+  .m-plan { color: var(--yellow); border-color: rgba(161,98,7,.35); background: rgba(161,98,7,.08); }
+  .m-auto { color: var(--red); border-color: rgba(185,28,28,.35); background: rgba(185,28,28,.07); }
+  .mode-line { height: 2px; width: 100%; position: absolute; top: 0; left: 0; opacity: .85; }
+  .mode-line.l-default { background: linear-gradient(90deg, var(--cyan), transparent); }
+  .mode-line.l-edits { background: linear-gradient(90deg, var(--green), transparent); }
+  .mode-line.l-plan { background: linear-gradient(90deg, var(--yellow), transparent); }
+  .mode-line.l-auto { background: linear-gradient(90deg, var(--red), transparent); }
+
+  .split { display: grid; grid-template-columns: 1fr 1.05fr; gap: 2.6rem; align-items: center; }
+  .split h3 { font-size: 1.12rem; margin: 0 0 .6rem; letter-spacing: -.01em; }
+  .split p { color: var(--muted); font-size: .92rem; margin: 0 0 .8rem; }
+  .codewin {
+    background: var(--dk-bg); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 24px 55px -26px rgba(29,25,18,.45);
+  }
+  .codewin .bar { display: flex; gap: .45rem; padding: .62rem .95rem; border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.03); align-items: center; }
+  .codewin .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2e2820; }
+  .codewin .bar span { margin-left: .5rem; color: var(--dk-dim); font: 500 .68rem var(--mono); }
+  pre.codeblock {
+    margin: 0; padding: 1.05rem 1.15rem; font: 400 .78rem/1.75 var(--mono);
+    overflow-x: auto; color: var(--dk-muted);
+  }
+  pre.codeblock .c-dim { color: var(--dk-dim); } pre.codeblock .c-grn { color: #86efac; }
+  pre.codeblock .c-yel { color: #fcd34d; } pre.codeblock .c-red { color: #f87171; }
+
+  .tools { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .tool {
+    font: 500 .75rem var(--mono); color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px; padding: .38rem .7rem;
+    transition: color .2s, border-color .2s;
+  }
+  .tool:hover { color: var(--text); border-color: var(--border); }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; }
+  .step {
+    background: var(--surface); border: 1px solid var(--border-soft); border-radius: 15px;
+    padding: 1.4rem 1.3rem; box-shadow: 0 1px 2px rgba(29,25,18,.04);
+    transition: border-color .25s, transform .25s var(--ease);
+  }
+  .step:hover { border-color: var(--border); transform: translateY(-3px); }
+  .step .num {
+    display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 10px; margin-bottom: .9rem;
+    background: var(--surface-2); border: 1px solid var(--border); font: 700 .82rem var(--mono); color: var(--accent);
+  }
+  .step h3 { margin: 0 0 .35rem; font-size: .94rem; }
+  .step p { margin: 0; color: var(--muted); font-size: .85rem; }
+  .step code { font: 500 .8em var(--mono); color: var(--accent-strong); }
+  .step code.cmdline {
+    display: block; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+    background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 8px;
+    padding: .45rem .6rem; margin-bottom: .5rem; font-size: .74rem; color: var(--text);
+  }
+  .step code.cmdline::-webkit-scrollbar { display: none; }
+
+  footer {
+    border-top: 1px solid var(--border-soft); padding: 2.1rem 0 2.6rem;
+    display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+    color: var(--dim); font: 500 .78rem var(--mono);
+  }
+  footer a { color: var(--muted); } footer a:hover { color: var(--text); }
+  footer .right { margin-left: auto; }
+
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity .65s var(--ease), transform .65s var(--ease); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (max-width: 900px) {
+    header.hero { grid-template-columns: 1fr; gap: 2.2rem; padding-top: 2rem; }
+    .split { grid-template-columns: 1fr; gap: 1.6rem; }
+    nav .links a:not(.btn) { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .cursor { animation: none; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="grid-lines"></div>
+<div class="wrap">
+
+  <nav>
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+        <defs><linearGradient id="lg-nav" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#0e7490"/><stop offset=".5" stop-color="#6d28d9"/><stop offset="1" stop-color="#be185d"/>
+        </linearGradient></defs>
+        <rect x="1" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)"/>
+        <rect x="9.25" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)" opacity=".75"/>
+        <rect x="17.5" y="4" width="5.5" height="16" rx="2" fill="url(#lg-nav)" opacity=".5"/>
+      </svg>
+      DGC
+    </div>
+    <div class="links">
+      <a href="#providers">Providers</a>
+      <a href="#modes">Permissions</a>
+      <a href="#features">Features</a>
+      <a href="#quickstart">Quickstart</a>
+      <a class="btn" href="#install">Install</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="install">
+    <div>
+      <pre class="logo">██████╗   ██████╗   ██████╗
+██╔══██╗ ██╔════╝  ██╔════╝
+██║  ██║ ██║  ███╗ ██║
+██║  ██║ ██║   ██║ ██║
+██████╔╝ ╚██████╔╝ ╚██████╗
+╚═════╝   ╚═════╝   ╚═════╝</pre>
+      <h1>A coding agent for the <span class="grad">models you run</span>.</h1>
+      <p class="lede">DGC lives in your terminal and drives <b>your</b> model — Ollama, llama.cpp,
+        LM Studio, vLLM, or any OpenAI-compatible cloud. Permission modes, plan mode, thinking
+        levels, memory and skills. <b>Your machine, your model, your data.</b></p>
+      <div class="cmd">
+        <span class="d">$</span>
+        <code id="cmd">curl -fsSL https://dagucchicode.com/install.sh | bash</code>
+        <button id="copy">copy</button>
+      </div>
+      <div class="hero-meta">
+        <span>pure python, 3 deps</span>
+        <span>no root needed</span>
+        <span>MIT licensed</span>
+      </div>
+    </div>
+
+    <div class="showcase">
+      <div class="term" aria-label="DGC session demo">
+        <div class="term-bar"><i></i><i></i><i></i><span>dgc — ~/my-project</span></div>
+        <div class="term-body" id="term"></div>
+      </div>
+    </div>
+  </header>
+
+  <section id="providers">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Providers</div>
+      <h2>One command to connect anything.</h2>
+      <p><span class="inline-code">dgc setup</span> walks you through provider, key, model and context size.
+        Switch any time inside the session with <span class="inline-code">/connect</span>.</p>
+    </div>
+    <div class="pills reveal">
+      <span class="pill"><b>Ollama</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>llama.cpp</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>LM Studio</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>vLLM</b><span class="sep">·</span>local</span>
+      <span class="pill"><b>OpenAI</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>OpenRouter</b><span class="sep">·</span>100s of models</span>
+      <span class="pill"><b>Groq</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>DeepSeek</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>Together</b><span class="sep">·</span>cloud</span>
+      <span class="pill"><b>Mistral</b><span class="sep">·</span>cloud</span>
+    </div>
+  </section>
+
+  <section id="modes">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Permissions</div>
+      <h2>You decide how much rope it gets.</h2>
+      <p>Four permission modes, switched live with <span class="inline-code">/mode</span> — from ask-first to fully unattended.</p>
+    </div>
+    <div class="cards">
+      <div class="card reveal">
+        <div class="mode-line l-default"></div>
+        <span class="mode-tag m-default">default</span>
+        <p>Reads and known-safe commands run free. Writes and other shell commands ask first — allow once, always, or never.</p>
+      </div>
+      <div class="card reveal">
+        <div class="mode-line l-edits"></div>
+        <span class="mode-tag m-edits">acceptEdits</span>
+        <p>File edits are auto-approved so flow isn't interrupted; shell commands still ask for a yes.</p>
+      </div>
+      <div class="card reveal">
+        <div class="mode-line l-plan"></div>
+        <span class="mode-tag m-plan">plan</span>
+        <p>Read-only. The agent researches your codebase and presents a concrete plan — approve it into any mode, or send it back to revise.</p>
+      </div>
+      <div class="card reveal">
+        <div class="mode-line l-auto"></div>
+        <span class="mode-tag m-auto">auto</span>
+        <p>Full-auto. Everything is approved — the agent builds, tests and verifies unattended until the task is done. Deny rules still fire.</p>
+      </div>
+    </div>
+    <div class="split" style="margin-top:3rem">
+      <div class="reveal">
+        <h3>Fine-grained rules on top.</h3>
+        <p>Claude Code-style rules, evaluated <b style="color:var(--text)">deny → ask → allow</b>.
+          Compound shell commands are split and matched per subcommand; wrappers like
+          <span class="inline-code">timeout</span> are stripped; read-only commands
+          (<span class="inline-code">ls</span>, <span class="inline-code">git status</span>, …) never prompt.</p>
+        <p>Rules persist globally in <span class="inline-code">~/.dgc/config.json</span> or per project in
+          <span class="inline-code">.dgc/permissions.json</span>.</p>
+      </div>
+      <div class="codewin reveal">
+        <div class="bar"><i></i><i></i><i></i><span>permission rules</span></div>
+<pre class="codeblock"><span class="c-dim"># in the REPL</span>
+<span class="c-grn">/permissions allow</span> Bash(npm run *)
+<span class="c-grn">/permissions allow</span> Edit(src/**)
+<span class="c-yel">/permissions ask</span>   Bash(git push *)
+<span class="c-red">/permissions deny</span>  Bash(rm -rf *)
+<span class="c-red">/permissions deny</span>  Read(**/.env)</pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Features</div>
+      <h2>A real harness, not a chat wrapper.</h2>
+      <p>The machinery the big agents have — pointed at whatever model you choose.</p>
+    </div>
+    <div class="cards">
+      <div class="card reveal">
+        <h3>Plan mode</h3>
+        <p>Read-only research → a concrete step-by-step plan → approve into auto, acceptEdits or default. Reject with feedback and it revises.</p>
+      </div>
+      <div class="card reveal">
+        <h3>Thinking modes</h3>
+        <p><code>/think off|low|medium|high</code>, with <code>think</code> / <code>think hard</code> / <code>ultrathink</code> keywords bumping a single turn. Reasoning streams dimmed.</p>
+      </div>
+      <div class="card reveal">
+        <h3>Memory</h3>
+        <p><code>DGC.md</code> in your project and <code>~/.dgc/DGC.md</code> for you load into every session. <code>#a fact</code> quick-adds; <code>/init</code> writes the project guide.</p>
+      </div>
+      <div class="card reveal">
+        <h3>Skills</h3>
+        <p>Drop a <code>SKILL.md</code> into <code>.dgc/skills/&lt;name&gt;/</code> — the model invokes it when the description matches, or call it directly with <code>/skill</code>.</p>
+      </div>
+      <div class="card reveal">
+        <h3>Runs tiny local models</h3>
+        <p>No native tool-calling on the endpoint? DGC auto-falls back to a text tool-call protocol and parses it, so small quantized models still work.</p>
+      </div>
+      <div class="card reveal">
+        <h3>Context compaction</h3>
+        <p>Long sessions summarize older turns automatically near your model's context limit. <code>/compact</code> forces it, <code>/clear</code> resets.</p>
+      </div>
+    </div>
+    <div style="margin-top:2rem" class="reveal">
+      <p style="color:var(--dim);font:600 .7rem var(--mono);letter-spacing:.16em;margin:0 0 .7rem">TOOLS THE AGENT CAN CALL</p>
+      <div class="tools">
+        <span class="tool">read_file</span><span class="tool">write_file</span><span class="tool">edit_file</span>
+        <span class="tool">bash</span><span class="tool">glob</span><span class="tool">grep</span>
+        <span class="tool">web_fetch</span><span class="tool">todo</span><span class="tool">skill</span>
+        <span class="tool">save_memory</span><span class="tool">present_plan</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="sec-head reveal">
+      <div class="eyebrow">Quickstart</div>
+      <h2>Coding in under a minute.</h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <span class="num">1</span>
+        <h3>Install</h3>
+        <p><code class="cmdline">curl -fsSL https://dagucchicode.com/install.sh | bash</code>
+          Self-contained venv, nothing needs root.</p>
+      </div>
+      <div class="step reveal">
+        <span class="num">2</span>
+        <h3>Connect a model</h3>
+        <p><code>dgc setup</code> picks a provider and model interactively; <code>dgc doctor</code> verifies the endpoint.</p>
+      </div>
+      <div class="step reveal">
+        <span class="num">3</span>
+        <h3>Start coding</h3>
+        <p><code class="cmdline">dgc -p "task" --mode auto</code>
+          <code>dgc</code> opens the agent in your project; the line above runs one-shot, unattended.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>DGC</span>
+    <span>Built by <a href="https://dagucchicode.com">Mohit Kalra</a></span>
+    <span>MIT License</span>
+    <span class="right">dagucchicode.com</span>
+  </footer>
+</div>
+
+<script>
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this;
+    navigator.clipboard.writeText(document.getElementById('cmd').textContent).then(function () {
+      btn.textContent = 'copied'; setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+    });
+  });
+
+  var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // scroll reveal
+  (function () {
+    if (reduced || !('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      });
+    }, { threshold: .1 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+  })();
+
+  // terminal demo — typed lines replay in a loop
+  (function () {
+    var LINES = [
+      { t: '$ dgc', cls: 't-muted', type: true },
+      { t: '  connected  ollama · qwen3.6:27b-q8_0', cls: 't-dim', pause: 320 },
+      { t: '  mode       default · thinking off · memory DGC.md', cls: 't-dim', pause: 550 },
+      { t: '', pause: 220 },
+      { t: 'dgc[default]> add rate limiting to the api, ultrathink', cls: 't-accent', type: true },
+      { t: '· thinking… mapping the middleware chain…', cls: 't-violet', pause: 850 },
+      { t: '⏺ read_file src/api/server.py', cls: 't-cyan', pause: 280 },
+      { t: '⏺ edit_file src/api/server.py', cls: 't-cyan', pause: 240 },
+      { t: '  @@ -14,2 +14,5 @@', cls: 't-dim', pause: 110 },
+      { t: '  +app.use(rate_limit(max=100, window="1m"))', cls: 't-add', pause: 420 },
+      { t: '⏺ bash pytest tests/', cls: 't-cyan', pause: 480 },
+      { t: '  ✓ 14 passed in 1.2s', cls: 't-green', pause: 550 },
+      { t: 'Done — token-bucket limiter (100 req/min per IP) wired in,', pause: 60 },
+      { t: 'tests green. Want it stricter on /auth?', pause: 2600 },
+    ];
+    var term = document.getElementById('term');
+
+    if (reduced) {
+      LINES.forEach(function (l) {
+        var row = document.createElement('span');
+        row.className = 'row ' + (l.cls || '');
+        row.textContent = l.t;
+        term.appendChild(row);
+      });
+      return;
+    }
+
+    function play() {
+      term.innerHTML = '';
+      var li = 0;
+      (function nextLine() {
+        if (li >= LINES.length) { setTimeout(play, 5200); return; }
+        var line = LINES[li++];
+        var row = document.createElement('span');
+        row.className = 'row ' + (line.cls || '');
+        term.appendChild(row);
+        if (line.type) {
+          var i = 0;
+          var cursor = document.createElement('span');
+          cursor.className = 'cursor';
+          row.appendChild(cursor);
+          (function tick() {
+            if (i < line.t.length) {
+              cursor.before(document.createTextNode(line.t[i++]));
+              setTimeout(tick, 30 + Math.random() * 45);
+            } else {
+              cursor.remove();
+              setTimeout(nextLine, line.pause || 220);
+            }
+          })();
+        } else {
+          row.textContent = line.t;
+          setTimeout(nextLine, line.pause || 150);
+        }
+      })();
+    }
+    play();
+  })();
+</script>
+</body>
+</html>
