@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -100,6 +101,14 @@ class UI:
         self._thinking = False
         self._streamed = False
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
+        self._live = None       # set by CLI during a live turn: the key-reader that owns stdin
+
+    def _yield_stdin(self) -> None:
+        """If a live key-reader owns stdin during this turn, ask it to release before we input()."""
+        live = self._live
+        if live and live["active"].is_set():
+            live["stop"].set()
+            live["released"].wait(timeout=2)
 
     # ------------------------------------------------ streaming callbacks ---
     def on_text(self, chunk: str) -> None:
@@ -155,6 +164,7 @@ class UI:
     # ---------------------------------------------------------- approvals ---
     def approve(self, name: str, args: dict) -> str:
         """Return 'once' | 'always' | 'no'."""
+        self._yield_stdin()
         self.console.print(Panel(
             f"[bold]{name}[/bold]\n{self._arg_summary(name, args)}",
             title="[yellow]permission requested[/yellow]", border_style="yellow", expand=False))
@@ -174,6 +184,7 @@ class UI:
 
     def present_plan(self, plan: str):
         """Return target mode string on approval, or None to keep planning."""
+        self._yield_stdin()
         self.console.print(Panel(Markdown(plan or "(empty plan)"),
                                  title="[bold yellow]📋 proposed plan[/bold yellow]",
                                  border_style="yellow"))
@@ -197,6 +208,7 @@ class UI:
 
     def propose_options(self, question: str, options: list[str]) -> str:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
+        self._yield_stdin()
         self.console.print(Panel(question or "(choose one)", title="[bold cyan]▸ choose[/bold cyan]",
                                  border_style="cyan", expand=False))
         for i, o in enumerate(options, 1):
@@ -567,14 +579,19 @@ class CLI:
         self.banner()
         USER_HOME.mkdir(parents=True, exist_ok=True)
         session: PromptSession = PromptSession(history=FileHistory(str(USER_HOME / "history")))
+        queue: list[str] = []
         while True:
             mode = self.agent.mode
-            try:
-                line = session.prompt(f"dgc[{mode}]> ").strip()
-            except KeyboardInterrupt:
-                continue
-            except EOFError:
-                break
+            if queue:                                   # run a follow-up queued during the last turn
+                line = queue.pop(0)
+                self.console.print(f"[dim]dgc[{mode}]> {line}[/dim]", highlight=False)
+            else:
+                try:
+                    line = session.prompt(f"dgc[{mode}]> ").strip()
+                except KeyboardInterrupt:
+                    continue
+                except EOFError:
+                    break
             if not line:
                 continue
             try:
@@ -586,7 +603,7 @@ class CLI:
                 elif line.startswith("!"):
                     self.run_bang(line[1:])
                 else:
-                    self.agent.run_turn(self.expand_mentions(line))
+                    self._run_turn_live(self.expand_mentions(line), queue)
             except EOFError:
                 break
             except KeyboardInterrupt:
@@ -594,6 +611,73 @@ class CLI:
             except Exception as e:  # keep the REPL alive
                 self.ui.error(f"{type(e).__name__}: {e}")
         self.console.print("[dim]bye[/dim]")
+
+    def _run_turn_live(self, text: str, queue: list[str]) -> None:
+        """Run a turn on a worker thread while the main thread watches the keyboard:
+        Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
+        The reader cleanly hands stdin back when a tool needs an approval prompt."""
+        self.agent.cancelled.clear()
+        done = threading.Event()
+
+        def work() -> None:
+            try:
+                self.agent.run_turn(text)
+            except Exception as e:
+                self.ui.error(f"{type(e).__name__}: {e}")
+            finally:
+                done.set()
+
+        threading.Thread(target=work, daemon=True).start()
+
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            done.wait()
+            return
+
+        import select as _sel
+        import termios
+        import tty
+        fd = sys.stdin.fileno()
+        live = {"active": threading.Event(), "stop": threading.Event(), "released": threading.Event()}
+        live["active"].set()
+        self.ui._live = live
+        old = termios.tcgetattr(fd)
+        buf = ""
+        try:
+            tty.setcbreak(fd)  # char-at-a-time, ECHO off, but keep \n->\r\n and signals
+            while not done.is_set():
+                if live["stop"].is_set():
+                    break                       # an approval prompt needs stdin — hand it over
+                try:
+                    r, _, _ = _sel.select([fd], [], [], 0.12)
+                except (OSError, ValueError):
+                    break
+                if not r:
+                    continue
+                try:
+                    ch = os.read(fd, 1).decode("utf-8", "replace")
+                except OSError:
+                    break
+                if ch in ("\x1b", "\x03"):       # Esc / Ctrl-C — interrupt this turn
+                    self.agent.cancelled.set()
+                    self.console.print("\n[dim]⎋ interrupting…[/dim]", highlight=False)
+                    buf = ""
+                elif ch in ("\r", "\n"):         # Enter — queue what was typed so far
+                    if buf.strip():
+                        queue.append(buf.strip())
+                        self.console.print(f"[dim]↵ queued: {buf.strip()[:70]}[/dim]", highlight=False)
+                    buf = ""
+                elif ch == "\x7f":               # backspace
+                    buf = buf[:-1]
+                elif ch.isprintable():
+                    buf += ch
+        except KeyboardInterrupt:
+            self.agent.cancelled.set()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            live["active"].clear()
+            live["released"].set()               # let a waiting approval proceed
+            self.ui._live = None
+        done.wait()
 
 
 def run_doctor(config: Config) -> None:

@@ -165,6 +165,7 @@ class LLMClient:
         reasoning_effort: str | None = None,
         on_text=None,
         on_thinking=None,
+        cancel=None,
     ) -> ChatResult:
         payload: dict = {"model": self.model, "messages": messages, "stream": True}
         if tools and self.tools_supported:
@@ -224,10 +225,10 @@ class LLMClient:
                     f"HTTP {r.status_code} from {self._url} after {transient} tries: {r.text[:400]}")
             if r.status_code != 200:
                 raise LLMError(f"HTTP {r.status_code} from {self._url}: {r.text[:400]}")
-            return self._consume(r, on_text, on_thinking)
+            return self._consume(r, on_text, on_thinking, cancel)
         raise LLMError(f"request failed repeatedly: {last_err}")
 
-    def _consume(self, r: requests.Response, on_text, on_thinking) -> ChatResult:
+    def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None) -> ChatResult:
         result = ChatResult()
         filt = _ThinkFilter()
         partial: dict[int, dict] = {}  # index -> accumulated native tool call
@@ -246,6 +247,13 @@ class LLMClient:
                         on_text(chunk)
 
         for line in r.iter_lines(decode_unicode=True):
+            if cancel is not None and cancel.is_set():
+                try:
+                    r.close()
+                except Exception:
+                    pass
+                result.finish_reason = "cancelled"
+                break
             if not line or not line.startswith("data:"):
                 continue
             data = line[5:].strip()

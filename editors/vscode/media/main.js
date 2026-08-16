@@ -2,6 +2,9 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const stop = $("stop"), queuedEl = $("queued");
+  let queuedCount = 0;
+  function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `⏳ ${queuedCount} queued` : ""; }
 
   const GLYPHS = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
   const VERBS = ["Ideating", "Percolating", "Ruminating", "Conjuring", "Noodling", "Marinating",
@@ -90,7 +93,8 @@
   function onEvent(ev) {
     const stick = atBottom();
     switch (ev.type) {
-      case "turn_start": startTurn(); break;
+      case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "queued": queuedCount = ev.count; renderQueued(); break;
       case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
@@ -147,15 +151,15 @@
   }
 
   // ---- composer ----
-  function setSending(on) { streaming = on; send.textContent = on ? "⏹ Stop" : "Send ▸"; send.classList.toggle("stop", on); }
+  function setSending(on) { streaming = on; stop.style.display = on ? "" : "none"; }
+  function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   function submit() {
-    if (streaming) { vscode.postMessage({ type: "cancel" }); return; }
     const text = input.value.trim();
     if (!text && !attachments.length) return;
     const full = attachments.map((a) => a.text).join("\n") + (attachments.length ? "\n" : "") + text;
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
-    vscode.postMessage({ type: "prompt", text: full });
+    vscode.postMessage({ type: "prompt", text: full });   // backend queues it if a turn is running
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
   }
   function renderAtts() {
@@ -206,9 +210,10 @@
       if (e.key === "Escape") { e.preventDefault(); hidePop(); return; }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-    else if (e.key === "Escape" && streaming) vscode.postMessage({ type: "cancel" });
+    else if (e.key === "Escape" && streaming) doStop();
   });
   send.onclick = submit;
+  stop.onclick = doStop;
   $("pill-model").onclick = () => vscode.postMessage({ type: "pickModel" });
   $("pill-mode").onclick = () => vscode.postMessage({ type: "pickMode" });
   $("pill-think").onclick = () => vscode.postMessage({ type: "pickThink" });

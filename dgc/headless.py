@@ -122,6 +122,7 @@ class Backend:
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._turn_n = 0
+        self._queue: list[str] = []   # prompts queued while a turn is running
 
     def _add_rule(self, rule_text: str) -> None:
         try:
@@ -144,26 +145,33 @@ class Backend:
     def _busy(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
 
+    def _start_turn(self, text: str) -> None:
+        self._turn_n += 1
+        tid = f"t{self._turn_n}"
+
+        def run():
+            self.em.emit("turn_start", turn_id=tid, prompt=text)
+            self.agent.run_turn(text)
+            cancelled = self.agent.cancelled.is_set()
+            self.em.emit("turn_end", turn_id=tid,
+                         reason="cancelled" if cancelled else "completed",
+                         token_estimate=self.agent.estimate_tokens())
+            if self._queue and not cancelled:      # drain a queued follow-up
+                self._start_turn(self._queue.pop(0))
+
+        self._worker = threading.Thread(target=run, daemon=True)
+        self._worker.start()
+
     def dispatch(self, cmd: dict) -> None:
         t = cmd.get("type")
 
         if t == "prompt":
-            if self._busy():
-                self.em.emit("error", message="a turn is already running")
-                return
             text = str(cmd.get("text", ""))
-            self._turn_n += 1
-            tid = f"t{self._turn_n}"
-
-            def run():
-                self.em.emit("turn_start", turn_id=tid, prompt=text)
-                self.agent.run_turn(text)
-                self.em.emit("turn_end", turn_id=tid,
-                             reason="cancelled" if self.agent.cancelled.is_set() else "completed",
-                             token_estimate=self.agent.estimate_tokens())
-
-            self._worker = threading.Thread(target=run, daemon=True)
-            self._worker.start()
+            if self._busy():                       # queue follow-ups sent mid-turn
+                self._queue.append(text)
+                self.em.emit("queued", count=len(self._queue), text=text)
+                return
+            self._start_turn(text)
 
         elif t == "permission_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule")})
@@ -175,6 +183,7 @@ class Backend:
         elif t in ("cancel", "interrupt"):
             self.agent.cancelled.set()
             self.pending.cancel_all({"decision": "no", "choice": None})
+            self._queue.clear()
 
         elif t == "set_mode":
             self.agent.set_mode(cmd.get("mode", "default"))

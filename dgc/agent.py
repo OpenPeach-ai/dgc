@@ -219,7 +219,8 @@ class Agent:
             tools = TOOL_SCHEMAS if self.client.tools_supported else None
             try:
                 result = self.client.chat(self.messages, tools=tools, reasoning_effort=effort,
-                                          on_text=self.ui.on_text, on_thinking=self.ui.on_thinking)
+                                          on_text=self.ui.on_text, on_thinking=self.ui.on_thinking,
+                                          cancel=self.cancelled)
             except LLMError as e:
                 self.ui.end_stream()
                 self.ui.error(str(e))

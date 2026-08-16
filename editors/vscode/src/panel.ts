@@ -351,9 +351,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </header>
 <main id="log"></main>
 <div id="pop" class="pop"></div>
+<div id="queued"></div>
 <div id="attachments"></div>
 <footer>
   <textarea id="input" rows="1" placeholder="Ask DGC…  @ files · / commands"></textarea>
+  <button id="stop" title="Stop (Esc)" style="display:none">⏹</button>
   <button id="send" title="Send">Send ▸</button>
 </footer>
 <script nonce="${nonce}" src="${js}"></script>
