@@ -16,7 +16,7 @@ dgc/
   skills.py        SKILL.md discovery/parsing
 tests/run_tests.py units + mock-server end-to-end
 install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`)
-site/              dagucchicode.com landing page (index.html) + the files it serves (install.sh, dgc.tar.gz)
+site/              daguccicode.com landing page (index.html) + the files it serves (install.sh, dgc.tar.gz)
 ```
 
 ## Run & test
@@ -37,5 +37,5 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 ## Releasing
 
-`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://dagucchicode.com`).
+`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://daguccicode.com`).
 Releases are cut by the maintainer from the source repo.

@@ -105,6 +105,39 @@ def parse_text_tool_calls(content: str) -> tuple[str, list[ToolCall]]:
     return clean.strip(), calls
 
 
+def _repair_for_retry(messages: list[dict]) -> list[dict]:
+    """Collapse native tool-calling structure into plain user/assistant text.
+
+    Some endpoints ship brittle chat templates — e.g. an Ollama model imported with a
+    passthrough template intermittently 500s "no user query found in messages" once a turn
+    becomes a chain of assistant(tool_calls) + tool results with no fresh user turn. Folding
+    the tool results into a `user` message guarantees a "user query" exists, so ANY template
+    can render it. This is DGC-level and endpoint-agnostic (it protects every user's models,
+    not just one box's). Used only on a retry after a transient failure; it never mutates the
+    caller's list or the stored conversation."""
+    out: list[dict] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            name = m.get("name") or "tool"
+            out.append({"role": "user", "content": f"[result of {name}]\n{m.get('content', '')}"})
+        elif role == "assistant" and m.get("tool_calls"):
+            names = ", ".join((tc.get("function") or {}).get("name", "tool") for tc in m["tool_calls"])
+            text = (m.get("content") or "").strip()
+            note = f"(calling {names})" if names else ""
+            out.append({"role": "assistant", "content": (f"{text}\n{note}".strip() or "(working)")})
+        else:
+            out.append({k: v for k, v in m.items() if k != "tool_calls"})
+    # merge adjacent same-role turns — a run of user/user/user also trips some templates
+    merged: list[dict] = []
+    for m in out:
+        if merged and merged[-1]["role"] == m["role"]:
+            merged[-1]["content"] = f"{merged[-1].get('content', '')}\n\n{m.get('content', '')}".strip()
+        else:
+            merged.append(dict(m))
+    return merged
+
+
 class LLMClient:
     def __init__(self, base_url: str, api_key: str, model: str):
         self.base_url = base_url.rstrip("/")
@@ -141,7 +174,8 @@ class LLMClient:
             payload["reasoning_effort"] = reasoning_effort
 
         last_err = ""
-        transient = 0  # count of retried timeouts / 5xx (bounded, with backoff)
+        transient = 0      # count of retried timeouts / 5xx (bounded, with backoff)
+        repaired = False   # whether we've swapped in the endpoint-agnostic repaired shape
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             try:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
@@ -171,12 +205,19 @@ class LLMClient:
                     continue
                 raise LLMError(f"400 from server: {body}")
             if r.status_code >= 500:
-                # Transient upstream error — retry the same request instead of killing
-                # the turn (Claude Code / Codex do the same). Ollama, for one, will
-                # intermittently 500 "no user query found in messages" on long tool-loops.
+                # Transient upstream error — retry instead of killing the turn (Claude
+                # Code / Codex do the same). Ollama, for one, intermittently 500s
+                # "no user query found in messages" on long tool-loops.
                 last_err = f"HTTP {r.status_code}: {r.text[:300]}"
                 transient += 1
                 if transient < 4:
+                    # After a plain retry fails, also repair the message SHAPE — collapse
+                    # native tool-calls/results into plain user/assistant text that even a
+                    # brittle chat template can render. This is the DGC-level fix (works for
+                    # any user's endpoint, not just one machine's Ollama models).
+                    if transient >= 2 and not repaired:
+                        payload["messages"] = _repair_for_retry(messages)
+                        repaired = True
                     time.sleep(0.5 * transient)
                     continue
                 raise LLMError(

@@ -17,6 +17,15 @@ BOLD = "\x1b[1m"
 RESET = "\x1b[0m"
 
 
+def _vtrunc(s: str, width: int) -> str:
+    """Truncate to at most `width` columns (… if cut) so a rendered line never wraps."""
+    if width <= 0:
+        return ""
+    if len(s) <= width:
+        return s
+    return s[: max(1, width - 1)] + "…"
+
+
 def _tty() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -62,11 +71,14 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
     # title scrolls off the top, and the in-place redraw (\x1b[<block>A) can't reach it
     # any more — every frame drifts down (the "weirdly aligned" list). Cap the block to
     # the viewport and scroll a window through the options instead.
-    rows = shutil.get_terminal_size((80, 24)).lines
+    size = shutil.get_terminal_size((80, 24))
+    rows, cols = size.lines, size.columns
     window = min(n, max(3, rows - 4))
     scrollable = n > window
     block = 1 + window + (2 if scrollable else 0)  # constant #lines per render → stable redraw
     top = 0
+    width = max(8, cols - 1)  # keep every line strictly inside the terminal → it can never wrap
+                              # (a wrapped line eats 2 rows but the \x1b[<block>A redraw counts 1)
 
     def render(first: bool) -> None:
         nonlocal top
@@ -75,21 +87,31 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
         elif i >= top + window:          # scrolled below — page down
             top = i - window + 1
         out = [] if first else [f"\x1b[{block}A"]  # move cursor back up to the title
-        out.append(f"{BOLD}{title}{RESET}  {DIM}(↑/↓ or j/k · enter · esc){RESET}\x1b[K\n")
+        keyhint = "  (↑/↓ · enter · esc)"
+        if len(title) + len(keyhint) <= width:
+            out.append(f"{BOLD}{title}{RESET}{DIM}{keyhint}{RESET}\x1b[K\n")
+        else:
+            out.append(f"{BOLD}{_vtrunc(title, width)}{RESET}\x1b[K\n")
         if scrollable:
-            more_up = f"{DIM}  ↑ {top} more{RESET}" if top else ""
-            out.append(f"{more_up}\x1b[K\n")
+            up = _vtrunc(f"  ↑ {top} more", width) if top else ""
+            out.append(f"{DIM}{up}{RESET}\x1b[K\n")
         for row in range(window):
             idx = top + row
             sel = idx == i
+            label, h = labels[idx], hints[idx]
+            avail = width - 2                 # room after the "❯ " / "  " marker+space
+            hint_c = ""
+            if h and len(label) + 2 + len(h) <= avail:
+                hint_c = f"  {DIM}{h}{RESET}"
+            else:
+                label = _vtrunc(label, avail)
             marker = f"{CYAN}❯{RESET}" if sel else " "
-            text = f"{CYAN}{labels[idx]}{RESET}" if sel else labels[idx]
-            hint = f"  {DIM}{hints[idx]}{RESET}" if hints[idx] else ""
-            out.append(f"{marker} {text}{hint}\x1b[K\n")
+            text = f"{CYAN}{label}{RESET}" if sel else label
+            out.append(f"{marker} {text}{hint_c}\x1b[K\n")
         if scrollable:
             rem = n - (top + window)
-            more_dn = f"{DIM}  ↓ {rem} more{RESET}" if rem else ""
-            out.append(f"{more_dn}\x1b[K\n")
+            dn = _vtrunc(f"  ↓ {rem} more", width) if rem else ""
+            out.append(f"{DIM}{dn}{RESET}\x1b[K\n")
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
