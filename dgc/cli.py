@@ -486,7 +486,14 @@ class CLI:
         elif cmd == "update":
             run_update()
         else:
-            self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
+            from .commands import discover_commands, render_command
+            custom = discover_commands(self.config.project_root)
+            if cmd in custom:
+                rendered = render_command(custom[cmd], rest)
+                if rendered:
+                    self.agent.run_turn(rendered)
+            else:
+                self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
         return True
 
     def _search_cmd(self, rest: str) -> None:

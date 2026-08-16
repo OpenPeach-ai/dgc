@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const stop = $("stop"), queuedEl = $("queued");
-  let queuedCount = 0;
+  let queuedCount = 0, customCommands = [];
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `⏳ ${queuedCount} queued` : ""; }
 
   const GLYPHS = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
@@ -93,6 +93,7 @@
   function onEvent(ev) {
     const stick = atBottom();
     switch (ev.type) {
+      case "ready": customCommands = ev.commands || []; break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
       case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
@@ -186,6 +187,10 @@
       renderAtts();
       input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
     } else if (popMode === "/") {
+      if (it.action && it.action.indexOf("custom:") === 0) {
+        input.value = it.label + " ";       // custom command — let the user add args, then Enter
+        hidePop(); input.focus(); return;
+      }
       input.value = "";
       vscode.postMessage({ type: "slash", action: it.action });
     }
@@ -196,7 +201,11 @@
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
     const at = upto.lastIndexOf("@"), sl = upto.startsWith("/") ? 0 : -1;
-    if (sl === 0 && !/\s/.test(v)) { popMode = "/"; popStart = 0; showPop(SLASH.filter((c) => c[0].startsWith(v)).map((c) => ({ label: c[0], detail: c[1], action: c[2] }))); }
+    if (sl === 0 && !/\s/.test(v)) {
+      popMode = "/"; popStart = 0;
+      const all = SLASH.concat(customCommands.map((c) => ["/" + c, "custom command", "custom:" + c]));
+      showPop(all.filter((c) => c[0].startsWith(v)).map((c) => ({ label: c[0], detail: c[1], action: c[2] })));
+    }
     else if (at !== -1 && !/\s/.test(upto.slice(at))) {
       popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();
       showPop(files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8).map((f) => ({ label: f })));

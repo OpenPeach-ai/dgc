@@ -14,6 +14,7 @@ import threading
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
+from .commands import discover_commands, render_command
 from .config import Config
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
@@ -140,7 +141,8 @@ class Backend:
             session_id=self.agent.session_file.stem if self.agent.session_file else None,
             tools_supported=self.agent.client.tools_supported,
             tools=[t["function"]["name"] for t in TOOL_SCHEMAS],
-            skills=[s.name for s in self.agent.skills.values()])
+            skills=[s.name for s in self.agent.skills.values()],
+            commands=list(discover_commands(self.config.project_root)))
 
     def _busy(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
@@ -170,6 +172,11 @@ class Backend:
         if t == "prompt":
             text = str(cmd.get("text", ""))
             images = cmd.get("images")             # list of data: URIs (vision models)
+            if text.startswith("/"):               # render a custom slash-command template
+                parts = text[1:].split(None, 1)
+                custom = discover_commands(self.config.project_root)
+                if parts and parts[0] in custom:
+                    text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "") or text
             if self._busy():                       # queue follow-ups sent mid-turn
                 self._queue.append((text, images))
                 self.em.emit("queued", count=len(self._queue), text=text)
