@@ -1,0 +1,796 @@
+"""Interactive CLI for dgc — REPL, slash commands, streaming render,
+approval prompts and plan-mode approval flow."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.table import Table
+
+from . import __version__, memory as memory_mod, sessions as sessions_mod
+from .agent import Agent
+from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
+from .llm import LLMError
+from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
+from .tools import TOOL_SCHEMAS
+
+VERSION_URL = "https://daguccicode.com/version.json"
+UPDATE_CACHE = USER_HOME / "update-check.json"
+
+
+def _ver_tuple(s: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3]) or (0,)
+
+
+def cached_update() -> str | None:
+    """Latest version from the local cache if it's newer than us — non-blocking, never raises."""
+    try:
+        latest = str(json.loads(UPDATE_CACHE.read_text()).get("latest", ""))
+        if latest and _ver_tuple(latest) > _ver_tuple(__version__):
+            return latest
+    except Exception:
+        pass
+    return None
+
+
+def refresh_update_async() -> None:
+    """Refresh the cached 'latest version' at most once a day, in a DETACHED subprocess.
+
+    Not a daemon thread: a background thread doing TLS I/O can SIGSEGV the interpreter
+    during shutdown (Python tears down the thread while it's inside a C ssl call), which
+    made `dgc -p` exit with a signal ~1/3 of the time. A detached child process can never
+    block startup, raise into us, or crash us on exit. The banner reads the cache this
+    writes on the *next* launch, so there's nothing to wait for now.
+    """
+    try:  # daily gate in the parent — usually we don't spawn anything at all
+        if time.time() - float(json.loads(UPDATE_CACHE.read_text()).get("checked", 0)) < 86400:
+            return
+    except Exception:
+        pass
+    snippet = (
+        "import json,time,urllib.request\n"
+        "try:\n"
+        f"  d=json.loads(urllib.request.urlopen({VERSION_URL!r},timeout=4).read().decode())\n"
+        f"  open({str(UPDATE_CACHE)!r},'w').write("
+        "json.dumps({'latest':str(d.get('version','')),'checked':time.time()}))\n"
+        "except Exception: pass\n"
+    )
+    try:
+        UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [sys.executable, "-c", snippet],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True)
+    except Exception:
+        pass
+
+
+def auto_warning(console: Console) -> None:
+    console.print(Panel(
+        "full-auto approves [bold]every[/bold] file write and shell command with no prompts.\n"
+        "Only use it on code and a directory you trust.",
+        title="[bold red]⚠ auto mode[/bold red]", border_style="red", expand=False))
+
+
+MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
+MODE_COLOR = {"default": "cyan", "acceptEdits": "green", "plan": "yellow", "auto": "red"}
+THINK_LEVELS = ["off", "low", "medium", "high"]
+
+
+class UI:
+    """All user-facing rendering + interaction. The agent calls back into this."""
+
+    def __init__(self):
+        self.console = Console()
+        self._thinking = False
+        self._streamed = False
+        self._rule_hook = None  # set by CLI: fn(rule_text) -> None
+
+    # ------------------------------------------------ streaming callbacks ---
+    def on_text(self, chunk: str) -> None:
+        if self._thinking:
+            self.console.print()
+            self._thinking = False
+        self.console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
+        self.console.file.flush()  # stream live — rich/stdout otherwise buffers until a newline
+        self._streamed = True
+
+    def on_thinking(self, chunk: str) -> None:
+        if not self._thinking:
+            self.console.print("\n[dim italic]· thinking…[/] ", end="")
+            self._thinking = True
+        self.console.print(chunk, end="", markup=False, highlight=False, style="dim italic")
+        self.console.file.flush()
+        self._streamed = True
+
+    def end_stream(self) -> None:
+        if self._streamed:
+            self.console.print()
+            self._streamed = False
+            self._thinking = False
+
+    # ------------------------------------------------------ tool rendering ---
+    def tool_call(self, name: str, args: dict) -> None:
+        summary = self._arg_summary(name, args)
+        self.console.print(f"\n[bold cyan]⏺ {name}[/bold cyan] [dim]{summary}[/dim]")
+
+    def tool_result(self, name: str, out: str) -> None:
+        if "\n--- " in out or out.startswith("---"):
+            diff = out[out.find("---"):]
+            if len(diff) < 6000:
+                self.console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
+                return
+        lines = out.splitlines()
+        preview = "\n".join(lines[:12])
+        if len(lines) > 12:
+            preview += f"\n[dim]… ({len(lines) - 12} more lines)[/dim]"
+        self.console.print(Panel(preview, border_style="dim", expand=False))
+
+    def tool_denied(self, name: str, args: dict, reason: str) -> None:
+        self.console.print(f"[bold red]✗ {name} denied[/bold red] [dim]{reason}[/dim]")
+
+    @staticmethod
+    def _arg_summary(name: str, args: dict) -> str:
+        for key in ("path", "command", "pattern", "url", "name", "memory"):
+            if key in args:
+                value = str(args[key]).replace("\n", " ")
+                return value[:120] + ("…" if len(value) > 120 else "")
+        return ""
+
+    # ---------------------------------------------------------- approvals ---
+    def approve(self, name: str, args: dict) -> str:
+        """Return 'once' | 'always' | 'no'."""
+        self.console.print(Panel(
+            f"[bold]{name}[/bold]\n{self._arg_summary(name, args)}",
+            title="[yellow]permission requested[/yellow]", border_style="yellow", expand=False))
+        if name == "bash":
+            self.console.print(Syntax(str(args.get("command", "")), "bash", theme="ansi_dark"))
+        rule = rule_for(name, args)
+        self.console.print("  [bold]1[/bold]) allow once   [bold]2[/bold]) always allow "
+                           f"[dim](adds rule {rule})[/dim]   [bold]3[/bold]) deny")
+        while True:
+            choice = input("  › ").strip().lower()
+            if choice in ("1", "y", "yes", ""):
+                return "once"
+            if choice in ("2", "a", "always"):
+                return "always"
+            if choice in ("3", "n", "no"):
+                return "no"
+
+    def present_plan(self, plan: str):
+        """Return target mode string on approval, or None to keep planning."""
+        self.console.print(Panel(Markdown(plan or "(empty plan)"),
+                                 title="[bold yellow]📋 proposed plan[/bold yellow]",
+                                 border_style="yellow"))
+        self.console.print("  [bold]1[/bold]) approve, build in [red]full-auto[/red]   "
+                           "[bold]2[/bold]) approve, build with [green]acceptEdits[/green]   "
+                           "[bold]3[/bold]) approve, build in [cyan]default[/cyan]   "
+                           "[bold]4[/bold]) reject, keep planning")
+        while True:
+            choice = input("  › ").strip()
+            if choice == "1":
+                return "auto"
+            if choice == "2":
+                return "acceptEdits"
+            if choice in ("3", ""):
+                return "default"
+            if choice == "4":
+                feedback = input("  feedback for the plan (optional): ").strip()
+                if feedback:
+                    self.console.print("[dim]feedback noted — the agent will see your denial[/dim]")
+                return None
+
+    def propose_options(self, question: str, options: list[str]) -> str:
+        """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
+        self.console.print(Panel(question or "(choose one)", title="[bold cyan]▸ choose[/bold cyan]",
+                                 border_style="cyan", expand=False))
+        for i, o in enumerate(options, 1):
+            self.console.print(f"  [bold]{i}[/bold]) {o}")
+        self.console.print("  [dim](number, or type your own answer)[/dim]")
+        while True:
+            try:
+                raw = input("  › ").strip()
+            except EOFError:
+                return options[0]
+            if not raw:
+                return options[0]
+            if raw.isdigit() and 1 <= int(raw) <= len(options):
+                return options[int(raw) - 1]
+            return raw
+
+    # ---------------------------------------------------------------- misc ---
+    def on_todo(self, todos: list) -> None:
+        if not todos:
+            return
+        marks = {"done": "[green]☑[/green]", "in_progress": "[yellow]◐[/yellow]", "pending": "[dim]☐[/dim]"}
+        self.console.print(Panel("\n".join(f"{marks.get(t['status'], '☐')} {t['content']}" for t in todos),
+                                 title="todos", border_style="dim", expand=False))
+
+    def info(self, msg: str) -> None:
+        self.console.print(f"[dim]· {msg}[/dim]")
+
+    def error(self, msg: str) -> None:
+        self.console.print(f"[bold red]error:[/bold red] {msg}")
+
+    def add_permission_rule(self, name: str, args: dict) -> None:
+        """Persist an allow-rule for this tool call — the 'always allow' path."""
+        if self._rule_hook:
+            self._rule_hook(str(rule_for(name, args)))
+
+
+# ------------------------------------------------------------------- REPL ---
+
+HELP = """\
+[bold]chat[/bold]
+  just type            ask dgc anything; it uses tools to act on your project
+  #fact                quick-add a memory to DGC.md
+  !cmd                 run a shell command directly
+  @path/to/file        attach a file's contents to your message
+
+[bold]slash commands[/bold]
+  /help                this help
+  /connect P|URL [KEY] connect a preset (ollama, llamacpp, openai, openrouter, groq…) or a raw URL
+  /models              list models served by the endpoint
+  /model [NAME]        show or set the model
+  /mode [MODE]         default | acceptEdits | plan | auto   (no arg: cycle)
+  /plan                toggle plan mode
+  /think [LEVEL]       off | low | medium | high   (keywords 'think', 'think hard',
+                       'ultrathink' in a prompt bump it for that turn)
+  /permissions         list rules;  /permissions allow|ask|deny Tool(pattern)
+  /memory [show]       show memory files
+  /memory add TEXT     add to project memory;  /memory add user TEXT → user memory
+  /skills              list discovered skills
+  /skill NAME [ARGS]   invoke a skill directly
+  /init                have the agent analyze the project and write DGC.md
+  /status              current config
+  /compact             compact conversation context now
+  /clear               reset the conversation
+  /search [P [K|URL]]  web search provider: duckduckgo | brave | tavily | searxng
+  /resume              resume a past conversation in this project
+  /update              update DGC to the latest version
+  /exit                quit
+"""
+
+
+class CLI:
+    def __init__(self, config: Config):
+        self.config = config
+        self.ui = UI()
+        self.ui._rule_hook = self._add_rule
+        self.agent = Agent(config, self.ui)
+        self.console = self.ui.console
+
+    # ------------------------------------------------------------- banner ---
+    # DGC wordmark — assembled from fixed-width block letters so it always aligns.
+    _LOGO_D = ["██████╗ ", "██╔══██╗", "██║  ██║", "██║  ██║", "██████╔╝", "╚═════╝ "]
+    _LOGO_G = [" ██████╗ ", "██╔════╝ ", "██║  ███╗", "██║   ██║", "╚██████╔╝", " ╚═════╝ "]
+    _LOGO_C = [" ██████╗", "██╔════╝", "██║     ", "██║     ", "╚██████╗", " ╚═════╝"]
+    _LOGO_COLORS = ["#22D3EE", "#3EC7EE", "#6FA6EE", "#9B84E8", "#C25FD8", "#E84CC6"]  # cyan → magenta
+
+    def _logo(self) -> None:
+        c = self.console
+        c.print()
+        for i in range(6):
+            row = f"{self._LOGO_D[i]} {self._LOGO_G[i]} {self._LOGO_C[i]}"
+            c.print("  " + row, style=f"bold {self._LOGO_COLORS[i]}", markup=False, highlight=False)
+        c.print(f"  [bold #E84CC6]DGC[/]  [dim]v{__version__} · a coding-agent CLI for the models you run[/]", highlight=False)
+        c.print("  [dim]Built by Mohit Kalra[/]\n", highlight=False)
+
+    def banner(self) -> None:
+        c = self.console
+        cfg = self.config
+        mode, think = cfg.data.get("mode", "default"), cfg.data.get("thinking", "off")
+        self._logo()
+        c.print(f"  endpoint  {cfg.base_url}")
+        c.print(f"  model     {cfg.model}")
+        c.print(f"  mode      [{MODE_COLOR.get(mode, 'white')}]{mode}[/]  ({MODE_DESCRIPTIONS.get(mode, '')})")
+        c.print(f"  thinking  {think}")
+        c.print(f"  project   {cfg.project_root}")
+        if self.agent.skills:
+            c.print(f"  skills    {', '.join(self.agent.skills)}")
+        proj_mem, user_mem = memory_mod.load_memories(cfg.project_root)
+        loaded = [n for n, m in (("DGC.md", proj_mem), ("user DGC.md", user_mem)) if m]
+        if loaded:
+            c.print(f"  memory    loaded: {', '.join(loaded)}")
+        c.print(f"  search    {cfg.get('search_provider', 'duckduckgo')}")
+        upd = cached_update()
+        if upd:
+            c.print(f"  [bold #E84CC6]⬆ update available: v{upd}[/]  [dim]— run [bold]dgc update[/bold][/]", highlight=False)
+        if mode == "auto":
+            auto_warning(c)
+        c.print("[dim]type /help for commands, /exit to quit[/dim]\n")
+
+    # ------------------------------------------------------- rule handling ---
+    def _add_rule(self, rule_text: str) -> None:
+        try:
+            Rule.parse(rule_text, "allow")
+        except ValueError as e:
+            self.ui.error(str(e))
+            return
+        self.config.permissions["allow"].append(rule_text)
+        self.config.save()
+        self.ui.info(f"rule saved: allow {rule_text}")
+
+    # ------------------------------------------------------ slash commands ---
+    def handle_slash(self, line: str) -> bool:
+        parts = line[1:].split(None, 1)
+        cmd = parts[0].lower() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        cfg = self.config
+
+        if cmd in ("exit", "quit", "q"):
+            raise EOFError
+        if cmd == "help":
+            self.console.print(HELP)
+        elif cmd == "connect":
+            args = rest.split()
+            if not args:
+                from .menu import select
+                pk = list(PROVIDERS)
+                idx = select("Connect a provider", [PROVIDERS[k]["label"] for k in pk],
+                             [PROVIDERS[k]["base_url"] for k in pk])
+                if idx is not None:
+                    prov = PROVIDERS[pk[idx]]
+                    cfg.set("base_url", prov["base_url"])
+                    if prov["needs_key"]:
+                        key = input(f"  API key for {prov['label']} › ").strip()
+                        cfg.set("api_key", key or prov["api_key"])
+                    else:
+                        cfg.set("api_key", prov["api_key"])
+                    self.agent.refresh_client()
+                    self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
+            else:
+                target = args[0]
+                if target in PROVIDERS:
+                    prov = PROVIDERS[target]
+                    cfg.set("base_url", prov["base_url"])
+                    if len(args) > 1:
+                        cfg.set("api_key", args[1])
+                    elif prov["needs_key"]:
+                        key = input(f"  API key for {prov['label']} › ").strip()
+                        cfg.set("api_key", key or prov["api_key"])
+                    else:
+                        cfg.set("api_key", prov["api_key"])
+                else:
+                    cfg.set("base_url", target)
+                    if len(args) > 1:
+                        cfg.set("api_key", args[1])
+                self.agent.refresh_client()
+                self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
+        elif cmd == "models":
+            try:
+                models = self.agent.client.list_models()
+            except (LLMError, Exception) as e:
+                self.ui.error(str(e))
+                return True
+            if not models:
+                self.ui.info("no models offered by the endpoint")
+            else:
+                from .menu import select
+                mi = select("Model", models)
+                if mi is not None:
+                    cfg.set("model", models[mi])
+                    self.agent.refresh_client()
+                    self.ui.info(f"model → {cfg.model}")
+        elif cmd == "model":
+            if rest:
+                cfg.set("model", rest.strip())
+                self.agent.refresh_client()
+            self.ui.info(f"model: {cfg.model}")
+        elif cmd in ("mode",):
+            if not rest:
+                i = MODE_CYCLE.index(self.agent.mode) if self.agent.mode in MODE_CYCLE else 0
+                rest = MODE_CYCLE[(i + 1) % len(MODE_CYCLE)]
+            if rest not in MODES:
+                self.ui.error(f"unknown mode {rest!r} — choose from {', '.join(MODES)}")
+            elif rest == "auto" and self.agent.mode != "auto":
+                auto_warning(self.console)
+                if input("  enable full-auto? [y/N] › ").strip().lower() in ("y", "yes"):
+                    self.agent.set_mode("auto")
+                    self.ui.info(f"mode → [{MODE_COLOR['auto']}]auto[/] ({MODE_DESCRIPTIONS['auto']})")
+                else:
+                    self.ui.info(f"kept {self.agent.mode}")
+            else:
+                self.agent.set_mode(rest)
+                self.ui.info(f"mode → [{MODE_COLOR[rest]}]{rest}[/] ({MODE_DESCRIPTIONS[rest]})")
+        elif cmd == "plan":
+            target = "default" if self.agent.mode == "plan" else "plan"
+            self.agent.set_mode(target)
+            self.ui.info(f"mode → [{MODE_COLOR[target]}]{target}[/] ({MODE_DESCRIPTIONS[target]})")
+        elif cmd == "think":
+            if not rest:
+                i = THINK_LEVELS.index(cfg.get("thinking", "off"))
+                rest = THINK_LEVELS[(i + 1) % len(THINK_LEVELS)]
+            if rest not in THINK_LEVELS:
+                self.ui.error(f"unknown level {rest!r} — choose from {', '.join(THINK_LEVELS)}")
+            else:
+                cfg.data["thinking"] = rest
+                self.ui.info(f"thinking → {rest}")
+        elif cmd == "permissions":
+            self._permissions_cmd(rest)
+        elif cmd == "memory":
+            self._memory_cmd(rest)
+        elif cmd == "skills":
+            if not self.agent.skills:
+                self.ui.info("no skills found — add dirs with SKILL.md under .dgc/skills/ or ~/.dgc/skills/")
+            table = Table("skill", "description", "location")
+            for s in self.agent.skills.values():
+                table.add_row(s.name, s.description, str(s.path))
+            self.console.print(table)
+        elif cmd == "skill":
+            args = rest.split(None, 1)
+            sk = self.agent.skills.get(args[0]) if args else None
+            if not sk:
+                self.ui.error(f"unknown skill — try /skills")
+            else:
+                self.agent.run_turn(sk.render(args[1] if len(args) > 1 else ""))
+        elif cmd == "init":
+            memory_mod.init_project_memory(cfg.project_root)
+            self.agent.run_turn(
+                "Analyze this project (read key files, manifests, existing docs) and rewrite "
+                "DGC.md at the project root as a concise, accurate guide for a coding agent: "
+                "what the project is, stack, layout, build/test/lint commands, conventions. "
+                "Use write_file to save it.")
+        elif cmd == "status":
+            self.banner()
+        elif cmd == "compact":
+            self.agent.maybe_compact(force=True)
+            self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
+        elif cmd == "clear":
+            self.agent.reset()
+            self.ui.info("conversation cleared")
+        elif cmd == "search":
+            self._search_cmd(rest)
+        elif cmd == "resume":
+            self._resume_cmd()
+        elif cmd == "update":
+            run_update()
+        else:
+            self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
+        return True
+
+    def _search_cmd(self, rest: str) -> None:
+        cfg = self.config
+        args = rest.split()
+        if not args:
+            self.ui.info(f"web search: {cfg.get('search_provider', 'duckduckgo')}  ·  "
+                         f"options: {', '.join(SEARCH_PROVIDERS)}")
+            return
+        p = args[0].lower()
+        if p not in SEARCH_PROVIDERS:
+            self.ui.error("providers: " + ", ".join(SEARCH_PROVIDERS))
+            return
+        meta = SEARCH_PROVIDERS[p]
+        cfg.set("search_provider", p)
+        if meta["needs_key"]:
+            key = args[1] if len(args) > 1 else input(f"  API key for {meta['label']} › ").strip()
+            cfg.set("search_api_key", key)
+        if meta["needs_url"]:
+            url = args[1] if len(args) > 1 else input(f"  base URL for {meta['label']} › ").strip()
+            cfg.set("search_url", url)
+        self.ui.info(f"web search → {meta['label']}")
+
+    def _resume_cmd(self) -> None:
+        items = sessions_mod.listing(self.config.project_root)
+        if not items:
+            self.ui.info("no saved sessions in this directory")
+            return
+        from .menu import select
+        labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (p, ts, prev, cnt) in items[:20]]
+        si = select("Resume a session", labels)
+        if si is None:
+            return
+        n = self.agent.load_session(items[si][0])
+        self.ui.info(f"resumed session ({n} messages)")
+
+    def _permissions_cmd(self, rest: str) -> None:
+        if not rest:
+            for action in ("allow", "ask", "deny"):
+                rules = self.config.permissions[action]
+                self.console.print(f"[bold]{action}[/bold] ({len(rules)})")
+                for r in rules:
+                    self.console.print(f"  {r}")
+            return
+        m = re.match(r"(allow|ask|deny)\s+(.+)", rest, re.S)
+        if not m:
+            self.ui.error("usage: /permissions allow|ask|deny Tool(pattern)")
+            return
+        action, rule_text = m.group(1), m.group(2).strip()
+        try:
+            Rule.parse(rule_text, action)
+        except ValueError as e:
+            self.ui.error(str(e))
+            return
+        self.config.permissions[action].append(rule_text)
+        self.config.save()
+        self.ui.info(f"rule saved: {action} {rule_text}")
+
+    def _memory_cmd(self, rest: str) -> None:
+        if not rest or rest == "show":
+            proj, user = memory_mod.load_memories(self.config.project_root)
+            self.console.print(Panel(proj or "(none)", title="project DGC.md", expand=False))
+            self.console.print(Panel(user or "(none)", title="~/.dgc/DGC.md", expand=False))
+            return
+        m = re.match(r"add\s+(user\s+)?(.+)", rest, re.S)
+        if not m:
+            self.ui.error("usage: /memory [show] | /memory add [user] TEXT")
+            return
+        scope = "user" if m.group(1) else "project"
+        path = memory_mod.add_memory(m.group(2), self.config.project_root, scope)
+        self.ui.info(f"memory saved to {path}")
+
+    # ----------------------------------------------------------- input prep ---
+    def expand_mentions(self, text: str) -> str:
+        """Inline @path file attachments."""
+        attachments = []
+        for token in re.findall(r"@([\w./\-~]+)", text):
+            p = Path(token).expanduser()
+            if not p.is_absolute():
+                p = self.config.project_root / p
+            if p.is_file():
+                try:
+                    content = p.read_text(errors="replace")[:20000]
+                    attachments.append(f"<file path=\"{p}\">\n{content}\n</file>")
+                except OSError:
+                    pass
+        if attachments:
+            text += "\n\n" + "\n".join(attachments)
+        return text
+
+    def run_bang(self, command: str) -> None:
+        try:
+            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                  timeout=int(self.config.get("bash_timeout", 120)),
+                                  cwd=str(self.config.project_root), executable="/bin/bash")
+            out = (proc.stdout + proc.stderr).strip()
+            self.console.print(out or f"[dim](exit {proc.returncode}, no output)[/dim]")
+        except subprocess.TimeoutExpired:
+            self.ui.error("command timed out")
+
+    # ---------------------------------------------------------------- loop ---
+    def repl(self) -> None:
+        self.banner()
+        USER_HOME.mkdir(parents=True, exist_ok=True)
+        session: PromptSession = PromptSession(history=FileHistory(str(USER_HOME / "history")))
+        while True:
+            mode = self.agent.mode
+            try:
+                line = session.prompt(f"dgc[{mode}]> ").strip()
+            except KeyboardInterrupt:
+                continue
+            except EOFError:
+                break
+            if not line:
+                continue
+            try:
+                if line.startswith("/"):
+                    self.handle_slash(line)
+                elif line.startswith("#"):
+                    path = memory_mod.add_memory(line[1:], self.config.project_root)
+                    self.ui.info(f"memory saved to {path}")
+                elif line.startswith("!"):
+                    self.run_bang(line[1:])
+                else:
+                    self.agent.run_turn(self.expand_mentions(line))
+            except EOFError:
+                break
+            except KeyboardInterrupt:
+                self.ui.info("interrupted")
+            except Exception as e:  # keep the REPL alive
+                self.ui.error(f"{type(e).__name__}: {e}")
+        self.console.print("[dim]bye[/dim]")
+
+
+def run_doctor(config: Config) -> None:
+    """`dgc doctor` — verify the endpoint is reachable and the model is available."""
+    from .llm import LLMClient
+    c = Console()
+    c.print("[bold]DGC doctor[/bold] — checking your setup\n")
+    c.print(f"  endpoint      {config.base_url}")
+    c.print(f"  model         {config.model}")
+    c.print(f"  mode          {config.data.get('mode', 'default')}")
+    c.print(f"  context_size  {config.get('context_size')}")
+    c.print(f"  config file   {USER_CONFIG}\n")
+    client = LLMClient(config.base_url, config.api_key, config.model)
+    try:
+        models = client.list_models()
+    except Exception as e:
+        c.print(f"  [bold red]✗[/bold red] cannot reach {config.base_url} — {type(e).__name__}: {e}")
+        c.print("    → start your server (ollama serve / llama-server / LM Studio) or fix the URL & key")
+        c.print("    → run [bold]dgc setup[/bold] to reconfigure")
+        return
+    c.print(f"  [green]✓[/green] endpoint reachable — {len(models)} model(s) offered")
+    if config.model in models:
+        c.print(f"  [green]✓[/green] model '{config.model}' is available")
+    else:
+        c.print(f"  [yellow]![/yellow] model '{config.model}' not offered by this server")
+        if models:
+            shown = ", ".join(models[:12]) + ("…" if len(models) > 12 else "")
+            c.print(f"    available: {shown}")
+        c.print("    → set one: [bold]dgc --model <name>[/bold]  or  [bold]dgc setup[/bold]")
+    c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
+
+
+def run_setup(config: Config) -> None:
+    """`dgc setup` — interactive first-run wizard: pick a provider, key, model, context."""
+    from .llm import LLMClient
+    c = Console()
+    c.print("\n[bold]DGC setup[/bold] — point DGC at a model you run\n")
+    from .menu import select
+    keys = list(PROVIDERS)
+    prov_labels = [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
+    prov_hints = [PROVIDERS[k]["base_url"] for k in keys] + [""]
+    idx = select("Provider", prov_labels, prov_hints)
+    if idx is None:
+        c.print("[dim]cancelled[/dim]"); return
+    if idx < len(keys):
+        prov = PROVIDERS[keys[idx]]
+        base_url, api_key = prov["base_url"], prov["api_key"]
+        if prov["needs_key"]:
+            api_key = input(f"  API key for {prov['label']} › ").strip() or api_key
+    else:
+        base_url = input("  base URL (…/v1) › ").strip()
+        if not base_url:
+            c.print("[dim]cancelled[/dim]"); return
+        api_key = input("  API key (blank for local) › ").strip() or "sk-local"
+    config.set("base_url", base_url)
+    config.set("api_key", api_key)
+    client = LLMClient(config.base_url, config.api_key, config.model)
+    try:
+        models = client.list_models()
+    except Exception as e:
+        c.print(f"  [yellow]couldn't list models[/yellow] ({type(e).__name__}) — set one by name below.")
+        models = []
+    if models:
+        mi = select("Model", models[:60])
+        if mi is not None:
+            config.set("model", models[mi])
+    else:
+        m = input(f"  model name [{config.model}] › ").strip()
+        if m:
+            config.set("model", m)
+    cs = input(f"  context window in tokens [{config.get('context_size')}] › ").strip()
+    if cs.isdigit():
+        config.set("context_size", int(cs))
+    skeys = list(SEARCH_PROVIDERS)
+    si = select("Web search  (optional — powers the web_search tool)",
+                [SEARCH_PROVIDERS[k]["label"] for k in skeys])
+    sk = skeys[si] if si is not None else "duckduckgo"
+    config.set("search_provider", sk)
+    meta = SEARCH_PROVIDERS[sk]
+    if meta["needs_key"]:
+        config.set("search_api_key", input(f"  API key for {meta['label']} › ").strip())
+    if meta["needs_url"]:
+        config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
+    c.print(f"\n  [bold green]saved[/bold green] → {USER_CONFIG}")
+    c.print(f"  endpoint {config.base_url}  ·  model {config.model}  ·  context {config.get('context_size')}  ·  search {config.get('search_provider')}")
+    c.print("  run [bold]dgc[/bold] to start  ·  [bold]dgc doctor[/bold] to verify\n")
+
+
+def run_help() -> None:
+    """`dgc help` — CLI commands + in-REPL commands, for new users."""
+    c = Console()
+    c.print("\n[bold]DGC[/bold] — a coding-agent CLI for the models you run  [dim](Built by Mohit Kalra)[/dim]\n")
+    c.print("[bold]command line[/bold]")
+    c.print("  dgc                     start the interactive agent")
+    c.print("  dgc setup               configure provider / model / context")
+    c.print("  dgc doctor              check the endpoint + model are reachable")
+    c.print("  dgc help                this help")
+    c.print("  dgc -p \"<task>\"         run one task and exit  (add --mode auto for hands-off)")
+    c.print("  dgc --mode MODE         default | acceptEdits | plan | auto")
+    c.print("  dgc -c / --continue     resume the most recent session in this directory")
+    c.print("  dgc --resume            pick a past session to resume")
+    c.print("  dgc update              update DGC to the latest version")
+    c.print("  dgc --model N --base-url URL --api-key KEY   set + persist a model\n")
+    c.print(HELP)
+
+
+def run_update() -> None:
+    """`dgc update` — reinstall the latest DGC from daguccicode.com."""
+    c = Console()
+    c.print("[bold]DGC update[/bold] — fetching the latest…\n")
+    try:
+        subprocess.run("curl -fsSL https://daguccicode.com/install.sh | bash",
+                       shell=True, check=True, executable="/bin/bash")
+    except subprocess.CalledProcessError as e:
+        c.print(f"\n[bold red]update failed[/bold red] (exit {e.returncode}). "
+                "Run manually: curl -fsSL https://daguccicode.com/install.sh | bash")
+        return
+    c.print("\n[bold green]updated[/bold green] — start [bold]dgc[/bold] again.")
+
+
+def main(argv: list[str] | None = None) -> None:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve"):
+        if raw_argv[0] == "help":
+            run_help(); return
+        if raw_argv[0] == "update":
+            run_update(); return
+        if raw_argv[0] == "serve":
+            # headless JSON backend for editor front-ends — stdout is protocol-only,
+            # so this returns before the banner / update-check ever run.
+            from .headless import serve
+            serve(Config()); return
+        cfg = Config()
+        (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
+        return
+
+    parser = argparse.ArgumentParser(
+        prog="dgc", description="DGC — a coding-agent CLI for the models you run",
+        epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
+    parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
+    parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
+    parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
+    parser.add_argument("--model", help="model name (persisted)")
+    parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
+    parser.add_argument("--api-key", help="API key for the endpoint (persisted)")
+    parser.add_argument("-c", "--continue", dest="cont", action="store_true",
+                        help="resume the most recent session in this directory")
+    parser.add_argument("--resume", action="store_true", help="pick a past session to resume")
+    parser.add_argument("--version", action="version", version=f"dgc {__version__}")
+    args = parser.parse_args(argv)
+    if not args.prompt:          # one-shot `-p` has no banner to show an update in — skip the check
+        refresh_update_async()
+
+    config = Config()
+    if args.base_url:
+        config.set("base_url", args.base_url)
+    if args.api_key:
+        config.set("api_key", args.api_key)
+    if args.model:
+        config.set("model", args.model)
+    if args.mode:
+        config.data["mode"] = args.mode
+    if args.think:
+        config.data["thinking"] = args.think
+
+    cli = CLI(config)
+
+    # session persistence (Claude Code / Codex style: transcripts resume)
+    if args.cont:
+        p = sessions_mod.latest(config.project_root)
+        if p:
+            n = cli.agent.load_session(p)
+            cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+        else:
+            cli.ui.info("no previous session here — starting fresh")
+            cli.agent.session_file = sessions_mod.new_path(config.project_root)
+    elif args.resume:
+        items = sessions_mod.listing(config.project_root)
+        if items:
+            from .menu import select
+            labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (pp, ts, prev, cnt) in items[:20]]
+            si = select("Resume a session", labels)
+            if si is not None:
+                cli.agent.load_session(items[si][0])
+            else:
+                cli.agent.session_file = sessions_mod.new_path(config.project_root)
+        else:
+            cli.agent.session_file = sessions_mod.new_path(config.project_root)
+    else:
+        cli.agent.session_file = sessions_mod.new_path(config.project_root)
+
+    if args.prompt is not None:
+        if config.data.get("mode") == "auto":
+            print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
+        cli.agent.run_turn(cli.expand_mentions(args.prompt))
+        cli.ui.end_stream()
+        print()
+    else:
+        cli.repl()
+
+
+if __name__ == "__main__":
+    main()
