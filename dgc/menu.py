@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import select as _select
+import shutil
 import sys
 
 CYAN = "\x1b[96m"
@@ -56,16 +57,39 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     i, n = 0, len(labels)
+    # Scrolling viewport: never print more lines than fit on screen. Otherwise, once
+    # the list + surrounding output exceeds the terminal height the screen scrolls, the
+    # title scrolls off the top, and the in-place redraw (\x1b[<block>A) can't reach it
+    # any more — every frame drifts down (the "weirdly aligned" list). Cap the block to
+    # the viewport and scroll a window through the options instead.
+    rows = shutil.get_terminal_size((80, 24)).lines
+    window = min(n, max(3, rows - 4))
+    scrollable = n > window
+    block = 1 + window + (2 if scrollable else 0)  # constant #lines per render → stable redraw
+    top = 0
 
     def render(first: bool) -> None:
-        out = [] if first else [f"\x1b[{n + 1}A"]  # move cursor back up to the title
+        nonlocal top
+        if i < top:                      # scrolled above the window — page up
+            top = i
+        elif i >= top + window:          # scrolled below — page down
+            top = i - window + 1
+        out = [] if first else [f"\x1b[{block}A"]  # move cursor back up to the title
         out.append(f"{BOLD}{title}{RESET}  {DIM}(↑/↓ or j/k · enter · esc){RESET}\x1b[K\n")
-        for idx, lab in enumerate(labels):
+        if scrollable:
+            more_up = f"{DIM}  ↑ {top} more{RESET}" if top else ""
+            out.append(f"{more_up}\x1b[K\n")
+        for row in range(window):
+            idx = top + row
             sel = idx == i
             marker = f"{CYAN}❯{RESET}" if sel else " "
-            text = f"{CYAN}{lab}{RESET}" if sel else lab
+            text = f"{CYAN}{labels[idx]}{RESET}" if sel else labels[idx]
             hint = f"  {DIM}{hints[idx]}{RESET}" if hints[idx] else ""
             out.append(f"{marker} {text}{hint}\x1b[K\n")
+        if scrollable:
+            rem = n - (top + window)
+            more_dn = f"{DIM}  ↓ {rem} more{RESET}" if rem else ""
+            out.append(f"{more_dn}\x1b[K\n")
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 

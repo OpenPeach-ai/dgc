@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -47,21 +46,35 @@ def cached_update() -> str | None:
 
 
 def refresh_update_async() -> None:
-    """Fetch version.json in the background (once/day) and cache it. Never blocks startup or raises."""
-    def work() -> None:
-        try:
-            if time.time() - float(json.loads(UPDATE_CACHE.read_text()).get("checked", 0)) < 86400:
-                return
-        except Exception:
-            pass
-        try:
-            import requests
-            latest = str(requests.get(VERSION_URL, timeout=4).json().get("version", ""))
-            UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            UPDATE_CACHE.write_text(json.dumps({"latest": latest, "checked": time.time()}))
-        except Exception:
-            pass
-    threading.Thread(target=work, daemon=True).start()
+    """Refresh the cached 'latest version' at most once a day, in a DETACHED subprocess.
+
+    Not a daemon thread: a background thread doing TLS I/O can SIGSEGV the interpreter
+    during shutdown (Python tears down the thread while it's inside a C ssl call), which
+    made `dgc -p` exit with a signal ~1/3 of the time. A detached child process can never
+    block startup, raise into us, or crash us on exit. The banner reads the cache this
+    writes on the *next* launch, so there's nothing to wait for now.
+    """
+    try:  # daily gate in the parent — usually we don't spawn anything at all
+        if time.time() - float(json.loads(UPDATE_CACHE.read_text()).get("checked", 0)) < 86400:
+            return
+    except Exception:
+        pass
+    snippet = (
+        "import json,time,urllib.request\n"
+        "try:\n"
+        f"  d=json.loads(urllib.request.urlopen({VERSION_URL!r},timeout=4).read().decode())\n"
+        f"  open({str(UPDATE_CACHE)!r},'w').write("
+        "json.dumps({'latest':str(d.get('version','')),'checked':time.time()}))\n"
+        "except Exception: pass\n"
+    )
+    try:
+        UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [sys.executable, "-c", snippet],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True)
+    except Exception:
+        pass
 
 
 def auto_warning(console: Console) -> None:
@@ -723,7 +736,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--resume", action="store_true", help="pick a past session to resume")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
-    refresh_update_async()
+    if not args.prompt:          # one-shot `-p` has no banner to show an update in — skip the check
+        refresh_update_async()
 
     config = Config()
     if args.base_url:

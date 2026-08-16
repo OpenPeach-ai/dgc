@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 
 import requests
@@ -140,7 +141,8 @@ class LLMClient:
             payload["reasoning_effort"] = reasoning_effort
 
         last_err = ""
-        for _ in range(3):
+        transient = 0  # count of retried timeouts / 5xx (bounded, with backoff)
+        for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             try:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
                                   stream=True, timeout=(10, 900))
@@ -148,6 +150,13 @@ class LLMClient:
                 raise LLMError(
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
                     f"(/connect <url> to change it)\n{e}") from e
+            except requests.Timeout as e:
+                last_err = f"timeout: {e}"
+                transient += 1
+                if transient < 4:
+                    time.sleep(0.5 * transient)
+                    continue
+                raise LLMError(f"request timed out repeatedly: {last_err}") from e
             if r.status_code == 400:
                 body = r.text[:600]
                 last_err = body
@@ -161,6 +170,17 @@ class LLMClient:
                     payload.pop("reasoning_effort")
                     continue
                 raise LLMError(f"400 from server: {body}")
+            if r.status_code >= 500:
+                # Transient upstream error — retry the same request instead of killing
+                # the turn (Claude Code / Codex do the same). Ollama, for one, will
+                # intermittently 500 "no user query found in messages" on long tool-loops.
+                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+                transient += 1
+                if transient < 4:
+                    time.sleep(0.5 * transient)
+                    continue
+                raise LLMError(
+                    f"HTTP {r.status_code} from {self._url} after {transient} tries: {r.text[:400]}")
             if r.status_code != 200:
                 raise LLMError(f"HTTP {r.status_code} from {self._url}: {r.text[:400]}")
             return self._consume(r, on_text, on_thinking)
