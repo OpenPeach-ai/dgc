@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC for VS Code &amp; Cursor</title>
+<meta name="description" content="Install the DGC coding-agent extension for VS Code and Cursor.">
+<style>
+  :root{ --bg:#0a0a0f; --surface:#121219; --border:#262633; --border2:#343446; --text:#e9e9f1;
+    --muted:#a0a0b8; --faint:#6b6b82; --cyan:#22d3ee; --magenta:#e84cc6;
+    --grad:linear-gradient(90deg,#22d3ee,#e84cc6); --code:#14141d;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background-image:radial-gradient(120% 55% at 50% -10%,rgba(34,211,238,.13),rgba(232,76,198,.10) 40%,transparent 60%);background-repeat:no-repeat}
+  .wrap{max-width:680px;margin:0 auto;padding:8vh 22px 12vh}
+  a{color:var(--magenta);text-decoration:none} a:hover{text-decoration:underline}
+  .word{font:700 14px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  h1{font-size:clamp(28px,5vw,40px);line-height:1.1;letter-spacing:-.02em;margin:16px 0 10px}
+  .g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);margin:0 0 30px}
+  .btn{display:inline-block;font-weight:700;color:#000;background:var(--grad);padding:13px 22px;border-radius:11px;margin:4px 8px 4px 0}
+  .btn:hover{filter:brightness(1.08);text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border2)}
+  h2{font-size:18px;margin:34px 0 8px} p{margin:0 0 12px}
+  ol{padding-left:20px} li{margin:8px 0}
+  pre{background:var(--code);border:1px solid var(--border2);border-radius:10px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:13.5px;color:var(--text);margin:10px 0}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code);color:var(--magenta);padding:.12em .4em;border-radius:5px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:20px;margin:14px 0}
+  .note{color:var(--faint);font-size:13.5px}
+  footer{margin-top:44px;color:var(--faint);font-size:13.5px;border-top:1px solid var(--border);padding-top:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="word">DGC</span>
+  <h1>DGC for <span class="g">VS&nbsp;Code &amp; Cursor</span></h1>
+  <p class="sub">A docked chat panel, native menus, streaming tool calls and inline diffs — driven by your own local model, inside your editor.</p>
+
+  <a class="btn" href="/vscode/dgc.vsix" download>Download dgc.vsix</a>
+  <a class="btn ghost" href="https://github.com/OpenPeach-ai/dgc/releases">Releases on GitHub</a>
+
+  <div class="card">
+    <h2 style="margin-top:0">Prerequisite: the DGC CLI (v0.4.0+)</h2>
+    <p>The extension drives the DGC CLI. Install it first:</p>
+    <pre>curl -fsSL https://daguccicode.com/install.sh | bash</pre>
+    <p class="note">Then <code>dgc setup</code> once to pick a provider &amp; model.</p>
+  </div>
+
+  <h2>Install the extension</h2>
+  <ol>
+    <li>Download <a href="/vscode/dgc.vsix" download><code>dgc.vsix</code></a>.</li>
+    <li>In a terminal:
+      <pre>cursor --install-extension dgc.vsix     # Cursor
+code   --install-extension dgc.vsix     # VS Code
+codium --install-extension dgc.vsix     # VSCodium</pre>
+    </li>
+    <li>Or in the editor: <b>Extensions</b> view → <b>…</b> menu → <b>Install from VSIX…</b> → pick <code>dgc.vsix</code>.</li>
+    <li>Open the <b>DGC</b> icon in the activity bar and start coding.</li>
+  </ol>
+  <p class="note">Verify the download: <code>shasum -a 256 dgc.vsix</code> against <a href="/vscode/dgc.vsix.sha256">dgc.vsix.sha256</a>.</p>
+
+  <p class="note">Marketplace &amp; Open&nbsp;VSX listings are coming — for now the <code>.vsix</code> above is the install path.</p>
+
+  <footer>Built by Mohit Kalra · <a href="https://daguccicode.com">daguccicode.com</a> · MIT</footer>
+</div>
+</body>
+</html>
