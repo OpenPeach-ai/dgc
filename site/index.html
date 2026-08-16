@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC — a coding-agent CLI for the models you run</title>
+<meta name="description" content="DGC is an interactive coding agent that lives in your terminal — pointed at your own local model. Ollama, llama.cpp, vLLM, or any OpenAI-compatible endpoint. Now with a VS Code & Cursor extension.">
+<style>
+  :root{
+    --bg:#08080c; --surface:#101017; --surface-2:#16161f; --border:#23232f; --border2:#33333f;
+    --text:#e9e9f1; --muted:#a0a0b8; --faint:#6a6a80;
+    --cyan:#22d3ee; --magenta:#e84cc6; --rose:#d78787; --ok:#3fb950; --del:#f76c6c;
+    --grad:linear-gradient(90deg,#22d3ee,#e84cc6);
+    --code:#0d0d14;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 24px 60px -22px rgba(0,0,0,.75);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:400 16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background-image:radial-gradient(130% 65% at 50% -12%,rgba(34,211,238,.12),rgba(232,76,198,.10) 42%,transparent 62%);
+    background-repeat:no-repeat;}
+  a{color:var(--magenta);text-decoration:none} a:hover{text-decoration:underline}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:5px}
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+  .g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .word{font:700 15px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:30;backdrop-filter:blur(12px);
+    background:color-mix(in srgb,var(--bg) 76%,transparent);border-bottom:1px solid var(--border)}
+  nav .wrap{display:flex;align-items:center;gap:18px;height:56px}
+  nav .word{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  nav .links{margin-left:auto;display:flex;gap:20px;font-size:14px;align-items:center}
+  nav .links a{color:var(--muted)} nav .links a:hover{color:var(--text);text-decoration:none}
+  nav .ext{color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:13px}
+  nav .ext:hover{border-color:var(--magenta)}
+
+  /* hero */
+  header.wrap{padding-top:88px;padding-bottom:34px;text-align:center}
+  img.logo{display:block;margin:0 auto 10px;width:clamp(230px,44vw,440px);height:auto}
+  .tag{font-size:clamp(17px,2.6vw,21px);color:var(--muted);margin:14px auto 6px;max-width:620px;text-wrap:balance}
+  .by{font:600 12px/1 var(--mono);letter-spacing:.06em;color:var(--faint);margin-bottom:28px}
+
+  /* install + CTAs */
+  .cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .cmd{display:flex;align-items:center;gap:12px;background:var(--code);border:1px solid var(--border2);
+    border-radius:11px;padding:12px 14px;font-family:var(--mono);font-size:14px;box-shadow:var(--shadow);text-align:left}
+  .cmd .p{color:var(--cyan)} .cmd code{color:var(--text);white-space:nowrap}
+  .cmd button{flex:none;font:600 12px/1 var(--mono);color:#000;background:var(--grad);border:none;border-radius:7px;padding:8px 12px;cursor:pointer}
+  .cmd button:hover{filter:brightness(1.1)}
+  .btn{display:inline-flex;align-items:center;gap:7px;font:600 14px/1 sans-serif;padding:12px 18px;border-radius:11px}
+  .btn.grad{color:#000;background:var(--grad)} .btn.grad:hover{filter:brightness(1.08);text-decoration:none}
+  .btn.ghost{color:var(--text);border:1px solid var(--border2);background:var(--surface)}
+  .btn.ghost:hover{border-color:var(--magenta);text-decoration:none}
+  .btn svg{width:17px;height:17px;fill:currentColor}
+
+  /* terminal */
+  .term-wrap{max-width:760px;margin:40px auto 0}
+  .term{background:#0b0b11;border:1px solid var(--border2);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);text-align:left}
+  .term .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--border);background:#12121a}
+  .term .bar i{width:11px;height:11px;border-radius:50%}
+  .term .bar i:nth-child(1){background:#ff5f57}.term .bar i:nth-child(2){background:#febc2e}.term .bar i:nth-child(3){background:#28c840}
+  .term .bar .ti{margin-left:8px;font:600 12px/1 var(--mono);color:var(--faint)}
+  .term .scene{padding:16px 18px;font-family:var(--mono);font-size:13px;line-height:1.65;min-height:280px;white-space:pre-wrap;word-break:break-word}
+  .term .p{color:var(--cyan)} .term .cmd-in{color:var(--text)}
+  .term .think{color:var(--rose)} .term .tool{color:var(--magenta)} .term .ok{color:var(--ok)}
+  .term .add{color:var(--ok)} .term .del{color:var(--del)} .term .dim{color:var(--faint)}
+  .cursor{display:inline-block;width:8px;height:15px;background:var(--cyan);vertical-align:-2px;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .dots{display:flex;gap:6px;justify-content:center;margin-top:12px}
+  .dots b{width:7px;height:7px;border-radius:50%;background:var(--border2);cursor:pointer;transition:background .2s}
+  .dots b.on{background:var(--magenta)}
+
+  /* sections */
+  section{padding:56px 0;border-top:1px solid var(--border)}
+  .eyebrow{font:600 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--magenta);margin-bottom:10px}
+  h2{font-size:27px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px;text-wrap:balance}
+  .lede{color:var(--muted);max-width:620px;margin:0 0 26px}
+  h3{font-size:16px;margin:0 0 6px}
+  code{font-family:var(--mono);font-size:.85em;background:var(--code);color:var(--magenta);padding:.12em .4em;border-radius:5px}
+  .grid{display:grid;gap:14px} .g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:19px;box-shadow:var(--shadow)}
+  .card:hover{border-color:var(--border2)} .card .ic{font:700 13px/1 var(--mono);color:var(--cyan);margin-bottom:9px}
+  .card p{font-size:14px;color:var(--muted);margin:0} .card p b{color:var(--text)}
+  .chips{display:flex;flex-wrap:wrap;gap:9px}
+  .chip{font:600 13px/1 var(--mono);padding:9px 13px;border-radius:999px;border:1px solid var(--border2);background:var(--surface);color:var(--muted)}
+  .chip.local{border-color:transparent;background:linear-gradient(90deg,rgba(34,211,238,.16),rgba(232,76,198,.16));color:var(--text)}
+  .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:440px}
+  th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--border)} tbody tr:last-child td{border-bottom:none}
+  thead th{background:var(--surface-2);font:700 11.5px/1.3 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  td:first-child code{background:transparent;padding:0;font-weight:700}
+  .md-default{color:var(--cyan)}.md-accept{color:var(--ok)}.md-plan{color:#d6a531}.md-auto{color:var(--del)}
+
+  /* extension banner */
+  .ext-banner{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:30px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;box-shadow:var(--shadow);
+    background-image:radial-gradient(90% 130% at 100% 0%,rgba(34,211,238,.12),rgba(232,76,198,.10),transparent 62%)}
+  .ext-banner .t{flex:1;min-width:250px}
+  .ext-banner .tag2{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#000;background:var(--grad);padding:5px 10px;border-radius:6px;margin-bottom:12px}
+  .ext-banner h2{margin-bottom:8px} .ext-banner p{color:var(--muted);margin:0 0 16px}
+  ul.tools{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}
+  ul.tools li{font:600 12.5px/1 var(--mono);padding:7px 11px;border-radius:8px;background:var(--code);color:var(--muted)}
+  footer{padding:40px 0 60px;border-top:1px solid var(--border);color:var(--faint);font-size:13.5px}
+  footer .row{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+  footer .links{margin-left:auto;display:flex;gap:20px} footer a{color:var(--muted)}
+  @media (max-width:600px){h2{font-size:23px} section{padding:44px 0}}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <span class="word">DGC</span>
+  <div class="links">
+    <a href="#install">Install</a>
+    <a href="#providers">Providers</a>
+    <a href="https://github.com/OpenPeach-ai/dgc">GitHub</a>
+    <a class="ext" href="/vscode/">VS Code / Cursor →</a>
+  </div>
+</div></nav>
+
+<header class="wrap" id="install">
+  <img class="logo" src="/dgc-wordmark.png" width="724" height="296" alt="DGC" fetchpriority="high">
+  <p class="tag">A coding agent that lives in your terminal — pointed at <span class="g">your own model, on your own machine</span>.</p>
+  <p class="by">Built by Mohit Kalra</p>
+
+  <div class="cta">
+    <div class="cmd"><span class="p">$</span><code id="cmd">curl -fsSL https://daguccicode.com/install.sh | bash</code><button id="copy" onclick="copyCmd()">Copy</button></div>
+  </div>
+  <div class="cta">
+    <a class="btn ghost" href="https://github.com/OpenPeach-ai/dgc"><svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    <a class="btn grad" href="/vscode/">Get the VS Code / Cursor extension</a>
+  </div>
+
+  <div class="term-wrap">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span class="ti" id="ti">dgc — ~/project</span></div>
+      <div class="scene" id="scene"></div>
+    </div>
+    <div class="dots" id="dots"></div>
+  </div>
+</header>
+
+<section id="why"><div class="wrap">
+  <p class="eyebrow">Why DGC</p>
+  <h2>A real harness, not a chat wrapper</h2>
+  <p class="lede">Tools, four permission modes, plan mode, memory, web search — everything a serious coding agent needs, running against whatever model you point it at.</p>
+  <div class="grid g3">
+    <div class="card"><div class="ic">local-first</div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud endpoint. Code stays local unless <b>you</b> pick a cloud model.</p></div>
+    <div class="card"><div class="ic">agentic</div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. Permission modes decide how much rope it gets — <b>ask</b>, auto-edit, plan-first, or full-auto.</p></div>
+    <div class="card"><div class="ic">in your editor</div><h3>Terminal or IDE</h3><p>A pure-Python CLI, and a native <b>VS&nbsp;Code &amp; Cursor</b> extension — same agent, same local models, a docked chat panel with inline diffs.</p></div>
+  </div>
+  <h3 style="margin:26px 0 12px">The toolbox</h3>
+  <ul class="tools"><li>read_file</li><li>write_file</li><li>edit_file</li><li>bash</li><li>glob</li><li>grep</li><li>web_fetch</li><li>web_search</li><li>todo</li><li>skill</li><li>save_memory</li><li>present_plan</li></ul>
+</div></section>
+
+<section id="providers"><div class="wrap">
+  <p class="eyebrow">Connect anything</p>
+  <h2>One command to point it at any model</h2>
+  <p class="lede"><code>dgc setup</code> walks you through these with arrow-key menus — local endpoints need no key; cloud ones prompt and store it safely.</p>
+  <div class="chips">
+    <span class="chip local">ollama</span><span class="chip local">llama.cpp</span><span class="chip local">LM Studio</span><span class="chip local">vLLM</span>
+    <span class="chip">OpenAI</span><span class="chip">OpenRouter</span><span class="chip">Groq</span><span class="chip">DeepSeek</span><span class="chip">Together</span><span class="chip">Mistral</span>
+  </div>
+</div></section>
+
+<section id="modes"><div class="wrap">
+  <p class="eyebrow">You decide the rope</p>
+  <h2>Four permission modes</h2>
+  <p class="lede">Switch live with <code>/mode</code>. Fine-grained allow / ask / deny rules layer on top, evaluated deny&nbsp;→&nbsp;ask&nbsp;→&nbsp;allow.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code class="md-default">default</code></td><td>reads &amp; known-safe commands auto-run; <b>writes and other commands ask first</b></td></tr>
+      <tr><td><code class="md-accept">acceptEdits</code></td><td><b>file edits auto-approved</b>; shell commands still ask</td></tr>
+      <tr><td><code class="md-plan">plan</code></td><td><b>read-only</b> — research and propose a plan you approve</td></tr>
+      <tr><td><code class="md-auto">auto</code></td><td><b>full-auto</b> — everything approved; deny-rules still apply</td></tr>
+    </tbody>
+  </table></div>
+</div></section>
+
+<section id="editor"><div class="wrap">
+  <div class="ext-banner">
+    <div class="t">
+      <span class="tag2">VS Code · Cursor</span>
+      <h2>DGC in your <span class="g">editor</span></h2>
+      <p>A docked chat panel with native menus, streaming tool cards, inline diffs, and the live thinking indicator — driven by the same local models. Installs alongside the CLI.</p>
+      <a class="btn grad" href="/vscode/">Install the extension</a>
+    </div>
+  </div>
+</div></section>
+
+<footer><div class="wrap"><div class="row">
+  <span class="word g">DGC</span>
+  <span>Built by Mohit Kalra · MIT</span>
+  <span class="links"><a href="https://github.com/OpenPeach-ai/dgc">GitHub</a><a href="/vscode/">Extension</a><a href="/install.sh">install.sh</a></span>
+</div></div></footer>
+
+<script>
+function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.getElementById('copy');
+  navigator.clipboard.writeText(t).then(function(){b.textContent='Copied ✓';setTimeout(function(){b.textContent='Copy';},1600);});}
+
+/* ---- live terminal: cycle through real DGC sessions ---- */
+(function(){
+  var scene=document.getElementById('scene'), dotsWrap=document.getElementById('dots'), ti=document.getElementById('ti');
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var GL=["·","✢","*","✶","✻","✽","✻","✶","*","✢"];
+  // each step: [kind, text].  kinds: prompt, think, tool, add, del, dim, ok, out, gap
+  var SCENES=[
+    { dir:"~/api", steps:[
+      ["prompt","add an `iat` claim to the JWT and cover it with a test"],
+      ["think","Reading the token module, then editing + adding a test."],
+      ["tool","⏺ read_file  auth/token.py"],
+      ["tool","⏺ edit_file  auth/token.py   +12 −3"],
+      ["del","- return jwt.encode({\"sub\": sub}, KEY)"],
+      ["add","+ return jwt.encode({\"sub\": sub, \"iat\": now()}, KEY)"],
+      ["tool","⏺ bash  python -m pytest -q"],
+      ["ok","  2 passed in 0.4s"],
+      ["out","Done — the token is signed with `iat` and the test is green."]
+    ]},
+    { dir:"~/web", steps:[
+      ["prompt","the /login route 500s — find and fix it"],
+      ["tool","⏺ grep  \"@app.post(.*/login\""],
+      ["tool","⏺ read_file  routes/auth.py"],
+      ["think","The handler calls an async function without awaiting it."],
+      ["tool","⏺ edit_file  routes/auth.py   +1 −1"],
+      ["del","- user = verify(token)"],
+      ["add","+ user = await verify(token)"],
+      ["tool","⏺ bash  curl -s :8000/login -d @cred.json"],
+      ["ok","  200 OK"],
+      ["out","Fixed — `verify()` is a coroutine; it needed `await`."]
+    ]},
+    { dir:"~/service", steps:[
+      ["prompt","refactor the auth module into its own package"],
+      ["dim","  [plan mode — read-only]"],
+      ["think","Mapping the imports and the surface I'd need to move."],
+      ["tool","⏺ present_plan"],
+      ["out","📋 Plan"],
+      ["dim","  1. create auth/ package · move token.py, verify.py"],
+      ["dim","  2. update 7 imports · re-export from auth/__init__.py"],
+      ["dim","  3. run the suite"],
+      ["ok","  ▶ approve → acceptEdits   ● default   ✎ keep planning"]
+    ]}
+  ];
+  var s=0;
+  SCENES.forEach(function(_,i){var b=document.createElement('b');if(i===0)b.className='on';b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
+  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';});}
+  var timers=[];
+  function clearT(){timers.forEach(clearTimeout);timers=[];}
+  function line(kind,text){var d=document.createElement('div');if(kind)d.className=kind;d.textContent=text;scene.appendChild(d);return d;}
+  function jump(i){clearT();s=i;render();}
+  function render(){
+    scene.innerHTML=''; setDot(s); ti.textContent='dgc — '+SCENES[s].dir;
+    var steps=SCENES[s].steps, i=0;
+    // prompt line first
+    var pl=document.createElement('div'); pl.className='prompt';
+    var pspan=document.createElement('span'); pspan.textContent='› '; pl.appendChild(pspan);
+    var txt=document.createElement('span'); txt.className='cmd-in'; pl.appendChild(txt);
+    var cur=document.createElement('span'); cur.className='cursor'; pl.appendChild(cur);
+    scene.appendChild(pl);
+    var prompt=steps[0][1], p=0;
+    if(reduce){ txt.textContent=prompt; cur.remove(); i=1; runRest(); return; }
+    (function type(){
+      if(p<prompt.length){ txt.textContent+=prompt[p++]; timers.push(setTimeout(type, 26)); }
+      else { cur.remove(); i=1; timers.push(setTimeout(runRest, 400)); }
+    })();
+    function runRest(){
+      if(i>=steps.length){ timers.push(setTimeout(function(){ s=(s+1)%SCENES.length; render(); }, 2600)); return; }
+      var st=steps[i++];
+      if(st[0]==='think'){
+        var t0=Date.now(), gi=0; var d=line('think','');
+        (function spin(){
+          var el=Date.now()-t0;
+          d.textContent=GL[gi=(gi+1)%GL.length]+' Percolating…  ('+Math.floor(el/1000)+'s)';
+          if(el<1300){ timers.push(setTimeout(spin,120)); }
+          else { d.className='think'; d.textContent='✽ '+d.textContent.replace(/^\S+ /,'').replace('Percolating…','Percolated'); timers.push(setTimeout(runRest,300)); }
+        })();
+      } else {
+        line(st[0], st[1]);
+        var delay = st[0]==='tool'?520 : st[0]==='out'?900 : 240;
+        timers.push(setTimeout(runRest, delay));
+      }
+    }
+  }
+  render();
+})();
+</script>
+</body>
+</html>

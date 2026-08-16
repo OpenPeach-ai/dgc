@@ -1,0 +1,95 @@
+{
+  "name": "dgc",
+  "displayName": "DGC — coding agent for your own models",
+  "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
+  "version": "0.2.0",
+  "publisher": "daguccicode",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": { "vscode": "^1.84.0" },
+  "categories": ["AI", "Programming Languages", "Other"],
+  "keywords": ["ai", "coding agent", "llm", "ollama", "local llm", "openai compatible", "cursor"],
+  "repository": { "type": "git", "url": "https://github.com/OpenPeach-ai/dgc.git", "directory": "editors/vscode" },
+  "bugs": { "url": "https://github.com/OpenPeach-ai/dgc/issues" },
+  "homepage": "https://daguccicode.com",
+  "galleryBanner": { "color": "#0a0a0f", "theme": "dark" },
+  "main": "./dist/extension.js",
+  "activationEvents": ["onView:dgc.chat"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "dgc", "title": "DGC", "icon": "media/dgc.svg" }
+      ]
+    },
+    "views": {
+      "dgc": [
+        { "id": "dgc.chat", "type": "webview", "name": "DGC", "icon": "media/dgc.svg" }
+      ]
+    },
+    "commands": [
+      { "command": "dgc.focus", "title": "DGC: Focus Chat", "category": "DGC" },
+      { "command": "dgc.newSession", "title": "DGC: New Session", "category": "DGC", "icon": "$(add)" },
+      { "command": "dgc.selectModel", "title": "DGC: Select Model", "category": "DGC" },
+      { "command": "dgc.connect", "title": "DGC: Connect Provider", "category": "DGC" },
+      { "command": "dgc.setMode", "title": "DGC: Set Permission Mode", "category": "DGC" },
+      { "command": "dgc.cycleMode", "title": "DGC: Cycle Permission Mode", "category": "DGC" },
+      { "command": "dgc.setThinking", "title": "DGC: Set Thinking Level", "category": "DGC" },
+      { "command": "dgc.addSelection", "title": "DGC: Add Selection to DGC", "category": "DGC" },
+      { "command": "dgc.restart", "title": "DGC: Restart Backend", "category": "DGC" },
+      { "command": "dgc.resume", "title": "DGC: Resume Session", "category": "DGC", "icon": "$(history)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "dgc.resume", "when": "view == dgc.chat", "group": "navigation@1" },
+        { "command": "dgc.newSession", "when": "view == dgc.chat", "group": "navigation@2" }
+      ],
+      "editor/context": [
+        { "command": "dgc.addSelection", "when": "editorHasSelection", "group": "dgc" }
+      ]
+    },
+    "keybindings": [
+      { "command": "dgc.focus", "key": "ctrl+escape", "mac": "cmd+escape" },
+      { "command": "dgc.addSelection", "key": "ctrl+i", "mac": "cmd+i", "when": "editorTextFocus" },
+      { "command": "dgc.cycleMode", "key": "ctrl+shift+m", "mac": "cmd+shift+m" }
+    ],
+    "configuration": {
+      "title": "DGC",
+      "properties": {
+        "dgc.command": {
+          "type": "string",
+          "default": "dgc",
+          "description": "Path to the dgc executable (must be v0.4.0+ for `dgc serve`)."
+        },
+        "dgc.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "For sideloaded (.vsix) installs, check daguccicode.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "dgc.gettingStarted",
+        "title": "Get Started with DGC",
+        "description": "Run a coding agent on your own models, in your editor.",
+        "steps": [
+          { "id": "cli", "title": "Install the DGC CLI", "description": "DGC drives the `dgc` CLI (v0.4.0+). Install it with `curl -fsSL https://daguccicode.com/install.sh | bash`, then run `dgc setup`.", "media": { "markdown": "media/walkthrough.md" } },
+          { "id": "open", "title": "Open the DGC panel", "description": "Click the DGC icon in the activity bar, or press Ctrl/Cmd+Escape.", "media": { "markdown": "media/walkthrough.md" }, "completionEvents": ["onView:dgc.chat"] },
+          { "id": "model", "title": "Pick your model", "description": "Click the model pill or run **DGC: Select Model** to choose from your endpoint.", "media": { "markdown": "media/walkthrough.md" } }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit",
+    "package": "npm run check-types && node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.4.0"
+  }
+}
