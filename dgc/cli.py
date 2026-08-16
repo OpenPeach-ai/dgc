@@ -324,7 +324,20 @@ class CLI:
         elif cmd == "connect":
             args = rest.split()
             if not args:
-                self.ui.error("usage: /connect <preset|url> [key]   presets: " + ", ".join(PROVIDERS))
+                from .menu import select
+                pk = list(PROVIDERS)
+                idx = select("Connect a provider", [PROVIDERS[k]["label"] for k in pk],
+                             [PROVIDERS[k]["base_url"] for k in pk])
+                if idx is not None:
+                    prov = PROVIDERS[pk[idx]]
+                    cfg.set("base_url", prov["base_url"])
+                    if prov["needs_key"]:
+                        key = input(f"  API key for {prov['label']} › ").strip()
+                        cfg.set("api_key", key or prov["api_key"])
+                    else:
+                        cfg.set("api_key", prov["api_key"])
+                    self.agent.refresh_client()
+                    self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
             else:
                 target = args[0]
                 if target in PROVIDERS:
@@ -346,9 +359,18 @@ class CLI:
         elif cmd == "models":
             try:
                 models = self.agent.client.list_models()
-                self.console.print("\n".join(models) or "(none)")
             except (LLMError, Exception) as e:
                 self.ui.error(str(e))
+                return True
+            if not models:
+                self.ui.info("no models offered by the endpoint")
+            else:
+                from .menu import select
+                mi = select("Model", models)
+                if mi is not None:
+                    cfg.set("model", models[mi])
+                    self.agent.refresh_client()
+                    self.ui.info(f"model → {cfg.model}")
         elif cmd == "model":
             if rest:
                 cfg.set("model", rest.strip())
@@ -452,14 +474,12 @@ class CLI:
         if not items:
             self.ui.info("no saved sessions in this directory")
             return
-        for i, (p, ts, prev, cnt) in enumerate(items[:15], 1):
-            self.console.print(f"  [bold]{i}[/bold]) {sessions_mod.when(ts)}  [dim]({cnt} msgs)[/dim]  {prev}")
-        sel = input("  resume # (blank = cancel) › ").strip()
-        try:
-            path = items[int(sel) - 1][0]
-        except (ValueError, IndexError):
+        from .menu import select
+        labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (p, ts, prev, cnt) in items[:20]]
+        si = select("Resume a session", labels)
+        if si is None:
             return
-        n = self.agent.load_session(path)
+        n = self.agent.load_session(items[si][0])
         self.ui.info(f"resumed session ({n} messages)")
 
     def _permissions_cmd(self, rest: str) -> None:
@@ -595,27 +615,23 @@ def run_setup(config: Config) -> None:
     from .llm import LLMClient
     c = Console()
     c.print("\n[bold]DGC setup[/bold] — point DGC at a model you run\n")
+    from .menu import select
     keys = list(PROVIDERS)
-    for i, k in enumerate(keys, 1):
-        p = PROVIDERS[k]
-        c.print(f"  [bold]{i:>2}[/bold]) {p['label']:<38} [dim]{p['base_url']}[/dim]")
-    c.print(f"  [bold]{len(keys) + 1:>2}[/bold]) custom endpoint")
-    try:
-        idx = int(input("\n  provider number › ").strip()) - 1
-    except ValueError:
-        c.print("[red]cancelled[/red]"); return
-    if 0 <= idx < len(keys):
+    prov_labels = [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
+    prov_hints = [PROVIDERS[k]["base_url"] for k in keys] + [""]
+    idx = select("Provider", prov_labels, prov_hints)
+    if idx is None:
+        c.print("[dim]cancelled[/dim]"); return
+    if idx < len(keys):
         prov = PROVIDERS[keys[idx]]
         base_url, api_key = prov["base_url"], prov["api_key"]
         if prov["needs_key"]:
             api_key = input(f"  API key for {prov['label']} › ").strip() or api_key
-    elif idx == len(keys):
+    else:
         base_url = input("  base URL (…/v1) › ").strip()
         if not base_url:
-            c.print("[red]cancelled[/red]"); return
+            c.print("[dim]cancelled[/dim]"); return
         api_key = input("  API key (blank for local) › ").strip() or "sk-local"
-    else:
-        c.print("[red]cancelled[/red]"); return
     config.set("base_url", base_url)
     config.set("api_key", api_key)
     client = LLMClient(config.base_url, config.api_key, config.model)
@@ -625,15 +641,9 @@ def run_setup(config: Config) -> None:
         c.print(f"  [yellow]couldn't list models[/yellow] ({type(e).__name__}) — set one by name below.")
         models = []
     if models:
-        c.print("\n  models this endpoint offers:")
-        for i, m in enumerate(models[:30], 1):
-            c.print(f"    [bold]{i:>2}[/bold]) {m}")
-        sel = input("\n  model number or name › ").strip()
-        try:
-            config.set("model", models[int(sel) - 1])
-        except (ValueError, IndexError):
-            if sel:
-                config.set("model", sel)
+        mi = select("Model", models[:60])
+        if mi is not None:
+            config.set("model", models[mi])
     else:
         m = input(f"  model name [{config.model}] › ").strip()
         if m:
@@ -641,15 +651,10 @@ def run_setup(config: Config) -> None:
     cs = input(f"  context window in tokens [{config.get('context_size')}] › ").strip()
     if cs.isdigit():
         config.set("context_size", int(cs))
-    c.print("\n  web search (optional) — powers the web_search tool:")
     skeys = list(SEARCH_PROVIDERS)
-    for i, k in enumerate(skeys, 1):
-        c.print(f"    [bold]{i}[/bold]) {SEARCH_PROVIDERS[k]['label']}")
-    ssel = input("  provider number [1 = DuckDuckGo] › ").strip()
-    try:
-        sk = skeys[int(ssel) - 1] if ssel else "duckduckgo"
-    except (ValueError, IndexError):
-        sk = "duckduckgo"
+    si = select("Web search  (optional — powers the web_search tool)",
+                [SEARCH_PROVIDERS[k]["label"] for k in skeys])
+    sk = skeys[si] if si is not None else "duckduckgo"
     config.set("search_provider", sk)
     meta = SEARCH_PROVIDERS[sk]
     if meta["needs_key"]:
@@ -746,11 +751,12 @@ def main(argv: list[str] | None = None) -> None:
     elif args.resume:
         items = sessions_mod.listing(config.project_root)
         if items:
-            for i, (pp, ts, prev, cnt) in enumerate(items[:15], 1):
-                print(f"  {i}) {sessions_mod.when(ts)}  ({cnt} msgs)  {prev}")
-            try:
-                cli.agent.load_session(items[int(input("  session # › ").strip()) - 1][0])
-            except (ValueError, IndexError):
+            from .menu import select
+            labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (pp, ts, prev, cnt) in items[:20]]
+            si = select("Resume a session", labels)
+            if si is not None:
+                cli.agent.load_session(items[si][0])
+            else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)
         else:
             cli.agent.session_file = sessions_mod.new_path(config.project_root)

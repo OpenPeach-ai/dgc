@@ -42,7 +42,7 @@ dgc           # start the interactive agent
 
 ## Connect any model in one command
 
-`dgc setup` walks you through these; you can also switch any time inside the REPL with `/connect <preset>`:
+`dgc setup` walks you through these with **arrow-key menus** (↑/↓ or j/k · enter · esc to go back) — as do `/connect`, `/models`, `/search` and `/resume` inside the REPL:
 
 | Preset | Endpoint | Notes |
 |---|---|---|
