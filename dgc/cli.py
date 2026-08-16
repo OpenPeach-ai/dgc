@@ -272,10 +272,13 @@ HELP = """\
   /status              current config
   /compact             compact conversation context now
   /clear               reset the conversation
+  /rewind              restore code + conversation to an earlier turn
+  /mcp                 list connected MCP servers and their tools
   /search [P [K|URL]]  web search provider: duckduckgo | brave | tavily | searxng
   /resume              resume a past conversation in this project
   /update              update DGC to the latest version
   /exit                quit
+  (while a turn runs: type a follow-up + Enter to queue it · Esc to interrupt)
 """
 
 
