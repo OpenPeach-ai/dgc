@@ -37,8 +37,8 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 ## Releasing
 
-`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://dagucchicode.com`). To cut a release, run `bash scripts/build-release.sh` (stages the tree, ships a scrubbed AGENTS.md without internal paths, writes `site/dgc.tar.gz`), then `bash scripts/deploy-site.sh` to publish.
+`install.sh` pulls `dgc.tar.gz` from `DGC_BASE_URL` (default `https://dagucchicode.com`). Releases are cut by the maintainer with local, unpublished tooling: the tarball build stages the tree with a scrubbed AGENTS.md (no internal paths), and the public GitHub repo receives a squashed single-commit snapshot — never the raw history.
 
 ## Website
 
-`site/index.html` is the dagucchicode.com landing page — a single static file (inline CSS/JS, no build). Keep `site/install.sh` and `site/dgc.tar.gz` in sync with releases. Deploy with `bash scripts/deploy-site.sh` (reads credentials from a local, untracked env file and deploys `site/` to Cloudflare Pages). When harness features change, update the feature/mode/tool sections on the page to match.
+`site/index.html` is the dagucchicode.com landing page — a single static file (inline CSS/JS, no build). Keep `site/install.sh` and `site/dgc.tar.gz` in sync with releases. Deploying and publishing are done with maintainer-local scripts (not part of the public tree). When harness features change, update the feature/mode/tool sections on the page to match.
