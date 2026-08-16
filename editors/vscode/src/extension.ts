@@ -18,6 +18,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("dgc.setThinking", () => provider.setThinking()),
     vscode.commands.registerCommand("dgc.addSelection", () => provider.addSelection()),
     vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
+    vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
   );
 
   checkForUpdates(context).catch(() => { /* never raise into activate */ });
@@ -53,7 +54,8 @@ async function checkForUpdates(ctx: vscode.ExtensionContext): Promise<void> {
   }
   await ctx.globalState.update("dgc.updateCheckedAt", Date.now());
 
-  const res = await fetch(MANIFEST, { signal: AbortSignal.timeout(4000) });
+  // a real User-Agent is required — Cloudflare 403s the default fetch UA
+  const res = await fetch(MANIFEST, { signal: AbortSignal.timeout(4000), headers: { "User-Agent": "dgc-vscode" } });
   const m: any = await res.json();
   const current = ctx.extension.packageJSON.version as string;
   if (!m?.version || !newer(m.version, current)) {

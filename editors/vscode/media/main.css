@@ -97,3 +97,16 @@ footer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--vsco
 #input:focus { outline: 1px solid var(--vscode-focusBorder); }
 #send { font: inherit; font-size: 12px; cursor: pointer; border: none; border-radius: 8px; padding: 8px 12px; color: #fff; background: var(--grad); white-space: nowrap; }
 #send.stop { background: #b3261e; }
+
+/* @file / slash popover */
+.pop{display:none;margin:0 8px;background:var(--vscode-editorWidget-background,var(--vscode-input-background));border:1px solid var(--vscode-focusBorder);border-radius:8px;max-height:190px;overflow-y:auto;box-shadow:0 -6px 20px rgba(0,0,0,.3)}
+.pop .pi{padding:5px 10px;cursor:pointer;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pop .pi.sel{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}
+.pop .pd{opacity:.6;font-size:11px}
+/* open-file link + code copy + markdown emphasis */
+button.link{margin-left:auto;font:inherit;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--vscode-textLink-foreground)}
+button.link:hover{text-decoration:underline}
+.text b{font-weight:700} .text i{font-style:italic}
+pre.code{position:relative;background:var(--vscode-textCodeBlock-background);border:1px solid var(--vscode-panel-border);border-radius:6px;padding:9px 10px;margin:6px 0;overflow-x:auto;font-family:var(--vscode-editor-font-family);font-size:12px;white-space:pre}
+pre.code .copy{position:absolute;top:5px;right:5px;font-size:10px;cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:none;border-radius:4px;padding:2px 6px;opacity:.5}
+pre.code:hover .copy{opacity:1}

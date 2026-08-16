@@ -30,8 +30,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", baseUrl: "" };
+  private sbModel: vscode.StatusBarItem;
+  private sbMode: vscode.StatusBarItem;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.sbModel = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    this.sbModel.command = "dgc.selectModel";
+    this.sbMode = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+    this.sbMode.command = "dgc.setMode";
+  }
 
   // ---- backend lifecycle ---------------------------------------------------
   private cwd(): string {
@@ -89,6 +96,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   private postState(): void {
     this.post({ type: "state", state: this.state });
+    this.sbModel.text = `$(chip) ${this.state.model || "dgc"}`;
+    this.sbModel.tooltip = "DGC — select model";
+    this.sbModel.show();
+    this.sbMode.text = `$(shield) ${this.state.mode}`;
+    this.sbMode.tooltip = "DGC — permission mode";
+    this.sbMode.show();
   }
 
   // ---- webview -------------------------------------------------------------
@@ -138,7 +151,67 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pickThink":
         this.setThinking();
         break;
+      case "reqFiles":
+        this.sendFiles();
+        break;
+      case "openFile":
+        this.openFile(msg.path, msg.line);
+        break;
+      case "copy":
+        vscode.env.clipboard.writeText(String(msg.text || ""));
+        break;
+      case "slash":
+        this.slash(msg.action);
+        break;
     }
+  }
+
+  private async sendFiles(): Promise<void> {
+    const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,out,.venv,.next}/**", 600);
+    this.post({ type: "files", files: uris.map((u) => vscode.workspace.asRelativePath(u)).sort() });
+  }
+
+  private async openFile(path: string, line?: number): Promise<void> {
+    const uri = vscode.Uri.file(path.startsWith("/") ? path : this.cwd() + "/" + path);
+    try {
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const ed = await vscode.window.showTextDocument(doc, { preview: true });
+      if (line) {
+        const pos = new vscode.Position(Math.max(0, line - 1), 0);
+        ed.selection = new vscode.Selection(pos, pos);
+        ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+      }
+    } catch {
+      /* file may not exist on disk */
+    }
+  }
+
+  private slash(action: string): void {
+    switch (action) {
+      case "pickModel": this.selectModel(); break;
+      case "connect": this.connect(); break;
+      case "pickMode": this.setMode(); break;
+      case "pickThink": this.setThinking(); break;
+      case "resume": this.resume(); break;
+      case "new": this.newSession(); break;
+      case "compact": this.ensureBackend().send({ type: "compact" }); break;
+      case "clear": this.post({ type: "cleared" }); break;
+    }
+  }
+
+  async resume(): Promise<void> {
+    const be = this.ensureBackend();
+    const items: any[] = await new Promise((resolve) => {
+      const h = (ev: DgcEvent) => { if (ev.type === "sessions") { be.off("sessions", h); resolve(ev.items || []); } };
+      be.on("sessions", h);
+      be.send({ type: "list_sessions" });
+      setTimeout(() => { be.off("sessions", h); resolve([]); }, 3000);
+    });
+    if (!items.length) { vscode.window.showInformationMessage("No past DGC sessions in this project."); return; }
+    const pick = await vscode.window.showQuickPick(
+      items.map((s) => ({ label: s.preview || s.path, description: `${s.when} · ${s.count} msgs`, path: s.path })),
+      { placeHolder: "Resume a session" });
+    if (pick) { be.send({ type: "resume_session", path: (pick as any).path }); this.post({ type: "cleared" }); }
   }
 
   // ---- native menus (QuickPicks) -------------------------------------------
@@ -255,6 +328,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.backend?.dispose();
+    this.sbModel.dispose();
+    this.sbMode.dispose();
   }
 
   // ---- html ----------------------------------------------------------------
@@ -275,6 +350,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <button id="pill-think" class="pill" title="Thinking level">💡 <span id="think">off</span></button>
 </header>
 <main id="log"></main>
+<div id="pop" class="pop"></div>
 <div id="attachments"></div>
 <footer>
   <textarea id="input" rows="1" placeholder="Ask DGC…  @ files · / commands"></textarea>
