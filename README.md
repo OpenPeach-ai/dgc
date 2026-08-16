@@ -95,7 +95,6 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one (Claude Code / Codex style).
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
 - **Skills** — drop a `SKILL.md` in `.dgc/skills/<name>/`; the model invokes it when the description matches.
-- **Mascot** — a friendly DGC character greets you in the startup banner (`monster` / `ghost` / `none`, set with `/mascot`).
 - **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `save_memory` · `present_plan` · `propose_options`.
 
 ## REPL conveniences
@@ -151,7 +150,6 @@ Paste this to your Claude Code / Codex / any coding agent:
   "max_turns": 40,
   "bash_timeout": 120,
   "compact_threshold": 0.85,
-  "mascot": "monster",
   "search_provider": "duckduckgo",
   "permissions": {"allow": ["Bash(git status:*)"], "ask": [], "deny": ["Bash(rm -rf *)"]}
 }

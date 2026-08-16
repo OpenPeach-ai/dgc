@@ -198,10 +198,12 @@ class LLMClient:
             if choice.get("finish_reason"):
                 result.finish_reason = choice["finish_reason"]
             delta = choice.get("delta") or {}
-            if delta.get("reasoning_content"):  # some servers stream this separately
-                result.thinking += delta["reasoning_content"]
+            # reasoning is streamed in a separate field: ollama uses `reasoning`, others `reasoning_content`
+            reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+            if reasoning:
+                result.thinking += reasoning
                 if on_thinking:
-                    on_thinking(delta["reasoning_content"])
+                    on_thinking(reasoning)
             if delta.get("content"):
                 emit(filt.feed(delta["content"]))
             for tc in delta.get("tool_calls") or []:

@@ -135,7 +135,9 @@ class Agent:
 
         project_mem, user_mem = load_memories(cfg.project_root)
         agents_md = cfg.project_root / "AGENTS.md"
-        if not project_mem and agents_md.exists():
+        # only adopt AGENTS.md as project memory in a real project dir — never the bare home dir,
+        # where it may belong to a different agent (Codex, another assistant) and hijack the session.
+        if not project_mem and agents_md.exists() and cfg.project_root != Path.home():
             try:
                 project_mem = agents_md.read_text().strip()
             except OSError:

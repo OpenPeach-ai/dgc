@@ -21,7 +21,6 @@ DEFAULTS: dict = {
     "max_turns": 40,                            # max tool-use iterations per user turn
     "bash_timeout": 120,
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
-    "mascot": "monster",                        # startup banner mascot: monster | ghost | none
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)

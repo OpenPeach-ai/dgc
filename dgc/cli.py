@@ -19,11 +19,9 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
-from rich.text import Text
 
 from . import __version__, memory as memory_mod, sessions as sessions_mod
 from .agent import Agent
-from .art import MASCOTS
 from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
@@ -93,13 +91,15 @@ class UI:
             self.console.print()
             self._thinking = False
         self.console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
+        self.console.file.flush()  # stream live — rich/stdout otherwise buffers until a newline
         self._streamed = True
 
     def on_thinking(self, chunk: str) -> None:
         if not self._thinking:
-            self.console.print("\n[dim italic]· thinking… ", end="")
+            self.console.print("\n[dim italic]· thinking…[/] ", end="")
             self._thinking = True
         self.console.print(chunk, end="", markup=False, highlight=False, style="dim italic")
+        self.console.file.flush()
         self._streamed = True
 
     def end_stream(self) -> None:
@@ -246,7 +246,6 @@ HELP = """\
   /clear               reset the conversation
   /search [P [K|URL]]  web search provider: duckduckgo | brave | tavily | searxng
   /resume              resume a past conversation in this project
-  /mascot [M]          startup mascot: monster | ghost | none
   /update              update DGC to the latest version
   /exit                quit
 """
@@ -270,11 +269,6 @@ class CLI:
     def _logo(self) -> None:
         c = self.console
         c.print()
-        mascot = MASCOTS.get(str(self.config.get("mascot", "monster")))
-        if mascot:
-            for ln in mascot.split("\n"):
-                c.print(Text.from_ansi("  " + ln))
-            c.print()
         for i in range(6):
             row = f"{self._LOGO_D[i]} {self._LOGO_G[i]} {self._LOGO_C[i]}"
             c.print("  " + row, style=f"bold {self._LOGO_COLORS[i]}", markup=False, highlight=False)
@@ -428,13 +422,6 @@ class CLI:
             self._resume_cmd()
         elif cmd == "update":
             run_update()
-        elif cmd == "mascot":
-            choice = rest.strip() or "monster"
-            if choice not in ("monster", "ghost", "none"):
-                self.ui.error("mascot: monster | ghost | none")
-            else:
-                cfg.set("mascot", choice)
-                self.ui.info(f"mascot → {choice} (shown on next launch)")
         else:
             self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
         return True
