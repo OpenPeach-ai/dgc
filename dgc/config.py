@@ -26,6 +26,8 @@ DEFAULTS: dict = {
     "search_url": "",                           # for searxng (self-hosted base URL)
     "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
     "hooks": {},                                # event -> [{matcher?, command}] lifecycle hooks
+    "fallback_model": "",                       # retried if the primary model errors
+    "fallback_base_url": "",                    # optional endpoint for the fallback (default: same)
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.

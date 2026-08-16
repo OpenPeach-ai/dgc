@@ -141,6 +141,11 @@ class Agent:
         """Built-in tools plus any tools from connected MCP servers."""
         return TOOL_SCHEMAS + self.mcp.tool_schemas()
 
+    def _chat(self, tools, effort):
+        return self.client.chat(self.messages, tools=tools, reasoning_effort=effort,
+                                on_text=self.ui.on_text, on_thinking=self.ui.on_thinking,
+                                cancel=self.cancelled)
+
     @property
     def mode(self) -> str:
         return self.config.data.get("mode", "default")
@@ -310,13 +315,23 @@ class Agent:
             self.maybe_compact()
             tools = self._tool_schemas() if self.client.tools_supported else None
             try:
-                result = self.client.chat(self.messages, tools=tools, reasoning_effort=effort,
-                                          on_text=self.ui.on_text, on_thinking=self.ui.on_thinking,
-                                          cancel=self.cancelled)
+                result = self._chat(tools, effort)
             except LLMError as e:
-                self.ui.end_stream()
-                self.ui.error(str(e))
-                return
+                fb = str(self.config.get("fallback_model") or "")
+                if fb and fb != self.client.model:      # retry the turn on a fallback model
+                    self.ui.info(f"⤳ primary model failed; falling back to {fb}")
+                    self.client = LLMClient(self.config.get("fallback_base_url") or self.config.base_url,
+                                            self.config.api_key, fb)
+                    try:
+                        result = self._chat(tools, effort)
+                    except LLMError as e2:
+                        self.ui.end_stream()
+                        self.ui.error(f"fallback model also failed: {e2}")
+                        return
+                else:
+                    self.ui.end_stream()
+                    self.ui.error(str(e))
+                    return
             self.ui.end_stream()
 
             native = bool(result.tool_calls) and not result.tool_calls[0].id.startswith("textcall_")
