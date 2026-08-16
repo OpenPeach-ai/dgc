@@ -86,15 +86,15 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
             top = i
         elif i >= top + window:          # scrolled below — page down
             top = i - window + 1
-        out = [] if first else [f"\x1b[{block}A"]  # move cursor back up to the title
+        out = ["\r"] if first else [f"\r\x1b[{block}A"]  # col 0, then up to the title on redraw
         keyhint = "  (↑/↓ · enter · esc)"
         if len(title) + len(keyhint) <= width:
-            out.append(f"{BOLD}{title}{RESET}{DIM}{keyhint}{RESET}\x1b[K\n")
+            out.append(f"{BOLD}{title}{RESET}{DIM}{keyhint}{RESET}\x1b[K\r\n")
         else:
-            out.append(f"{BOLD}{_vtrunc(title, width)}{RESET}\x1b[K\n")
+            out.append(f"{BOLD}{_vtrunc(title, width)}{RESET}\x1b[K\r\n")
         if scrollable:
             up = _vtrunc(f"  ↑ {top} more", width) if top else ""
-            out.append(f"{DIM}{up}{RESET}\x1b[K\n")
+            out.append(f"{DIM}{up}{RESET}\x1b[K\r\n")
         for row in range(window):
             idx = top + row
             sel = idx == i
@@ -107,11 +107,11 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
                 label = _vtrunc(label, avail)
             marker = f"{CYAN}❯{RESET}" if sel else " "
             text = f"{CYAN}{label}{RESET}" if sel else label
-            out.append(f"{marker} {text}{hint_c}\x1b[K\n")
+            out.append(f"{marker} {text}{hint_c}\x1b[K\r\n")
         if scrollable:
             rem = n - (top + window)
             dn = _vtrunc(f"  ↓ {rem} more", width) if rem else ""
-            out.append(f"{DIM}{dn}{RESET}\x1b[K\n")
+            out.append(f"{DIM}{dn}{RESET}\x1b[K\r\n")
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
