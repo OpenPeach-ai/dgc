@@ -835,7 +835,7 @@ def run_update() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve"):
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve", "acp"):
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "update":
@@ -845,6 +845,10 @@ def main(argv: list[str] | None = None) -> None:
             # so this returns before the banner / update-check ever run.
             from .headless import serve
             serve(Config()); return
+        if raw_argv[0] == "acp":
+            # Agent Client Protocol (JSON-RPC over stdio) for Zed/JetBrains/Neovim/Emacs.
+            from .acp import serve as acp_serve
+            acp_serve(); return
         cfg = Config()
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
