@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,7 @@ class Agent:
                                 on_todo=getattr(ui, "on_todo", None))
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
+        self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -183,6 +185,7 @@ class Agent:
 
     # ------------------------------------------------------------- main loop ---
     def run_turn(self, user_text: str) -> None:
+        self.cancelled.clear()
         try:
             self._run_turn(user_text)
         finally:
@@ -209,6 +212,9 @@ class Agent:
         max_turns = int(self.config.get("max_turns", 40))
 
         for _ in range(max_turns):
+            if self.cancelled.is_set():
+                self.ui.info("turn cancelled")
+                return
             self.maybe_compact()
             tools = TOOL_SCHEMAS if self.client.tools_supported else None
             try:

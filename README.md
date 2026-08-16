@@ -116,6 +116,7 @@ dgc doctor           verify the endpoint + model
 dgc -c / --continue  resume the most recent session in this directory
 dgc --resume         pick a past session to resume
 dgc update           update DGC to the latest version
+dgc serve            headless JSON backend (NDJSON over stdio) for editor extensions
 dgc -p "fix the bug in auth.py" --mode auto    one-shot, non-interactive
 dgc --model NAME --base-url URL --api-key KEY   override + persist
 ```

@@ -713,11 +713,16 @@ def run_update() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update"):
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve"):
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "update":
             run_update(); return
+        if raw_argv[0] == "serve":
+            # headless JSON backend for editor front-ends — stdout is protocol-only,
+            # so this returns before the banner / update-check ever run.
+            from .headless import serve
+            serve(Config()); return
         cfg = Config()
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
