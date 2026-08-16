@@ -62,7 +62,10 @@ def refresh_update_async() -> None:
     snippet = (
         "import json,time,urllib.request\n"
         "try:\n"
-        f"  d=json.loads(urllib.request.urlopen({VERSION_URL!r},timeout=4).read().decode())\n"
+        # a real User-Agent is required — Cloudflare 403s the default 'Python-urllib' UA,
+        # which silently broke the update nudge (the fetch failed, the cache went stale).
+        f"  req=urllib.request.Request({VERSION_URL!r},headers={{'User-Agent':'dgc-update-check'}})\n"
+        f"  d=json.loads(urllib.request.urlopen(req,timeout=4).read().decode())\n"
         f"  open({str(UPDATE_CACHE)!r},'w').write("
         "json.dumps({'latest':str(d.get('version','')),'checked':time.time()}))\n"
         "except Exception: pass\n"

@@ -26,6 +26,23 @@ fetch() {
   else die "need curl or wget to download DGC"; fi
 }
 
+# Install the editor extension too, if an editor CLI is on PATH (skip with DGC_SKIP_EXTENSION=1).
+install_extension() {
+  [ -n "${DGC_SKIP_EXTENSION:-}" ] && return 0
+  local editor="" e
+  for e in cursor code codium; do
+    command -v "$e" >/dev/null 2>&1 && { editor="$e"; break; }
+  done
+  [ -z "$editor" ] && return 0
+  if fetch "$BASE/vscode/dgc.vsix" "$TMP/dgc.vsix" 2>/dev/null; then
+    if "$editor" --install-extension "$TMP/dgc.vsix" --force >/dev/null 2>&1; then
+      say "editor extension installed/updated in $editor (reload the window to see the DGC panel)"
+    else
+      printf '  note: could not auto-install the extension — get it at %s/vscode/\n' "$BASE"
+    fi
+  fi
+}
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 say "downloading DGC from $BASE"
@@ -56,11 +73,16 @@ case ":$PATH:" in
   *) printf '\033[1;33m  note:\033[0m add %s to your PATH:\n    echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc && source ~/.bashrc\n' "$BIN" "$BIN" ;;
 esac
 
+install_extension
+
 cat <<EOF
 
   DGC is installed. Next:
     dgc setup     # pick your provider + model (Ollama, llama.cpp, OpenAI, OpenRouter …)
     dgc doctor    # verify it can reach your model
     dgc           # start coding
+
+  Editor extension (VS Code / Cursor): auto-installed if 'cursor' or 'code' was found;
+  otherwise grab it at $BASE/vscode/
 
 EOF
