@@ -444,6 +444,9 @@ class CLI:
             for s in self.agent.skills.values():
                 table.add_row(s.name, s.description, str(s.path))
             self.console.print(table)
+        elif cmd == "mcp":
+            self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
+            self.console.print(self.agent.mcp.summary())
         elif cmd == "skill":
             args = rest.split(None, 1)
             sk = self.agent.skills.get(args[0]) if args else None

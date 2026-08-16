@@ -24,6 +24,7 @@ DEFAULTS: dict = {
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)
+    "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.

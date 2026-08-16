@@ -13,6 +13,7 @@ from .config import Config
 from .llm import LLMClient, LLMError, ToolCall
 from .memory import load_memories
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
+from .mcp import MCPManager
 from .skills import discover_skills
 from .tools import TOOL_SCHEMAS, execute
 
@@ -50,6 +51,8 @@ class Agent:
         self.ui = ui
         self.client = LLMClient(config.base_url, config.api_key, config.model)
         self.skills = discover_skills(config.project_root)
+        self.mcp = MCPManager()
+        self.mcp.connect_all(config.get("mcp_servers"))
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.ctx = AgentContext(project_root=config.project_root, config=config,
@@ -63,6 +66,10 @@ class Agent:
     # ------------------------------------------------------------ setup ---
     def refresh_client(self) -> None:
         self.client = LLMClient(self.config.base_url, self.config.api_key, self.config.model)
+
+    def _tool_schemas(self) -> list[dict]:
+        """Built-in tools plus any tools from connected MCP servers."""
+        return TOOL_SCHEMAS + self.mcp.tool_schemas()
 
     @property
     def mode(self) -> str:
@@ -163,7 +170,8 @@ class Agent:
     def _text_protocol_section(self) -> str:
         schemas = [{"name": t["function"]["name"],
                     "description": t["function"]["description"],
-                    "parameters": t["function"]["parameters"]} for t in TOOL_SCHEMAS]
+                    "parameters": t["function"]["parameters"]}
+                   for t in (TOOL_SCHEMAS + self.mcp.tool_schemas())]
         return (
             "# Tool protocol (IMPORTANT)\n"
             "This model endpoint has no native tool calling. To use a tool, emit a fenced block "
@@ -216,7 +224,7 @@ class Agent:
                 self.ui.info("turn cancelled")
                 return
             self.maybe_compact()
-            tools = TOOL_SCHEMAS if self.client.tools_supported else None
+            tools = self._tool_schemas() if self.client.tools_supported else None
             try:
                 result = self.client.chat(self.messages, tools=tools, reasoning_effort=effort,
                                           on_text=self.ui.on_text, on_thinking=self.ui.on_thinking,
@@ -283,7 +291,7 @@ class Agent:
                 self.ui.add_permission_rule(name, args)
 
         self.ui.tool_call(name, args)
-        out = execute(name, args, self.ctx)
+        out = self.mcp.call(name, args) if name.startswith("mcp__") else execute(name, args, self.ctx)
         self.ui.tool_result(name, out)
         return out
 
