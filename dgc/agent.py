@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .checkpoints import CheckpointManager
 from .config import Config
+from .hooks import run_hooks
 from .llm import LLMClient, LLMError, ToolCall
 from .memory import load_memories
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
@@ -282,7 +283,12 @@ class Agent:
 
     def _run_turn(self, user_text: str) -> None:
         self._refresh_system()
-        if self.depth == 0:                        # checkpoints only for the top-level agent
+        if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
+            blocked, hout = run_hooks("UserPromptSubmit", {"prompt": user_text},
+                                      self.config, self.config.project_root)
+            if blocked:
+                self.ui.error(f"prompt blocked by a UserPromptSubmit hook: {hout}")
+                return
             self.checkpoints.open(len(self.messages), user_text)
         self.messages.append({"role": "user", "content": user_text})
         thinking = self._effective_thinking(user_text)
@@ -369,8 +375,17 @@ class Agent:
             raw = str(args["path"])
             abs_path = raw if Path(raw).is_absolute() else str(self.config.project_root / raw)
             self.checkpoints.record_file(abs_path)     # snapshot before the edit, for rewind
+        blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
+                                  self.config, self.config.project_root)
+        if blocked:
+            self.ui.tool_denied(name, args, "PreToolUse hook")
+            return f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. Do not retry this exact action."
         self.ui.tool_call(name, args)
         out = self.mcp.call(name, args) if name.startswith("mcp__") else execute(name, args, self.ctx)
+        _, post = run_hooks("PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
+                            self.config, self.config.project_root)
+        if post:
+            out = f"{out}\n[hook] {post}"
         self.ui.tool_result(name, out)
         return out
 
