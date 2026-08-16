@@ -45,14 +45,79 @@ class AgentContext:
     on_todo: object = None
 
 
+class _SubUI:
+    """Transparent UI wrapper for a sub-agent: forwards all I/O to the parent UI (so the
+    user sees the sub-agent's work and answers its prompts) while capturing the sub-agent's
+    final text as the task result."""
+
+    def __init__(self, parent, label: str):
+        self._parent = parent
+        self._label = label
+        self._buf: list[str] = []
+        self._last = ""
+
+    def on_text(self, chunk):
+        self._buf.append(chunk)
+        self._parent.on_text(chunk)
+
+    def on_thinking(self, chunk):
+        self._parent.on_thinking(chunk)
+
+    def end_stream(self):
+        if self._buf:
+            self._last = "".join(self._buf)
+            self._buf = []
+        self._parent.end_stream()
+
+    def tool_call(self, name, args):
+        self._parent.tool_call(name, args)
+
+    def tool_result(self, name, out):
+        self._parent.tool_result(name, out)
+
+    def tool_denied(self, name, args, reason):
+        self._parent.tool_denied(name, args, reason)
+
+    def approve(self, name, args):
+        return self._parent.approve(name, args)
+
+    def add_permission_rule(self, name, args):
+        self._parent.add_permission_rule(name, args)
+
+    def present_plan(self, plan):
+        return self._parent.present_plan(plan)
+
+    def propose_options(self, question, options):
+        return self._parent.propose_options(question, options)
+
+    def on_todo(self, todos):
+        self._parent.on_todo(todos)
+
+    def info(self, msg):
+        self._parent.info(msg)
+
+    def error(self, msg):
+        self._parent.error(msg)
+
+    @property
+    def _live(self):
+        return getattr(self._parent, "_live", None)
+
+    def result(self) -> str:
+        return (self._last or "".join(self._buf)).strip()
+
+
 class Agent:
-    def __init__(self, config: Config, ui):
+    def __init__(self, config: Config, ui, mcp: MCPManager | None = None):
         self.config = config
         self.ui = ui
         self.client = LLMClient(config.base_url, config.api_key, config.model)
         self.skills = discover_skills(config.project_root)
-        self.mcp = MCPManager()
-        self.mcp.connect_all(config.get("mcp_servers"))
+        if mcp is not None:                       # subagents share the parent's MCP servers
+            self.mcp = mcp
+        else:
+            self.mcp = MCPManager()
+            self.mcp.connect_all(config.get("mcp_servers"))
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.ctx = AgentContext(project_root=config.project_root, config=config,
@@ -61,6 +126,7 @@ class Agent:
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
+        self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -278,6 +344,11 @@ class Agent:
             choice = self.ui.propose_options(question, options)
             return f"The user chose: {choice!r}. Continue with that decision."
 
+        if name == "task":
+            if self.depth >= 3:
+                return "Max sub-agent depth reached — handle this sub-task directly instead."
+            return self._run_subagent(str(args.get("description", "")), str(args.get("prompt", "")))
+
         perms = PermissionEngine(self.mode, self.config.permissions)  # fresh: mode may have just changed
         decision, reason = perms.decide(name, args)
         if decision == DENY:
@@ -294,6 +365,18 @@ class Agent:
         out = self.mcp.call(name, args) if name.startswith("mcp__") else execute(name, args, self.ctx)
         self.ui.tool_result(name, out)
         return out
+
+    def _run_subagent(self, description: str, prompt: str) -> str:
+        self.ui.info(f"⟳ sub-task: {description}")
+        sub_ui = _SubUI(self.ui, description)
+        sub = Agent(self.config, sub_ui, mcp=self.mcp)   # fresh context, shared config + MCP servers
+        sub.depth = self.depth + 1
+        try:
+            sub.run_turn(prompt)
+        except Exception as e:
+            return f"Sub-task '{description}' failed: {type(e).__name__}: {e}"
+        result = sub_ui.result() or "(the sub-agent finished but produced no summary text)"
+        return f"Sub-task '{description}' completed. Summary:\n{result}"
 
     # ---------------------------------------------------------- compaction ---
     def estimate_tokens(self) -> int:

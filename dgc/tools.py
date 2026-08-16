@@ -79,6 +79,12 @@ TOOL_SCHEMAS = [
          "options": {"type": "array", "items": {"type": "string"},
                      "description": "The choices, most-recommended first"}},
         ["question", "options"]),
+    _fn("task", "Delegate a self-contained sub-task to a fresh sub-agent that works autonomously "
+        "(its own context, the same tools) and returns a summary. Use for large, independent chunks "
+        "of work you want handled end-to-end without cluttering the main conversation.",
+        {"description": {"type": "string", "description": "A short label for the sub-task"},
+         "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"}},
+        ["description", "prompt"]),
 ]
 
 SCHEMAS_BY_NAME = {t["function"]["name"] for t in TOOL_SCHEMAS}
