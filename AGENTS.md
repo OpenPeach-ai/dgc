@@ -41,4 +41,4 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 ## Website
 
-`site/index.html` is the dagucchicode.com landing page — a single static file (inline CSS/JS, no build). Keep `site/install.sh` and `site/dgc.tar.gz` in sync with releases. Deploy with `bash scripts/deploy-site.sh` (reads the Cloudflare token from `evolving-fungi/.env` as `dgc_cloudflare_token`, deploys `site/` to the Pages project `dgc`). When harness features change, update the feature/mode/tool sections on the page to match.
+`site/index.html` is the dagucchicode.com landing page — a single static file (inline CSS/JS, no build). Keep `site/install.sh` and `site/dgc.tar.gz` in sync with releases. Deploy with `bash scripts/deploy-site.sh` (reads credentials from a local, untracked env file and deploys `site/` to Cloudflare Pages). When harness features change, update the feature/mode/tool sections on the page to match.

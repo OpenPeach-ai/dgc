@@ -18,6 +18,8 @@ Built by Mohit Kalra.
 
 DGC is an interactive coding agent that lives in your terminal — in the spirit of Claude Code, Codex CLI and Kimi Code, but pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
 
+![DGC landing — dagucchicode.com](docs/screenshot.png)
+
 Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Your code and your prompts never leave your machine unless the model you pick is a cloud one.
 
 ## Install
