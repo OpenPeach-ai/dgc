@@ -9,3 +9,4 @@ dgc.tar.gz
 
 # maintainer-only tooling (kept local, not published)
 scripts/
+HANDOFF.md
