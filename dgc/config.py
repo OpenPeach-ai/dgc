@@ -21,6 +21,18 @@ DEFAULTS: dict = {
     "max_turns": 40,                            # max tool-use iterations per user turn
     "bash_timeout": 120,
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
+    "mascot": "monster",                        # startup banner mascot: monster | ghost | none
+    "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
+    "search_api_key": "",                       # for brave / tavily
+    "search_url": "",                           # for searxng (self-hosted base URL)
+}
+
+# Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.
+SEARCH_PROVIDERS: dict[str, dict] = {
+    "duckduckgo": {"label": "DuckDuckGo (keyless, default)",  "needs_key": False, "needs_url": False},
+    "brave":      {"label": "Brave Search (API key)",         "needs_key": True,  "needs_url": False},
+    "tavily":     {"label": "Tavily (API key)",               "needs_key": True,  "needs_url": False},
+    "searxng":    {"label": "SearXNG (self-hosted base URL)", "needs_key": False, "needs_url": True},
 }
 
 # One-command connection presets — used by `dgc setup`, `/connect <name>`, and the docs.

@@ -88,11 +88,15 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Interactive REPL** — streaming output, live tool-call display, diffs, todos.
 - **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode).
 - **Runs tiny local models** — if the endpoint has no native tool-calling, DGC auto-switches to a text tool-call protocol and parses it.
-- **Auto context compaction** — near ~70% of your model's context window, older turns are summarized so long sessions don't overflow. `/compact` forces it.
+- **Auto context compaction** — near ~85% of your model's context window (configurable via `compact_threshold`), older turns are summarized so long sessions don't overflow. `/compact` forces it.
 - **Thinking modes** — `/think off|low|medium|high`; `think` / `think hard` / `ultrathink` in a prompt bump it for that turn. `<think>` streams dim.
 - **Memory** — `DGC.md` in your project (and `~/.dgc/DGC.md` personal) load into every session; `#a fact` quick-adds; `/init` writes a project guide.
+- **Web search** — the model gets a `web_search` tool. DuckDuckGo works keyless out of the box; add Brave/Tavily (API key) or SearXNG (self-hosted URL) via `dgc setup` or `/search`.
+- **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one (Claude Code / Codex style).
+- **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
 - **Skills** — drop a `SKILL.md` in `.dgc/skills/<name>/`; the model invokes it when the description matches.
-- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `glob` · `grep` · `web_fetch` · `todo` · `skill` · `save_memory` · `present_plan`.
+- **Mascot** — a friendly DGC character greets you in the startup banner (`monster` / `ghost` / `none`, set with `/mascot`).
+- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `save_memory` · `present_plan` · `propose_options`.
 
 ## REPL conveniences
 
@@ -108,8 +112,11 @@ just type            ask DGC — it uses tools to act on your project
 
 ```
 dgc                  interactive REPL
-dgc setup            configure provider / model / context
+dgc setup            configure provider / model / context / web search
 dgc doctor           verify the endpoint + model
+dgc -c / --continue  resume the most recent session in this directory
+dgc --resume         pick a past session to resume
+dgc update           update DGC to the latest version
 dgc -p "fix the bug in auth.py" --mode auto    one-shot, non-interactive
 dgc --model NAME --base-url URL --api-key KEY   override + persist
 ```
@@ -143,6 +150,9 @@ Paste this to your Claude Code / Codex / any coding agent:
   "context_size": 32768,
   "max_turns": 40,
   "bash_timeout": 120,
+  "compact_threshold": 0.85,
+  "mascot": "monster",
+  "search_provider": "duckduckgo",
   "permissions": {"allow": ["Bash(git status:*)"], "ask": [], "deny": ["Bash(rm -rf *)"]}
 }
 ```
@@ -156,6 +166,16 @@ Set `context_size` to your model's real context window — compaction timing dep
 ```
 
 See [AGENTS.md](AGENTS.md) for the layout and conventions.
+
+## Security
+
+DGC is a coding agent that runs shell commands and edits files on your machine. Worth knowing:
+
+- **Ask-by-default.** In the shipped `default` mode, reads are automatic but **every file write and shell command asks first**. Only `auto` mode runs unattended — and DGC warns you before entering it. Use `default` / `acceptEdits` for anything you care about.
+- **Your model, your machine.** Code and prompts stay local unless you point DGC at a cloud model (then they go to that provider, with your key).
+- **Deny-rules** apply in every mode, including auto — add your own hard blocks: `/permissions deny Bash(rm -rf *)`, `/permissions deny Read(**/.env)`.
+- **Prompt injection.** Like any coding agent, pointing it at untrusted content (a web page via `web_fetch`, a hostile file) in `auto` mode could trick the model into running commands — `default` mode's approval prompts are the mitigation.
+- **The installer** is non-root (touches only `~/.local/bin` and `~/dgc`) and verifies the download against a published SHA-256.
 
 ## License
 

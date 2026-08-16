@@ -56,6 +56,10 @@ TOOL_SCHEMAS = [
         ["pattern"]),
     _fn("web_fetch", "Fetch a URL and return its text content (HTML stripped).",
         {"url": {"type": "string"}}, ["url"]),
+    _fn("web_search", "Search the web for current information (news, docs, versions, facts). Returns titles, "
+        "URLs and snippets; follow up with web_fetch on a result URL to read the full page. Uses the user's "
+        "configured provider (DuckDuckGo by default; Brave/Tavily/SearXNG if set up).",
+        {"query": {"type": "string", "description": "The search query"}}, ["query"]),
     _fn("todo", "Replace the session todo list. Use it to track multi-step work.",
         {"todos": {"type": "array", "items": {"type": "object", "properties": {
             "content": {"type": "string"},
@@ -258,6 +262,15 @@ def web_fetch(args: dict, ctx) -> str:
     return text or "(empty page)"
 
 
+def web_search(args: dict, ctx) -> str:
+    from .search import search
+    cfg = ctx.config
+    return search(str(args.get("query", "")),
+                  provider=str(cfg.get("search_provider", "duckduckgo")),
+                  api_key=str(cfg.get("search_api_key", "")),
+                  url=str(cfg.get("search_url", "")))
+
+
 def todo(args: dict, ctx) -> str:
     ctx.todos = [{"content": str(t.get("content", "")),
                   "status": t.get("status", "pending")} for t in args.get("todos", [])]
@@ -286,7 +299,7 @@ def save_memory(args: dict, ctx) -> str:
 EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file,
     "bash": bash, "glob": glob_tool, "grep": grep_tool, "web_fetch": web_fetch,
-    "todo": todo, "skill": skill_tool, "save_memory": save_memory,
+    "web_search": web_search, "todo": todo, "skill": skill_tool, "save_memory": save_memory,
 }
 
 

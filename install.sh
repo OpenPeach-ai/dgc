@@ -31,6 +31,14 @@ trap 'rm -rf "$TMP"' EXIT
 say "downloading DGC from $BASE"
 fetch "$BASE/dgc.tar.gz" "$TMP/dgc.tar.gz" || die "download failed from $BASE/dgc.tar.gz"
 
+# integrity check: verify against the published SHA-256 (best-effort — skipped if not published)
+if fetch "$BASE/dgc.tar.gz.sha256" "$TMP/sum" 2>/dev/null && [ -s "$TMP/sum" ]; then
+  want=$(awk '{print $1}' "$TMP/sum")
+  got=$( { sha256sum "$TMP/dgc.tar.gz" 2>/dev/null || shasum -a 256 "$TMP/dgc.tar.gz"; } | awk '{print $1}')
+  [ -n "$want" ] && [ "$want" != "$got" ] && die "checksum mismatch — refusing to install (want $want, got $got)"
+  [ -n "$want" ] && say "checksum verified"
+fi
+
 mkdir -p "$DEST"
 tar -xzf "$TMP/dgc.tar.gz" -C "$DEST" --strip-components=1
 

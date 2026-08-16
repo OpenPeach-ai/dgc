@@ -3,10 +3,13 @@ approval prompts and plan-mode approval flow."""
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -16,13 +19,59 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
-from . import __version__, memory as memory_mod
+from . import __version__, memory as memory_mod, sessions as sessions_mod
 from .agent import Agent
-from .config import PROVIDERS, USER_CONFIG, USER_HOME, Config
+from .art import MASCOTS
+from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
 from .tools import TOOL_SCHEMAS
+
+VERSION_URL = "https://dagucchicode.com/version.json"
+UPDATE_CACHE = USER_HOME / "update-check.json"
+
+
+def _ver_tuple(s: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3]) or (0,)
+
+
+def cached_update() -> str | None:
+    """Latest version from the local cache if it's newer than us — non-blocking, never raises."""
+    try:
+        latest = str(json.loads(UPDATE_CACHE.read_text()).get("latest", ""))
+        if latest and _ver_tuple(latest) > _ver_tuple(__version__):
+            return latest
+    except Exception:
+        pass
+    return None
+
+
+def refresh_update_async() -> None:
+    """Fetch version.json in the background (once/day) and cache it. Never blocks startup or raises."""
+    def work() -> None:
+        try:
+            if time.time() - float(json.loads(UPDATE_CACHE.read_text()).get("checked", 0)) < 86400:
+                return
+        except Exception:
+            pass
+        try:
+            import requests
+            latest = str(requests.get(VERSION_URL, timeout=4).json().get("version", ""))
+            UPDATE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            UPDATE_CACHE.write_text(json.dumps({"latest": latest, "checked": time.time()}))
+        except Exception:
+            pass
+    threading.Thread(target=work, daemon=True).start()
+
+
+def auto_warning(console: Console) -> None:
+    console.print(Panel(
+        "full-auto approves [bold]every[/bold] file write and shell command with no prompts.\n"
+        "Only use it on code and a directory you trust.",
+        title="[bold red]⚠ auto mode[/bold red]", border_style="red", expand=False))
+
 
 MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
 MODE_COLOR = {"default": "cyan", "acceptEdits": "green", "plan": "yellow", "auto": "red"}
@@ -195,6 +244,10 @@ HELP = """\
   /status              current config
   /compact             compact conversation context now
   /clear               reset the conversation
+  /search [P [K|URL]]  web search provider: duckduckgo | brave | tavily | searxng
+  /resume              resume a past conversation in this project
+  /mascot [M]          startup mascot: monster | ghost | none
+  /update              update DGC to the latest version
   /exit                quit
 """
 
@@ -217,6 +270,11 @@ class CLI:
     def _logo(self) -> None:
         c = self.console
         c.print()
+        mascot = MASCOTS.get(str(self.config.get("mascot", "monster")))
+        if mascot:
+            for ln in mascot.split("\n"):
+                c.print(Text.from_ansi("  " + ln))
+            c.print()
         for i in range(6):
             row = f"{self._LOGO_D[i]} {self._LOGO_G[i]} {self._LOGO_C[i]}"
             c.print("  " + row, style=f"bold {self._LOGO_COLORS[i]}", markup=False, highlight=False)
@@ -239,6 +297,12 @@ class CLI:
         loaded = [n for n, m in (("DGC.md", proj_mem), ("user DGC.md", user_mem)) if m]
         if loaded:
             c.print(f"  memory    loaded: {', '.join(loaded)}")
+        c.print(f"  search    {cfg.get('search_provider', 'duckduckgo')}")
+        upd = cached_update()
+        if upd:
+            c.print(f"  [bold #E84CC6]⬆ update available: v{upd}[/]  [dim]— run [bold]dgc update[/bold][/]", highlight=False)
+        if mode == "auto":
+            auto_warning(c)
         c.print("[dim]type /help for commands, /exit to quit[/dim]\n")
 
     # ------------------------------------------------------- rule handling ---
@@ -302,6 +366,13 @@ class CLI:
                 rest = MODE_CYCLE[(i + 1) % len(MODE_CYCLE)]
             if rest not in MODES:
                 self.ui.error(f"unknown mode {rest!r} — choose from {', '.join(MODES)}")
+            elif rest == "auto" and self.agent.mode != "auto":
+                auto_warning(self.console)
+                if input("  enable full-auto? [y/N] › ").strip().lower() in ("y", "yes"):
+                    self.agent.set_mode("auto")
+                    self.ui.info(f"mode → [{MODE_COLOR['auto']}]auto[/] ({MODE_DESCRIPTIONS['auto']})")
+                else:
+                    self.ui.info(f"kept {self.agent.mode}")
             else:
                 self.agent.set_mode(rest)
                 self.ui.info(f"mode → [{MODE_COLOR[rest]}]{rest}[/] ({MODE_DESCRIPTIONS[rest]})")
@@ -351,9 +422,58 @@ class CLI:
         elif cmd == "clear":
             self.agent.reset()
             self.ui.info("conversation cleared")
+        elif cmd == "search":
+            self._search_cmd(rest)
+        elif cmd == "resume":
+            self._resume_cmd()
+        elif cmd == "update":
+            run_update()
+        elif cmd == "mascot":
+            choice = rest.strip() or "monster"
+            if choice not in ("monster", "ghost", "none"):
+                self.ui.error("mascot: monster | ghost | none")
+            else:
+                cfg.set("mascot", choice)
+                self.ui.info(f"mascot → {choice} (shown on next launch)")
         else:
             self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
         return True
+
+    def _search_cmd(self, rest: str) -> None:
+        cfg = self.config
+        args = rest.split()
+        if not args:
+            self.ui.info(f"web search: {cfg.get('search_provider', 'duckduckgo')}  ·  "
+                         f"options: {', '.join(SEARCH_PROVIDERS)}")
+            return
+        p = args[0].lower()
+        if p not in SEARCH_PROVIDERS:
+            self.ui.error("providers: " + ", ".join(SEARCH_PROVIDERS))
+            return
+        meta = SEARCH_PROVIDERS[p]
+        cfg.set("search_provider", p)
+        if meta["needs_key"]:
+            key = args[1] if len(args) > 1 else input(f"  API key for {meta['label']} › ").strip()
+            cfg.set("search_api_key", key)
+        if meta["needs_url"]:
+            url = args[1] if len(args) > 1 else input(f"  base URL for {meta['label']} › ").strip()
+            cfg.set("search_url", url)
+        self.ui.info(f"web search → {meta['label']}")
+
+    def _resume_cmd(self) -> None:
+        items = sessions_mod.listing(self.config.project_root)
+        if not items:
+            self.ui.info("no saved sessions in this directory")
+            return
+        for i, (p, ts, prev, cnt) in enumerate(items[:15], 1):
+            self.console.print(f"  [bold]{i}[/bold]) {sessions_mod.when(ts)}  [dim]({cnt} msgs)[/dim]  {prev}")
+        sel = input("  resume # (blank = cancel) › ").strip()
+        try:
+            path = items[int(sel) - 1][0]
+        except (ValueError, IndexError):
+            return
+        n = self.agent.load_session(path)
+        self.ui.info(f"resumed session ({n} messages)")
 
     def _permissions_cmd(self, rest: str) -> None:
         if not rest:
@@ -534,8 +654,23 @@ def run_setup(config: Config) -> None:
     cs = input(f"  context window in tokens [{config.get('context_size')}] › ").strip()
     if cs.isdigit():
         config.set("context_size", int(cs))
+    c.print("\n  web search (optional) — powers the web_search tool:")
+    skeys = list(SEARCH_PROVIDERS)
+    for i, k in enumerate(skeys, 1):
+        c.print(f"    [bold]{i}[/bold]) {SEARCH_PROVIDERS[k]['label']}")
+    ssel = input("  provider number [1 = DuckDuckGo] › ").strip()
+    try:
+        sk = skeys[int(ssel) - 1] if ssel else "duckduckgo"
+    except (ValueError, IndexError):
+        sk = "duckduckgo"
+    config.set("search_provider", sk)
+    meta = SEARCH_PROVIDERS[sk]
+    if meta["needs_key"]:
+        config.set("search_api_key", input(f"  API key for {meta['label']} › ").strip())
+    if meta["needs_url"]:
+        config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
     c.print(f"\n  [bold green]saved[/bold green] → {USER_CONFIG}")
-    c.print(f"  endpoint {config.base_url}  ·  model {config.model}  ·  context {config.get('context_size')}")
+    c.print(f"  endpoint {config.base_url}  ·  model {config.model}  ·  context {config.get('context_size')}  ·  search {config.get('search_provider')}")
     c.print("  run [bold]dgc[/bold] to start  ·  [bold]dgc doctor[/bold] to verify\n")
 
 
@@ -550,16 +685,34 @@ def run_help() -> None:
     c.print("  dgc help                this help")
     c.print("  dgc -p \"<task>\"         run one task and exit  (add --mode auto for hands-off)")
     c.print("  dgc --mode MODE         default | acceptEdits | plan | auto")
+    c.print("  dgc -c / --continue     resume the most recent session in this directory")
+    c.print("  dgc --resume            pick a past session to resume")
+    c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc --model N --base-url URL --api-key KEY   set + persist a model\n")
     c.print(HELP)
 
 
+def run_update() -> None:
+    """`dgc update` — reinstall the latest DGC from dagucchicode.com."""
+    c = Console()
+    c.print("[bold]DGC update[/bold] — fetching the latest…\n")
+    try:
+        subprocess.run("curl -fsSL https://dagucchicode.com/install.sh | bash",
+                       shell=True, check=True, executable="/bin/bash")
+    except subprocess.CalledProcessError as e:
+        c.print(f"\n[bold red]update failed[/bold red] (exit {e.returncode}). "
+                "Run manually: curl -fsSL https://dagucchicode.com/install.sh | bash")
+        return
+    c.print("\n[bold green]updated[/bold green] — start [bold]dgc[/bold] again.")
+
+
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor", "help"):
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update"):
         if raw_argv[0] == "help":
-            run_help()
-            return
+            run_help(); return
+        if raw_argv[0] == "update":
+            run_update(); return
         cfg = Config()
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
@@ -573,8 +726,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--model", help="model name (persisted)")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
     parser.add_argument("--api-key", help="API key for the endpoint (persisted)")
+    parser.add_argument("-c", "--continue", dest="cont", action="store_true",
+                        help="resume the most recent session in this directory")
+    parser.add_argument("--resume", action="store_true", help="pick a past session to resume")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
+    refresh_update_async()
 
     config = Config()
     if args.base_url:
@@ -589,7 +746,33 @@ def main(argv: list[str] | None = None) -> None:
         config.data["thinking"] = args.think
 
     cli = CLI(config)
+
+    # session persistence (Claude Code / Codex style: transcripts resume)
+    if args.cont:
+        p = sessions_mod.latest(config.project_root)
+        if p:
+            n = cli.agent.load_session(p)
+            cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+        else:
+            cli.ui.info("no previous session here — starting fresh")
+            cli.agent.session_file = sessions_mod.new_path(config.project_root)
+    elif args.resume:
+        items = sessions_mod.listing(config.project_root)
+        if items:
+            for i, (pp, ts, prev, cnt) in enumerate(items[:15], 1):
+                print(f"  {i}) {sessions_mod.when(ts)}  ({cnt} msgs)  {prev}")
+            try:
+                cli.agent.load_session(items[int(input("  session # › ").strip()) - 1][0])
+            except (ValueError, IndexError):
+                cli.agent.session_file = sessions_mod.new_path(config.project_root)
+        else:
+            cli.agent.session_file = sessions_mod.new_path(config.project_root)
+    else:
+        cli.agent.session_file = sessions_mod.new_path(config.project_root)
+
     if args.prompt is not None:
+        if config.data.get("mode") == "auto":
+            print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         cli.agent.run_turn(cli.expand_mentions(args.prompt))
         cli.ui.end_stream()
         print()

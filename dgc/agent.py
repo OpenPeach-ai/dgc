@@ -55,6 +55,7 @@ class Agent:
                                 skills=self.skills, todos=self.todos,
                                 on_todo=getattr(ui, "on_todo", None))
         self.messages: list[dict] = []
+        self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -180,6 +181,25 @@ class Agent:
 
     # ------------------------------------------------------------- main loop ---
     def run_turn(self, user_text: str) -> None:
+        try:
+            self._run_turn(user_text)
+        finally:
+            self._persist()
+
+    def _persist(self) -> None:
+        if self.session_file:
+            from . import sessions
+            sessions.save(self.session_file, self.messages, self.config.project_root)
+
+    def load_session(self, path) -> int:
+        """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
+        from . import sessions
+        loaded = [m for m in sessions.load(path) if m.get("role") != "system"]
+        self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
+        self.session_file = path
+        return len(loaded)
+
+    def _run_turn(self, user_text: str) -> None:
         self._refresh_system()
         self.messages.append({"role": "user", "content": user_text})
         thinking = self._effective_thinking(user_text)
