@@ -40,7 +40,8 @@ RULE_ARG = {
     "web_fetch": "url", "skill": "name", "save_memory": "scope",
 }
 
-READ_ONLY_TOOLS = {"read_file", "glob", "grep", "web_fetch", "todo", "skill"}
+READ_ONLY_TOOLS = {"read_file", "glob", "grep", "web_fetch", "todo", "skill",
+                   "bash_output", "bash_kill"}
 EDIT_TOOLS = {"write_file", "edit_file"}
 
 # bash commands that never mutate state — auto-allowed in every mode (Claude Code style)

@@ -4,9 +4,11 @@ from __future__ import annotations
 import difflib
 import glob as globmod
 import html
+import itertools as _itertools
 import os
 import re
 import subprocess
+import threading as _threading
 from pathlib import Path
 
 import requests
@@ -43,9 +45,16 @@ TOOL_SCHEMAS = [
          "new_string": {"type": "string"},
          "replace_all": {"type": "boolean", "default": False}},
         ["path", "old_string", "new_string"]),
-    _fn("bash", "Run a bash command on the user's machine. Returns stdout+stderr.",
+    _fn("bash", "Run a bash command on the user's machine. Returns stdout+stderr. "
+        "Set background:true for long-running commands (dev servers, watchers) — it returns "
+        "immediately with a task id; read its output later with bash_output.",
         {"command": {"type": "string"},
-         "timeout": {"type": "integer", "description": "Seconds (default from config)"}}, ["command"]),
+         "timeout": {"type": "integer", "description": "Seconds (default from config)"},
+         "background": {"type": "boolean", "default": False}}, ["command"]),
+    _fn("bash_output", "Read accumulated output + status of a background bash task.",
+        {"id": {"type": "string"}}, ["id"]),
+    _fn("bash_kill", "Terminate a background bash task.",
+        {"id": {"type": "string"}}, ["id"]),
     _fn("glob", "Find files by glob pattern, e.g. 'src/**/*.py'. Sorted by modification time.",
         {"pattern": {"type": "string"},
          "path": {"type": "string", "description": "Directory to search (default: project root)"}}, ["pattern"]),
@@ -178,8 +187,14 @@ def _diff(old: str, new: str, path: str) -> str:
     return "\n".join(lines)
 
 
+_BG: dict[str, dict] = {}          # background bash tasks: id -> {proc, buf, lock, cmd}
+_BG_N = _itertools.count(1)
+
+
 def bash(args: dict, ctx) -> str:
     command = str(args.get("command", ""))
+    if args.get("background"):
+        return _bash_background(command, ctx)
     timeout = int(args.get("timeout") or ctx.config.get("bash_timeout", 120))
     try:
         proc = subprocess.run(command, shell=True, capture_output=True, text=True,
@@ -192,6 +207,56 @@ def bash(args: dict, ctx) -> str:
         half = MAX_BASH_OUT // 2
         out = out[:half] + f"\n… output truncated ({len(out)} chars total) …\n" + out[-half:]
     return f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}"
+
+
+def _bash_background(command: str, ctx) -> str:
+    bid = f"bg{next(_BG_N)}"
+    try:
+        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True,
+                                cwd=str(ctx.project_root), executable="/bin/bash")
+    except Exception as e:
+        return f"error: could not start background command: {e}"
+    entry = {"proc": proc, "buf": [], "lock": _threading.Lock(), "cmd": command}
+    _BG[bid] = entry
+
+    def reader():
+        try:
+            for line in proc.stdout:
+                with entry["lock"]:
+                    entry["buf"].append(line)
+        except Exception:
+            pass
+        proc.wait()
+
+    _threading.Thread(target=reader, daemon=True).start()
+    return f"started background task {bid}: {command}\nRead its output with bash_output(id=\"{bid}\")."
+
+
+def bash_output(args: dict, ctx) -> str:
+    bid = str(args.get("id", ""))
+    e = _BG.get(bid)
+    if not e:
+        return f"no background task '{bid}' (active: {', '.join(_BG) or 'none'})"
+    with e["lock"]:
+        out = "".join(e["buf"])
+    rc = e["proc"].poll()
+    status = "running" if rc is None else f"exited {rc}"
+    if len(out) > MAX_BASH_OUT:
+        out = out[-MAX_BASH_OUT:]
+    return f"[{bid} · {status}] {e['cmd']}\n{out.strip() or '(no output yet)'}"
+
+
+def bash_kill(args: dict, ctx) -> str:
+    bid = str(args.get("id", ""))
+    e = _BG.get(bid)
+    if not e:
+        return f"no background task '{bid}'"
+    try:
+        e["proc"].terminate()
+    except Exception:
+        pass
+    return f"killed {bid}"
 
 
 def glob_tool(args: dict, ctx) -> str:
@@ -304,7 +369,8 @@ def save_memory(args: dict, ctx) -> str:
 
 EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file,
-    "bash": bash, "glob": glob_tool, "grep": grep_tool, "web_fetch": web_fetch,
+    "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill,
+    "glob": glob_tool, "grep": grep_tool, "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "save_memory": save_memory,
 }
 
