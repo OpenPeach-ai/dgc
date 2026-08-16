@@ -156,10 +156,12 @@
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
-    const full = attachments.map((a) => a.text).join("\n") + (attachments.length ? "\n" : "") + text;
+    const textAtts = attachments.filter((a) => !a.img);
+    const imgs = attachments.filter((a) => a.img).map((a) => a.data);
+    const full = textAtts.map((a) => a.text).join("\n") + (textAtts.length ? "\n" : "") + text;
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
-    vscode.postMessage({ type: "prompt", text: full });   // backend queues it if a turn is running
+    vscode.postMessage({ type: "prompt", text: full, images: imgs.length ? imgs : undefined });   // backend queues it if a turn is running
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
   }
   function renderAtts() {
@@ -211,6 +213,18 @@
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
     else if (e.key === "Escape" && streaming) doStop();
+  });
+  input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.type && it.type.indexOf("image/") === 0) {
+        const file = it.getAsFile(); if (!file) continue;
+        const r = new FileReader();
+        r.onload = () => { attachments.push({ label: "📷 image", img: true, data: r.result, text: "" }); renderAtts(); };
+        r.readAsDataURL(file);
+        e.preventDefault();
+      }
+    }
   });
   send.onclick = submit;
   stop.onclick = doStop;

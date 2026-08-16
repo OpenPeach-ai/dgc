@@ -560,19 +560,34 @@ class CLI:
         self.ui.info(f"memory saved to {path}")
 
     # ----------------------------------------------------------- input prep ---
+    _IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
     def expand_mentions(self, text: str) -> str:
-        """Inline @path file attachments."""
-        attachments = []
+        """Inline @path text files; attach @path image files to the next prompt (vision models)."""
+        attachments, images = [], []
         for token in re.findall(r"@([\w./\-~]+)", text):
             p = Path(token).expanduser()
             if not p.is_absolute():
                 p = self.config.project_root / p
-            if p.is_file():
+            if not p.is_file():
+                continue
+            if p.suffix.lower() in self._IMG_EXT:
+                try:
+                    import base64
+                    data = base64.b64encode(p.read_bytes()).decode()
+                    ext = p.suffix.lower().lstrip(".")
+                    mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+                    images.append(f"data:{mime};base64,{data}")
+                except OSError:
+                    pass
+            else:
                 try:
                     content = p.read_text(errors="replace")[:20000]
                     attachments.append(f"<file path=\"{p}\">\n{content}\n</file>")
                 except OSError:
                     pass
+        if images:
+            self.agent._pending_images = images
         if attachments:
             text += "\n\n" + "\n".join(attachments)
         return text

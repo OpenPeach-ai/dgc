@@ -130,6 +130,7 @@ class Agent:
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager()
+        self._pending_images: list | None = None  # data: URIs attached to the next prompt
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -290,7 +291,14 @@ class Agent:
                 self.ui.error(f"prompt blocked by a UserPromptSubmit hook: {hout}")
                 return
             self.checkpoints.open(len(self.messages), user_text)
-        self.messages.append({"role": "user", "content": user_text})
+        images = self._pending_images
+        self._pending_images = None
+        if images:                                 # vision: OpenAI-style multimodal content
+            content: object = ([{"type": "text", "text": user_text}] +
+                               [{"type": "image_url", "image_url": {"url": u}} for u in images])
+        else:
+            content = user_text
+        self.messages.append({"role": "user", "content": content})
         thinking = self._effective_thinking(user_text)
         effort = thinking if thinking != "off" else None
         max_turns = int(self.config.get("max_turns", 40))

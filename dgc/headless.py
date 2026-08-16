@@ -145,9 +145,10 @@ class Backend:
     def _busy(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
 
-    def _start_turn(self, text: str) -> None:
+    def _start_turn(self, text: str, images=None) -> None:
         self._turn_n += 1
         tid = f"t{self._turn_n}"
+        self.agent._pending_images = images
 
         def run():
             self.em.emit("turn_start", turn_id=tid, prompt=text)
@@ -157,7 +158,8 @@ class Backend:
                          reason="cancelled" if cancelled else "completed",
                          token_estimate=self.agent.estimate_tokens())
             if self._queue and not cancelled:      # drain a queued follow-up
-                self._start_turn(self._queue.pop(0))
+                nxt = self._queue.pop(0)
+                self._start_turn(nxt[0], nxt[1])
 
         self._worker = threading.Thread(target=run, daemon=True)
         self._worker.start()
@@ -167,11 +169,12 @@ class Backend:
 
         if t == "prompt":
             text = str(cmd.get("text", ""))
+            images = cmd.get("images")             # list of data: URIs (vision models)
             if self._busy():                       # queue follow-ups sent mid-turn
-                self._queue.append(text)
+                self._queue.append((text, images))
                 self.em.emit("queued", count=len(self._queue), text=text)
                 return
-            self._start_turn(text)
+            self._start_turn(text, images)
 
         elif t == "permission_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule")})
