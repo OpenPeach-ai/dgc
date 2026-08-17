@@ -26,7 +26,7 @@ from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
-from .style import BRAND, BRAND_MAGENTA, DIM, section
+from .style import ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section
 from .tools import TOOL_SCHEMAS
 
 VERSION_URL = "https://daguccicode.com/version.json"
@@ -104,9 +104,41 @@ class UI:
         self._streamed = False
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
         self._live = None       # set by CLI during a live turn: the key-reader that owns stdin
+        self._work_stop = None  # set while a "working…" spinner is running
+
+    # --------------------------------------------------- working indicator ---
+    def start_working(self, label: str = "working") -> None:
+        """Show a live spinner from submit until the first token/tool — so the user
+        knows the model is loading/generating, not that the CLI hung."""
+        if not sys.stdout.isatty():
+            return
+        self.stop_working()
+        stop = threading.Event()
+        self._work_stop = stop
+
+        def spin() -> None:
+            glyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+            t0, i = time.time(), 0
+            while not stop.wait(0.1):
+                el = int(time.time() - t0)
+                sys.stdout.write(f"\r{ANSI_DIM}  {glyphs[i % len(glyphs)]} {label}…"
+                                 f"{f' ({el}s)' if el else ''}{ANSI_RESET}\x1b[K")
+                sys.stdout.flush()
+                i += 1
+        threading.Thread(target=spin, daemon=True).start()
+
+    def stop_working(self) -> None:
+        stop = self._work_stop
+        if stop and not stop.is_set():
+            stop.set()
+            if sys.stdout.isatty():
+                sys.stdout.write("\r\x1b[K")   # wipe the spinner line before real output
+                sys.stdout.flush()
+        self._work_stop = None
 
     def _yield_stdin(self) -> None:
         """If a live key-reader owns stdin during this turn, ask it to release before we input()."""
+        self.stop_working()
         live = self._live
         if live and live["active"].is_set():
             live["stop"].set()
@@ -114,6 +146,7 @@ class UI:
 
     # ------------------------------------------------ streaming callbacks ---
     def on_text(self, chunk: str) -> None:
+        self.stop_working()
         if self._thinking:
             self.console.print()
             self._thinking = False
@@ -122,6 +155,7 @@ class UI:
         self._streamed = True
 
     def on_thinking(self, chunk: str) -> None:
+        self.stop_working()
         if not self._thinking:
             self.console.print("\n[dim italic]· thinking…[/] ", end="")
             self._thinking = True
@@ -137,6 +171,7 @@ class UI:
 
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict) -> None:
+        self.stop_working()
         summary = self._arg_summary(name, args)
         self.console.print(f"\n[bold {BRAND}]⏺ {name}[/] [{DIM}]{summary}[/]", highlight=False)
 
@@ -145,6 +180,7 @@ class UI:
             diff = out[out.find("---"):]
             if len(diff) < 6000:
                 self.console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
+                self.start_working()                         # spin again until the next step
                 return
         lines = out.splitlines()
         for ln in lines[:12]:                                # flat, 2-space indented (no box)
@@ -152,8 +188,10 @@ class UI:
         if len(lines) > 12:
             self.console.print(f"  … ({len(lines) - 12} more lines)", style=DIM,
                                markup=False, highlight=False)
+        self.start_working()                                 # spin again until the next step
 
     def tool_denied(self, name: str, args: dict, reason: str) -> None:
+        self.stop_working()
         self.console.print(f"[bold red]✗ {name} denied[/bold red] [{DIM}]{reason}[/]", highlight=False)
 
     @staticmethod
@@ -217,6 +255,7 @@ class UI:
 
     # ---------------------------------------------------------------- misc ---
     def on_todo(self, todos: list) -> None:
+        self.stop_working()
         if not todos:
             return
         marks = {"done": "[green]☑[/green]", "in_progress": f"[{BRAND}]◐[/]", "pending": f"[{DIM}]☐[/]"}
@@ -225,9 +264,11 @@ class UI:
             self.console.print(f"  {marks.get(t['status'], '☐')} {t['content']}", highlight=False)
 
     def info(self, msg: str) -> None:
+        self.stop_working()
         self.console.print(f"  [{DIM}]· {msg}[/]", highlight=False)
 
     def error(self, msg: str) -> None:
+        self.stop_working()
         self.console.print(f"[bold red]error:[/bold red] {msg}")
 
     def add_permission_rule(self, name: str, args: dict) -> None:
@@ -718,6 +759,7 @@ class CLI:
         Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
         The reader cleanly hands stdin back when a tool needs an approval prompt."""
         self.agent.cancelled.clear()
+        self.ui.start_working()          # live spinner until the first token / tool
         done = threading.Event()
 
         def work() -> None:
@@ -726,6 +768,7 @@ class CLI:
             except Exception as e:
                 self.ui.error(f"{type(e).__name__}: {e}")
             finally:
+                self.ui.stop_working()
                 done.set()
 
         threading.Thread(target=work, daemon=True).start()
