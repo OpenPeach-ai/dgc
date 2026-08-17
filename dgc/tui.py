@@ -55,7 +55,8 @@ class TUI:
         self._req_event = threading.Event()
 
         self.app: Application | None = None
-        self._width = 80
+        import shutil
+        self._width = shutil.get_terminal_size((100, 30)).columns
         self._stick = True                 # transcript auto-scrolls to bottom
         self._build()
 
@@ -87,10 +88,15 @@ class TUI:
         if self._buf:                       # the in-flight assistant text
             parts.append(self._rich(self._md(self._buf)))
         if not parts:
-            th = style_mod.theme()
-            return ANSI(self._rich(f"[{th.faint}]  Ask DGC anything.  "
-                                   f"/help for commands · Shift+Tab to switch mode · Esc to stop[/]"))
+            return ANSI("")                      # empty transcript (welcome state) — kept clear
         return ANSI("\n".join(p for p in parts if p) + "\n")
+
+    def _tip(self):
+        th = style_mod.theme()
+        if self.blocks or self._buf:
+            return ANSI("")
+        return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]Shift+Tab to switch mode "
+                               f"{glyphs.MIDDOT} /help for commands {glyphs.MIDDOT} Esc to stop a turn[/]"))
 
     @staticmethod
     def _md(text: str):
@@ -107,32 +113,39 @@ class TUI:
 
     def _welcome_card(self) -> str:
         from rich import box
+        from rich.padding import Padding
         from rich.panel import Panel
-        from rich.table import Table
         from rich.text import Text
         th = style_mod.theme()
         secs = time.monotonic() - self._start
-        logo = logo_mod.shimmer_text(secs)                 # the shimmering DGC mark
+        W = max(44, min(self._width - 6, 118))             # card width (side margins)
+        logo_w = 18
+        cw = W - logo_w - 8                                # content width (border+padding+gap safe)
 
-        right = Table.grid(expand=True, padding=(0, 2))
-        right.add_column(ratio=1)
-        right.add_column(justify="right")
+        logo = logo_mod.shimmer_lines(secs, pad=logo_w)    # 6 rows, padded
         title = Text("Vibe DGC", style="bold #FFFFFF")
         title.append(f"  {__version__}", style=th.faint)
-        right.add_row(title, "")
-        right.add_row("", "")
-        right.add_row(Text("a coding agent for the models you run", style=th.muted), "")
-        right.add_row("", "")
-        for lbl, key in (("New session", "Ctrl+N"), ("Switch mode", "Shift+Tab"),
-                         ("Commands", "type /help"), ("Quit", "Ctrl+Q")):
-            right.add_row(Text(lbl, style="bold"), Text(key, style=th.faint))
+        click = Text("[ New session ]", style=f"bold {th.accent}")
+        click.append("  or just start typing", style=th.faint)
 
-        grid = Table.grid(padding=(0, 4))
-        grid.add_column()
-        grid.add_column(ratio=1)
-        grid.add_row(logo, right)
-        panel = Panel(grid, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 3), expand=True)
-        return self._rich(panel)
+        def mrow(lbl, key):
+            t = Text(); t.append(lbl, style="bold")
+            t.append(" " * max(2, cw - len(lbl) - len(key))); t.append(key, style=th.faint)
+            return t
+
+        content = [title, Text(""), Text("a coding agent for the models you run", style=th.muted),
+                   Text(""), click, Text(""),
+                   mrow("New session", "Ctrl+N"), mrow("Switch mode", "Shift+Tab"),
+                   mrow("Commands", "/help"), mrow("Quit", "Ctrl+Q")]
+
+        body = Text()
+        for i in range(max(len(logo), len(content))):
+            body.append_text(logo[i] if i < len(logo) else Text(" " * logo_w))
+            body.append("  ")
+            body.append_text(content[i] if i < len(content) else Text(""))
+            body.append("\n")
+        panel = Panel(body, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 2), width=W)
+        return self._rich(Padding(panel, (2, 0, 0, 3)))    # top gap + left margin
 
     # ---- status line ----
     def _status(self):
@@ -316,18 +329,22 @@ class TUI:
             ]),
             Window(FormattedTextControl(self._bottom_border), height=1),
         ])
+        tip = Window(FormattedTextControl(self._tip), height=1, style="class:status")
         root = HSplit([
             header,
             transcript,
+            tip,
             status,
             composer_box,
         ])
+        from prompt_toolkit.output import ColorDepth
         self.app = Application(layout=Layout(root, focused_element=composer),
-                               key_bindings=self._keys(), full_screen=True, mouse_support=False,
-                               style=self._pt_style(), refresh_interval=0.08)
+                               key_bindings=self._keys(), full_screen=True, mouse_support=True,
+                               style=self._pt_style(), refresh_interval=0.08,
+                               color_depth=ColorDepth.DEPTH_24_BIT)
 
     def _header_height(self) -> int:
-        return 1 if (self.blocks or self._buf) else 13
+        return 1 if (self.blocks or self._buf) else 16
 
     def _composer_height(self) -> int:
         return min(max(1, self.input_buf.text.count("\n") + 1), 8)
@@ -351,9 +368,10 @@ class TUI:
         from prompt_toolkit.styles import Style
         th = style_mod.theme()
         return Style.from_dict({
-            "rule": f"fg:{th.border}",
-            "status": f"fg:{th.muted}",
-            "composer": f"fg:{th.text}",
+            "": f"bg:{th.bg} fg:{th.text}",          # paint the whole app background
+            "rule": f"fg:{th.border} bg:{th.bg}",
+            "status": f"fg:{th.muted} bg:{th.bg}",
+            "composer": f"fg:{th.text} bg:{th.bg}",
         })
 
     def _keys(self) -> KeyBindings:

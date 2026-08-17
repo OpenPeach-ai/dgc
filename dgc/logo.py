@@ -64,6 +64,26 @@ def shimmer_text(secs: float, indent: bool = False):
     return _frame(secs, indent=indent)
 
 
+def shimmer_lines(secs: float, pad: int = 0):
+    """The wordmark as a list of rich Text rows (one per line), each padded to `pad`."""
+    from rich.text import Text
+    hi = style.theme().accent_bright
+    out = []
+    for r, raw in enumerate(LOGO):
+        line = raw.lstrip()
+        t = Text()
+        for c, ch in enumerate(line):
+            if ch in _BLANK:
+                t.append(" ")
+            else:
+                diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
+                t.append(ch, style="bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs)))
+        if pad and len(line) < pad:
+            t.append(" " * (pad - len(line)))
+        out.append(t)
+    return out
+
+
 def frame_ansi(secs: float, width: int = 80) -> str:
     """One shimmer frame rendered to a centered ANSI string (for the TUI header)."""
     import io as _io
