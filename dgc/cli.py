@@ -20,7 +20,8 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-from . import __version__, memory as memory_mod, sessions as sessions_mod
+from . import __version__, glyphs, logo as logo_mod, memory as memory_mod, render, sessions as sessions_mod
+from . import style as style_mod
 from .agent import Agent
 from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
@@ -91,7 +92,8 @@ def auto_warning(console: Console) -> None:
 
 
 MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
-MODE_COLOR = {"default": "cyan", "acceptEdits": "green", "plan": "yellow", "auto": "red"}
+# mono + purple: muted / accent / lavender / red (auto stays red as a danger signal)
+MODE_COLOR = {"default": "#9A9A9E", "acceptEdits": "#7C5CFF", "plan": "#A78BFA", "auto": "#DC5A64"}
 THINK_LEVELS = ["off", "low", "medium", "high"]
 
 
@@ -118,12 +120,14 @@ class UI:
         self._work_stop = stop
 
         def spin() -> None:
-            glyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+            frames = glyphs.SPINNER
+            acc, dim, rst = style_mod.ansi_fg(style_mod.theme().accent), ANSI_DIM, ANSI_RESET
             t0, i = time.time(), 0
             while not stop.wait(0.1):
                 el = int(time.time() - t0)
-                sys.stdout.write(f"\r{ANSI_DIM}  {glyphs[i % len(glyphs)]} {label}…"
-                                 f"{f' ({el}s)' if el else ''}{ANSI_RESET}\x1b[K")
+                et = f" {el}s" if el else ""
+                sys.stdout.write(f"\r  {acc}{frames[i % len(frames)]}{rst} {dim}{label}…{et}"
+                                 f"   {glyphs.MIDDOT} esc to stop{rst}\x1b[K")
                 sys.stdout.flush()
                 i += 1
         threading.Thread(target=spin, daemon=True).start()
@@ -190,13 +194,14 @@ class UI:
         self.stop_working()
         self._tool_count += 1
         summary = self._arg_summary(name, args)
-        self.console.print(f"\n[bold {BRAND}]⏺ {name}[/] [{DIM}]{summary}[/]", highlight=False)
+        self.console.print(f"\n[bold {BRAND}]{glyphs.tool_icon(name)} {name}[/] "
+                           f"[{DIM}]{summary}[/]", highlight=False)
 
     def tool_result(self, name: str, out: str) -> None:
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
-            if len(diff) < 6000:
-                self.console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
+            if len(diff) < 8000:
+                self.console.print(render.render_diff(diff))
                 self.start_working()                         # spin again until the next step
                 return
         lines = out.splitlines()
@@ -321,6 +326,8 @@ HELP = """\
   /subagent …          set the sub-agent model/host: model NAME | host URL [KEY] | clear
   /init                have the agent analyze the project and write DGC.md
   /status              current config
+  /context             show context-window usage
+  /theme [NAME]        switch theme: dark | light
   /compact             compact conversation context now
   /clear               reset the conversation
   /rewind              restore code + conversation to an earlier turn
@@ -361,6 +368,7 @@ def render_help(console) -> None:
 class CLI:
     def __init__(self, config: Config):
         self.config = config
+        style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
         self.ui = UI()
         self.ui._rule_hook = self._add_rule
         self.agent = Agent(config, self.ui)
@@ -378,14 +386,11 @@ class CLI:
         c.print()
         if (c.size.width or 80) < 34:                        # minimal: no art, one dim brand line
             cfg = self.config
-            c.print(f"  [bold {BRAND_MAGENTA}]DGC[/] [{DIM}]v{__version__} · {cfg.model} · "
+            c.print(f"  [bold {BRAND_MAGENTA}]dgc[/] [{DIM}]v{__version__} · {cfg.model} · "
                     f"{cfg.data.get('mode', 'default')}[/]", highlight=False)
             return
-        for i in range(6):
-            row = f"{self._LOGO_D[i]} {self._LOGO_G[i]} {self._LOGO_C[i]}"
-            c.print("  " + row, style=f"bold {self._LOGO_COLORS[i]}", markup=False, highlight=False)
-        c.print(f"  [bold {BRAND_MAGENTA}]DGC[/]  [{DIM}]v{__version__} · a coding-agent CLI "
-                f"for the models you run[/]", highlight=False)
+        logo_mod.show(c, animate=bool(self.config.get("logo_animation", True)))   # animated shimmer wordmark
+        c.print(f"  [{DIM}]v{__version__} · a coding agent for the models you run[/]", highlight=False)
         c.print(f"  [{DIM}]Built by Mohit Kalra[/]\n", highlight=False)
 
     def banner(self) -> None:
@@ -410,6 +415,8 @@ class CLI:
         if loaded:
             row("memory", "loaded: " + ", ".join(loaded))
         row("search", cfg.get("search_provider", "duckduckgo"))
+        c.print(f"  [{DIM}]{'context':<8}[/]  ", render.context_bar(self.agent.estimate_tokens(),
+                int(cfg.get("context_size", 32768))), highlight=False)
         upd = cached_update()
         if upd:
             c.print(f"  [bold {BRAND_MAGENTA}]⬆ update available: v{upd}[/]  "
@@ -554,6 +561,17 @@ class CLI:
                 "Use write_file to save it.")
         elif cmd == "status":
             self.banner()
+        elif cmd == "context":
+            used, size = self.agent.estimate_tokens(), int(cfg.get("context_size", 32768))
+            self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)
+        elif cmd == "theme":
+            if not rest:
+                self.ui.info(f"theme: {style_mod.theme().name}  ·  available: {', '.join(style_mod.THEMES)}")
+            elif style_mod.set_theme(rest.strip()):
+                cfg.set("theme", rest.strip())
+                self.banner()
+            else:
+                self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")
         elif cmd == "compact":
             self.agent.maybe_compact(force=True)
             self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
@@ -738,15 +756,19 @@ class CLI:
         self.banner()
         USER_HOME.mkdir(parents=True, exist_ok=True)
         session: PromptSession = PromptSession(history=FileHistory(str(USER_HOME / "history")))
+        from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
         while True:
             mode = self.agent.mode
+            th = style_mod.theme()
+            acc, dim, rst = style_mod.ansi_fg(th.accent), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
             if queue:                                   # run a follow-up queued during the last turn
                 line = queue.pop(0)
-                self.console.print(f"[dim]dgc[{mode}]> {line}[/dim]", highlight=False)
+                self.console.print(f"  [{DIM}]{glyphs.ARROW} {line}[/]", highlight=False)
             else:
-                try:
-                    line = session.prompt(f"dgc[{mode}]> ").strip()
+                try:                                    # ❯ prefix + right-aligned `model · mode`
+                    rp = ANSI(f"{dim}{self.config.model}  {glyphs.MIDDOT}  {mode}{rst}")
+                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp).strip()
                 except KeyboardInterrupt:
                     continue
                 except EOFError:

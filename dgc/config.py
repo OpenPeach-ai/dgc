@@ -33,6 +33,8 @@ DEFAULTS: dict = {
     "subagent_model": "",                       # model for `task` sub-agents (empty: inherit main)
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
     "subagent_api_key": "",                     # key for the sub-agent host (empty: inherit main)
+    "logo_animation": True,                     # animate the startup wordmark (TTY only)
+    "theme": "dark",                            # dark | light
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.
