@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgc"
-version = "0.5.0"
+dynamic = ["version"]                       # single-sourced from dgc/__init__.py __version__
 description = "Interactive coding-agent CLI harness for local LLMs (Ollama, LM Studio, vLLM, llama.cpp)"
 requires-python = ">=3.10"
 dependencies = ["rich>=13", "prompt_toolkit>=3", "requests>=2.31"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dgc.__version__" }
 
 [project.scripts]
 dgc = "dgc.cli:main"
