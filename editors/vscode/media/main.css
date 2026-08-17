@@ -92,8 +92,11 @@ button.act:hover { filter: brightness(1.1); }
 #attachments { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 8px; }
 #attachments .chip { font-size: 11px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 5px; padding: 2px 7px; display: inline-flex; gap: 5px; }
 #attachments .chip .x { cursor: pointer; opacity: .7; }
-footer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--vscode-panel-border); align-items: flex-end; }
-#input { flex: 1; resize: none; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 7px 9px; max-height: 160px; }
+footer { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--vscode-panel-border); }
+#input { width: 100%; resize: none; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 7px 9px; max-height: 160px; }
+#toolbar { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+#toolbar .spacer { flex: 1; }
+#pill-ctx.warn { color: #fff; background: var(--vscode-inputValidation-warningBackground, #9a6700); border-color: var(--vscode-inputValidation-warningBorder, transparent); }
 #input:focus { outline: 1px solid var(--vscode-focusBorder); }
 #send { font: inherit; font-size: 12px; cursor: pointer; border: none; border-radius: 8px; padding: 8px 12px; color: #fff; background: var(--grad); white-space: nowrap; }
 #send.stop { background: #b3261e; }

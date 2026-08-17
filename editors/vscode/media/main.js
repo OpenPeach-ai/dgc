@@ -94,6 +94,13 @@
     const stick = atBottom();
     switch (ev.type) {
       case "ready": customCommands = ev.commands || []; break;
+      case "context": {
+        const pct = ev.size ? Math.min(100, Math.round((ev.used / ev.size) * 100)) : 0;
+        $("ctx").textContent = pct + "%";
+        $("pill-ctx").classList.toggle("warn", pct >= 85);
+        break;
+      }
+      case "history": renderHistory(ev.items || []); break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
       case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
@@ -240,6 +247,23 @@
   $("pill-model").onclick = () => vscode.postMessage({ type: "pickModel" });
   $("pill-mode").onclick = () => vscode.postMessage({ type: "pickMode" });
   $("pill-think").onclick = () => vscode.postMessage({ type: "pickThink" });
+  $("pill-ctx").onclick = () => vscode.postMessage({ type: "compact" });
+
+  function renderHistory(items) {
+    log.innerHTML = ""; turn = null;
+    items.forEach((it) => {
+      if (it.role === "user") {
+        const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+        m.appendChild(el("div", "bubble", esc(it.text))); log.appendChild(m);
+      } else {
+        const m = el("div", "msg dgc"); m.appendChild(el("div", "role dgc", "DGC"));
+        if (it.text) m.appendChild(el("div", "text", md(it.text)));
+        if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "⏺ " + it.tools.join(", ")));
+        log.appendChild(m);
+      }
+    });
+    scroll();
+  }
   // copy-code (delegated)
   log.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".copy"); if (b) vscode.postMessage({ type: "copy", text: decodeURIComponent(b.dataset.c) }); });
 

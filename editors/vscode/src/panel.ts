@@ -363,19 +363,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="${css}">
 </head><body>
-<header id="hdr">
-  <button id="pill-model" class="pill" title="Select model">◆ <span id="model">—</span></button>
-  <button id="pill-mode" class="pill" title="Permission mode">🛡 <span id="mode">default</span></button>
-  <button id="pill-think" class="pill" title="Thinking level">💡 <span id="think">off</span></button>
-</header>
 <main id="log"></main>
 <div id="pop" class="pop"></div>
 <div id="queued"></div>
 <div id="attachments"></div>
 <footer>
   <textarea id="input" rows="1" placeholder="Ask DGC…  @ files · / commands"></textarea>
-  <button id="stop" title="Stop (Esc)" style="display:none">⏹</button>
-  <button id="send" title="Send">Send ▸</button>
+  <div id="toolbar">
+    <button id="pill-model" class="pill" title="Model">◆ <span id="model">—</span></button>
+    <button id="pill-mode" class="pill" title="Permission mode">🛡 <span id="mode">default</span></button>
+    <button id="pill-think" class="pill" title="Thinking">💡 <span id="think">off</span></button>
+    <button id="pill-ctx" class="pill" title="Context used — click to compact">▓ <span id="ctx">0%</span></button>
+    <span class="spacer"></span>
+    <button id="stop" title="Stop (Esc)" style="display:none">⏹</button>
+    <button id="send" title="Send">Send ▸</button>
+  </div>
 </footer>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;

@@ -142,7 +142,9 @@ class Backend:
             tools_supported=self.agent.client.tools_supported,
             tools=[t["function"]["name"] for t in TOOL_SCHEMAS],
             skills=[s.name for s in self.agent.skills.values()],
-            commands=list(discover_commands(self.config.project_root)))
+            commands=list(discover_commands(self.config.project_root)),
+            context_size=int(self.config.get("context_size", 32768)))
+        self._emit_context()
 
     def _busy(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
@@ -159,12 +161,42 @@ class Backend:
             self.em.emit("turn_end", turn_id=tid,
                          reason="cancelled" if cancelled else "completed",
                          token_estimate=self.agent.estimate_tokens())
+            self._emit_context()
             if self._queue and not cancelled:      # drain a queued follow-up
                 nxt = self._queue.pop(0)
                 self._start_turn(nxt[0], nxt[1])
 
         self._worker = threading.Thread(target=run, daemon=True)
         self._worker.start()
+
+    def _emit_context(self) -> None:
+        try:
+            used = self.agent.estimate_tokens()
+        except Exception:
+            used = 0
+        self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)))
+
+    def _history(self) -> list:
+        """A display transcript of the current conversation (for resuming in a UI)."""
+        items = []
+        for m in self.agent.messages:
+            role = m.get("role")
+            content = m.get("content")
+            if role == "system":
+                continue
+            if role == "user":
+                if isinstance(content, list):
+                    text = " ".join(p.get("text", "") for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text") + " 📷"
+                else:
+                    text = str(content)
+                if text.startswith("<tool_results>"):
+                    continue
+                items.append({"role": "user", "text": text})
+            elif role == "assistant":
+                tools = [(tc.get("function") or {}).get("name", "") for tc in (m.get("tool_calls") or [])]
+                items.append({"role": "assistant", "text": str(content or ""), "tools": tools})
+        return items
 
     def dispatch(self, cmd: dict) -> None:
         t = cmd.get("type")
@@ -224,6 +256,8 @@ class Backend:
             if path:
                 n = self.agent.load_session(path)
                 self.em.emit("session", kind="resumed", message_count=n, path=str(path))
+                self.em.emit("history", items=self._history())
+                self._emit_context()
             else:
                 self.em.emit("error", message="no session to resume")
         elif t == "list_sessions":
@@ -240,6 +274,7 @@ class Backend:
             self.em.emit("rewound", ok=(msgs >= 0), files_restored=nfiles)
         elif t == "compact":
             self.agent.maybe_compact(force=True)
+            self._emit_context()
         elif t in ("get_config", "status"):
             self.em.emit("config", model=self.config.model, mode=self.agent.mode,
                          think=self.config.get("thinking", "off"), base_url=self.config.base_url,
