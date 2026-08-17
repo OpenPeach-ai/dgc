@@ -10,6 +10,8 @@ USER_HOME = Path.home() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
+USER_AGENTS = USER_HOME / "agents"
+BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
 
 DEFAULTS: dict = {
     "base_url": "http://localhost:11434/v1",   # any OpenAI-compatible endpoint
@@ -28,6 +30,9 @@ DEFAULTS: dict = {
     "hooks": {},                                # event -> [{matcher?, command}] lifecycle hooks
     "fallback_model": "",                       # retried if the primary model errors
     "fallback_base_url": "",                    # optional endpoint for the fallback (default: same)
+    "subagent_model": "",                       # model for `task` sub-agents (empty: inherit main)
+    "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
+    "subagent_api_key": "",                     # key for the sub-agent host (empty: inherit main)
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.

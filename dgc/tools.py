@@ -92,7 +92,9 @@ TOOL_SCHEMAS = [
         "(its own context, the same tools) and returns a summary. Use for large, independent chunks "
         "of work you want handled end-to-end without cluttering the main conversation.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
-         "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"}},
+         "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"},
+         "agent": {"type": "string", "description": "Optional: name of a defined sub-agent "
+                   "(.dgc/agents/<name>.md) to use its persona, model and host"}},
         ["description", "prompt"]),
 ]
 

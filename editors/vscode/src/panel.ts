@@ -73,6 +73,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "ready":
         this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url };
         this.postState();
+        this.applyNativeSettings();   // let explicitly-set VS Code settings override the CLI config
         break;
       case "model_changed":
         this.state.model = ev.model;
@@ -144,6 +145,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "pickModel":
         this.selectModel();
+        break;
+      case "listModels":
+        this.listModels();
+        break;
+      case "setModel":
+        this.ensureBackend().send({ type: "set_model", model: msg.model });
+        break;
+      case "connect":
+        this.connect();
+        break;
+      case "setMode":
+        this.ensureBackend().send({ type: "set_mode", mode: msg.mode });
+        break;
+      case "setThink":
+        this.ensureBackend().send({ type: "set_think", level: msg.level });
+        break;
+      case "compact":
+        this.ensureBackend().send({ type: "compact" });
+        break;
+      case "openSettings":
+        this.openSettings();
+        break;
+      case "saveSettings":
+        this.saveSettings(msg.values || {});
         break;
       case "pickMode":
         this.setMode();
@@ -233,15 +258,80 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // ---- native menus (QuickPicks) -------------------------------------------
+  // ---- model listing --------------------------------------------------------
+  private async fetchModels(): Promise<string[]> {
+    const base = this.state.baseUrl || PROVIDERS.ollama.url;
+    const res = await fetch(base.replace(/\/$/, "") + "/models");
+    const data: any = await res.json();
+    return (data?.data ?? []).map((m: any) => m.id).sort();
+  }
+
+  // in-composer model menu (Claude-Code style — rendered inside the webview)
+  async listModels(): Promise<void> {
+    const base = this.state.baseUrl || PROVIDERS.ollama.url;
+    try {
+      const ids = await this.fetchModels();
+      this.post({ type: "models", ids, current: this.state.model, base });
+    } catch {
+      this.post({ type: "models", ids: [], base, err: true });
+    }
+  }
+
+  // ---- native VS Code settings → backend (only explicitly-set values override the CLI config) ---
+  applyNativeSettings(): void {
+    const be = this.backend;
+    if (!be) { return; }
+    const c = vscode.workspace.getConfiguration("dgc");
+    const baseUrl = c.get<string>("baseUrl", ""), apiKey = c.get<string>("apiKey", ""), model = c.get<string>("model", "");
+    if (baseUrl || apiKey || model) {
+      be.send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
+    }
+    const values: any = {};
+    const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };
+    put("subagent_model", "subagentModel");
+    put("subagent_base_url", "subagentBaseUrl");
+    put("subagent_api_key", "subagentApiKey");
+    put("fallback_model", "fallbackModel");
+    put("fallback_base_url", "fallbackBaseUrl");
+    const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
+    if (Object.keys(values).length) { be.send({ type: "set_config", values }); }
+  }
+
+  // ---- in-webview settings page --------------------------------------------
+  async openSettings(): Promise<void> {
+    const be = this.ensureBackend();
+    be.send({ type: "get_config" });          // backend replies with a `config` event → fills the form
+    const providers = Object.entries(PROVIDERS).map(([id, p]) =>
+      ({ id, label: p.label, url: p.url, needsKey: p.needsKey }));
+    let models: string[] = [];
+    try { models = await this.fetchModels(); } catch { /* endpoint may be down */ }
+    this.post({ type: "settings_open", providers, models });
+  }
+
+  async saveSettings(v: any): Promise<void> {
+    const be = this.ensureBackend();
+    if (v.base_url || v.api_key || v.model) {
+      be.send({ type: "set_model", base_url: v.base_url || undefined,
+                api_key: v.api_key || undefined, model: v.model || undefined });
+    }
+    if (v.mode) { be.send({ type: "set_mode", mode: v.mode }); }
+    if (v.think) { be.send({ type: "set_think", level: v.think }); }
+    const values: any = {
+      subagent_model: v.subagent_model || "", subagent_base_url: v.subagent_base_url || "",
+      subagent_api_key: v.subagent_api_key || "", fallback_model: v.fallback_model || "",
+      fallback_base_url: v.fallback_base_url || "",
+    };
+    if (v.context_size) { values.context_size = Number(v.context_size); }
+    be.send({ type: "set_config", values });
+    vscode.window.showInformationMessage("DGC settings saved.");
+  }
+
   async selectModel(): Promise<void> {
     const be = this.ensureBackend();
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     let ids: string[] = [];
     try {
-      const res = await fetch(base.replace(/\/$/, "") + "/models");
-      const data: any = await res.json();
-      ids = (data?.data ?? []).map((m: any) => m.id).sort();
+      ids = await this.fetchModels();
     } catch (e: any) {
       const go = await vscode.window.showWarningMessage(
         `Can't reach ${base} — connect a provider?`, "Connect Provider");
@@ -356,27 +446,81 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
+    const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};`;
     return `<!doctype html><html><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body>
 <main id="log"></main>
+<div id="settings" hidden>
+  <div class="set-head">
+    <span class="set-title"><span class="codicon codicon-settings-gear"></span> DGC Settings</span>
+    <button id="set-close" class="fbtn" title="Close"><span class="codicon codicon-close"></span></button>
+  </div>
+  <div class="set-body">
+    <div class="set-group">Connection</div>
+    <label>Provider preset
+      <select id="s-provider"></select></label>
+    <label>Host URL
+      <input id="s-base_url" type="text" spellcheck="false" placeholder="http://localhost:11434/v1"></label>
+    <label>API key
+      <input id="s-api_key" type="password" spellcheck="false" placeholder="(dummy for local)"></label>
+    <label>Model
+      <span class="set-row"><input id="s-model" type="text" spellcheck="false" placeholder="model id" list="s-models"><datalist id="s-models"></datalist></span></label>
+
+    <div class="set-group">Sub-agents <span class="set-hint">run <code>task</code> sub-agents on a different model / host — blank = inherit main</span></div>
+    <label>Sub-agent model
+      <input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main"></label>
+    <label>Sub-agent host URL
+      <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
+    <label>Sub-agent API key
+      <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit main key"></label>
+
+    <div class="set-group">Fallback <span class="set-hint">retried if the primary model errors</span></div>
+    <label>Fallback model
+      <input id="s-fallback_model" type="text" spellcheck="false" placeholder="none"></label>
+    <label>Fallback host URL
+      <input id="s-fallback_base_url" type="text" spellcheck="false" placeholder="same as main"></label>
+
+    <div class="set-group">Behavior</div>
+    <label>Permission mode
+      <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
+    <label>Thinking
+      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+    <label>Context size (tokens)
+      <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"></label>
+  </div>
+  <div class="set-foot">
+    <button id="set-save" class="csend set-save">Save</button>
+    <button id="set-cancel" class="fbtn">Close</button>
+  </div>
+</div>
 <div id="pop" class="pop"></div>
 <div id="queued"></div>
-<div id="attachments"></div>
 <footer>
-  <textarea id="input" rows="1" placeholder="Ask DGC…  @ files · / commands"></textarea>
-  <div id="toolbar">
-    <button id="pill-model" class="pill" title="Model">◆ <span id="model">—</span></button>
-    <button id="pill-mode" class="pill" title="Permission mode">🛡 <span id="mode">default</span></button>
-    <button id="pill-think" class="pill" title="Thinking">💡 <span id="think">off</span></button>
-    <button id="pill-ctx" class="pill" title="Context used — click to compact">▓ <span id="ctx">0%</span></button>
-    <span class="spacer"></span>
-    <button id="stop" title="Stop (Esc)" style="display:none">⏹</button>
-    <button id="send" title="Send">Send ▸</button>
+  <div id="attachments"></div>
+  <div id="cbox" data-mode="default">
+    <textarea id="input" rows="1" placeholder="Ask DGC…"></textarea>
+    <div id="cfooter">
+      <button id="btn-add" class="fbtn" title="Attach a file (@-mention)"><span class="codicon codicon-add"></span></button>
+      <button id="btn-cmd" class="fbtn" title="Commands (/)"><span class="codicon codicon-terminal"></span></button>
+      <button id="btn-ctx" class="fbtn" title="Context used — click to compact"><span class="codicon codicon-pie-chart"></span> <span id="ctx">0%</span></button>
+      <button id="btn-settings" class="fbtn" title="Settings"><span class="codicon codicon-settings-gear"></span></button>
+      <span class="cspacer"></span>
+      <div class="picker">
+        <button id="btn-model" class="fbtn mode" title="Model — click to change"><span class="codicon codicon-chip"></span> <span id="modelname">dgc</span></button>
+        <div id="modelmenu" class="cmenu" hidden></div>
+      </div>
+      <div class="picker">
+        <button id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle"><span id="modeicon" class="codicon codicon-shield"></span> <span id="modelabel">default</span></button>
+        <div id="modemenu" class="cmenu" hidden></div>
+      </div>
+      <button id="send" class="csend" data-mode="default" title="Send"><span class="codicon codicon-arrow-up"></span></button>
+    </div>
   </div>
 </footer>
 <script nonce="${nonce}" src="${js}"></script>

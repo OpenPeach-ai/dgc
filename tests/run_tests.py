@@ -22,6 +22,7 @@ from dgc.permissions import PermissionEngine, Rule, _is_readonly_bash  # noqa: E
 from dgc.skills import _parse_skill, discover_skills  # noqa: E402
 from dgc.memory import add_memory, load_memories  # noqa: E402
 from dgc.tools import execute  # noqa: E402
+from dgc.headless import Backend  # noqa: E402
 
 PASS = []
 
@@ -147,6 +148,68 @@ def unit_tests(tmp: Path):
     add_memory("second fact", tmp)
     proj, _ = load_memories(tmp)
     check("memory appends", "second fact" in proj and "always run pytest" in proj)
+
+    # --- resume transcript flattening (drives the extension's `history` event
+    #     so a resumed session re-renders instead of showing blank)
+    class _FakeAgent:
+        def __init__(self, msgs): self.messages = msgs
+    class _FakeBackend:
+        def __init__(self, msgs): self.agent = _FakeAgent(msgs)
+    msgs = [
+        {"role": "system", "content": "you are dgc"},
+        {"role": "user", "content": "add a weather widget"},
+        {"role": "assistant", "content": "on it", "tool_calls": [
+            {"function": {"name": "write_file"}}, {"function": {"name": "bash"}}]},
+        {"role": "user", "content": "<tool_results>\n<result tool=\"bash\">ok</result>\n</tool_results>"},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": [{"type": "text", "text": "make it bold"},
+                                     {"type": "image_url", "image_url": {"url": "data:x"}}]},
+    ]
+    items = Backend._history(_FakeBackend(msgs))
+    check("resume history skips system", all(i["role"] != "system" for i in items))
+    check("resume history keeps user turns",
+          items[0] == {"role": "user", "text": "add a weather widget"})
+    check("resume history captures assistant tools",
+          items[1]["role"] == "assistant" and items[1]["tools"] == ["write_file", "bash"])
+    check("resume history drops tool_results envelope",
+          not any("<tool_results>" in i.get("text", "") for i in items))
+    check("resume history keeps multimodal user text",
+          items[-1]["role"] == "user" and "make it bold" in items[-1]["text"])
+
+    # --- named sub-agent defs + model/host resolution
+    from dgc.agents import _parse_agent, AgentDef
+    from dgc.agent import Agent
+    adir = tmp / "adefs"; adir.mkdir()
+    (adir / "reviewer.md").write_text(
+        "---\nname: reviewer\ndescription: careful reviewer\n"
+        "model: qwen3:14b\nbase_url: http://gpu:11434/v1\napi_key: k\neffort: high\n---\n"
+        "Be a meticulous reviewer.")
+    ad = _parse_agent(adir / "reviewer.md")
+    check("agentdef parses model+host+effort",
+          ad.model == "qwen3:14b" and ad.base_url == "http://gpu:11434/v1"
+          and ad.api_key == "k" and ad.effort == "high")
+    check("agentdef keeps body", "meticulous reviewer" in ad.body)
+
+    class _Cfg2:
+        base_url, api_key, model = "http://localhost:11434/v1", "ollama", "main-model"
+        def __init__(self, o): self._o = o
+        def get(self, k, d=None): return self._o.get(k, d)
+    class _FakeA:
+        def __init__(self, cfg): self.config = cfg
+    # no def, no global → reuse the parent client (None)
+    check("subagent inherits main when unset",
+          Agent._subagent_client(_FakeA(_Cfg2({})), None) is None)
+    # global subagent_* selects a different host+model
+    c = Agent._subagent_client(_FakeA(_Cfg2(
+        {"subagent_model": "sub-model", "subagent_base_url": "http://gpu:11434/v1"})), None)
+    check("subagent global host+model",
+          c is not None and c.model == "sub-model" and c.base_url == "http://gpu:11434/v1")
+    # a named agent def overrides the global default
+    c2 = Agent._subagent_client(_FakeA(_Cfg2({"subagent_model": "sub-model"})),
+                                AgentDef(name="r", description="", body="",
+                                         model="def-model", base_url="http://def:1/v1"))
+    check("agentdef overrides global",
+          c2.model == "def-model" and c2.base_url == "http://def:1/v1")
 
 
 # ------------------------------------------------------------- mock server ---

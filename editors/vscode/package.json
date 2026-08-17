@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "daguccicode",
   "license": "MIT",
   "icon": "icon.png",
@@ -37,12 +37,14 @@
       { "command": "dgc.addSelection", "title": "DGC: Add Selection to DGC", "category": "DGC" },
       { "command": "dgc.restart", "title": "DGC: Restart Backend", "category": "DGC" },
       { "command": "dgc.resume", "title": "DGC: Resume Session", "category": "DGC", "icon": "$(history)" },
-      { "command": "dgc.rewind", "title": "DGC: Rewind (code + conversation)", "category": "DGC", "icon": "$(discard)" }
+      { "command": "dgc.rewind", "title": "DGC: Rewind (code + conversation)", "category": "DGC", "icon": "$(discard)" },
+      { "command": "dgc.settings", "title": "DGC: Settings", "category": "DGC", "icon": "$(settings-gear)" }
     ],
     "menus": {
       "view/title": [
         { "command": "dgc.resume", "when": "view == dgc.chat", "group": "navigation@1" },
-        { "command": "dgc.newSession", "when": "view == dgc.chat", "group": "navigation@2" }
+        { "command": "dgc.newSession", "when": "view == dgc.chat", "group": "navigation@2" },
+        { "command": "dgc.settings", "when": "view == dgc.chat", "group": "navigation@3" }
       ],
       "editor/context": [
         { "command": "dgc.addSelection", "when": "editorHasSelection", "group": "dgc" }
@@ -65,6 +67,51 @@
           "type": "boolean",
           "default": true,
           "description": "For sideloaded (.vsix) installs, check daguccicode.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
+        },
+        "dgc.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Main model host — any OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
+        },
+        "dgc.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key / bearer token for the main host. Blank = unchanged. For local endpoints a dummy value like \"ollama\" is fine."
+        },
+        "dgc.model": {
+          "type": "string",
+          "default": "",
+          "description": "Main model id. Blank = use the CLI's config."
+        },
+        "dgc.subagentModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model used by `task` sub-agents. Blank = inherit the main model."
+        },
+        "dgc.subagentBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Host for `task` sub-agents — run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
+        },
+        "dgc.subagentApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the sub-agent host. Blank = inherit the main key."
+        },
+        "dgc.fallbackModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model retried automatically if the primary model errors. Blank = no fallback."
+        },
+        "dgc.fallbackBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional host for the fallback model. Blank = same host as the main model."
+        },
+        "dgc.contextSize": {
+          "type": "number",
+          "default": 0,
+          "description": "Context window (tokens) used for compaction budgeting. 0 = use the CLI's config."
         }
       }
     },

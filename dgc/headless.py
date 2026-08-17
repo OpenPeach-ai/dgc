@@ -176,6 +176,18 @@ class Backend:
             used = 0
         self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)))
 
+    def _emit_config(self) -> None:
+        c = self.config
+        self.em.emit("config", model=c.model, mode=self.agent.mode,
+                     think=c.get("thinking", "off"), base_url=c.base_url,
+                     project_root=str(c.project_root), search=c.get("search_provider"),
+                     subagent_model=c.get("subagent_model", ""),
+                     subagent_base_url=c.get("subagent_base_url", ""),
+                     subagent_api_key=c.get("subagent_api_key", ""),
+                     fallback_model=c.get("fallback_model", ""),
+                     fallback_base_url=c.get("fallback_base_url", ""),
+                     context_size=c.get("context_size", 32768))
+
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
         items = []
@@ -275,11 +287,15 @@ class Backend:
         elif t == "compact":
             self.agent.maybe_compact(force=True)
             self._emit_context()
+        elif t == "set_config":
+            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
+                       "fallback_model", "fallback_base_url", "context_size", "search_provider")
+            for k, v in (cmd.get("values") or {}).items():
+                if k in allowed:
+                    self.config.set(k, v)
+            self._emit_config()
         elif t in ("get_config", "status"):
-            self.em.emit("config", model=self.config.model, mode=self.agent.mode,
-                         think=self.config.get("thinking", "off"), base_url=self.config.base_url,
-                         project_root=str(self.config.project_root),
-                         search=self.config.get("search_provider"))
+            self._emit_config()
         elif t == "shutdown":
             raise _Shutdown()
         else:

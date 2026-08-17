@@ -266,8 +266,10 @@ HELP = """\
   /permissions         list rules;  /permissions allow|ask|deny Tool(pattern)
   /memory [show]       show memory files
   /memory add TEXT     add to project memory;  /memory add user TEXT → user memory
-  /skills              list discovered skills
+  /skills              list skills (bundled defaults + ~/.dgc/skills + .dgc/skills)
   /skill NAME [ARGS]   invoke a skill directly
+  /agents              list named sub-agents (.dgc/agents/*.md) + sub-agent defaults
+  /subagent …          set the sub-agent model/host: model NAME | host URL [KEY] | clear
   /init                have the agent analyze the project and write DGC.md
   /status              current config
   /compact             compact conversation context now
@@ -488,6 +490,39 @@ class CLI:
             self._resume_cmd()
         elif cmd == "update":
             run_update()
+        elif cmd == "agents":
+            defs = self.agent.agent_defs
+            sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
+            sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"
+            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [cyan]{sm}[/]  ·  host [cyan]{sh}[/]")
+            self.console.print("[dim]/subagent model NAME  ·  /subagent host URL [KEY]  ·  /subagent clear[/dim]")
+            if not defs:
+                self.ui.info("no named agents — add .dgc/agents/<name>.md "
+                             "(frontmatter: model, base_url, api_key, effort)")
+            else:
+                table = Table("agent", "description", "model", "host")
+                for a in defs.values():
+                    table.add_row(a.name, a.description, a.model or "(default)", a.base_url or "(default)")
+                self.console.print(table)
+        elif cmd == "subagent":
+            args = rest.split()
+            if not args:
+                self.ui.info(f"sub-agent model: {cfg.get('subagent_model') or '(inherit main)'}  ·  "
+                             f"host: {cfg.get('subagent_base_url') or '(inherit main)'}")
+            elif args[0] == "model" and len(args) > 1:
+                cfg.set("subagent_model", args[1])
+                self.ui.info(f"sub-agent model → {args[1]}")
+            elif args[0] == "host" and len(args) > 1:
+                cfg.set("subagent_base_url", args[1])
+                if len(args) > 2:
+                    cfg.set("subagent_api_key", args[2])
+                self.ui.info(f"sub-agent host → {args[1]}")
+            elif args[0] == "clear":
+                for k in ("subagent_model", "subagent_base_url", "subagent_api_key"):
+                    cfg.set(k, "")
+                self.ui.info("sub-agent overrides cleared — inherits the main model/host")
+            else:
+                self.ui.error("usage: /subagent [model NAME | host URL [KEY] | clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)

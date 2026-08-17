@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import USER_SKILLS
+from .config import USER_SKILLS, BUILTIN_SKILLS
 
 
 @dataclass
@@ -58,7 +58,8 @@ def _parse_skill(path: Path) -> Skill | None:
 
 def discover_skills(project_root: Path) -> dict[str, Skill]:
     skills: dict[str, Skill] = {}
-    for base in (USER_SKILLS, project_root / ".dgc" / "skills"):
+    # precedence low→high: bundled defaults, then user, then project (later wins on name clash)
+    for base in (BUILTIN_SKILLS, USER_SKILLS, project_root / ".dgc" / "skills"):
         if not base.is_dir():
             continue
         for skill_md in sorted(base.glob("*/SKILL.md")):

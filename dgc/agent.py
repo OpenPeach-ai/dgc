@@ -15,6 +15,7 @@ from .hooks import run_hooks
 from .llm import LLMClient, LLMError, ToolCall
 from .memory import load_memories
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
+from .agents import discover_agents
 from .mcp import MCPManager
 from .skills import discover_skills
 from .tools import TOOL_SCHEMAS, execute
@@ -131,6 +132,8 @@ class Agent:
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager()
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
+        self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
+        self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
         self.reset()
 
     # ------------------------------------------------------------ setup ---
@@ -258,7 +261,7 @@ class Agent:
 
     # ------------------------------------------------------------ thinking ---
     def _effective_thinking(self, user_text: str) -> str:
-        level = self.config.get("thinking", "off")
+        level = self._effort_override or self.config.get("thinking", "off")
         order = {name: i for i, name in enumerate(THINK_LEVELS)}
         lower = user_text.lower()
         for keyword, bumped in THINK_KEYWORDS:
@@ -380,7 +383,8 @@ class Agent:
         if name == "task":
             if self.depth >= 3:
                 return "Max sub-agent depth reached — handle this sub-task directly instead."
-            return self._run_subagent(str(args.get("description", "")), str(args.get("prompt", "")))
+            return self._run_subagent(str(args.get("description", "")), str(args.get("prompt", "")),
+                                      str(args.get("agent", "")))
 
         perms = PermissionEngine(self.mode, self.config.permissions)  # fresh: mode may have just changed
         decision, reason = perms.decide(name, args)
@@ -419,13 +423,33 @@ class Agent:
             self.messages = self.messages[:msg_count]
         return msg_count, n_files
 
-    def _run_subagent(self, description: str, prompt: str) -> str:
-        self.ui.info(f"⟳ sub-task: {description}")
+    def _subagent_client(self, adef):
+        """Resolve a sub-agent's (base_url, api_key, model): per-agent def → global
+        subagent_* config → inherit the main loop. Returns None to reuse the parent client."""
+        cfg = self.config
+        base = (adef.base_url if adef else "") or cfg.get("subagent_base_url") or cfg.base_url
+        key = (adef.api_key if adef else "") or cfg.get("subagent_api_key") or cfg.api_key
+        model = (adef.model if adef else "") or cfg.get("subagent_model") or cfg.model
+        base = base.rstrip("/")
+        if (base, key, model) == (cfg.base_url, cfg.api_key, cfg.model):
+            return None
+        return LLMClient(base, key, model)
+
+    def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
+        adef = self.agent_defs.get(agent_name) if agent_name else None
+        tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
+        self.ui.info(f"⟳ sub-task: {description}{tag}")
         sub_ui = _SubUI(self.ui, description)
         sub = Agent(self.config, sub_ui, mcp=self.mcp)   # fresh context, shared config + MCP servers
         sub.depth = self.depth + 1
+        override = self._subagent_client(adef)
+        if override is not None:
+            sub.client = override                         # its own model/host
+        if adef and adef.effort:
+            sub._effort_override = adef.effort
+        task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
         try:
-            sub.run_turn(prompt)
+            sub.run_turn(task_prompt)
         except Exception as e:
             return f"Sub-task '{description}' failed: {type(e).__name__}: {e}"
         result = sub_ui.result() or "(the sub-agent finished but produced no summary text)"

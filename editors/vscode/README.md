@@ -8,9 +8,11 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 ## What it does
 
 - **Chat panel** in the activity bar — streaming responses, a live *thinking* indicator, collapsible tool cards, and inline diffs.
-- **Native menus** (no JSON editing): pick your **model**, **provider**, **permission mode** (`default` / `acceptEdits` / `plan` / `auto`) and **thinking level** from the header pills or the command palette.
+- **Claude-Code-style composer** — model, permission mode and thinking level live *in* the prompt box: an inline model picker, a mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
+- **In-panel Settings page** (gear icon) — edit provider / host / API key / model, sub-agent model + host + key, fallback model + host, permission mode, thinking level and context size, all live. The provider/host/key/model, sub-agent, fallback and context settings are also exposed as native VS Code settings (Settings UI → **DGC**), which override the CLI config when set.
 - **Permission prompts** inline — allow once / always-allow (saves a rule) / deny.
-- **Your model, your machine** — the extension spawns `dgc serve` locally and talks to it over stdio. Nothing leaves your machine unless you point DGC at a cloud model.
+- **Session resume & rewind** — resuming renders the full transcript; rewind restores both your code and the conversation to an earlier turn.
+- **Your model, your machine** — the extension drives the local `dgc` CLI via `dgc serve` over stdio: same models, same config (`~/.dgc/config.json`), local-first. Nothing leaves your machine unless you point DGC at a cloud model.
 
 ## Commands
 

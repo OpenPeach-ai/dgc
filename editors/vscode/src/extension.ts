@@ -20,6 +20,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
     vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
+    vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
+    }),
   );
 
   checkForUpdates(context).catch(() => { /* never raise into activate */ });

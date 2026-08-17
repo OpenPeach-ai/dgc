@@ -93,9 +93,18 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Memory** — `DGC.md` in your project (and `~/.dgc/DGC.md` personal) load into every session; `#a fact` quick-adds; `/init` writes a project guide.
 - **Web search** — the model gets a `web_search` tool. DuckDuckGo works keyless out of the box; add Brave/Tavily (API key) or SearXNG (self-hosted URL) via `dgc setup` or `/search`.
 - **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one (Claude Code / Codex style).
+- **Checkpoints & rewind** — every turn is checkpointed; `/rewind` restores both your code and the conversation to an earlier turn.
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
-- **Skills** — drop a `SKILL.md` in `.dgc/skills/<name>/`; the model invokes it when the description matches.
-- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `save_memory` · `present_plan` · `propose_options`.
+- **Skills** — ships **10 built-in skills** (`code-review`, `debug`, `deep-research`, `doctor`, `verify`, `batch`, `dataviz`, `loop`, `fewer-permission-prompts`, `providers`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`.
+- **Sub-agents** — the `task` tool hands a self-contained job to a fresh autonomous sub-agent (its own context, the same tools). Sub-agents can run on a *different* local model/host than the main loop — set `subagent_model` / `subagent_base_url` / `subagent_api_key` globally, or define named agents in `.dgc/agents/<name>.md` (frontmatter: name, description, model, base_url, api_key, effort) and pick one with the task tool's `agent` argument. `/agents` lists them; `/subagent` sets the defaults.
+- **MCP servers** — connect stdio MCP servers (configured in `~/.dgc/config.json` → `mcp_servers`) and their tools join DGC's own; `/mcp` lists what's connected.
+- **Lifecycle hooks** — run your own shell commands on `PreToolUse` / `PostToolUse` / `UserPromptSubmit` (config → `hooks`).
+- **Vision input** — attach an image with `@path/to/image.png` for models that can see.
+- **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors.
+- **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`.
+- **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
+- **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
+- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `bash_output` · `bash_kill` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `task` · `save_memory` · `present_plan` · `propose_options`.
 
 ## REPL conveniences
 
@@ -117,6 +126,7 @@ dgc -c / --continue  resume the most recent session in this directory
 dgc --resume         pick a past session to resume
 dgc update           update DGC to the latest version
 dgc serve            headless JSON backend (NDJSON over stdio) for editor extensions
+dgc acp              Agent Client Protocol backend (stdio) for Zed / Neovim / …
 dgc -p "fix the bug in auth.py" --mode auto    one-shot, non-interactive
 dgc --model NAME --base-url URL --api-key KEY   override + persist
 ```

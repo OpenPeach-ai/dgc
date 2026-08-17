@@ -2,9 +2,60 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
-  const stop = $("stop"), queuedEl = $("queued");
+  const queuedEl = $("queued");
   let queuedCount = 0, customCommands = [];
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `⏳ ${queuedCount} queued` : ""; }
+
+  // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
+  const MODES = {
+    default:     { icon: "shield",    desc: "ask before edits & commands" },
+    acceptEdits: { icon: "edit",      desc: "auto-approve file edits" },
+    plan:        { icon: "checklist", desc: "read-only — plan first" },
+    auto:        { icon: "zap",       desc: "approve everything" },
+  };
+  const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
+  const THINK = ["off", "low", "medium", "high"];
+  let curMode = "default", curThink = "off", curModel = "";
+  let lastConfig = null, settingsProviders = [];
+
+  function applyMode(m) {
+    if (!MODES[m]) return;
+    curMode = m;
+    $("cbox").dataset.mode = m; send.dataset.mode = m;
+    $("modeicon").className = "codicon codicon-" + MODES[m].icon; $("modelabel").textContent = m;
+    $("btn-mode").title = MODES[m].desc + " — Shift+Tab to cycle";
+  }
+  function setMode(m) { applyMode(m); vscode.postMessage({ type: "setMode", mode: m }); hideModeMenu(); }
+  function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
+  function hideModeMenu() { $("modemenu").hidden = true; }
+  function toggleModeMenu() {
+    const mm = $("modemenu");
+    if (!mm.hidden) { mm.hidden = true; return; }
+    hideModelMenu();
+    mm.innerHTML =
+      `<div class="mhead"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
+      MODE_ORDER.map((m) => `<div class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></div>`).join("") +
+      `<div class="mdiv"></div><div class="mhead"><span>Thinking</span></div>` +
+      THINK.map((t) => `<div class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb"></span><span>${t}</span></div>`).join("");
+    mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
+    mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { curThink = r.dataset.think; vscode.postMessage({ type: "setThink", level: curThink }); hideModeMenu(); });
+    mm.hidden = false;
+  }
+
+  // in-composer model menu (rendered from the `models` message the extension posts)
+  function hideModelMenu() { $("modelmenu").hidden = true; }
+  function renderModelMenu(ids, current, err) {
+    const mm = $("modelmenu");
+    if (err || !ids.length) {
+      mm.innerHTML = `<div class="mrow" data-connect="1"><span class="mi codicon codicon-plug"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></div>`;
+      mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
+      mm.hidden = false; return;
+    }
+    mm.innerHTML = `<div class="mhead"><span>Model</span></div>` +
+      ids.map((id, i) => `<div class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}"></span><span>${esc(id)}</span></div>`).join("");
+    mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+    mm.hidden = false;
+  }
 
   const GLYPHS = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
   const VERBS = ["Ideating", "Percolating", "Ruminating", "Conjuring", "Noodling", "Marinating",
@@ -97,10 +148,11 @@
       case "context": {
         const pct = ev.size ? Math.min(100, Math.round((ev.used / ev.size) * 100)) : 0;
         $("ctx").textContent = pct + "%";
-        $("pill-ctx").classList.toggle("warn", pct >= 85);
+        $("btn-ctx").classList.toggle("warn", pct >= 85);
         break;
       }
       case "history": renderHistory(ev.items || []); break;
+      case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
       case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
@@ -159,7 +211,7 @@
   }
 
   // ---- composer ----
-  function setSending(on) { streaming = on; stop.style.display = on ? "" : "none"; }
+  function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}"></span>`; send.title = on ? "Stop" : "Send"; }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   function submit() {
     const text = input.value.trim();
@@ -227,6 +279,7 @@
       if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choosePop(popIdx); return; }
       if (e.key === "Escape") { e.preventDefault(); hidePop(); return; }
     }
+    if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); cycleMode(); return; }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
     else if (e.key === "Escape" && streaming) doStop();
   });
@@ -242,12 +295,63 @@
       }
     }
   });
-  send.onclick = submit;
-  stop.onclick = doStop;
-  $("pill-model").onclick = () => vscode.postMessage({ type: "pickModel" });
-  $("pill-mode").onclick = () => vscode.postMessage({ type: "pickMode" });
-  $("pill-think").onclick = () => vscode.postMessage({ type: "pickThink" });
-  $("pill-ctx").onclick = () => vscode.postMessage({ type: "compact" });
+  send.onclick = () => { if (streaming) doStop(); else submit(); };
+  $("btn-ctx").onclick = () => vscode.postMessage({ type: "compact" });
+  $("btn-mode").onclick = (e) => { e.stopPropagation(); toggleModeMenu(); };
+  $("btn-add").onclick = () => {                       // insert @ at the caret → file popover
+    input.focus();
+    const p = input.selectionStart;
+    input.value = input.value.slice(0, p) + "@" + input.value.slice(p);
+    input.selectionStart = input.selectionEnd = p + 1;
+    onInput();
+  };
+  $("btn-cmd").onclick = () => { input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput(); };
+  $("btn-model").onclick = (e) => {
+    e.stopPropagation();
+    const mm = $("modelmenu");
+    if (!mm.hidden) { mm.hidden = true; return; }
+    mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
+    mm.hidden = false; hideModeMenu();
+    vscode.postMessage({ type: "listModels" });
+  };
+  document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
+    if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
+    if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
+  });
+
+  // ---- settings page ----
+  const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
+    "subagent_api_key", "fallback_model", "fallback_base_url", "mode", "think", "context_size"];
+  function fillSettings(cfg) {
+    const map = {
+      base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
+      subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
+      subagent_api_key: cfg.subagent_api_key, fallback_model: cfg.fallback_model,
+      fallback_base_url: cfg.fallback_base_url, context_size: cfg.context_size,
+    };
+    for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
+  }
+  function openSettings(providers, models) {
+    settingsProviders = providers || [];
+    $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
+      settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
+    $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
+    if (lastConfig) fillSettings(lastConfig);
+    $("settings").hidden = false;
+  }
+  function collectSettings() {
+    const v = {};
+    SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
+    return v;
+  }
+  $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
+  $("set-close").onclick = () => { $("settings").hidden = true; };
+  $("set-cancel").onclick = () => { $("settings").hidden = true; };
+  $("set-save").onclick = () => { vscode.postMessage({ type: "saveSettings", values: collectSettings() }); $("settings").hidden = true; };
+  $("s-provider").onchange = () => {
+    const p = settingsProviders.find((x) => x.id === $("s-provider").value);
+    if (p) { $("s-base_url").value = p.url; if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama"; }
+  };
 
   function renderHistory(items) {
     log.innerHTML = ""; turn = null;
@@ -270,7 +374,9 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
-    else if (msg.type === "state") { $("model").textContent = msg.state.model || "—"; $("mode").textContent = msg.state.mode; $("think").textContent = msg.state.think; $("pill-mode").className = "pill " + (msg.state.mode === "auto" ? "auto" : msg.state.mode === "plan" ? "plan" : ""); }
+    else if (msg.type === "state") { curModel = msg.state.model || ""; curThink = msg.state.think || "off"; $("modelname").textContent = curModel || "dgc"; $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change"; applyMode(msg.state.mode || "default"); }
+    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
+    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
     else if (msg.type === "cleared") { log.innerHTML = ""; turn = null; setSending(false); }
     else if (msg.type === "attach") { attachments.push({ label: msg.label, text: msg.text }); renderAtts(); }
     else if (msg.type === "files") { files = msg.files || []; if (popMode === "@") onInput(); }
