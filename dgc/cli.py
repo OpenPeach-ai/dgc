@@ -24,7 +24,9 @@ from . import __version__, memory as memory_mod, sessions as sessions_mod
 from .agent import Agent
 from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
+from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
+from .style import BRAND, BRAND_MAGENTA, DIM, section
 from .tools import TOOL_SCHEMAS
 
 VERSION_URL = "https://daguccicode.com/version.json"
@@ -136,7 +138,7 @@ class UI:
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict) -> None:
         summary = self._arg_summary(name, args)
-        self.console.print(f"\n[bold cyan]⏺ {name}[/bold cyan] [dim]{summary}[/dim]")
+        self.console.print(f"\n[bold {BRAND}]⏺ {name}[/] [{DIM}]{summary}[/]", highlight=False)
 
     def tool_result(self, name: str, out: str) -> None:
         if "\n--- " in out or out.startswith("---"):
@@ -145,13 +147,14 @@ class UI:
                 self.console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
                 return
         lines = out.splitlines()
-        preview = "\n".join(lines[:12])
+        for ln in lines[:12]:                                # flat, 2-space indented (no box)
+            self.console.print("  " + ln, style=DIM, markup=False, highlight=False, soft_wrap=True)
         if len(lines) > 12:
-            preview += f"\n[dim]… ({len(lines) - 12} more lines)[/dim]"
-        self.console.print(Panel(preview, border_style="dim", expand=False))
+            self.console.print(f"  … ({len(lines) - 12} more lines)", style=DIM,
+                               markup=False, highlight=False)
 
     def tool_denied(self, name: str, args: dict, reason: str) -> None:
-        self.console.print(f"[bold red]✗ {name} denied[/bold red] [dim]{reason}[/dim]")
+        self.console.print(f"[bold red]✗ {name} denied[/bold red] [{DIM}]{reason}[/]", highlight=False)
 
     @staticmethod
     def _arg_summary(name: str, args: dict) -> str:
@@ -165,76 +168,64 @@ class UI:
     def approve(self, name: str, args: dict) -> str:
         """Return 'once' | 'always' | 'no'."""
         self._yield_stdin()
-        self.console.print(Panel(
-            f"[bold]{name}[/bold]\n{self._arg_summary(name, args)}",
-            title="[yellow]permission requested[/yellow]", border_style="yellow", expand=False))
+        section(self.console, "permission requested", name)
         if name == "bash":
             self.console.print(Syntax(str(args.get("command", "")), "bash", theme="ansi_dark"))
+        else:
+            summary = self._arg_summary(name, args)
+            if summary:
+                self.console.print(f"  [{DIM}]{summary}[/]", highlight=False)
         rule = rule_for(name, args)
-        self.console.print("  [bold]1[/bold]) allow once   [bold]2[/bold]) always allow "
-                           f"[dim](adds rule {rule})[/dim]   [bold]3[/bold]) deny")
-        while True:
-            choice = input("  › ").strip().lower()
-            if choice in ("1", "y", "yes", ""):
-                return "once"
-            if choice in ("2", "a", "always"):
-                return "always"
-            if choice in ("3", "n", "no"):
-                return "no"
+        idx = menu_select("Allow this?",
+                          ["allow once", "always allow", "deny"],
+                          ["just this time", f"add rule {rule}", "block it"])
+        return {0: "once", 1: "always"}.get(idx, "no")   # None (esc) or 2 → deny
 
     def present_plan(self, plan: str):
         """Return target mode string on approval, or None to keep planning."""
         self._yield_stdin()
-        self.console.print(Panel(Markdown(plan or "(empty plan)"),
-                                 title="[bold yellow]📋 proposed plan[/bold yellow]",
-                                 border_style="yellow"))
-        self.console.print("  [bold]1[/bold]) approve, build in [red]full-auto[/red]   "
-                           "[bold]2[/bold]) approve, build with [green]acceptEdits[/green]   "
-                           "[bold]3[/bold]) approve, build in [cyan]default[/cyan]   "
-                           "[bold]4[/bold]) reject, keep planning")
-        while True:
-            choice = input("  › ").strip()
-            if choice == "1":
-                return "auto"
-            if choice == "2":
-                return "acceptEdits"
-            if choice in ("3", ""):
-                return "default"
-            if choice == "4":
-                feedback = input("  feedback for the plan (optional): ").strip()
-                if feedback:
-                    self.console.print("[dim]feedback noted — the agent will see your denial[/dim]")
-                return None
+        section(self.console, "📋 proposed plan")
+        self.console.print(Markdown(plan or "(empty plan)"))
+        idx = menu_select("Approve this plan?",
+                          ["build in full-auto", "build with acceptEdits", "build in default",
+                           "keep planning"],
+                          ["approve everything", "auto-approve edits", "ask per action",
+                           "reject & refine"])
+        target = {0: "auto", 1: "acceptEdits", 2: "default"}.get(idx)
+        if target:
+            return target
+        feedback = input("  feedback for the plan (optional): ").strip()
+        if feedback:
+            self.console.print(f"  [{DIM}]feedback noted — the agent will see your denial[/]")
+        return None
 
     def propose_options(self, question: str, options: list[str]) -> str:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
         self._yield_stdin()
-        self.console.print(Panel(question or "(choose one)", title="[bold cyan]▸ choose[/bold cyan]",
-                                 border_style="cyan", expand=False))
-        for i, o in enumerate(options, 1):
-            self.console.print(f"  [bold]{i}[/bold]) {o}")
-        self.console.print("  [dim](number, or type your own answer)[/dim]")
-        while True:
+        idx = menu_select(question or "Choose one",
+                          list(options) + ["something else…"],
+                          [""] * len(options) + ["type your own answer"])
+        if idx is None:
+            return options[0]
+        if idx == len(options):                          # the "something else…" row
             try:
                 raw = input("  › ").strip()
             except EOFError:
                 return options[0]
-            if not raw:
-                return options[0]
-            if raw.isdigit() and 1 <= int(raw) <= len(options):
-                return options[int(raw) - 1]
-            return raw
+            return raw or options[0]
+        return options[idx]
 
     # ---------------------------------------------------------------- misc ---
     def on_todo(self, todos: list) -> None:
         if not todos:
             return
-        marks = {"done": "[green]☑[/green]", "in_progress": "[yellow]◐[/yellow]", "pending": "[dim]☐[/dim]"}
-        self.console.print(Panel("\n".join(f"{marks.get(t['status'], '☐')} {t['content']}" for t in todos),
-                                 title="todos", border_style="dim", expand=False))
+        marks = {"done": "[green]☑[/green]", "in_progress": f"[{BRAND}]◐[/]", "pending": f"[{DIM}]☐[/]"}
+        section(self.console, "todos")
+        for t in todos:
+            self.console.print(f"  {marks.get(t['status'], '☐')} {t['content']}", highlight=False)
 
     def info(self, msg: str) -> None:
-        self.console.print(f"[dim]· {msg}[/dim]")
+        self.console.print(f"  [{DIM}]· {msg}[/]", highlight=False)
 
     def error(self, msg: str) -> None:
         self.console.print(f"[bold red]error:[/bold red] {msg}")
@@ -284,6 +275,31 @@ HELP = """\
 """
 
 
+def render_help(console) -> None:
+    """Print HELP with brand-tinted command tokens + dim descriptions (one content source).
+
+    Command tokens contain literal brackets (/memory [show], /think [LEVEL]) that would
+    collide with rich markup — build styled Text so nothing is parsed as a tag.
+    """
+    from rich.text import Text
+    for line in HELP.splitlines():
+        if not line.strip():
+            console.print()
+        elif line.startswith("[bold]"):
+            console.print(line, highlight=False)                       # section header (white)
+        elif line[:2] == "  " and line[2:3] not in (" ", "(", ""):
+            m = re.match(r"^(\S.*?)(\s{2,})(.*)$", line[2:])            # command  ·  description
+            t = Text("  ")
+            if m:
+                cmd, gap, desc = m.groups()
+                t.append(cmd, style=BRAND); t.append(gap); t.append(desc, style=DIM)
+            else:
+                t.append(line[2:], style=BRAND)
+            console.print(t)
+        else:
+            console.print(Text(line, style=DIM))                       # continuation / footer hint
+
+
 class CLI:
     def __init__(self, config: Config):
         self.config = config
@@ -302,35 +318,47 @@ class CLI:
     def _logo(self) -> None:
         c = self.console
         c.print()
+        if (c.size.width or 80) < 34:                        # minimal: no art, one dim brand line
+            cfg = self.config
+            c.print(f"  [bold {BRAND_MAGENTA}]DGC[/] [{DIM}]v{__version__} · {cfg.model} · "
+                    f"{cfg.data.get('mode', 'default')}[/]", highlight=False)
+            return
         for i in range(6):
             row = f"{self._LOGO_D[i]} {self._LOGO_G[i]} {self._LOGO_C[i]}"
             c.print("  " + row, style=f"bold {self._LOGO_COLORS[i]}", markup=False, highlight=False)
-        c.print(f"  [bold #E84CC6]DGC[/]  [dim]v{__version__} · a coding-agent CLI for the models you run[/]", highlight=False)
-        c.print("  [dim]Built by Mohit Kalra[/]\n", highlight=False)
+        c.print(f"  [bold {BRAND_MAGENTA}]DGC[/]  [{DIM}]v{__version__} · a coding-agent CLI "
+                f"for the models you run[/]", highlight=False)
+        c.print(f"  [{DIM}]Built by Mohit Kalra[/]\n", highlight=False)
 
     def banner(self) -> None:
         c = self.console
         cfg = self.config
         mode, think = cfg.data.get("mode", "default"), cfg.data.get("thinking", "off")
         self._logo()
-        c.print(f"  endpoint  {cfg.base_url}")
-        c.print(f"  model     {cfg.model}")
-        c.print(f"  mode      [{MODE_COLOR.get(mode, 'white')}]{mode}[/]  ({MODE_DESCRIPTIONS.get(mode, '')})")
-        c.print(f"  thinking  {think}")
-        c.print(f"  project   {cfg.project_root}")
+        if (c.size.width or 80) < 34:                        # minimal: skip the config block
+            return
+        def row(label, value):                               # dim padded label + value (peachd statusLine)
+            c.print(f"  [{DIM}]{label:<8}[/]  {value}", highlight=False)
+        row("endpoint", cfg.base_url)
+        row("model", cfg.model)
+        c.print(f"  [{DIM}]{'mode':<8}[/]  [{MODE_COLOR.get(mode, 'white')}]{mode}[/]  "
+                f"[{DIM}]· {MODE_DESCRIPTIONS.get(mode, '')}[/]", highlight=False)
+        row("thinking", think)
+        row("project", cfg.project_root)
         if self.agent.skills:
-            c.print(f"  skills    {', '.join(self.agent.skills)}")
+            row("skills", ", ".join(self.agent.skills))
         proj_mem, user_mem = memory_mod.load_memories(cfg.project_root)
         loaded = [n for n, m in (("DGC.md", proj_mem), ("user DGC.md", user_mem)) if m]
         if loaded:
-            c.print(f"  memory    loaded: {', '.join(loaded)}")
-        c.print(f"  search    {cfg.get('search_provider', 'duckduckgo')}")
+            row("memory", "loaded: " + ", ".join(loaded))
+        row("search", cfg.get("search_provider", "duckduckgo"))
         upd = cached_update()
         if upd:
-            c.print(f"  [bold #E84CC6]⬆ update available: v{upd}[/]  [dim]— run [bold]dgc update[/bold][/]", highlight=False)
+            c.print(f"  [bold {BRAND_MAGENTA}]⬆ update available: v{upd}[/]  "
+                    f"[{DIM}]— run [bold]dgc update[/bold][/]", highlight=False)
         if mode == "auto":
             auto_warning(c)
-        c.print("[dim]type /help for commands, /exit to quit[/dim]\n")
+        c.print(f"  [{DIM}]type [bold]/help[/bold] for commands, [bold]/exit[/bold] to quit[/]\n")
 
     # ------------------------------------------------------- rule handling ---
     def _add_rule(self, rule_text: str) -> None:
@@ -353,7 +381,7 @@ class CLI:
         if cmd in ("exit", "quit", "q"):
             raise EOFError
         if cmd == "help":
-            self.console.print(HELP)
+            render_help(self.console)
         elif cmd == "connect":
             args = rest.split()
             if not args:
@@ -854,7 +882,7 @@ def run_help() -> None:
     c.print("  dgc --resume            pick a past session to resume")
     c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc --model N --base-url URL --api-key KEY   set + persist a model\n")
-    c.print(HELP)
+    render_help(c)
 
 
 def run_update() -> None:
