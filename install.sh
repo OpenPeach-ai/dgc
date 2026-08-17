@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# DGC installer — curl -fsSL https://daguccicode.com/install.sh | bash
+# DGC installer — curl -fsSL https://vibedgc.com/install.sh | bash
 # Downloads DGC, sets up a private virtualenv, and puts `dgc` on your PATH.
 # Nothing here needs root. Override the source with DGC_BASE_URL, the target with DGC_DIR.
 set -euo pipefail
 
-BASE="${DGC_BASE_URL:-https://daguccicode.com}"
+BASE="${DGC_BASE_URL:-https://vibedgc.com}"
 DEST="${DGC_DIR:-$HOME/dgc}"
 BIN="${DGC_BIN:-$HOME/.local/bin}"
 

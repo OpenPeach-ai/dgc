@@ -30,7 +30,7 @@ from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
 from .style import ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section
 from .tools import TOOL_SCHEMAS
 
-VERSION_URL = "https://daguccicode.com/version.json"
+VERSION_URL = "https://vibedgc.com/version.json"
 UPDATE_CACHE = USER_HOME / "update-check.json"
 
 
@@ -972,15 +972,15 @@ def run_help() -> None:
 
 
 def run_update() -> None:
-    """`dgc update` — reinstall the latest DGC from daguccicode.com."""
+    """`dgc update` — reinstall the latest DGC from vibedgc.com."""
     c = Console()
     c.print("[bold]DGC update[/bold] — fetching the latest…\n")
     try:
-        subprocess.run("curl -fsSL https://daguccicode.com/install.sh | bash",
+        subprocess.run("curl -fsSL https://vibedgc.com/install.sh | bash",
                        shell=True, check=True, executable="/bin/bash")
     except subprocess.CalledProcessError as e:
         c.print(f"\n[bold red]update failed[/bold red] (exit {e.returncode}). "
-                "Run manually: curl -fsSL https://daguccicode.com/install.sh | bash")
+                "Run manually: curl -fsSL https://vibedgc.com/install.sh | bash")
         return
     c.print("\n[bold green]updated[/bold green] — start [bold]dgc[/bold] again.")
 

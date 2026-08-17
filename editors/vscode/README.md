@@ -3,7 +3,7 @@
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible endpoint. Your code stays on your machine.
 
 > Requires the DGC CLI **v0.4.0+** on your PATH. Install it with
-> `curl -fsSL https://daguccicode.com/install.sh | bash`, then `dgc setup`.
+> `curl -fsSL https://vibedgc.com/install.sh | bash`, then `dgc setup`.
 
 ## What it does
 
@@ -25,4 +25,4 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 - `dgc.command` — path to the `dgc` executable (default `dgc`).
 
-Built by Mohit Kalra · [daguccicode.com](https://daguccicode.com) · MIT.
+Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · MIT.

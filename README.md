@@ -18,7 +18,7 @@ Built by Mohit Kalra.
 
 DGC is an interactive coding agent that lives in your terminal — in the spirit of Claude Code, Codex CLI and Kimi Code, but pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
 
-![DGC landing — daguccicode.com](docs/screenshot.png)
+![DGC landing — vibedgc.com](docs/screenshot.png)
 
 Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Your code and your prompts never leave your machine unless the model you pick is a cloud one.
 
@@ -27,7 +27,7 @@ Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Yo
 One line — nothing needs root:
 
 ```bash
-curl -fsSL https://daguccicode.com/install.sh | bash
+curl -fsSL https://vibedgc.com/install.sh | bash
 ```
 
 Then point it at a model and go:
@@ -144,7 +144,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 Paste this to your Claude Code / Codex / any coding agent:
 
-> Install DGC for me: run `curl -fsSL https://daguccicode.com/install.sh | bash`, then run `dgc setup` and connect it to my local Ollama (or ask me which provider). Verify with `dgc doctor`.
+> Install DGC for me: run `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup` and connect it to my local Ollama (or ask me which provider). Verify with `dgc doctor`.
 
 ## Configuration
 

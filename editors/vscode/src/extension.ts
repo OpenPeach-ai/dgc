@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void { /* provider disposal handled by subscriptions */ }
 
 // --- self-hosted update nudge (mirrors the CLI's version.json pattern) --------
-const MANIFEST = "https://daguccicode.com/vscode/version.json";
+const MANIFEST = "https://vibedgc.com/vscode/version.json";
 const DAY = 86_400_000;
 
 function newer(a: string, b: string): boolean {
@@ -73,7 +73,7 @@ async function checkForUpdates(ctx: vscode.ExtensionContext): Promise<void> {
     `DGC ${m.version} is available (you have ${current}).`,
     "Get it", "Skip this version");
   if (pick === "Get it") {
-    vscode.env.openExternal(vscode.Uri.parse(m.page || "https://daguccicode.com/vscode/"));
+    vscode.env.openExternal(vscode.Uri.parse(m.page || "https://vibedgc.com/vscode/"));
   } else if (pick === "Skip this version") {
     ctx.globalState.update("dgc.skip", m.version);
   }

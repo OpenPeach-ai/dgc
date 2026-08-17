@@ -11,7 +11,7 @@
   "keywords": ["ai", "coding agent", "llm", "ollama", "local llm", "openai compatible", "cursor"],
   "repository": { "type": "git", "url": "https://github.com/OpenPeach-ai/dgc.git", "directory": "editors/vscode" },
   "bugs": { "url": "https://github.com/OpenPeach-ai/dgc/issues" },
-  "homepage": "https://daguccicode.com",
+  "homepage": "https://vibedgc.com",
   "galleryBanner": { "color": "#0a0a0f", "theme": "dark" },
   "main": "./dist/extension.js",
   "activationEvents": ["onView:dgc.chat"],
@@ -66,7 +66,7 @@
         "dgc.checkForUpdates": {
           "type": "boolean",
           "default": true,
-          "description": "For sideloaded (.vsix) installs, check daguccicode.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
+          "description": "For sideloaded (.vsix) installs, check vibedgc.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
         },
         "dgc.baseUrl": {
           "type": "string",
@@ -121,7 +121,7 @@
         "title": "Get Started with DGC",
         "description": "Run a coding agent on your own models, in your editor.",
         "steps": [
-          { "id": "cli", "title": "Install the DGC CLI", "description": "DGC drives the `dgc` CLI (v0.4.0+). Install it with `curl -fsSL https://daguccicode.com/install.sh | bash`, then run `dgc setup`.", "media": { "markdown": "media/walkthrough.md" } },
+          { "id": "cli", "title": "Install the DGC CLI", "description": "DGC drives the `dgc` CLI (v0.4.0+). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.", "media": { "markdown": "media/walkthrough.md" } },
           { "id": "open", "title": "Open the DGC panel", "description": "Click the DGC icon in the activity bar, or press Ctrl/Cmd+Escape.", "media": { "markdown": "media/walkthrough.md" }, "completionEvents": ["onView:dgc.chat"] },
           { "id": "model", "title": "Pick your model", "description": "Click the model pill or run **DGC: Select Model** to choose from your endpoint.", "media": { "markdown": "media/walkthrough.md" } }
         ]
