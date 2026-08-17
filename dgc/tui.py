@@ -25,7 +25,7 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from rich.console import Console
 
-from . import glyphs, logo as logo_mod, render as render_mod, style as style_mod
+from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
 from .agent import Agent
 
 
@@ -97,14 +97,42 @@ class TUI:
         from rich.markdown import Markdown
         return Markdown(text)
 
-    # ---- header (animated logo when empty, slim when busy) ----
+    # ---- header (Grok-style welcome card when empty, slim line when busy) ----
     def _header(self):
-        if self.blocks or self._buf:        # conversation started → slim
-            th = style_mod.theme()
-            return ANSI(self._rich(f"[{th.faint}]{glyphs.CURSOR}[/] "
-                                   f"[bold {th.accent}]dgc[/] [{th.faint}]· {self.config.model}[/]"))
+        th = style_mod.theme()
+        if self.blocks or self._buf:        # conversation started → slim line
+            return ANSI(self._rich(f"[bold {th.accent}]Vibe DGC[/] "
+                                   f"[{th.faint}]· {self.config.model} · {self.agent.mode}[/]"))
+        return ANSI(self._welcome_card())
+
+    def _welcome_card(self) -> str:
+        from rich import box
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+        th = style_mod.theme()
         secs = time.monotonic() - self._start
-        return ANSI(logo_mod.frame_ansi(secs, self._width))
+        logo = logo_mod.shimmer_text(secs)                 # the shimmering DGC mark
+
+        right = Table.grid(expand=True, padding=(0, 2))
+        right.add_column(ratio=1)
+        right.add_column(justify="right")
+        title = Text("Vibe DGC", style="bold #FFFFFF")
+        title.append(f"  {__version__}", style=th.faint)
+        right.add_row(title, "")
+        right.add_row("", "")
+        right.add_row(Text("a coding agent for the models you run", style=th.muted), "")
+        right.add_row("", "")
+        for lbl, key in (("New session", "Ctrl+N"), ("Switch mode", "Shift+Tab"),
+                         ("Commands", "type /help"), ("Quit", "Ctrl+Q")):
+            right.add_row(Text(lbl, style="bold"), Text(key, style=th.faint))
+
+        grid = Table.grid(padding=(0, 4))
+        grid.add_column()
+        grid.add_column(ratio=1)
+        grid.add_row(logo, right)
+        panel = Panel(grid, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 3), expand=True)
+        return self._rich(panel)
 
     # ---- status line ----
     def _status(self):
@@ -141,6 +169,17 @@ class TUI:
         w = max(4, self._width)
         c = style_mod.ansi_fg(self._border_color())
         return ANSI(f"{c}{left}{'─' * (w - 2)}{right}{style_mod.ANSI_RESET}")
+
+    def _bottom_border(self):
+        """Bottom composer border with `model · mode` embedded at the right (Grok style)."""
+        w = max(10, self._width)
+        th = style_mod.theme()
+        c, dim, rst = style_mod.ansi_fg(self._border_color()), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
+        info = f" {self.config.model} {glyphs.MIDDOT} {self.agent.mode} "
+        n = w - 3 - len(info)
+        if n < 2:
+            return ANSI(f"{c}╰{'─' * (w - 2)}╯{rst}")
+        return ANSI(f"{c}╰{'─' * n}{rst}{dim}{info}{c}─╯{rst}")
 
     # ------------------------------------------------------ AgentUI callbacks ---
     def on_text(self, chunk: str) -> None:
@@ -267,8 +306,6 @@ class TUI:
         composer = Window(BufferControl(self.input_buf, focus_on_click=True),
                           get_line_prefix=self._line_prefix, wrap_lines=True,
                           height=self._composer_height, style="class:composer")
-        info = Window(FormattedTextControl(self._info), height=1)
-
         side = lambda: f"fg:{self._border_color()}"          # noqa: E731
         composer_box = HSplit([
             Window(FormattedTextControl(lambda: self._hborder("╭", "╮")), height=1),
@@ -277,21 +314,20 @@ class TUI:
                 composer,
                 Window(width=1, char="│", style=side),
             ]),
-            Window(FormattedTextControl(lambda: self._hborder("╰", "╯")), height=1),
+            Window(FormattedTextControl(self._bottom_border), height=1),
         ])
         root = HSplit([
             header,
             transcript,
             status,
             composer_box,
-            info,
         ])
         self.app = Application(layout=Layout(root, focused_element=composer),
                                key_bindings=self._keys(), full_screen=True, mouse_support=False,
                                style=self._pt_style(), refresh_interval=0.08)
 
     def _header_height(self) -> int:
-        return 1 if (self.blocks or self._buf) else 7
+        return 1 if (self.blocks or self._buf) else 13
 
     def _composer_height(self) -> int:
         return min(max(1, self.input_buf.text.count("\n") + 1), 8)
@@ -349,11 +385,23 @@ class TUI:
 
         @kb.add("c-c")
         @kb.add("c-d")
+        @kb.add("c-q")
         def _(ev):
             if self._turn.is_set():
                 self._cancel.set()
             else:
                 ev.app.exit()
+
+        @kb.add("c-n")
+        def _(ev):
+            if self._turn.is_set():
+                return
+            self.agent.reset()
+            self.blocks.clear()
+            self._buf = ""
+            from . import sessions as _sess
+            self.agent.session_file = _sess.new_path(self.config.project_root)
+            self._invalidate()
 
         @kb.add("s-tab")
         def _(ev):

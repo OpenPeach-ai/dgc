@@ -10,16 +10,18 @@ import time
 
 from . import style
 
-# "DGC" as dotted braille art (Grok-style), generated from a bold render
+# "DGC" as a block-shadow wordmark (figlet ansi_shadow) — the chosen mark
 LOGO = [
-    "  ⢰⣶⡶⠶⣶⣤⡀⠀⠀⢀⣤⣶⠶⠶⣶⠄⠀⢀⣴⡶⠶⠶⡦",
-    "  ⢸⣿⡇⠀⠈⢿⣿⡀⢰⣿⡟⠀⠀⠀⠀⠀⢰⣿⡟⠀⠀⠀⠀",
-    "  ⢸⣿⡇⠀⠀⣼⣿⠃⢸⣿⣇⠀⠘⢻⣿⡇⢸⣿⣇⠀⠀⠀⠀",
-    "  ⢸⣿⣧⣤⣾⠿⠋⠀⠀⠙⢿⣦⣤⣼⡿⠇⠀⠙⢿⣦⣤⣤⡦",
+    "  ██████╗  ██████╗  ██████╗",
+    "  ██╔══██╗██╔════╝ ██╔════╝",
+    "  ██║  ██║██║  ███╗██║",
+    "  ██║  ██║██║   ██║██║",
+    "  ██████╔╝╚██████╔╝╚██████╗",
+    "  ╚═════╝  ╚═════╝  ╚═════╝",
 ]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
-_BLANK = (" ", "⠀")     # ASCII space + braille blank — both invisible, skip in the shimmer
+_BLANK = (" ", "⠀")     # skip blanks in the shimmer
 
 # shimmer constants (Grok's logo.rs): a raised-cosine band sweeps bottom-left→top-right
 _BAND = 0.42          # half-width of the glint band (diagonal units)
@@ -40,11 +42,13 @@ def _shine_opacity(diag: float, secs: float) -> float:
     return 0.0 if val < 0 else 1.0 if val > 1 else val
 
 
-def _frame(secs: float):
+def _frame(secs: float, indent: bool = True):
     from rich.text import Text
     hi = style.theme().accent_bright        # lavender glint
     t = Text()
     for r, line in enumerate(LOGO):
+        if not indent:
+            line = line.lstrip()
         for c, ch in enumerate(line):
             if ch in _BLANK:
                 t.append(" ")
@@ -53,6 +57,11 @@ def _frame(secs: float):
             t.append(ch, style="bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs)))
         t.append("\n")
     return t
+
+
+def shimmer_text(secs: float, indent: bool = False):
+    """The wordmark as a shimmering rich Text (for embedding in the welcome card)."""
+    return _frame(secs, indent=indent)
 
 
 def frame_ansi(secs: float, width: int = 80) -> str:
