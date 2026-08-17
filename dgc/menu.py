@@ -11,10 +11,12 @@ import select as _select
 import shutil
 import sys
 
-CYAN = "\x1b[96m"
-DIM = "\x1b[2m"
-BOLD = "\x1b[1m"
-RESET = "\x1b[0m"
+from .style import ANSI_BRAND, ANSI_DIM, ANSI_BOLD, ANSI_RESET
+
+CYAN = ANSI_BRAND    # brand cyan — the ❯ marker + selected label (was generic \x1b[96m)
+DIM = ANSI_DIM       # explicit grey 245 — the muted secondary (was \x1b[2m, which washes out)
+BOLD = ANSI_BOLD
+RESET = ANSI_RESET
 
 
 def _vtrunc(s: str, width: int) -> str:
