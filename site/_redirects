@@ -1,0 +1,5 @@
+# old domains → vibedgc.com (301, path + query preserved). vibedgc.com falls through and serves.
+https://daguccicode.com/* https://vibedgc.com/:splat 301
+https://www.daguccicode.com/* https://vibedgc.com/:splat 301
+https://dagucchicode.com/* https://vibedgc.com/:splat 301
+https://www.dagucchicode.com/* https://vibedgc.com/:splat 301
