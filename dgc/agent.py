@@ -156,7 +156,7 @@ class Agent:
     def set_mode(self, mode: str) -> None:
         if mode == "plan" and self.mode != "plan":
             self.plan_return_mode = self.mode
-        self.config.data["mode"] = mode  # session-only; not persisted
+        self.config.set("mode", mode)    # persisted — restarts keep your last mode
         self._refresh_system()
 
     def exit_plan(self, to_mode: str | None = None) -> str:

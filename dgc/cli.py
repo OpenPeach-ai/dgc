@@ -105,6 +105,7 @@ class UI:
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
         self._live = None       # set by CLI during a live turn: the key-reader that owns stdin
         self._work_stop = None  # set while a "working…" spinner is running
+        self._tool_count = 0    # tools used in the current turn (for the done marker)
 
     # --------------------------------------------------- working indicator ---
     def start_working(self, label: str = "working") -> None:
@@ -135,6 +136,21 @@ class UI:
                 sys.stdout.write("\r\x1b[K")   # wipe the spinner line before real output
                 sys.stdout.flush()
         self._work_stop = None
+
+    def turn_complete(self, elapsed: float, cancelled: bool = False) -> None:
+        """A clear end-of-turn delimiter so the user knows the model is done and it's
+        their turn — not still working, not waiting on a follow-up."""
+        self.stop_working()
+        if self._streamed:                       # close off any mid-stream line
+            self.console.print()
+            self._streamed = False
+        if not sys.stdout.isatty():              # scripts / pipes don't want a UX marker
+            return
+        verb = "stopped" if cancelled else "done"
+        parts = [f"{elapsed:.0f}s"]
+        if self._tool_count:
+            parts.append(f"{self._tool_count} tool" + ("" if self._tool_count == 1 else "s"))
+        self.console.print(f"  [{DIM}]· {verb} · {' · '.join(parts)}[/]", highlight=False)
 
     def _yield_stdin(self) -> None:
         """If a live key-reader owns stdin during this turn, ask it to release before we input()."""
@@ -172,6 +188,7 @@ class UI:
     # ------------------------------------------------------ tool rendering ---
     def tool_call(self, name: str, args: dict) -> None:
         self.stop_working()
+        self._tool_count += 1
         summary = self._arg_summary(name, args)
         self.console.print(f"\n[bold {BRAND}]⏺ {name}[/] [{DIM}]{summary}[/]", highlight=False)
 
@@ -505,7 +522,7 @@ class CLI:
             if rest not in THINK_LEVELS:
                 self.ui.error(f"unknown level {rest!r} — choose from {', '.join(THINK_LEVELS)}")
             else:
-                cfg.data["thinking"] = rest
+                cfg.set("thinking", rest)   # persisted across restarts
                 self.ui.info(f"thinking → {rest}")
         elif cmd == "permissions":
             self._permissions_cmd(rest)
@@ -759,6 +776,8 @@ class CLI:
         Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
         The reader cleanly hands stdin back when a tool needs an approval prompt."""
         self.agent.cancelled.clear()
+        self.ui._tool_count = 0
+        t0 = time.time()
         self.ui.start_working()          # live spinner until the first token / tool
         done = threading.Event()
 
@@ -775,6 +794,7 @@ class CLI:
 
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             done.wait()
+            self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set())
             return
 
         import select as _sel
@@ -822,6 +842,7 @@ class CLI:
             live["released"].set()               # let a waiting approval proceed
             self.ui._live = None
         done.wait()
+        self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set())
 
 
 def run_doctor(config: Config) -> None:

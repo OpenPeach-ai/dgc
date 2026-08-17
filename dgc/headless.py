@@ -252,7 +252,7 @@ class Backend:
             self.agent.refresh_client()
             self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url)
         elif t == "set_think":
-            self.config.data["thinking"] = cmd.get("level", "off")
+            self.config.set("thinking", cmd.get("level", "off"))   # persisted
             self.em.emit("think_changed", think=self.config.get("thinking", "off"))
 
         elif t == "new_session":

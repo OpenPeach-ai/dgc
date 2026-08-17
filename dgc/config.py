@@ -63,7 +63,11 @@ def find_project_root(start: Path | None = None) -> Path:
     """Walk up from `start` looking for a project marker (.git, DGC.md, .dgc)."""
     p = Path(start or os.getcwd()).resolve()
     for d in (p, *p.parents):
-        if (d / ".git").exists() or (d / "DGC.md").exists() or (d / ".dgc").is_dir():
+        dgc_dir = d / ".dgc"
+        # a project's own .dgc counts, but NOT the global ~/.dgc config dir — otherwise every
+        # folder under $HOME resolves its project root all the way up to $HOME.
+        if (d / ".git").exists() or (d / "DGC.md").exists() or \
+           (dgc_dir.is_dir() and dgc_dir != USER_HOME):
             return d
     return p
 
