@@ -1017,6 +1017,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("-c", "--continue", dest="cont", action="store_true",
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", action="store_true", help="pick a past session to resume")
+    parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
     if not args.prompt:          # one-shot `-p` has no banner to show an update in — skip the check
@@ -1066,8 +1067,11 @@ def main(argv: list[str] | None = None) -> None:
         cli.agent.run_turn(cli.expand_mentions(args.prompt))
         cli.ui.end_stream()
         print()
-    else:
+    elif args.classic or not sys.stdout.isatty():
         cli.repl()
+    else:
+        from .tui import TUI
+        TUI(config, agent=cli.agent).run()
 
 
 if __name__ == "__main__":

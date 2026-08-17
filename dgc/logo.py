@@ -52,6 +52,32 @@ def _frame(secs: float):
     return t
 
 
+def frame_ansi(secs: float, width: int = 80) -> str:
+    """One shimmer frame rendered to a centered ANSI string (for the TUI header)."""
+    import io as _io
+    from rich.console import Console
+    from . import style as _style
+    c = Console(file=_io.StringIO(), force_terminal=True, color_system="truecolor",
+                width=max(_COLS + 2, width), highlight=False)
+    pad = max(0, (width - _COLS) // 2)
+    hi = _style.theme().accent_bright
+    from rich.text import Text
+    body = Text("\n")
+    for r, line in enumerate(LOGO):
+        body.append(" " * pad)
+        for col, ch in enumerate(line):
+            if ch == " ":
+                body.append(" ")
+                continue
+            diag = (col + (_ROWS - 1 - r)) / (_COLS + _ROWS)
+            body.append(ch, style="bold " + _style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs)))
+        body.append("\n")
+    tag = _style.theme().faint
+    body.append(" " * pad + "  a coding agent for the models you run", style=tag)
+    c.print(body)
+    return c.file.getvalue().rstrip("\n")
+
+
 def _static(console) -> None:
     from rich.text import Text
     t = Text()
