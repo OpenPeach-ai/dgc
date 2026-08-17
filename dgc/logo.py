@@ -10,13 +10,16 @@ import time
 
 from . import style
 
-# the "DGC" block mark (~29 cols × 6 rows), 2-space indent
-_D = ["██████╗ ", "██╔══██╗", "██║  ██║", "██║  ██║", "██████╔╝", "╚═════╝ "]
-_G = [" ██████╗ ", "██╔════╝ ", "██║  ███╗", "██║   ██║", "╚██████╔╝", " ╚═════╝ "]
-_C = [" ██████╗", "██╔════╝", "██║     ", "██║     ", "╚██████╗", " ╚═════╝"]
-LOGO = ["  " + f"{_D[i]} {_G[i]} {_C[i]}" for i in range(6)]
+# "DGC" as dotted braille art (Grok-style), generated from a bold render
+LOGO = [
+    "  ⢰⣶⡶⠶⣶⣤⡀⠀⠀⢀⣤⣶⠶⠶⣶⠄⠀⢀⣴⡶⠶⠶⡦",
+    "  ⢸⣿⡇⠀⠈⢿⣿⡀⢰⣿⡟⠀⠀⠀⠀⠀⢰⣿⡟⠀⠀⠀⠀",
+    "  ⢸⣿⡇⠀⠀⣼⣿⠃⢸⣿⣇⠀⠘⢻⣿⡇⢸⣿⣇⠀⠀⠀⠀",
+    "  ⢸⣿⣧⣤⣾⠿⠋⠀⠀⠙⢿⣦⣤⣼⡿⠇⠀⠙⢿⣦⣤⣤⡦",
+]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
+_BLANK = (" ", "⠀")     # ASCII space + braille blank — both invisible, skip in the shimmer
 
 # shimmer constants (Grok's logo.rs): a raised-cosine band sweeps bottom-left→top-right
 _BAND = 0.42          # half-width of the glint band (diagonal units)
@@ -43,7 +46,7 @@ def _frame(secs: float):
     t = Text()
     for r, line in enumerate(LOGO):
         for c, ch in enumerate(line):
-            if ch == " ":
+            if ch in _BLANK:
                 t.append(" ")
                 continue
             diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
@@ -66,7 +69,7 @@ def frame_ansi(secs: float, width: int = 80) -> str:
     for r, line in enumerate(LOGO):
         body.append(" " * pad)
         for col, ch in enumerate(line):
-            if ch == " ":
+            if ch in _BLANK:
                 body.append(" ")
                 continue
             diag = (col + (_ROWS - 1 - r)) / (_COLS + _ROWS)

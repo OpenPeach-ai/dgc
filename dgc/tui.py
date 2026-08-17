@@ -20,7 +20,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from rich.console import Console
@@ -132,9 +132,15 @@ class TUI:
                                f"[{th.faint}]{glyphs.MIDDOT}[/]  [{mc.get(mode, th.muted)}]{mode}[/]",
                                end=""))
 
-    def _composer_prompt(self):
+    # ---- the rounded composer box (Grok's ╭─╮│╰─╯) ----
+    def _border_color(self) -> str:
         th = style_mod.theme()
-        return ANSI(f"{style_mod.ansi_fg(th.accent)}{glyphs.ARROW}{style_mod.ANSI_RESET} ")
+        return th.accent_bright if self.agent.mode == "plan" else th.border_strong
+
+    def _hborder(self, left: str, right: str):
+        w = max(4, self._width)
+        c = style_mod.ansi_fg(self._border_color())
+        return ANSI(f"{c}{left}{'─' * (w - 2)}{right}{style_mod.ANSI_RESET}")
 
     # ------------------------------------------------------ AgentUI callbacks ---
     def on_text(self, chunk: str) -> None:
@@ -263,13 +269,21 @@ class TUI:
                           height=self._composer_height, style="class:composer")
         info = Window(FormattedTextControl(self._info), height=1)
 
+        side = lambda: f"fg:{self._border_color()}"          # noqa: E731
+        composer_box = HSplit([
+            Window(FormattedTextControl(lambda: self._hborder("╭", "╮")), height=1),
+            VSplit([
+                Window(width=1, char="│", style=side),
+                composer,
+                Window(width=1, char="│", style=side),
+            ]),
+            Window(FormattedTextControl(lambda: self._hborder("╰", "╯")), height=1),
+        ])
         root = HSplit([
             header,
-            Window(char="─", height=1, style="class:rule"),
             transcript,
-            Window(char="─", height=1, style="class:rule"),
             status,
-            composer,
+            composer_box,
             info,
         ])
         self.app = Application(layout=Layout(root, focused_element=composer),
@@ -277,15 +291,16 @@ class TUI:
                                style=self._pt_style(), refresh_interval=0.08)
 
     def _header_height(self) -> int:
-        return 1 if (self.blocks or self._buf) else 8
+        return 1 if (self.blocks or self._buf) else 7
 
     def _composer_height(self) -> int:
         return min(max(1, self.input_buf.text.count("\n") + 1), 8)
 
     def _line_prefix(self, line_no, wrap_count):
+        th = style_mod.theme()
         if line_no == 0 and wrap_count == 0:
-            return self._composer_prompt()
-        return "  "
+            return ANSI(f" {style_mod.ansi_fg(th.accent)}{glyphs.ARROW}{style_mod.ANSI_RESET} ")
+        return "   "
 
     def _vscroll(self, win) -> int:
         if not self._stick:
