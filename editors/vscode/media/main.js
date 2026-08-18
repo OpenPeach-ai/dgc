@@ -4,7 +4,7 @@
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const queuedEl = $("queued");
   let queuedCount = 0, customCommands = [];
-  function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `⏳ ${queuedCount} queued` : ""; }
+  function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
   const MODES = {
@@ -57,14 +57,30 @@
     mm.hidden = false;
   }
 
-  const GLYPHS = ["·", "✢", "*", "✶", "✻", "✽", "✻", "✶", "*", "✢"];
-  const VERBS = ["Ideating", "Percolating", "Ruminating", "Conjuring", "Noodling", "Marinating",
-    "Untangling", "Composing", "Simmering", "Cogitating", "Wrangling", "Distilling"];
+  // animated DGC mark — the three stripes light up one-by-one, hold all three,
+  // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
+  // spinner; the reduced-motion case (in main.css) renders all three lit + static.
+  const MARK = '<svg class="tmark" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true">'
+    + '<path class="s1" d="M24 32 L30 20 L72 13 L66 25 Z"/>'
+    + '<path class="s2" d="M18 54 L24 42 L72 35 L66 47 Z"/>'
+    + '<path class="s3" d="M24 76 L30 64 L66 57 L60 69 Z"/></svg>';
+  // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
+  const GLYPH = {
+    read_file: "→", glob: "→",
+    write_file: "✎", edit_file: "✎", save_memory: "✎",
+    bash: "$", bash_output: "$", bash_kill: "$",
+    grep: "✱", web_search: "✱", web_fetch: "✱",
+    present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
+  };
+  const glyphFor = (name) => GLYPH[name] || "▸";
   const SLASH = [
-    ["/model", "pick the model", "pickModel"], ["/connect", "connect a provider", "connect"],
-    ["/mode", "permission mode", "pickMode"], ["/think", "thinking level", "pickThink"],
-    ["/resume", "resume a past session", "resume"], ["/new", "new session", "new"],
+    ["/model", "pick the model", "pickModel"], ["/connect", "provider or a custom LAN host", "connect"],
+    ["/subagent", "sub-agent model + host", "subagent"],
+    ["/mode", "permission mode", "pickMode"], ["/think", "how hard the model reasons", "pickThink"],
+    ["/resume", "resume a past session (or delete one)", "resume"], ["/new", "new session", "new"],
+    ["/rewind", "undo to an earlier checkpoint", "rewind"],
     ["/compact", "summarize context now", "compact"], ["/clear", "clear the view", "clear"],
+    ["/settings", "open DGC settings", "settings"], ["/bug", "report a bug / request a feature", "bug"],
   ];
 
   let streaming = false, turn = null;
@@ -93,23 +109,20 @@
   // ---- turn lifecycle ----
   function startTurn() {
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
-    const act = el("div", "thinking", `<span class="spin">·</span> <span class="verb"></span> <span class="meta"></span>`);
+    const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
-    const verb = VERBS[Math.floor(Math.random() * VERBS.length)];
-    act.querySelector(".verb").textContent = verb + "…";
-    let i = 0; const t0 = Date.now(), spin = act.querySelector(".spin"), meta = act.querySelector(".meta");
-    turn = { block, act, verb, t0, chars: 0, textEl: null, reasonEl: null, _buf: "" };
+    const t0 = Date.now(), meta = act.querySelector(".meta");
+    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "" };
     turn.timer = setInterval(() => {
-      spin.textContent = GLYPHS[(i = (i + 1) % GLYPHS.length)];
-      meta.textContent = `(${Math.floor((Date.now() - t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tokens)`;
-    }, 120);
+      meta.textContent = `(${Math.floor((Date.now() - t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok)`;
+    }, 200);
     scroll();
   }
   function endTurn() {
     if (!turn) return;
     clearInterval(turn.timer);
     turn.act.classList.add("done");
-    turn.act.innerHTML = `✽ ${esc(turn.verb)}d for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tokens`;
+    turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
     turn = null;
   }
   function ensureTurn() { if (!turn) startTurn(); }
@@ -120,21 +133,25 @@
 
   function toolCard(ev) {
     const c = el("div", "tool");
-    const verb = { read_file: "Read", write_file: "Write", edit_file: "Edit", bash: "Bash", glob: "Glob", grep: "Grep", web_fetch: "Fetch", web_search: "Search", todo: "Todos", skill: "Skill", save_memory: "Remember" }[ev.name] || ev.name;
-    c.innerHTML = `<div class="head"><span class="dot run"></span><span class="verb">${esc(verb)}</span><span class="arg">${esc(ev.summary || "")}</span><span class="badge"></span></div><div class="body"><pre></pre></div>`;
-    c.querySelector(".head").onclick = () => c.classList.toggle("open");
-    if (["read_file", "write_file", "edit_file"].includes(ev.name) && ev.summary) c.querySelector(".head").appendChild(openFileBtn(ev.summary));
+    c.innerHTML = `<div class="head"><span class="glyph">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></div><div class="body"><pre></pre></div>`;
+    const head = c.querySelector(".head");
+    head.onclick = () => c.classList.toggle("open");
+    if (["read_file", "write_file", "edit_file"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
+    head.appendChild(el("span", "dot run"));
+    head.appendChild(el("span", "badge"));
     turn.block.appendChild(c); breakText(); scroll(); return c;
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff");
     const path = (diff.match(/\+\+\+ b\/(.+)/) || [, "changed file"])[1].replace(/^\/+/, "");
-    const lines = diff.split("\n").map((l) => {
-      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : l.startsWith("@@") || l.startsWith("---") || l.startsWith("+++") ? "hh" : "";
-      return `<span class="${cls}">${esc(l)}</span>`;
-    }).join("\n");
-    wrap.innerHTML = `<div class="dhead"><span class="f">◈ ${esc(path)}</span></div><pre>${lines}</pre>`;
-    const b = openFileBtn(path); wrap.querySelector(".dhead").appendChild(b);
+    const body = diff.split("\n").map((l) => {
+      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add"
+        : l.startsWith("-") && !l.startsWith("---") ? "del"
+          : (l.startsWith("@@") || l.startsWith("---") || l.startsWith("+++")) ? "hh" : "ctx";
+      return `<span class="${cls}">${esc(l) || " "}</span>`;
+    }).join("");
+    wrap.innerHTML = `<div class="dhead"><span class="dg">✎</span><span class="f">${esc(path)}</span></div><pre>${body}</pre>`;
+    wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
   function decisionCard(inner) { const c = el("div", "card"); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
@@ -178,13 +195,13 @@
       case "permission_request": {
         ensureTurn();
         const cmd = ev.command ? `<pre>$ ${esc(ev.command)}</pre>` : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
-        const c = decisionCard(`<div class="q">⛔ DGC wants to run <b>${esc(ev.name)}</b></div>${cmd}<div class="btns"><button class="act primary" data-d="once">Allow once</button><button class="act" data-d="always">Always allow</button><button class="act" data-d="deny">Deny</button></div>`);
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button class="act primary" data-d="once">Allow once</button><button class="act" data-d="always">Always allow</button><button class="act" data-d="deny">Deny</button></div>`);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d, rule: b.dataset.d === "always" ? ev.suggested_rule : undefined }); resolveCard(c); });
         break;
       }
       case "plan_proposal": {
         ensureTurn();
-        const c = decisionCard(`<div class="q">📋 Plan ready</div><pre>${esc(ev.plan)}</pre><div class="btns"><button class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button class="act" data-d="auto">auto</button><button class="act" data-d="default">default</button><button class="act" data-d="reject">Keep planning</button></div>`);
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><div class="btns"><button class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button class="act" data-d="auto">auto</button><button class="act" data-d="default">default</button><button class="act" data-d="reject">Keep planning</button></div>`);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d }); resolveCard(c); });
         break;
       }
@@ -314,6 +331,7 @@
     mm.hidden = false; hideModeMenu();
     vscode.postMessage({ type: "listModels" });
   };
+  const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
@@ -362,7 +380,7 @@
       } else {
         const m = el("div", "msg dgc"); m.appendChild(el("div", "role dgc", "DGC"));
         if (it.text) m.appendChild(el("div", "text", md(it.text)));
-        if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "⏺ " + it.tools.join(", ")));
+        if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
         log.appendChild(m);
       }
     });
@@ -374,7 +392,13 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
-    else if (msg.type === "state") { curModel = msg.state.model || ""; curThink = msg.state.think || "off"; $("modelname").textContent = curModel || "dgc"; $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change"; applyMode(msg.state.mode || "default"); }
+    else if (msg.type === "state") {
+      curModel = msg.state.model || ""; curThink = msg.state.think || "off";
+      $("modelname").textContent = curModel || "dgc";
+      $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change";
+      if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; }
+      applyMode(msg.state.mode || "default");
+    }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
     else if (msg.type === "cleared") { log.innerHTML = ""; turn = null; setSending(false); }

@@ -30,19 +30,64 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", baseUrl: "" };
-  private sbModel: vscode.StatusBarItem;
-  private sbMode: vscode.StatusBarItem;
+  private _installPrompted = false;
+  private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    this.sbModel = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.sbModel.command = "dgc.selectModel";
-    this.sbMode = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-    this.sbMode.command = "dgc.setMode";
+    // one status-bar item: `model · mode` (click to change model)
+    this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    this.sb.command = "dgc.selectModel";
   }
 
   // ---- backend lifecycle ---------------------------------------------------
   private cwd(): string {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  }
+
+  /**
+   * A compact `<editor-context>` block describing what the user is looking at:
+   * the focused file (path + language), the open file tabs, and the current
+   * selection (truncated to ~2KB). Prepended to each prompt on the host side, so
+   * the DGC backend needs no change. Returns "" when there's nothing to say.
+   */
+  private editorContext(): string {
+    try {
+      const lines: string[] = [];
+      const ed = vscode.window.activeTextEditor;
+      const active = ed && ed.document.uri.scheme === "file"
+        ? vscode.workspace.asRelativePath(ed.document.uri) : "";
+      if (active && ed) { lines.push(`active file: ${active} (${ed.document.languageId})`); }
+
+      const open: string[] = [];
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const input: any = tab.input;
+          const uri: vscode.Uri | undefined = input && input.uri;
+          if (uri && uri.scheme === "file") {
+            const rel = vscode.workspace.asRelativePath(uri);
+            if (!open.includes(rel)) { open.push(rel); }
+          }
+        }
+      }
+      if (open.length) { lines.push(`open tabs: ${open.slice(0, 12).join(", ")}`); }
+
+      if (ed && !ed.selection.isEmpty && ed.document.uri.scheme === "file") {
+        const a = ed.selection.start.line + 1, b = ed.selection.end.line + 1;
+        const CAP = 2048;
+        let sel = ed.document.getText(ed.selection);
+        const cut = sel.length > CAP;
+        if (cut) { sel = sel.slice(0, CAP); }
+        lines.push(`selection (${active || "file"}:${a}-${b})${cut ? " [truncated]" : ""}:`);
+        lines.push("```" + (ed.document.languageId || ""));
+        lines.push(sel);
+        lines.push("```");
+      }
+
+      if (!lines.length) { return ""; }
+      return `<editor-context>\n${lines.join("\n")}\n</editor-context>\n\n`;
+    } catch {
+      return "";
+    }
   }
 
   private ensureBackend(): DgcBackend {
@@ -89,7 +134,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         break;
     }
+    if (ev.type === "error" && (ev as any).notInstalled) {
+      this.promptInstallCli();
+    }
     this.post({ type: "event", event: ev });
+  }
+
+  /** The CLI ('dgc') is missing — offer to install it (the extension drives the CLI). */
+  private promptInstallCli(): void {
+    if (this._installPrompted) { return; }
+    this._installPrompted = true;
+    const INSTALL = "Install DGC CLI", SETPATH = "Set dgc.command…";
+    vscode.window.showErrorMessage(
+      "DGC needs the `dgc` command-line tool, which isn't installed or on PATH.",
+      INSTALL, SETPATH,
+    ).then((choice) => {
+      if (choice === INSTALL) {
+        const term = vscode.window.createTerminal("Install DGC");
+        term.show();
+        term.sendText("curl -fsSL https://vibedgc.com/install.sh | bash");
+        vscode.window.showInformationMessage(
+          "Installing the DGC CLI in the terminal. When it finishes, reload the window to connect.");
+      } else if (choice === SETPATH) {
+        vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
+      }
+    });
   }
 
   private post(msg: any): void {
@@ -97,12 +166,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   private postState(): void {
     this.post({ type: "state", state: this.state });
-    this.sbModel.text = `$(chip) ${this.state.model || "dgc"}`;
-    this.sbModel.tooltip = "DGC — select model";
-    this.sbModel.show();
-    this.sbMode.text = `$(shield) ${this.state.mode}`;
-    this.sbMode.tooltip = "DGC — permission mode";
-    this.sbMode.show();
+    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${this.state.mode}`;
+    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${this.state.mode} mode · click to change model`;
+    this.sb.show();
   }
 
   // ---- webview -------------------------------------------------------------
@@ -128,9 +194,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onMessage(msg: any): void {
     const be = this.ensureBackend();
     switch (msg.type) {
-      case "prompt":
-        be.send({ type: "prompt", text: msg.text });
+      case "prompt": {
+        let text = String(msg.text ?? "");
+        // Prepend the editor's context (focused file, open tabs, selection) so the
+        // agent grounds on what you're looking at. Skip for `/command` prompts — the
+        // backend keys custom slash-commands off a leading "/". No DGC-Python change.
+        if (text && !text.startsWith("/")) {
+          const ctx = this.editorContext();
+          if (ctx) { text = ctx + text; }
+        }
+        be.send({ type: "prompt", text, images: msg.images });
         break;
+      }
       case "permission_response":
         be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule });
         break;
@@ -221,22 +296,50 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "new": this.newSession(); break;
       case "compact": this.ensureBackend().send({ type: "compact" }); break;
       case "clear": this.post({ type: "cleared" }); break;
+      case "rewind": this.rewind(); break;
+      case "subagent": vscode.commands.executeCommand("workbench.action.openSettings", "dgc.subagent"); break;
+      case "settings": vscode.commands.executeCommand("workbench.action.openSettings", "@ext:daguccicode.dgc"); break;
+      case "bug": vscode.env.openExternal(vscode.Uri.parse("https://github.com/OpenPeach-ai/dgc/issues")); break;
     }
   }
 
   async resume(): Promise<void> {
     const be = this.ensureBackend();
-    const items: any[] = await new Promise((resolve) => {
+    const listSessions = (cmd: any): Promise<any[]> => new Promise((resolve) => {
       const h = (ev: DgcEvent) => { if (ev.type === "sessions") { be.off("sessions", h); resolve(ev.items || []); } };
       be.on("sessions", h);
-      be.send({ type: "list_sessions" });
+      be.send(cmd);
       setTimeout(() => { be.off("sessions", h); resolve([]); }, 3000);
     });
+    let items = await listSessions({ type: "list_sessions" });
     if (!items.length) { vscode.window.showInformationMessage("No past DGC sessions in this project."); return; }
-    const pick = await vscode.window.showQuickPick(
-      items.map((s) => ({ label: s.preview || s.path, description: `${s.when} · ${s.count} msgs`, path: s.path })),
-      { placeHolder: "Resume a session" });
-    if (pick) { be.send({ type: "resume_session", path: (pick as any).path }); this.post({ type: "cleared" }); }
+
+    const trash = new vscode.ThemeIcon("trash");
+    const qp = vscode.window.createQuickPick<any>();
+    qp.placeholder = "Resume a session — trash icon deletes";
+    const render = () => {
+      qp.items = items.map((s) => ({
+        label: s.name ? `${s.name} · ${s.preview}` : (s.preview || s.path),
+        description: `${s.when} · ${s.count} msgs`,
+        path: s.path,
+        buttons: [{ iconPath: trash, tooltip: "Delete this session" }],
+      }));
+    };
+    render();
+    return new Promise<void>((resolve) => {
+      qp.onDidTriggerItemButton(async (e) => {           // trash icon → delete + refresh the list
+        items = await listSessions({ type: "delete_session", path: (e.item as any).path });
+        if (!items.length) { qp.hide(); resolve(); return; }
+        render();
+      });
+      qp.onDidAccept(() => {
+        const pick = qp.selectedItems[0] as any;
+        if (pick) { be.send({ type: "resume_session", path: pick.path }); this.post({ type: "cleared" }); }
+        qp.hide();
+      });
+      qp.onDidHide(() => { qp.dispose(); resolve(); });
+      qp.show();
+    });
   }
 
   async rewind(): Promise<void> {
@@ -437,8 +540,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.backend?.dispose();
-    this.sbModel.dispose();
-    this.sbMode.dispose();
+    this.sb.dispose();
   }
 
   // ---- html ----------------------------------------------------------------
@@ -455,6 +557,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body>
+<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M24 32 L30 20 L72 13 L66 25 Z"/><path d="M18 54 L24 42 L72 35 L66 47 Z"/><path d="M24 76 L30 64 L66 57 L60 69 Z"/></svg>DGC<span class="cur"></span></span><span class="pd" id="pmodel" title="Model — click to change">dgc</span></header>
 <main id="log"></main>
 <div id="settings" hidden>
   <div class="set-head">
@@ -504,7 +607,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <footer>
   <div id="attachments"></div>
   <div id="cbox" data-mode="default">
-    <textarea id="input" rows="1" placeholder="Ask DGC…"></textarea>
+    <div class="cinput"><span class="pmark">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…"></textarea></div>
     <div id="cfooter">
       <button id="btn-add" class="fbtn" title="Attach a file (@-mention)"><span class="codicon codicon-add"></span></button>
       <button id="btn-cmd" class="fbtn" title="Commands (/)"><span class="codicon codicon-terminal"></span></button>

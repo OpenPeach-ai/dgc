@@ -33,7 +33,7 @@ export class DgcBackend extends EventEmitter {
         env: { ...process.env },
       });
     } catch (err: any) {
-      this.emit("event", { type: "error", message: `could not launch '${this.command} serve': ${err?.message ?? err}`, fatal: true });
+      this.emit("event", { type: "error", message: `could not launch '${this.command} serve': ${err?.message ?? err}`, fatal: true, notInstalled: err?.code === "ENOENT" });
       return;
     }
     this.proc = child;
@@ -49,10 +49,14 @@ export class DgcBackend extends EventEmitter {
       }
     });
     child.on("error", (err: any) => {
+      const missing = err?.code === "ENOENT";
       this.emit("event", {
         type: "error",
-        message: `dgc backend failed to start: ${err?.message ?? err}. Set "dgc.command" to your dgc path (needs v0.4.0+).`,
+        message: missing
+          ? `The DGC CLI ('${this.command}') isn't installed or isn't on PATH.`
+          : `dgc backend failed to start: ${err?.message ?? err}. Set "dgc.command" to your dgc path (needs v0.4.0+).`,
         fatal: true,
+        notInstalled: missing,
       });
     });
     child.on("exit", (code) => {

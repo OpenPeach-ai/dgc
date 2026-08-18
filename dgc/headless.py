@@ -273,9 +273,17 @@ class Backend:
             else:
                 self.em.emit("error", message="no session to resume")
         elif t == "list_sessions":
-            items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c}
-                     for (p, ts, pv, c) in sessions_mod.listing(self.config.project_root)]
+            items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
+                      "name": nm}
+                     for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
             self.em.emit("sessions", items=items)
+        elif t == "delete_session":
+            path = cmd.get("path")
+            ok = bool(path) and sessions_mod.delete(path)
+            items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
+                      "name": nm}
+                     for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
+            self.em.emit("sessions", items=items, deleted=ok)
 
         elif t == "list_checkpoints":
             items = [{"index": i, "preview": p, "files": nf}
