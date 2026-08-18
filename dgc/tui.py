@@ -29,6 +29,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from rich.console import Console
 
 from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
+from .update import cached_update
 from .agent import Agent
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -57,6 +58,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("memory", "view the project DGC.md"),
     ("permissions", "allow · ask · deny rules"),
     ("bug", "report a bug / request a feature"),
+    ("update", "update DGC to the latest version"),
     ("clear", "clear the transcript"),
     ("quit", "exit dgc"),
 ]
@@ -349,8 +351,12 @@ class TUI:
 
     def _tip(self):
         th = style_mod.theme()
-        if self.blocks or self._buf or self._overlay or self._welcome_metrics()[3]:   # hidden once busy / tiny
+        if self.blocks or self._buf or self._overlay or self._welcome_metrics()[2] == "compact":
             return ANSI("")
+        upd = cached_update()
+        if upd:                                            # echo the update CTA in the tip, like Grok
+            return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]a newer DGC ([bold {self._GOLD}]v{upd}[/]) "
+                                   f"is out — type [bold {self._GOLD}]/update[/] or click [ Update now ][/]"))
         return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]Shift+Tab to switch mode "
                                f"{glyphs.MIDDOT} /help for commands {glyphs.MIDDOT} Esc to stop a turn[/]"))
 
@@ -368,26 +374,38 @@ class TUI:
                                    f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]"))
         return ANSI(self._welcome_card())
 
+    # rows the right column needs = title + blank + (2 update-CTA | 1 tagline) + blank + cta + blank + 4 menu
+    def _right_rows(self, upd) -> int:
+        return 4 + 4 + (2 if upd else 1)
+
     def _welcome_metrics(self):
-        """Card width, inner content width, whether the terminal is too NARROW to place the logo
-        beside the menu (→ stack), and whether it's too SHORT for the full card (→ compact 1-line
-        header, so a phone terminal with its keyboard up never hits 'window too small')."""
+        """Card width W, inner content width, layout mode, and the exact header height.
+
+        mode: 'wide' (Grok-style — braille logo LEFT, text RIGHT), 'stacked' (narrow: logo on top,
+        menu below), or 'compact' (too short → a 1-line header, so a phone terminal never hits
+        'window too small'). header_h is the full rendered height so _header_height matches the card.
+        """
         w, h = self._width, getattr(self, "_height", 30)
+        upd = cached_update()
         margin = 4 if w < 62 else 6
-        W = max(30, min(w - margin, 160))
-        cw_area = W - 6                                    # inside the border(2) + padding(4)
-        narrow = (cw_area - logo_mod.WIDTH - 2) < 22
-        # The full card needs `need` header rows; below it sit the composer/status chrome. If the
-        # terminal is too short to hold both, prompt_toolkit shows "Window too small" — so we drop to
-        # the 1-line compact header instead. This covers the whole in-between band, not just tiny ones.
-        need = (21 + (1 if self.agent.session_name else 0)) if narrow else 16
-        RESERVED = 7                                       # tip + status + composer(3) + transcript(1) + safety
-        compact = w < 34 or h < 12 or (h - RESERVED) < need
-        return W, cw_area, narrow, compact
+        W = max(30, min(w - margin, 150))
+        cw_area = W - 8                                    # inside border(2) + padding(2*3)
+        RESERVED = 6                                       # tip + status + composer(3) + transcript(1)
+        avail = h - RESERVED
+        wide_inner = max(len(logo_mod.LOGO), self._right_rows(upd))
+        wide_h = wide_inner + 4 + 2                        # panel pad(2)+border(2) + top pad(2)
+        stack_inner = len(logo_mod.LOGO_SMALL) + self._right_rows(upd) + 1
+        stack_h = stack_inner + 4 + 2
+        if w >= 72 and avail >= wide_h:
+            return W, cw_area, "wide", wide_h, upd
+        if w >= 40 and avail >= stack_h:
+            return W, cw_area, "stacked", stack_h, upd
+        return W, cw_area, "compact", 1, upd
 
     # (label, keyboard shortcut, slash command, click-action) — the card shows BOTH ways in.
     _MENU = [("New session", "Ctrl+N", "/new", "new"), ("Switch mode", "Shift+Tab", "/mode", "switch"),
              ("Commands", "type /", "/help", "commands"), ("Quit", "Ctrl+Q", "/quit", "quit")]
+    _GOLD = "#E0A24E"                                       # update CTA accent (stands out, like Grok's)
 
     def _welcome_card(self) -> str:
         from rich import box
@@ -396,79 +414,105 @@ class TUI:
         from rich.text import Text
         th = style_mod.theme()
         secs = time.monotonic() - self._start
-        W, cw_area, narrow, compact = self._welcome_metrics()
-        if compact:                                        # tiny terminal → 1-line header only
+        W, cw_area, mode, _hh, upd = self._welcome_metrics()
+        if mode == "compact":                              # tiny terminal → 1-line header only
             self._menu_rows = {}
             t = Text()
             t.append("╱╱╱ ", style=f"bold {th.accent}")
             t.append("Vibe DGC", style="bold #FFFFFF")
             t.append(f" v{__version__}", style=th.faint)
             t.append(f"  {glyphs.MIDDOT} /help", style=th.faint)
+            if upd:
+                t.append(f"  {glyphs.MIDDOT} ⬆ v{upd} /update", style=f"bold {self._GOLD}")
             return self._rich(Padding(t, (0, 0, 0, 1)))
-        logo = logo_mod.shimmer_lines(secs)                # natural-width rows
 
-        def mrow(lbl, key, slash, width, hot=False):
-            # ▸ label ......... Ctrl+N  /new  (hovered row lights up in the accent)
+        top_pad, left_margin = 2, 3
+        base = top_pad + 2                                 # top padding + top border + panel pad
+
+        # ── figure logo geometry + the content-column offset FIRST, so click/hover rows are exact ──
+        if mode == "stacked":
+            logo_p = logo_mod.shimmer_lines(secs, small=True)
+            text_w = cw_area
+            content_off = len(logo_p) + 1                  # logo rows + one blank
+            logo_w = gap = loff = 0
+        else:                                              # wide
+            logo_w, gap = logo_mod.WIDTH, 4                # gap = breathing room between logo and text
+            text_w = cw_area - logo_w - gap
+            logo_p = logo_mod.shimmer_lines(secs, small=False, pad=logo_w)
+            n_right = self._right_rows(upd)
+            loff = max(0, (n_right - len(logo_p)) // 2)     # centre the shorter column vertically
+            content_off = max(0, (len(logo_p) - n_right) // 2)
+
+        self._menu_rows = {}
+
+        def hot(ci: int) -> bool:
+            return (base + content_off + ci) == self._hover_row
+
+        content: list = []
+
+        def add(text, action=None):
+            if action:
+                self._menu_rows[base + content_off + len(content)] = action
+            content.append(text)
+
+        def mrow(lbl, key, slash, h):
             right = len(key) + 2 + len(slash)
-            mark = "› " if hot else "  "
             t = Text()
-            t.append(mark, style=f"bold {th.accent}")
-            t.append(lbl, style=f"bold {th.accent}" if hot else "bold")
-            t.append(" " * max(2, width - len(mark) - len(lbl) - right))
-            t.append(key, style=th.accent if hot else th.faint); t.append("  ")
-            t.append(slash, style=f"bold {th.accent_bright}" if hot else th.accent_dim)
+            t.append("› " if h else "  ", style=f"bold {th.accent}")
+            t.append(lbl, style=f"bold {th.accent}" if h else "bold")
+            t.append(" " * max(2, text_w - 2 - len(lbl) - right))
+            t.append(key, style=th.accent if h else th.faint); t.append("  ")
+            t.append(slash, style=f"bold {th.accent_bright}" if h else th.accent_dim)
             return t
 
-        top_pad = 1 if narrow else 2
-        left_margin = 1 if narrow else 3
-        base = top_pad + 2                                 # top padding + top border + panel pad
+        # title
+        title = Text(); title.append("Vibe DGC", style="bold #FFFFFF")
+        title.append(f"  v{__version__}", style=th.faint)
+        if self.agent.session_name:
+            title.append(f"  {glyphs.MIDDOT}  {self.agent.session_name}", style=th.accent)
+        add(title)
+        add(Text(""))
+        if upd:                                            # ── update available: message + clickable CTA ──
+            msg = Text(f"v{upd} is out", style=f"bold {self._GOLD}")
+            msg.append(" — update for the latest.", style=th.muted)
+            add(msg)
+            ci = len(content); h = hot(ci)
+            cta = Text("› " if h else "", style=f"bold {self._GOLD}")
+            cta.append("[ Update now ]", style=f"bold {'#FFFFFF' if h else self._GOLD}")
+            cta.append("  or type ", style=th.faint); cta.append("/update", style=f"bold {self._GOLD}")
+            add(cta, "update")
+        else:
+            add(Text("a coding agent for the models you run", style=th.muted))
+        add(Text(""))
+        ci = len(content); h = hot(ci)
+        newc = Text("[ New session ]", style=f"bold {'#FFFFFF' if h else th.accent}")
+        newc.append("  or just start typing", style=th.faint)
+        add(newc, "new")
+        add(Text(""))
+        for lbl, key, slash, action in self._MENU:
+            add(mrow(lbl, key, slash, hot(len(content))), action)
+
+        # ── compose rows ──
         rows: list = []
-        clicks: dict[int, str] = {}
-
-        title = Text(); title.append("╱╱╱ ", style=f"bold {th.accent}")   # the DGC mark
-        title.append("Vibe DGC", style="bold #FFFFFF"); title.append(f"  v{__version__}", style=th.faint)
-
-        if narrow:                                         # ── stacked: logo on top, menu below ──
-            for lr in logo:
+        if mode == "stacked":
+            for lr in logo_p:
                 pad = max(0, (cw_area - lr.cell_len) // 2)
-                row = Text(" " * pad); row.append_text(lr); rows.append(row)
-            rows += [Text(""), title, Text("a coding agent for local models", style=th.muted), Text("")]
-            clicks[len(rows)] = "new"
-            c = Text("[ New session ]", style=f"bold {th.accent}"); c.append("  or just type", style=th.faint)
-            rows += [c, Text("")]
-            if self.agent.session_name:
-                rows.append(Text(f"session: {self.agent.session_name}"[:cw_area], style=th.accent))
-            for lbl, key, slash, action in self._MENU:
-                idx = len(rows)
-                clicks[idx] = action
-                rows.append(mrow(lbl, key, slash, cw_area, hot=(base + idx == self._hover_row)))
-        else:                                              # ── wide: logo beside the menu ──
-            logo_w = logo_mod.WIDTH
-            cw = W - logo_w - 8
-            if self.agent.session_name:
-                title.append(f"  {glyphs.MIDDOT}  {self.agent.session_name}", style=th.accent)
-            c = Text("[ New session ]", style=f"bold {th.accent}"); c.append("  or just start typing", style=th.faint)
-            content = [title, Text(""), Text("a coding agent for the models you run", style=th.muted),
-                       Text(""), c, Text("")]
-            clicks[4] = "new"
-            for i, (lbl, key, slash, action) in enumerate(self._MENU):
-                clicks[6 + i] = action
-                content.append(mrow(lbl, key, slash, cw, hot=(base + 6 + i == self._hover_row)))
-            logo_p = logo_mod.shimmer_lines(secs, pad=logo_w)
-            n = max(len(logo_p), len(content))
-            loff = max(0, (len(content) - len(logo_p)) // 2)   # vertically centre the mark beside the menu
+                r = Text(" " * pad); r.append_text(lr); rows.append(r)
+            rows.append(Text(""))
+            rows.extend(content)
+        else:
+            n = max(len(logo_p) + loff, content_off + len(content))
             for i in range(n):
-                row = Text()
+                r = Text()
                 li = i - loff
-                row.append_text(logo_p[li] if 0 <= li < len(logo_p) else Text(" " * logo_w))
-                row.append("  ")
-                row.append_text(content[i] if i < len(content) else Text(""))
-                rows.append(row)
+                r.append_text(logo_p[li] if 0 <= li < len(logo_p) else Text(" " * logo_w))
+                r.append(" " * gap)
+                ci = i - content_off
+                r.append_text(content[ci] if 0 <= ci < len(content) else Text(""))
+                rows.append(r)
 
-        self._menu_rows = {base + idx: action for idx, action in clicks.items()}
-
-        body = Text("\n").join(rows)                       # no trailing newline (that clipped the ╰ border)
-        panel = Panel(body, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 2), width=W)
+        body = Text("\n").join(rows)
+        panel = Panel(body, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 3), width=W)
         return self._rich(Padding(panel, (top_pad, 0, 0, left_margin)))
 
     # ---- status line ----
@@ -758,11 +802,10 @@ class TUI:
         if self.blocks or self._buf or self._overlay:
             return 1
         self._sync_width()
-        _, _, narrow, compact = self._welcome_metrics()
-        if compact:                             # tiny / in-between terminal → 1-line header
+        _, _, mode, header_h, _ = self._welcome_metrics()
+        if mode == "compact":                   # tiny / in-between terminal → 1-line header
             return 1
-        desired = (21 + (1 if self.agent.session_name else 0)) if narrow else 16
-        return max(1, min(desired, self._height - 6))   # never exceed the terminal (belt + suspenders)
+        return max(1, min(header_h, self._height - 6))   # never exceed the terminal (belt + suspenders)
 
     def _composer_height(self) -> int:
         return min(max(1, self.input_buf.text.count("\n") + 1), 8)
@@ -849,6 +892,8 @@ class TUI:
         action = self._menu_rows.get(position.y)
         if action == "new":
             self._prompt_new_session(); return True
+        if action == "update":                  # clicked "[ Update now ]"
+            self._handle_slash("/update"); return True
         if action == "switch":
             self._cycle_mode(); return True
         if action == "commands":
@@ -985,7 +1030,16 @@ class TUI:
                                     f"[{th.faint}](include your `dgc --version`)[/]"))
         elif cmd == "clear":
             self.blocks.clear(); self._buf = ""; self._flash("cleared")
-        elif cmd in ("rewind", "init", "search", "update"):
+        elif cmd == "update":
+            # exit the full-screen app cleanly, THEN run the installer on the raw terminal
+            # (curl | bash needs a normal TTY; it can't run inside the alt-screen app).
+            if cached_update() or rest in ("force", "-f", "now"):
+                self._pending_update = True
+                if self.app:
+                    self.app.exit()
+            else:
+                self._flash(f"you're on the latest — DGC v{__version__}")
+        elif cmd in ("rewind", "init", "search"):
             self._flash(f"/{cmd} is available in the classic REPL — run: dgc --classic")
         elif cmd in ("quit", "exit"):
             if self.app:
@@ -1578,6 +1632,10 @@ class TUI:
             self.app.run()
         finally:
             termbg.reset()
+        if getattr(self, "_pending_update", False):     # user ran /update — install on the raw TTY
+            from .update import run_update
+            run_update()
+            return
         if len(self.agent.messages) > 1 and self.agent.session_file:   # resume hint on exit
             import sys
             nm = f" ({self.agent.session_name})" if self.agent.session_name else ""
@@ -1617,7 +1675,7 @@ def _tui_help() -> str:
         out.append(f"[{th.muted}]{name}[/]")
         for c, d in rows:
             out.append(f"  [bold]{_esc(c)}[/]{' ' * max(2, 30 - len(c))}[{th.faint}]{_esc(d)}[/]")
-    out.append(f"[{th.faint}]  /rewind, /init, /search, /update live in the classic REPL: dgc --classic[/]")
+    out.append(f"[{th.faint}]  /rewind, /init, /search live in the classic REPL: dgc --classic[/]")
     return "\n".join(out)
 
 
