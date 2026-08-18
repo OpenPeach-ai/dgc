@@ -99,7 +99,7 @@
     font-family:var(--mono);background:var(--term)}
   .tui-card{border:1px solid var(--border-strong);border-radius:11px;padding:clamp(14px,2vw,20px) clamp(16px,2.4vw,26px);
     display:flex;gap:clamp(16px,3vw,34px);align-items:flex-start}
-  .tui-logo{margin:0;color:var(--logo-rest);font:700 clamp(9px,1.15vw,13px)/1.08 var(--mono);white-space:pre;flex:none;
+  .tui-logo{margin:0;color:var(--logo-rest);font:700 clamp(12px,1.6vw,18px)/1.02 var(--mono);white-space:pre;flex:none;letter-spacing:-.02em;
     background:linear-gradient(105deg,var(--logo-rest) 0%,var(--logo-rest) 38%,var(--logo-glint) 50%,var(--logo-rest) 62%,var(--logo-rest) 100%);
     background-size:280% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
     animation:shimmer 4.6s ease-in-out infinite}
@@ -240,14 +240,14 @@
     nav .links a[href^="#"]{display:none} nav .wrap{gap:14px}
     .hero h1{font-size:clamp(29px,8vw,38px);text-wrap:wrap;overflow-wrap:break-word}
     .tui-card{flex-direction:column;gap:14px}
-    .tui-logo{font-size:11px}
+    .tui-logo{font-size:14px}
     footer .cols{grid-template-columns:1fr}
   }
 </style>
 </head>
 <body>
 
-<div class="topbar"><div class="wrap"><span><b>v0.17.0</b> — a floating <code>/</code> command menu, per-project sessions, and a VS&nbsp;Code&nbsp;&&nbsp;Cursor extension&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
+<div class="topbar"><div class="wrap"><span><b>v0.17.5</b> — a dotted <code>///</code> welcome, a built-in update nudge, and a VS&nbsp;Code&nbsp;&&nbsp;Cursor extension&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
 
 <nav><div class="wrap">
   <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
@@ -280,14 +280,16 @@
     <div class="bar"><i></i><i></i><i></i><span class="ti">dgc — ~/project</span></div>
     <div class="tui-body">
       <div class="tui-card">
-<pre class="tui-logo" aria-label="DGC">██████╗  ██████╗  ██████╗
-██╔══██╗██╔════╝ ██╔════╝
-██║  ██║██║  ███╗██║
-██║  ██║██║   ██║██║
-██████╔╝╚██████╔╝╚██████╗
-╚═════╝  ╚═════╝  ╚═════╝</pre>
+<pre class="tui-logo" aria-label="/// DGC">⠀⠀⠀⠀⠀⠀⠀⢀⣠⣶⡇
+⠀⠀⣤⣴⡟⠀⠀⣾⣿⣿⠁⠀⠀⣠⣴⣾
+⠀⢸⣿⣿⡇⠀⠀⣿⣿⣿⠀⠀⠀⣿⣿⡇
+⠀⣾⣿⣿⠁⠀⢀⣿⣿⡟⠀⠀⢸⣿⣿⠇
+⠀⣿⣿⣿⠀⠀⢸⣿⣿⡇⠀⠀⣿⣿⣿
+⢠⣿⣿⡇⠀⠀⣾⣿⣿⠀⠀⢀⣿⣿⡟
+⣸⣿⣿⠃⠀⠀⣿⣿⣿⠀⠀⢸⣿⠟⠁
+⣿⠿⠋⠀⠀⢠⡿⠟⠉⠀⠀⠈</pre>
         <div class="tui-meta">
-          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.14.0</span></div>
+          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.17.5</span></div>
           <div class="tui-tag">a coding agent for the models you run</div>
           <div class="tui-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
           <div class="tui-menu">
