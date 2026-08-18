@@ -837,9 +837,7 @@ class TUI:
                 else:
                     self._flash(f"no MCP server named '{sub[1]}'")
             else:
-                summ = self.agent.mcp.summary() if getattr(self.agent, "mcp", None) else "(no MCP servers)"
-                self._append(self._rich(f"[bold {th.accent}]MCP[/]\n[{th.faint}]{_esc(summ)}[/]\n"
-                                        f"  [{th.faint}]/mcp add  ·  /mcp remove <name>[/]"))
+                self._extensions_modal(tab=1)           # open the tabbed Skills/MCP modal on MCP
         elif cmd == "agents":
             sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"
@@ -847,9 +845,8 @@ class TUI:
             self._append(self._rich(f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
                                     f"  host   [{th.text}]{_esc(sh)}[/]\n  named  [{th.faint}]{_esc(defs)}[/]\n"
                                     f"  [{th.faint}]/subagent to change[/]"))
-        elif cmd == "skills":
-            names = ", ".join(getattr(s, "name", str(s)) for s in getattr(self.agent, "skills", [])) or "(none)"
-            self._append(self._rich(f"[bold {th.accent}]skills[/]  [{th.faint}]{_esc(names)}[/]"))
+        elif cmd in ("skills", "extensions", "ext"):
+            self._extensions_modal(tab=0)               # open the tabbed Skills/MCP modal on Skills
         elif cmd == "memory":
             p = cfg.project_root / "DGC.md"
             body = p.read_text()[:1500] if p.exists() else "(no project DGC.md — durable memory file)"
@@ -978,6 +975,61 @@ class TUI:
             self._flash("session deleted")
             self._resume_flow()             # re-show the updated list
         self._show_picker("Resume a session", labels, pick, delete_cb=dele)
+
+    def _extensions_modal(self, tab: int = 0) -> None:
+        """A centered tabbed dialog with Skills + MCP Servers tabs (Grok's Extensions modal)."""
+        from .skills import discover_skills
+
+        def rebuild(ov):
+            if ov["tab"] == 0:                          # Skills
+                sk = discover_skills(self.config.project_root)
+                return [{"label": name, "desc": (s.description or "skill"),
+                         "value": ("skill", name)} for name, s in sk.items()]
+            servers = self.config.get("mcp_servers", {}) or {}   # MCP Servers
+            out = []
+            for name, spec in servers.items():
+                live = name in getattr(self.agent.mcp, "servers", {}) if getattr(self.agent, "mcp", None) else False
+                tail = f"{spec.get('command', '')} {' '.join(spec.get('args', []))}".strip()
+                out.append({"label": ("● " if live else "○ ") + name, "desc": tail[:64],
+                            "value": ("mcp", name)})
+            return out
+
+        def on_action(key, row):
+            ov = self._overlay
+            is_mcp = ov["tab"] == 1
+            if key == "a":                              # add
+                self._close_overlay()
+                if is_mcp:
+                    self._mcp_add_flow()
+                else:
+                    self._ask_input("skill URL (a raw SKILL.md or a github link):", self._install_skill_url)
+            elif key == "x" and row:                    # remove
+                kind, name = row["value"]
+                if kind == "mcp":
+                    servers = dict(self.config.get("mcp_servers", {}) or {}); servers.pop(name, None)
+                    self.config.set("mcp_servers", servers)
+                    if getattr(self.agent, "mcp", None):
+                        self.agent.mcp.servers.pop(name, None)
+                else:
+                    import shutil
+                    from .config import USER_SKILLS
+                    shutil.rmtree(USER_SKILLS / name, ignore_errors=True)
+                ov["sel"] = 0
+                self._invalidate()
+            elif key == "r":                            # reload (rebuild happens on render)
+                self._invalidate()
+
+        self._open_overlay([], on_pick=lambda r: None, tabs=["Skills", "MCP Servers"], tab=tab,
+                           footer="Tab switch · ↑↓ move · a add · x remove · r reload · Esc close",
+                           rebuild=rebuild, on_action=on_action)
+
+    def _install_skill_url(self, url: str) -> None:
+        url = url.strip()
+        if not url:
+            self._flash("cancelled"); return
+        from . import tools
+        res = tools.add_skill({"url": url}, self.agent.ctx)
+        self._flash(res.split(".")[0][:70])
 
     def _mcp_add_flow(self) -> None:
         """Interactive: add an MCP server (remote URL+token or a local command) via prompts."""
@@ -1164,11 +1216,32 @@ class TUI:
             if rows:
                 self._overlay["on_delete"](rows[self._overlay["sel"]])   # cb re-opens with fresh rows
 
+        # tabbed-modal action keys (a/x/r/space) — only when the overlay declares on_action
+        has_actions = Condition(lambda: self._overlay is not None and self._overlay.get("on_action"))
+
+        def _ov_action(key):
+            ov = self._overlay
+            if not (ov and ov.get("on_action")):
+                return
+            rows = self._overlay_rows()
+            ov["on_action"](key, rows[ov["sel"]] if rows else None)
+
+        for _ch in ("a", "x", "r"):
+            @kb.add(_ch, filter=has_actions)
+            def _(ev, _ch=_ch):
+                _ov_action(_ch)
+
+        @kb.add("space", filter=has_actions)
+        def _(ev):
+            _ov_action("space")
+
         @kb.add("enter")
         def _(ev):
-            if self._overlay is not None:           # floating picker/modal → Enter picks the row
-                rows = self._overlay_rows()
+            if self._overlay is not None:           # floating picker/modal
                 ov = self._overlay
+                if ov.get("tabs"):                  # tabbed modal → Enter is inert (use a/x/r · Esc)
+                    return
+                rows = self._overlay_rows()
                 on_pick = ov["on_pick"]
                 self._close_overlay()
                 if rows:
