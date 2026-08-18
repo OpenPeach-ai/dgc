@@ -161,9 +161,38 @@ class TUI:
         self._open_overlay([], on_pick=lambda r: None, rebuild=rebuild, on_submit=submit,
                            footer="↑↓ move · type to filter · Enter run · Esc close", keep_input=True)
 
+    # commands that take a fixed set of options → the palette opens a SUB-MENU to pick one
+    _SUBMENUS = {
+        "thoughts": ([("Show thinking", "show"), ("Hide thinking", "hide")],
+                     lambda s: "show" if s.config.get("show_reasoning", True) else "hide"),
+        "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
+                  lambda s: s.config.get("thinking", "off")),
+        "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
+                  ("Plan — read-only", "plan"), ("Auto — full access", "auto")],
+                 lambda s: s.agent.mode),
+        "bg": ([("Auto", "auto"), ("Dark", "dark"), ("Inherit", "inherit")],
+               lambda s: s.config.get("background", "auto")),
+        "theme": ([("Dark", "dark"), ("Light", "light")], lambda s: s.config.get("theme", "dark")),
+        "sandbox": ([("On — confine bash", "on"), ("Off", "off")],
+                    lambda s: "on" if s.config.get("sandbox") else "off"),
+    }
+
     def _run_command(self, text: str) -> None:
-        if text.startswith("/"):
+        if not text.startswith("/"):
+            return
+        parts = text[1:].split(maxsplit=1)
+        cmd = parts[0].lower()
+        if cmd in self._SUBMENUS and len(parts) == 1:   # bare option-command → open a sub-menu
+            self._open_submenu(cmd)
+        else:
             self._handle_slash(text)
+
+    def _open_submenu(self, cmd: str) -> None:
+        opts, current = self._SUBMENUS[cmd]
+        cur = current(self)
+        rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
+        self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
+                           title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back")
 
     def _close_overlay(self) -> None:
         self._overlay = None

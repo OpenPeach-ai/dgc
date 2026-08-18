@@ -11,14 +11,15 @@ import time
 
 from . import style
 
-# "DGC" as a block-shadow wordmark (figlet ansi_shadow) — the chosen mark
+# "/// DGC" — the three-slash mark (matching the logo + the ╱╱╱ thinking animation) + the
+# block-shadow "DGC" wordmark (figlet ansi_shadow).
 LOGO = [
-    "  ██████╗  ██████╗  ██████╗",
-    "  ██╔══██╗██╔════╝ ██╔════╝",
-    "  ██║  ██║██║  ███╗██║",
-    "  ██║  ██║██║   ██║██║",
-    "  ██████╔╝╚██████╔╝╚██████╗",
-    "  ╚═════╝  ╚═════╝  ╚═════╝",
+    " ╱╱ ╱╱ ╱╱  ██████╗  ██████╗  ██████╗",
+    " ╱╱ ╱╱ ╱╱  ██╔══██╗██╔════╝ ██╔════╝",
+    " ╱╱ ╱╱ ╱╱  ██║  ██║██║  ███╗██║",
+    " ╱╱ ╱╱ ╱╱  ██║  ██║██║   ██║██║",
+    " ╱╱ ╱╱ ╱╱  ██████╔╝╚██████╔╝╚██████╗",
+    " ╱╱ ╱╱ ╱╱  ╚═════╝  ╚═════╝  ╚═════╝",
 ]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
