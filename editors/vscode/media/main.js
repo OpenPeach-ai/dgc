@@ -61,9 +61,9 @@
   // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
   // spinner; the reduced-motion case (in main.css) renders all three lit + static.
   const MARK = '<svg class="tmark" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true">'
-    + '<path class="s1" d="M12 70 L24 18 L37 18 L25 70 Z"/>'
-    + '<path class="s2" d="M33 70 L45 18 L58 18 L46 70 Z"/>'
-    + '<path class="s3" d="M54 70 L66 18 L79 18 L67 70 Z"/></svg>';
+    + '<path class="s1" d="M58 24 L70 30 L77 72 L65 66 Z"/>'
+    + '<path class="s2" d="M36 18 L48 24 L55 72 L43 66 Z"/>'
+    + '<path class="s3" d="M14 24 L26 30 L33 66 L21 60 Z"/></svg>';
   // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
   const GLYPH = {
     read_file: "→", glob: "→",
