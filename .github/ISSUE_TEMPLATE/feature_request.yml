@@ -1,0 +1,10 @@
+name: Feature request
+description: Suggest an improvement to DGC
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like DGC to do, and why?
+    validations: {required: true}

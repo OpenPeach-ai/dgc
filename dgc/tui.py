@@ -118,13 +118,13 @@ class TUI:
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
-        self._overlay: dict | None = None  # floating dropdown/modal above the composer (Grok-style)
+        self._overlay: dict | None = None  # floating dropdown/modal above the composer
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
             self._render_history()
 
-    # ---- floating overlay (Grok-style dropdown/modal above the composer) ----
+    # ---- floating overlay (a dropdown/modal above the composer) ----
     def _show_picker(self, title: str, labels: list[str], cb, delete_cb=None) -> None:
         """Open a floating, filterable, arrow-navigable picker above the composer (NOT chat text)."""
         rows = [{"label": str(l), "value": i} for i, l in enumerate(labels)]
@@ -221,7 +221,7 @@ class TUI:
         ov = self._overlay
         n = len(self._overlay_rows())
         if n:
-            ov["sel"] = (ov["sel"] + d) % n             # wrap-around like Grok
+            ov["sel"] = (ov["sel"] + d) % n             # wrap-around
         self._invalidate()
 
     def _overlay_height(self) -> int:
@@ -734,7 +734,7 @@ class TUI:
             Window(FormattedTextControl(self._bottom_border), height=1),
         ])
         tip = Window(FormattedTextControl(self._tip), height=1, style="class:status")
-        # The floating overlay (pickers / tabbed modal) grows a region ABOVE the composer, Grok-style —
+        # The floating overlay (pickers / tabbed modal) grows a region ABOVE the composer —
         # it pushes the transcript up instead of dumping the menu into the chat.
         overlay_panel = ConditionalContainer(
             Window(FormattedTextControl(self._render_overlay), height=self._overlay_height,
@@ -743,7 +743,7 @@ class TUI:
         root = HSplit([header, transcript, overlay_panel, tip, status, composer_box])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
-        # Mouse capture ON (like Grok) so the wheel scrolls DGC's own transcript instead of the
+        # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
         # terminal's scrollback (which would show pre-DGC output). Copy text with Option/Shift-drag.
         self.app = Application(layout=Layout(root, focused_element=composer),
                                key_bindings=self._keys(), full_screen=True, mouse_support=True,
@@ -1097,7 +1097,7 @@ class TUI:
         self._show_picker("Resume a session", labels, pick, delete_cb=dele)
 
     def _extensions_modal(self, tab: int = 0) -> None:
-        """A centered tabbed dialog with Skills + MCP Servers tabs (Grok's Extensions modal)."""
+        """A centered tabbed dialog with Skills + MCP Servers tabs (a tabbed Skills + MCP dialog)."""
         from .skills import discover_skills
 
         def rebuild(ov):

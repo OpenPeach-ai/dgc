@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in DGC (the CLI or the VS Code / Cursor extension) isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve DGC. Please share enough to reproduce it.
+  - type: input
+    id: version
+    attributes:
+      label: DGC version
+      description: "Run `dgc --version` (and note the extension version if relevant)."
+      placeholder: "0.12.0"
+    validations: {required: true}
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options: [CLI (full-screen), CLI (--classic), VS Code / Cursor extension]
+    validations: {required: true}
+  - type: input
+    id: env
+    attributes:
+      label: OS + terminal + model/provider
+      placeholder: "macOS 15 · iTerm2 · qwen3:8b via Ollama"
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead. Paste output/screenshots if you can.
+    validations: {required: true}
