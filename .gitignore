@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.DS_Store
+dgc.tar.gz
+
+# maintainer-only tooling (kept local, not published)
+scripts/
+HANDOFF.md
+OVERNIGHT_PLAN.md
+node_modules/
+*.vsix
+editors/vscode/dist/
+site/dgc.tar.gz
+site/dgc.tar.gz.sha256
+site/vscode/*.vsix

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script>if(location.protocol.indexOf('http')==0&&location.hostname.indexOf('.')>0&&!/(^|\.)vibedgc\.com$/i.test(location.hostname)&&!/\.pages\.dev$/i.test(location.hostname)){location.replace('https://vibedgc.com'+location.pathname+location.search+location.hash)}</script>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC for VS Code &amp; Cursor</title>
+<meta name="description" content="Install the DGC coding-agent extension for VS Code and Cursor.">
+<style>
+  :root{
+    --bg:#0B0B0C; --surface:#141416; --surface-2:#1A1A1D; --code:#0E0E10;
+    --border:#232326; --border-strong:#303034;
+    --text:#F5F5F5; --text-strong:#FFFFFF; --muted:#9A9A9E; --faint:#6A6A6E;
+    --accent:#7C5CFF; --accent-hover:#6A4BF0; --lav:#A78BFA; --accent-soft:rgba(124,92,255,.12);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.65 var(--sans);-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(70% 40% at 50% -8%,rgba(124,92,255,.16),rgba(167,139,250,.06) 45%,transparent 62%);background-repeat:no-repeat}
+  .wrap{max-width:680px;margin:0 auto;padding:8vh 22px 12vh}
+  a{color:var(--accent);text-decoration:none} a:hover{color:var(--lav)}
+  .mark{font:800 15px/1 var(--mono);letter-spacing:.08em;color:var(--text-strong);display:inline-flex;align-items:center}
+  .mark svg.mk{width:1.7em;height:1.7em;margin-right:.42em;color:var(--accent);flex:none}
+  .mark .cur{width:8px;height:14px;margin-left:4px;background:var(--accent);display:inline-block;animation:blink 1.1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  h1{font:800 clamp(28px,5vw,40px)/1.1 var(--sans);letter-spacing:-.02em;margin:16px 0 10px;color:var(--text-strong)}
+  .g{background:linear-gradient(92deg,var(--lav),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);margin:0 0 30px}
+  .btn{display:inline-block;font:600 14px/1 var(--sans);color:#fff;background:var(--accent);padding:13px 22px;border-radius:11px;margin:4px 8px 4px 0;transition:.15s}
+  .btn:hover{background:var(--accent-hover)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border-strong)}
+  .btn.ghost:hover{border-color:var(--lav);background:transparent}
+  h2{font:600 18px/1.3 var(--sans);margin:34px 0 8px;color:var(--text-strong)} p{margin:0 0 12px}
+  ol{padding-left:20px} li{margin:8px 0}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:13.5px;color:var(--text);margin:10px 0}
+  code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);color:var(--text);padding:.12em .4em;border-radius:5px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:20px;margin:14px 0}
+  .note{color:var(--faint);font-size:13.5px}
+  footer{margin-top:44px;color:var(--faint);font-size:13.5px;border-top:1px solid var(--border);padding-top:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M10 74 L30 16 L39 16 L19 74 Z"/><path d="M32 74 L52 16 L61 16 L41 74 Z"/><path d="M54 74 L74 16 L83 16 L63 74 Z"/></svg>DGC<span class="cur"></span></span>
+  <h1>DGC for <span class="g">VS&nbsp;Code &amp; Cursor</span></h1>
+  <p class="sub">A docked chat panel, native menus, streaming tool calls and inline diffs — driven by your own local model, inside your editor.</p>
+
+  <a class="btn" href="/vscode/dgc.vsix" download>Download dgc.vsix</a>
+  <a class="btn ghost" href="https://github.com/OpenPeach-ai/dgc/releases">Releases on GitHub</a>
+
+  <div class="card">
+    <h2 style="margin-top:0">Prerequisite: the DGC CLI (v0.4.0+)</h2>
+    <p>The extension drives the DGC CLI. Install it first:</p>
+    <pre>curl -fsSL https://vibedgc.com/install.sh | bash</pre>
+    <p class="note">Then <code>dgc setup</code> once to pick a provider &amp; model.</p>
+  </div>
+
+  <h2>Install the extension</h2>
+  <ol>
+    <li>Download <a href="/vscode/dgc.vsix" download><code>dgc.vsix</code></a>.</li>
+    <li>In a terminal:
+      <pre>cursor --install-extension dgc.vsix     # Cursor
+code   --install-extension dgc.vsix     # VS Code
+codium --install-extension dgc.vsix     # VSCodium</pre>
+    </li>
+    <li>Or in the editor: <b>Extensions</b> view → <b>…</b> menu → <b>Install from VSIX…</b> → pick <code>dgc.vsix</code>.</li>
+    <li>Open the <b>DGC</b> icon in the activity bar and start coding.</li>
+  </ol>
+  <p class="note">Verify the download: <code>shasum -a 256 dgc.vsix</code> against <a href="/vscode/dgc.vsix.sha256">dgc.vsix.sha256</a>.</p>
+
+  <p class="note">Marketplace &amp; Open&nbsp;VSX listings are coming — for now the <code>.vsix</code> above is the install path.</p>
+
+  <footer>Built by Mohit Kalra · <a href="https://vibedgc.com">vibedgc.com</a> · PolyForm Noncommercial</footer>
+</div>
+</body>
+</html>
