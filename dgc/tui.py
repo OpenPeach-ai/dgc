@@ -636,7 +636,11 @@ class TUI:
         th = style_mod.theme()
         cfg = self.config
         if cmd in ("help", "?", "commands"):
-            self._append(self._rich(_tui_help()))
+            # open the interactive `/` palette (arrow-select · Enter runs · Esc closes) — same menu
+            # you get by typing `/`, so /help and the banner "Commands" item are both selectable.
+            self.input_buf.reset()
+            self.input_buf.insert_text("/")
+            self.input_buf.start_completion(select_first=False)
         elif cmd in ("new", "session"):
             self._prompt_new_session()
         elif cmd == "name":
@@ -813,6 +817,40 @@ class TUI:
         self._show_picker(f"{'Sub-agent model' if subagent else 'Model'} @ {base or self.config.base_url}",
                           models, lambda i: self._set_model_tui(models[i], subagent=subagent))
 
+    def _render_history(self) -> None:
+        """Repopulate the transcript from the loaded session so a resumed chat is actually visible."""
+        th = style_mod.theme()
+
+        def _text(content) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):       # multimodal → keep the text parts
+                return " ".join(p.get("text", "") for p in content
+                                if isinstance(p, dict) and p.get("type") == "text")
+            return ""
+
+        for m in self.agent.messages:
+            role = m.get("role")
+            body = _text(m.get("content")).strip()
+            if role == "user":
+                if body.startswith("<system-reminder>"):
+                    continue                    # internal nudges aren't part of the chat
+                if body.startswith("<user-interjection>"):
+                    body = body.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
+                if body:
+                    self.blocks.append(self._rich(f"[bold]{glyphs.ARROW}[/] {_esc(body[:6000])}"))
+            elif role == "assistant":
+                if body:
+                    self.blocks.append(self._rich(self._md(body)))   # _md → renderable; blocks need ANSI str
+                tcs = m.get("tool_calls") or []
+                if tcs:
+                    names = ", ".join(tc.get("function", {}).get("name", "?") for tc in tcs)
+                    self.blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
+            # role == "tool" (results) and "system" are omitted — too verbose for the recap
+        if self.blocks:
+            self.blocks.append(self._rich(f"[{th.faint}]{'─' * 20} resumed here {'─' * 20}[/]"))
+        self._stick = True
+
     def _resume_flow(self) -> None:
         from . import sessions
         items = sessions.listing(self.config.project_root)
@@ -824,6 +862,7 @@ class TUI:
         def pick(i):
             n = self.agent.load_session(items[i][0])
             self.blocks.clear(); self._buf = ""; self._think = ""
+            self._render_history()          # show the loaded conversation, not a blank screen
             self._flash(f"resumed ({n} messages)"
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
