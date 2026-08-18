@@ -136,13 +136,13 @@ class TUI:
 
     def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
-                      keep_input=False, header=None, accent=False) -> None:
+                      keep_input=False, header=None, accent=False, back=None) -> None:
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
                          "rebuild": rebuild, "on_submit": on_submit, "header": header,
-                         "accent": accent, "sel": 0, "scroll": 0}
+                         "accent": accent, "sel": 0, "scroll": 0, "back": back}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
@@ -193,8 +193,12 @@ class TUI:
         opts, current = self._SUBMENUS[cmd]
         cur = current(self)
         rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
+
+        def back():                                     # Esc in a sub-menu → return to the `/` palette
+            self.input_buf.reset(); self.input_buf.insert_text("/")
+            self._open_command_palette()
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
-                           title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back")
+                           title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back", back=back)
 
     def _close_overlay(self) -> None:
         self._overlay = None
@@ -1518,8 +1522,12 @@ class TUI:
                 cb = self._input["cb"]; self._input = None
                 cb("")
                 return
-            if self._overlay is not None:                   # non-blocking picker/palette/modal → close
-                self._close_overlay()
+            if self._overlay is not None:                   # non-blocking picker/palette/modal
+                back = self._overlay.get("back")
+                if back:                                    # sub-menu → step back to the parent menu
+                    back()
+                else:                                       # top-level menu → close
+                    self._close_overlay()
                 return
             if self._naming:
                 self._naming = False
