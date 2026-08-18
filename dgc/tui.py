@@ -150,8 +150,11 @@ class TUI:
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
         def rebuild(ov):
             q = self.input_buf.text.lstrip("/").strip().lower()
-            return [{"label": "/" + n, "desc": d, "value": n} for n, d in SLASH_COMMANDS
-                    if not q or q in n.lower() or q in d.lower()]
+            rows = [(n, d) for n, d in SLASH_COMMANDS if not q or q in n.lower() or q in d.lower()]
+            if q:   # rank: exact name, then name-prefix, then name-substring, then description-only
+                rows.sort(key=lambda nd: (nd[0].lower() != q, not nd[0].lower().startswith(q),
+                                          q not in nd[0].lower(), nd[0]))
+            return [{"label": "/" + n, "desc": d, "value": n} for n, d in rows]
 
         def submit(row, typed):
             if " " in typed:                            # typed args → run verbatim (e.g. /model qwen)
