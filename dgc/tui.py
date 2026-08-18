@@ -121,6 +121,8 @@ class TUI:
         self._overlay: dict | None = None  # floating dropdown/modal above the composer (Grok-style)
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
+        if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
+            self._render_history()
 
     # ---- floating overlay (Grok-style dropdown/modal above the composer) ----
     def _show_picker(self, title: str, labels: list[str], cb, delete_cb=None) -> None:
@@ -1504,6 +1506,7 @@ class TUI:
         self._cancel.clear()
         self._tool_count = 0
         self.blocks.append(self._rich(f"[bold]{glyphs.ARROW}[/] {_esc(text)}"))
+        self._stick = True                  # ALWAYS snap to the bottom so the prompt + stream are visible
         self._turn.set()
         self._turn_t0 = time.monotonic()
 
