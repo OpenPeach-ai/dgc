@@ -91,6 +91,8 @@ class TUI:
         self._think = ""                   # current streaming reasoning (shown muted)
         self._streaming = False
         self._thinking = False
+        self._cur_tool: str | None = None   # activity label while a tool runs ("Run npm test")
+        self._think_t0: float | None = None  # when the current reasoning block started
         self._tool_count = 0
         self._start = time.monotonic()
 
@@ -116,6 +118,7 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer (Grok-style)
+        self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
 
     # ---- floating overlay (Grok-style dropdown/modal above the composer) ----
@@ -127,12 +130,36 @@ class TUI:
                            on_delete=(lambda r: delete_cb(r["value"])) if delete_cb else None)
 
     def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
-                      on_delete=None, on_action=None, rebuild=None) -> None:
-        self.input_buf.reset()                          # composer becomes the filter box
+                      on_delete=None, on_action=None, rebuild=None, on_submit=None,
+                      keep_input=False) -> None:
+        if not keep_input:
+            self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
-                         "rebuild": rebuild, "sel": 0, "scroll": 0}
+                         "rebuild": rebuild, "on_submit": on_submit, "sel": 0, "scroll": 0}
         self._invalidate()
+
+    def _open_command_palette(self) -> None:
+        """The `/` menu as an overlay (same engine as the pickers): the composer holds `/query`,
+        rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
+        def rebuild(ov):
+            q = self.input_buf.text.lstrip("/").strip().lower()
+            return [{"label": "/" + n, "desc": d, "value": n} for n, d in SLASH_COMMANDS
+                    if not q or q in n.lower() or q in d.lower()]
+
+        def submit(row, typed):
+            if " " in typed:                            # typed args → run verbatim (e.g. /model qwen)
+                self._run_command(typed)
+            elif row:                                   # selected a row → run it
+                self._run_command("/" + row["value"])
+            elif typed.startswith("/") and len(typed) > 1:
+                self._run_command(typed)
+        self._open_overlay([], on_pick=lambda r: None, rebuild=rebuild, on_submit=submit,
+                           footer="↑↓ move · type to filter · Enter run · Esc close", keep_input=True)
+
+    def _run_command(self, text: str) -> None:
+        if text.startswith("/"):
+            self._handle_slash(text)
 
     def _close_overlay(self) -> None:
         self._overlay = None
@@ -142,14 +169,17 @@ class TUI:
     _OVERLAY_CAP = 10                                   # max rows shown at once
 
     def _overlay_rows(self) -> list:
-        """Rows for the active tab, filtered by the composer text; clamps sel."""
+        """Rows for the overlay; a rebuild callback owns its own filtering, otherwise filter by
+        the composer text. Clamps the selection into range."""
         ov = self._overlay
         if not ov:
             return []
-        base = ov["rebuild"](ov) if ov.get("rebuild") else ov["rows"]
-        flt = self.input_buf.text.strip().lower()
-        rows = [r for r in base if not flt or flt in r.get("label", "").lower()
-                or flt in r.get("desc", "").lower()] if flt else base
+        if ov.get("rebuild"):
+            rows = ov["rebuild"](ov)
+        else:
+            flt = self.input_buf.text.strip().lower()
+            rows = [r for r in ov["rows"] if not flt or flt in r.get("label", "").lower()
+                    or flt in r.get("desc", "").lower()] if flt else ov["rows"]
         if ov["sel"] >= len(rows):
             ov["sel"] = max(0, len(rows) - 1)
         return rows
@@ -419,8 +449,15 @@ class TUI:
             el = int(time.monotonic() - self._turn_t0)
             fr = glyphs.THINK_FRAMES[int(time.monotonic() * 6) % len(glyphs.THINK_FRAMES)]
             toks = render_mod.fmt_tokens(len(self._buf) // 4) if self._buf else "0"
-            act = "responding" if self._streaming else ("thinking" if self._thinking else "working")
-            return ANSI(self._rich(f"[{th.accent}]{fr}[/] [{th.muted}]{act}… {el}s "
+            if self._streaming:
+                act = "responding"
+            elif self._cur_tool:
+                act = self._cur_tool            # "Run npm test" · "Read x.py" · "Search …"
+            elif self._thinking:
+                act = "thinking"
+            else:
+                act = "working"
+            return ANSI(self._rich(f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}… {el}s "
                                    f"{glyphs.MIDDOT} {toks} tok[/]  [{th.faint}]esc to stop[/]"))
         used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
         return ANSI(self._rich(render_mod.context_bar(used, size, width=14)))
@@ -459,6 +496,7 @@ class TUI:
     def on_text(self, chunk: str) -> None:
         if self._thinking:
             self._thinking = False
+        self._cur_tool = None
         self._flush_think()                 # finalize any reasoning above the answer
         self._buf += chunk
         self._streaming = True
@@ -466,6 +504,8 @@ class TUI:
 
     def on_thinking(self, chunk: str) -> None:
         self._thinking = True
+        if self._think_t0 is None:
+            self._think_t0 = time.monotonic()   # start timing this reasoning block
         if self.config.get("show_reasoning", True):
             self._think += chunk            # shown live + muted in the transcript
         self._invalidate()
@@ -474,9 +514,12 @@ class TUI:
         """Move the streamed reasoning into a permanent muted block above the answer."""
         if self._think.strip():
             th = style_mod.theme()
-            self._append(self._rich(f"[{th.faint} italic]{glyphs.RAIL} reasoning[/]\n"
+            secs = int(time.monotonic() - self._think_t0) if self._think_t0 else 0
+            head = f"Thought for {secs}s" if secs else "Thought"
+            self._append(self._rich(f"[{th.faint} italic]{glyphs.RAIL} {head}[/]\n"
                                     f"[{th.faint} italic]{_esc(self._think.strip())}[/]"))
         self._think = ""
+        self._think_t0 = None
 
     def end_stream(self) -> None:
         self._flush_think()
@@ -484,16 +527,25 @@ class TUI:
             self._append(self._rich(self._md(self._buf)))
         self._buf = ""; self._think = ""
         self._streaming = False
+        self._cur_tool = None
+
+    _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
+                  "edit_file": "Edit", "grep": "Search", "glob": "Find", "web_search": "Search",
+                  "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
+                  "add_skill": "Install skill", "save_memory": "Remember"}
 
     def tool_call(self, name: str, args: dict) -> None:
         self._flush_text()
         self._tool_count += 1
         th = style_mod.theme()
         summary = _arg_summary(args)
+        verb = self._TOOL_VERB.get(name, name)          # status now reads "Run npm test", "Read x.py"
+        self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
         self._append(self._rich(f"[bold {th.accent}]{glyphs.tool_icon(name)} {name}[/] "
                                 f"[{th.faint}]{summary}[/]"))
 
     def tool_result(self, name: str, out: str) -> None:
+        self._cur_tool = None
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -583,9 +635,8 @@ class TUI:
 
     # --------------------------------------------------------------- the app ---
     def _build(self) -> None:
-        # complete_while_typing → the `/` palette opens the instant you type a slash.
-        self.input_buf = Buffer(multiline=True, completer=SlashCompleter(),
-                                complete_while_typing=True)
+        # `/` opens the command palette as an overlay (see the `/` key binding) — no completer.
+        self.input_buf = Buffer(multiline=True)
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
@@ -613,19 +664,13 @@ class TUI:
             Window(FormattedTextControl(self._render_overlay), height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
-        # FloatContainer so the `/` command palette (CompletionsMenu) can float above the composer.
-        root = FloatContainer(
-            content=HSplit([header, transcript, overlay_panel, tip, status, composer_box]),
-            floats=[Float(xcursor=True, ycursor=True,
-                          content=CompletionsMenu(max_height=12, scroll_offset=1))],
-        )
+        root = HSplit([header, transcript, overlay_panel, tip, status, composer_box])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
-        # Mouse capture ONLY on the welcome screen (for menu hover/click). Once you're chatting it
-        # turns OFF, so the terminal's own text selection + copy works in the transcript.
-        mouse_on_welcome = Condition(lambda: not self.blocks and not self._buf)
+        # Mouse capture ON (like Grok) so the wheel scrolls DGC's own transcript instead of the
+        # terminal's scrollback (which would show pre-DGC output). Copy text with Option/Shift-drag.
         self.app = Application(layout=Layout(root, focused_element=composer),
-                               key_bindings=self._keys(), full_screen=True, mouse_support=mouse_on_welcome,
+                               key_bindings=self._keys(), full_screen=True, mouse_support=True,
                                style=self._pt_style(), refresh_interval=0.08,
                                erase_when_done=True,   # wipe the TUI frame on exit — no blank gap above the hint
                                color_depth=style_mod.detect_color_depth())
@@ -743,11 +788,10 @@ class TUI:
         th = style_mod.theme()
         cfg = self.config
         if cmd in ("help", "?", "commands"):
-            # open the interactive `/` palette (arrow-select · Enter runs · Esc closes) — same menu
-            # you get by typing `/`, so /help and the banner "Commands" item are both selectable.
+            # open the interactive `/` palette overlay (arrow-select · Enter runs · Esc closes)
             self.input_buf.reset()
             self.input_buf.insert_text("/")
-            self.input_buf.start_completion(select_first=False)
+            self._open_command_palette()
         elif cmd in ("new", "session"):
             self._prompt_new_session()
         elif cmd == "name":
@@ -1188,6 +1232,22 @@ class TUI:
 
         ov_open = Condition(lambda: self._overlay is not None)
 
+        @kb.add("/")
+        def _(ev):
+            b = self.input_buf
+            if (self._overlay is None and not b.text and not self._turn.is_set()
+                    and self._req is None and not self._naming and self._input is None):
+                b.insert_text("/")
+                self._open_command_palette()            # `/` on an empty composer → command palette
+            else:
+                b.insert_text("/")
+
+        @kb.add("backspace", filter=Condition(lambda: self._overlay is not None and self._overlay.get("on_submit")))
+        def _(ev):
+            self.input_buf.delete_before_cursor()
+            if not self.input_buf.text.startswith("/"):  # deleted the leading slash → close palette
+                self._close_overlay()
+
         @kb.add("up", filter=ov_open)
         def _(ev):
             self._overlay_move(-1)
@@ -1195,6 +1255,22 @@ class TUI:
         @kb.add("down", filter=ov_open)
         def _(ev):
             self._overlay_move(1)
+
+        # `/` command palette navigation — the composer is multiline, so without these Down/Up would
+        # move the cursor and CLOSE the completion menu (then Enter submitted a bare "/").
+        comp_open = Condition(lambda: self._overlay is None and self.input_buf.complete_state is not None)
+
+        @kb.add("down", filter=comp_open)
+        def _(ev):
+            self.input_buf.complete_next()
+
+        @kb.add("up", filter=comp_open)
+        def _(ev):
+            self.input_buf.complete_previous()
+
+        @kb.add("tab", filter=comp_open)
+        def _(ev):
+            self.input_buf.complete_next()
 
         @kb.add("c-p", filter=ov_open)
         def _(ev):
@@ -1242,10 +1318,14 @@ class TUI:
                 if ov.get("tabs"):                  # tabbed modal → Enter is inert (use a/x/r · Esc)
                     return
                 rows = self._overlay_rows()
-                on_pick = ov["on_pick"]
+                sel = rows[ov["sel"]] if rows else None
+                typed = self.input_buf.text.strip()
+                submit, on_pick = ov.get("on_submit"), ov["on_pick"]
                 self._close_overlay()
-                if rows:
-                    on_pick(rows[ov["sel"]])
+                if submit:                          # command palette: (selected row, typed text)
+                    submit(sel, typed)
+                elif sel:
+                    on_pick(sel)
                 return
             buf = self.input_buf
             if buf.complete_state is not None:      # the `/` command palette is open → resolve + RUN
@@ -1322,10 +1402,20 @@ class TUI:
         @kb.add("c-d")
         @kb.add("c-q")
         def _(ev):
-            if self._turn.is_set():
-                self._cancel.set()
-            else:
+            if self._turn.is_set():             # a turn is running → cancel it
+                self._cancel.set(); return
+            if self._overlay is not None:        # a menu is open → close it
+                self._close_overlay(); return
+            if self.input_buf.complete_state is not None:
+                self.input_buf.cancel_completion(); return
+            if self.input_buf.text.strip():      # a draft is typed → clear it first
+                self.input_buf.reset(); self._flash("draft cleared"); return
+            now = time.monotonic()               # idle + empty → double-press to quit
+            if now - self._quit_armed < 2.0:
                 ev.app.exit()
+            else:
+                self._quit_armed = now
+                self._flash("press Ctrl+C again to quit")
 
         @kb.add("c-n")
         def _(ev):
