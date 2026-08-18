@@ -557,7 +557,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body>
-<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M58 24 L70 30 L77 72 L65 66 Z"/><path d="M36 18 L48 24 L55 72 L43 66 Z"/><path d="M14 24 L26 30 L33 66 L21 60 Z"/></svg>DGC<span class="cur"></span></span><span class="pd" id="pmodel" title="Model — click to change">dgc</span></header>
+<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span><span class="pd" id="pmodel" title="Model — click to change">dgc</span></header>
 <main id="log"></main>
 <div id="settings" hidden>
   <div class="set-head">

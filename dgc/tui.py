@@ -22,7 +22,7 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Float, FloatContainer, HSplit, Layout, VSplit, Window
+from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Layout, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -115,16 +115,113 @@ class TUI:
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
+        self._overlay: dict | None = None  # floating dropdown/modal above the composer (Grok-style)
         self._build()
 
-    # ---- interactive prompts inside the TUI (numbered picker / free-text) ----
+    # ---- floating overlay (Grok-style dropdown/modal above the composer) ----
     def _show_picker(self, title: str, labels: list[str], cb, delete_cb=None) -> None:
+        """Open a floating, filterable, arrow-navigable picker above the composer (NOT chat text)."""
+        rows = [{"label": str(l), "value": i} for i, l in enumerate(labels)]
+        foot = "↑↓ move · type to filter · Enter select" + ("  · ^D delete" if delete_cb else "") + " · Esc close"
+        self._open_overlay(rows, on_pick=lambda r: cb(r["value"]), title=title, footer=foot,
+                           on_delete=(lambda r: delete_cb(r["value"])) if delete_cb else None)
+
+    def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
+                      on_delete=None, on_action=None, rebuild=None) -> None:
+        self.input_buf.reset()                          # composer becomes the filter box
+        self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
+                         "footer": footer, "on_delete": on_delete, "on_action": on_action,
+                         "rebuild": rebuild, "sel": 0, "scroll": 0}
+        self._invalidate()
+
+    def _close_overlay(self) -> None:
+        self._overlay = None
+        self.input_buf.reset()
+        self._invalidate()
+
+    _OVERLAY_CAP = 10                                   # max rows shown at once
+
+    def _overlay_rows(self) -> list:
+        """Rows for the active tab, filtered by the composer text; clamps sel."""
+        ov = self._overlay
+        if not ov:
+            return []
+        base = ov["rebuild"](ov) if ov.get("rebuild") else ov["rows"]
+        flt = self.input_buf.text.strip().lower()
+        rows = [r for r in base if not flt or flt in r.get("label", "").lower()
+                or flt in r.get("desc", "").lower()] if flt else base
+        if ov["sel"] >= len(rows):
+            ov["sel"] = max(0, len(rows) - 1)
+        return rows
+
+    def _overlay_move(self, d: int) -> None:
+        ov = self._overlay
+        n = len(self._overlay_rows())
+        if n:
+            ov["sel"] = (ov["sel"] + d) % n             # wrap-around like Grok
+        self._invalidate()
+
+    def _overlay_height(self) -> int:
+        if not self._overlay:
+            return 0
+        n = min(len(self._overlay_rows()) or 1, self._OVERLAY_CAP)
+        h = n + 2                                       # rows + top/bottom border
+        h += 2 if self._overlay.get("tabs") else (1 if self._overlay.get("title") else 0)
+        h += 2 if self._overlay.get("footer") else 0
+        avail = max(4, getattr(self, "_height", 30) - 9)   # leave room for slim header + status + composer
+        return min(h, 18, avail)
+
+    def _render_overlay(self):
+        from rich import box as _box
+        from rich.padding import Padding
+        from rich.panel import Panel
+        from rich.text import Text
         th = style_mod.theme()
-        rows = "\n".join(f"  [{th.accent}]{i + 1:>2}[/]  {_esc(str(l))}" for i, l in enumerate(labels))
-        self._append(self._rich(f"[bold]{_esc(title)}[/]\n{rows}"))
-        self._picker = {"labels": labels, "cb": cb, "delete_cb": delete_cb}
-        extra = " (or dN to delete)" if delete_cb else ""
-        self._flash(f"type a number 1-{len(labels)}{extra} then Enter · Esc to cancel")
+        ov = self._overlay
+        if not ov:
+            return ANSI("")
+        W = min(max(46, self._width - 6), 108)
+        inner = W - 4
+        rows = self._overlay_rows()
+        sel, cap = ov["sel"], self._OVERLAY_CAP
+        scroll = ov.get("scroll", 0)
+        scroll = min(scroll, sel)
+        if sel >= scroll + cap:
+            scroll = sel - cap + 1
+        ov["scroll"] = scroll = max(0, scroll)
+        visible = rows[scroll:scroll + cap]
+        labw = min(max((len(r.get("label", "")) for r in rows), default=8), 34)
+        lines: list = []
+        if ov.get("tabs"):                              # tab strip (tabbed modal)
+            strip = Text()
+            for i, t in enumerate(ov["tabs"]):
+                strip.append(f" {t} ", style=(f"bold {th.bg} on {th.accent}" if i == ov["tab"] else th.muted))
+                strip.append(" ")
+            lines += [strip, Text("─" * inner, style=th.border)]
+        elif ov.get("title"):
+            lines.append(Text(ov["title"], style="bold"))
+        if not visible:
+            lines.append(Text("  (no matches)", style=th.faint))
+        for i, r in enumerate(visible):
+            hot = (scroll + i == sel)
+            line = Text()
+            line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
+            line.append(r.get("label", "").ljust(labw), style="bold" if hot else th.text)
+            if r.get("desc"):
+                line.append("  " + r["desc"], style=th.muted if hot else th.faint)
+            pad = inner - line.cell_len
+            if pad > 0:
+                line.append(" " * pad)
+            if hot:
+                line.stylize(f"on {th.surface2}")       # subtle full-width highlight bar
+            lines.append(line)
+        if len(rows) > cap:                             # scroll indicator
+            lines.append(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
+        if ov.get("footer"):
+            lines += [Text(""), Text(ov["footer"], style=th.faint)]
+        panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
+                      border_style=th.border_strong, padding=(0, 1), width=W)
+        return ANSI(self._rich(Padding(panel, (0, 0, 0, 2))))
 
     def _ask_input(self, prompt: str, cb) -> None:
         self._input = {"cb": cb, "prompt": prompt}
@@ -183,7 +280,7 @@ class TUI:
 
     def _tip(self):
         th = style_mod.theme()
-        if self.blocks or self._buf or self._welcome_metrics()[3]:   # hidden once busy / on tiny terminals
+        if self.blocks or self._buf or self._overlay or self._welcome_metrics()[3]:   # hidden once busy / tiny
             return ANSI("")
         return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]Shift+Tab to switch mode "
                                f"{glyphs.MIDDOT} /help for commands {glyphs.MIDDOT} Esc to stop a turn[/]"))
@@ -196,7 +293,7 @@ class TUI:
     def _header(self):
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
-        if self.blocks or self._buf:        # conversation started → slim line
+        if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             return ANSI(self._rich(f"[bold {th.accent}]Vibe DGC[/] "
                                    f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]"))
@@ -510,9 +607,15 @@ class TUI:
             Window(FormattedTextControl(self._bottom_border), height=1),
         ])
         tip = Window(FormattedTextControl(self._tip), height=1, style="class:status")
+        # The floating overlay (pickers / tabbed modal) grows a region ABOVE the composer, Grok-style —
+        # it pushes the transcript up instead of dumping the menu into the chat.
+        overlay_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._render_overlay), height=self._overlay_height,
+                   dont_extend_height=True),
+            filter=Condition(lambda: self._overlay is not None))
         # FloatContainer so the `/` command palette (CompletionsMenu) can float above the composer.
         root = FloatContainer(
-            content=HSplit([header, transcript, tip, status, composer_box]),
+            content=HSplit([header, transcript, overlay_panel, tip, status, composer_box]),
             floats=[Float(xcursor=True, ycursor=True,
                           content=CompletionsMenu(max_height=12, scroll_offset=1))],
         )
@@ -528,7 +631,7 @@ class TUI:
                                color_depth=style_mod.detect_color_depth())
 
     def _header_height(self) -> int:
-        if self.blocks or self._buf:
+        if self.blocks or self._buf or self._overlay:
             return 1
         self._sync_width()
         _, _, narrow, compact = self._welcome_metrics()
@@ -1031,8 +1134,46 @@ class TUI:
     def _keys(self) -> KeyBindings:
         kb = KeyBindings()
 
+        ov_open = Condition(lambda: self._overlay is not None)
+
+        @kb.add("up", filter=ov_open)
+        def _(ev):
+            self._overlay_move(-1)
+
+        @kb.add("down", filter=ov_open)
+        def _(ev):
+            self._overlay_move(1)
+
+        @kb.add("c-p", filter=ov_open)
+        def _(ev):
+            self._overlay_move(-1)
+
+        @kb.add("c-n", filter=ov_open)
+        def _(ev):
+            self._overlay_move(1)
+
+        @kb.add("tab", filter=Condition(lambda: self._overlay is not None and self._overlay.get("tabs")))
+        def _(ev):
+            ov = self._overlay
+            ov["tab"] = (ov["tab"] + 1) % len(ov["tabs"]); ov["sel"] = 0; ov["scroll"] = 0
+            self.input_buf.reset(); self._invalidate()
+
+        @kb.add("c-x", filter=Condition(lambda: self._overlay is not None and self._overlay.get("on_delete")))
+        def _(ev):
+            rows = self._overlay_rows()
+            if rows:
+                self._overlay["on_delete"](rows[self._overlay["sel"]])   # cb re-opens with fresh rows
+
         @kb.add("enter")
         def _(ev):
+            if self._overlay is not None:           # floating picker/modal → Enter picks the row
+                rows = self._overlay_rows()
+                ov = self._overlay
+                on_pick = ov["on_pick"]
+                self._close_overlay()
+                if rows:
+                    on_pick(rows[ov["sel"]])
+                return
             buf = self.input_buf
             if buf.complete_state is not None:      # the `/` command palette is open → resolve + RUN
                 cs = buf.complete_state
@@ -1083,6 +1224,9 @@ class TUI:
 
         @kb.add("escape")
         def _(ev):
+            if self._overlay is not None:                   # close the floating overlay first
+                self._close_overlay()
+                return
             if self.input_buf.complete_state is not None:   # `/` palette open → abandon it
                 self.input_buf.cancel_completion()
                 self.input_buf.reset()          # clear the partial command (else the next one concatenates)
