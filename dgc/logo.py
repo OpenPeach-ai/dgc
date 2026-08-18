@@ -11,23 +11,41 @@ import time
 
 from . import style
 
-# The "///" mark — three tapered, staggered, forward-leaning bars (the DGC logo, rendered as solid
-# block ASCII from site/dgc-mark.svg's parallelograms). Middle bar tallest, right bar shortest, just
-# like the logo. Leading spaces on each row create the diagonal, so these lines are NOT lstripped.
+# The "///" mark — three tapered, staggered, forward-leaning bars (the DGC logo). Rendered from the
+# founder's slash-logo art (site/slash-logo.txt) at terminal scale, using HALF-BLOCK edges (▀▄) so the
+# diagonals stay sharp instead of stair-stepping. Middle bar tallest, right bar shortest — like the
+# logo. Leading spaces on each row create the diagonal, so these lines are NOT lstripped.
 LOGO = [
-    "            ████",
-    "    ███    ████     ████",
-    "   ████    ████    ████",
-    "   ████    ████    ████",
-    "  █████   █████    ████",
-    "  ████    ████    ████",
-    "  ████    ████    ████",
-    " █████    ████    ███",
-    " ████    ████",
+    '               ▄▄█',
+    '       ▄     ▄████         ▄',
+    '    ▄▄██     █████      ▄▄██',
+    '   █████    ▄████▀     ████▀',
+    '   █████    █████     █████',
+    '  ▄████▀    █████     █████',
+    '  █████     █████     ████▀',
+    '  █████    ▄████▀    █████',
+    '  █████    █████     █████',
+    ' ▄████     █████     ████▀',
+    ' █████     █████    █████',
+    ' █████    ▄████▀    ███▀',
+    '█████▀    █████     ▀',
+    '██▀       ██▀',
+]
+# A smaller build of the same mark, for medium-height terminals that can't fit the full hero.
+LOGO_SMALL = [
+    '        ▄▄',
+    '  ▄▄█  ███   ▄▄█',
+    ' ▄██▀  ███   ███',
+    ' ███   ███  ▄██',
+    ' ███  ▄██▀  ███',
+    ' ███  ███   ███',
+    '███   ███  ▄█▀',
+    '█▀▀   █▀▀',
 ]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
-WIDTH = _COLS                                # full mark width (/// + DGC, incl. the diagonal spaces)
+WIDTH = _COLS                                # full mark width (incl. the diagonal leading spaces)
+WIDTH_SMALL = max(len(r) for r in LOGO_SMALL)
 _BLANK = (" ", "⠀")     # skip blanks in the shimmer
 
 # shimmer constants: a raised-cosine band sweeps bottom-left→top-right
@@ -42,9 +60,9 @@ _REST = "#5E5E66"     # resting colour of the mark (muted grey)
 # grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
 # into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
 _GLINT = "#EDEDF2"
-def _char_style(r: int, c: int, secs: float, hi: str) -> str:
-    """Colour a wordmark cell — the whole mark (/// and DGC) uses the same grey→white glint sweep."""
-    diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
+def _char_style(r: int, c: int, secs: float, hi: str, rows: int = _ROWS, cols: int = _COLS) -> str:
+    """Colour a mark cell — the /// gets a grey→white glint sweeping bottom-left→top-right."""
+    diag = (c + (rows - 1 - r)) / (cols + rows)
     return "bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs))
 
 
@@ -76,18 +94,23 @@ def shimmer_text(secs: float, indent: bool = False):
     return _frame(secs, indent=indent)
 
 
-def shimmer_lines(secs: float, pad: int = 0):
-    """The wordmark as a list of rich Text rows (one per line), each padded to `pad`."""
+def shimmer_lines(secs: float, pad: int = 0, small: bool = False):
+    """The mark as a list of rich Text rows (one per line), each padded to `pad`.
+
+    `small=True` renders the compact build (LOGO_SMALL) for medium-height terminals.
+    """
     from rich.text import Text
+    art = LOGO_SMALL if small else LOGO
+    rows, cols = len(art), max(len(r) for r in art)
     hi = _GLINT
     out = []
-    for r, line in enumerate(LOGO):             # NOT lstripped — leading spaces form the /// diagonal
+    for r, line in enumerate(art):              # NOT lstripped — leading spaces form the /// diagonal
         t = Text()
         for c, ch in enumerate(line):
             if ch in _BLANK:
                 t.append(" ")
             else:
-                t.append(ch, style=_char_style(r, c, secs, hi))
+                t.append(ch, style=_char_style(r, c, secs, hi, rows, cols))
         if pad and len(line) < pad:
             t.append(" " * (pad - len(line)))
         out.append(t)
