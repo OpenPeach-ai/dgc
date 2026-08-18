@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5 — 2026-08-19
+
+- **Update the CLI from the editor.** New command **DGC: Update CLI to Latest** runs the installer in a terminal (parity with the CLI's `/update`), then prompts you to restart the backend.
+- Tracks CLI **v0.17.5**: the new dotted `///` welcome mark and the built-in update nudge.
+
 ## 0.5.0 — 2026-08-18
 
 - **New logo mark.** The three-stripe DGC mark now sits before the `DGC` wordmark in the panel header — inline SVG, single purple, sized to the header.

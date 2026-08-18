@@ -20,6 +20,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
     vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
+    vscode.commands.registerCommand("dgc.updateCli", () => {
+      // parity with the CLI's /update: run the installer in a terminal (curl | bash),
+      // then remind the user to restart the backend so the panel picks up the new version.
+      const cmd = vscode.workspace.getConfiguration("dgc").get<string>("command", "dgc") || "dgc";
+      const term = vscode.window.createTerminal({ name: "DGC update" });
+      term.show();
+      term.sendText(`${cmd} update`);
+      vscode.window.showInformationMessage("Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
+    }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
