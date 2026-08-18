@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "publisher": "daguccicode",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
