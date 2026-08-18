@@ -11,19 +11,20 @@ import time
 
 from . import style
 
-# "/// DGC" — the three-slash mark (matching the logo + the ╱╱╱ thinking animation) + the
-# block-shadow "DGC" wordmark (figlet ansi_shadow).
-# A block "/// " mark (purple) + the block-shadow "DGC" wordmark (white). Leading spaces on the
-# slash rows create the diagonal, so these lines are NOT lstripped (see _slash_split).
+# The "///" mark — three tapered, staggered, forward-leaning bars (the DGC logo, rendered as solid
+# block ASCII from site/dgc-mark.svg's parallelograms). Middle bar tallest, right bar shortest, just
+# like the logo. Leading spaces on each row create the diagonal, so these lines are NOT lstripped.
 LOGO = [
-    "        ▄▄█       ██████╗  ██████╗  ██████╗",
-    "  ▄██  ▄██▀  ▄██▀ ██╔══██╗██╔════╝ ██╔════╝",
-    "  ██▀  ███   ███  ██║  ██║██║  ███╗██║",
-    " ███   ███  ▄██▀  ██║  ██║██║   ██║██║",
-    " ███  ▄██▀  ██▀   ██████╔╝╚██████╔╝╚██████╗",
-    "▄▀▀   █▀▀         ╚═════╝  ╚═════╝  ╚═════╝",
+    "            ████",
+    "    ███    ████     ████",
+    "   ████    ████    ████",
+    "   ████    ████    ████",
+    "  █████   █████    ████",
+    "  ████    ████    ████",
+    "  ████    ████    ████",
+    " █████    ████    ███",
+    " ████    ████",
 ]
-_SLASH_COLS = 18                 # columns 0.._SLASH_COLS-1 are the purple slashes; the rest is DGC
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
 WIDTH = _COLS                                # full mark width (/// + DGC, incl. the diagonal spaces)
@@ -41,18 +42,9 @@ _REST = "#5E5E66"     # resting colour of the mark (muted grey)
 # grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
 # into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
 _GLINT = "#EDEDF2"
-# The /// glint stays inside the purple family (brand purple → a light lavender). Both endpoints are
-# purples, so on a 256-colour terminal the sweep downsamples to a couple of neighbouring purples —
-# it never crosses into cyan/rainbow the way a full-spectrum gradient would.
-_ACCENT = "#7C5CFF"          # brand purple (resting colour of the slashes)
-_ACCENT_GLINT = "#D9CCFF"    # light lavender glint that sweeps across the slashes
-
-
 def _char_style(r: int, c: int, secs: float, hi: str) -> str:
-    """Colour a wordmark cell: the /// slashes get a purple glint sweep; the DGC letters a grey→white one."""
+    """Colour a wordmark cell — the whole mark (/// and DGC) uses the same grey→white glint sweep."""
     diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
-    if c < _SLASH_COLS:
-        return "bold " + style.lerp_rgb(_ACCENT, _ACCENT_GLINT, _shine_opacity(diag, secs))
     return "bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs))
 
 
