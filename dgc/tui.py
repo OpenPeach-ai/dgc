@@ -19,6 +19,7 @@ import time
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Float, FloatContainer, HSplit, Layout, VSplit, Window
@@ -517,8 +518,11 @@ class TUI:
         )
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
+        # Mouse capture ONLY on the welcome screen (for menu hover/click). Once you're chatting it
+        # turns OFF, so the terminal's own text selection + copy works in the transcript.
+        mouse_on_welcome = Condition(lambda: not self.blocks and not self._buf)
         self.app = Application(layout=Layout(root, focused_element=composer),
-                               key_bindings=self._keys(), full_screen=True, mouse_support=True,
+                               key_bindings=self._keys(), full_screen=True, mouse_support=mouse_on_welcome,
                                style=self._pt_style(), refresh_interval=0.08,
                                erase_when_done=True,   # wipe the TUI frame on exit — no blank gap above the hint
                                color_depth=style_mod.detect_color_depth())
