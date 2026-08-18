@@ -1,0 +1,284 @@
+{
+  "name": "dgc",
+  "displayName": "Vibe DGC — coding agent for your own models",
+  "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
+  "version": "0.6.2",
+  "publisher": "daguccicode",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding agent",
+    "llm",
+    "ollama",
+    "local llm",
+    "openai compatible",
+    "cursor"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenPeach-ai/dgc.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/OpenPeach-ai/dgc/issues"
+  },
+  "homepage": "https://vibedgc.com",
+  "galleryBanner": {
+    "color": "#0B0B0C",
+    "theme": "dark"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:dgc.chat"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dgc",
+          "title": "DGC",
+          "icon": "media/dgc.svg"
+        }
+      ]
+    },
+    "views": {
+      "dgc": [
+        {
+          "id": "dgc.chat",
+          "type": "webview",
+          "name": "DGC",
+          "icon": "media/dgc.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dgc.focus",
+        "title": "DGC: Focus Chat",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.newSession",
+        "title": "DGC: New Session",
+        "category": "DGC",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dgc.selectModel",
+        "title": "DGC: Select Model",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.connect",
+        "title": "DGC: Connect Provider",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.setMode",
+        "title": "DGC: Set Permission Mode",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.cycleMode",
+        "title": "DGC: Cycle Permission Mode",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.setThinking",
+        "title": "DGC: Set Thinking Level",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.addSelection",
+        "title": "DGC: Add Selection to DGC",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.restart",
+        "title": "DGC: Restart Backend",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.resume",
+        "title": "DGC: Resume Session",
+        "category": "DGC",
+        "icon": "$(history)"
+      },
+      {
+        "command": "dgc.rewind",
+        "title": "DGC: Rewind (code + conversation)",
+        "category": "DGC",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "dgc.settings",
+        "title": "DGC: Settings",
+        "category": "DGC",
+        "icon": "$(settings-gear)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "dgc.resume",
+          "when": "view == dgc.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "dgc.newSession",
+          "when": "view == dgc.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "dgc.settings",
+          "when": "view == dgc.chat",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dgc.addSelection",
+          "when": "editorHasSelection",
+          "group": "dgc"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "dgc.focus",
+        "key": "ctrl+escape",
+        "mac": "cmd+escape"
+      },
+      {
+        "command": "dgc.addSelection",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "dgc.cycleMode",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      }
+    ],
+    "configuration": {
+      "title": "DGC",
+      "properties": {
+        "dgc.command": {
+          "type": "string",
+          "default": "dgc",
+          "description": "Path to the dgc executable (must be v0.4.0+ for `dgc serve`)."
+        },
+        "dgc.checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "For sideloaded (.vsix) installs, check vibedgc.com for a newer extension version and notify. Ignored on Marketplace / Open VSX installs (they auto-update)."
+        },
+        "dgc.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Main model host — any OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
+        },
+        "dgc.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key / bearer token for the main host. Blank = unchanged. For local endpoints a dummy value like \"ollama\" is fine."
+        },
+        "dgc.model": {
+          "type": "string",
+          "default": "",
+          "description": "Main model id. Blank = use the CLI's config."
+        },
+        "dgc.subagentModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model used by `task` sub-agents. Blank = inherit the main model."
+        },
+        "dgc.subagentBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Host for `task` sub-agents — run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
+        },
+        "dgc.subagentApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the sub-agent host. Blank = inherit the main key."
+        },
+        "dgc.fallbackModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model retried automatically if the primary model errors. Blank = no fallback."
+        },
+        "dgc.fallbackBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional host for the fallback model. Blank = same host as the main model."
+        },
+        "dgc.contextSize": {
+          "type": "number",
+          "default": 0,
+          "description": "Context window (tokens) used for compaction budgeting. 0 = use the CLI's config."
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "dgc.gettingStarted",
+        "title": "Get Started with DGC",
+        "description": "Run a coding agent on your own models, in your editor.",
+        "steps": [
+          {
+            "id": "cli",
+            "title": "Install the DGC CLI",
+            "description": "DGC drives the `dgc` CLI (v0.4.0+). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "media": {
+              "markdown": "media/walkthrough.md"
+            }
+          },
+          {
+            "id": "open",
+            "title": "Open the DGC panel",
+            "description": "Click the DGC icon in the activity bar, or press Ctrl/Cmd+Escape.",
+            "media": {
+              "markdown": "media/walkthrough.md"
+            },
+            "completionEvents": [
+              "onView:dgc.chat"
+            ]
+          },
+          {
+            "id": "model",
+            "title": "Pick your model",
+            "description": "Click the model pill or run **DGC: Select Model** to choose from your endpoint.",
+            "media": {
+              "markdown": "media/walkthrough.md"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit",
+    "package": "npm run check-types && node esbuild.js --production",
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "esbuild": "^0.23.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.4.0"
+  }
+}
