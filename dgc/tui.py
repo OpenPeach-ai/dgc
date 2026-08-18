@@ -104,6 +104,7 @@ class TUI:
         self._req: dict | None = None
         self._req_answer = None
         self._req_event = threading.Event()
+        self.deny_reason = ""              # set when the user denies a tool "with a reason"
 
         self.app: Application | None = None
         import shutil
@@ -131,12 +132,13 @@ class TUI:
 
     def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
-                      keep_input=False) -> None:
+                      keep_input=False, header=None, accent=False) -> None:
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
-                         "rebuild": rebuild, "on_submit": on_submit, "sel": 0, "scroll": 0}
+                         "rebuild": rebuild, "on_submit": on_submit, "header": header,
+                         "accent": accent, "sel": 0, "scroll": 0}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
@@ -198,8 +200,9 @@ class TUI:
         h = n + 2                                       # rows + top/bottom border
         h += 2 if self._overlay.get("tabs") else (1 if self._overlay.get("title") else 0)
         h += 2 if self._overlay.get("footer") else 0
+        h += len(self._overlay["header"]) + 1 if self._overlay.get("header") else 0
         avail = max(4, getattr(self, "_height", 30) - 9)   # leave room for slim header + status + composer
-        return min(h, 18, avail)
+        return min(h, 20, avail)
 
     def _render_overlay(self):
         from rich import box as _box
@@ -230,6 +233,10 @@ class TUI:
             lines += [strip, Text("─" * inner, style=th.border)]
         elif ov.get("title"):
             lines.append(Text(ov["title"], style="bold"))
+        if ov.get("header"):                            # a rich block (e.g. the command being approved)
+            for h in ov["header"]:
+                lines.append(h if isinstance(h, Text) else Text(str(h)))
+            lines.append(Text("─" * inner, style=th.border))
         if not visible:
             lines.append(Text("  (no matches)", style=th.faint))
         for i, r in enumerate(visible):
@@ -250,7 +257,8 @@ class TUI:
         if ov.get("footer"):
             lines += [Text(""), Text(ov["footer"], style=th.faint)]
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
-                      border_style=th.border_strong, padding=(0, 1), width=W)
+                      border_style=(th.accent if ov.get("accent") else th.border_strong),
+                      padding=(0, 1), width=W)
         return ANSI(self._rich(Padding(panel, (0, 0, 0, 2))))
 
     def _ask_input(self, prompt: str, cb) -> None:
@@ -596,24 +604,62 @@ class TUI:
 
     # ---- blocking prompts (run on the worker thread; answered by the UI) ----
     def _ask(self, req: dict):
+        """Render a blocking prompt as a navigable overlay CARD (↑↓ + Enter + number shortcuts).
+        Runs on the worker thread; the UI thread answers via on_pick / number keys / Esc."""
         self._req = req
         self._req_event.clear()
+        options = req.get("options", [])
+        rows = [{"label": o, "value": i} for i, o in enumerate(options)]
+
+        def pick(row):
+            self._req_answer = row["value"]
+            self._req_event.set()
+        self._open_overlay(rows, on_pick=pick, title=req.get("title"), header=req.get("header"),
+                           footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
+                           accent=True)
         self._invalidate()
         self._req_event.wait()
         self._req = None
+        self._overlay = None                            # closed (option chosen or Esc-cancelled)
         self._invalidate()
         return self._req_answer
 
     def approve(self, name: str, args: dict) -> str:
-        from .permissions import rule_for
+        from rich.text import Text
         self._flush_text()
         th = style_mod.theme()
-        body = f"[bold]{glyphs.RAIL} permission requested[/] [{th.faint}]— {name}[/]"
-        detail = _arg_summary(args)
-        self._append(self._rich(body + (f"\n  [{th.faint}]{_esc(detail)}[/]" if detail else "")))
-        ans = self._ask({"kind": "approve", "options": ["allow once", "always allow", "deny"],
-                         "hint": "1 allow · 2 always · 3 deny"})
+        header = [Text(f"{glyphs.RAIL} Allow ", style="bold").append(name, style=f"bold {th.accent}")
+                  .append(" to run?", style="bold")]
+        if name == "bash" and args.get("command"):      # show the shell command itself
+            for ln in str(args["command"]).splitlines()[:6]:
+                header.append(Text("  $ ", style=th.faint).append(ln, style=th.text))
+        else:
+            detail = _arg_summary(args)
+            if detail:
+                header.append(Text("  " + detail, style=th.muted))
+        ans = self._ask({"kind": "approve", "header": header,
+                         "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
+                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"})
+        if ans == 3:                                     # deny + tell the model why (steers the retry)
+            self.deny_reason = self._ask_text("why / what to do instead:")
+            return "no"
+        self.deny_reason = ""
         return {0: "once", 1: "always"}.get(ans, "no")
+
+    def _ask_text(self, prompt: str) -> str:
+        """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
+        result = {"v": ""}
+        self._req_event.clear()
+
+        def cb(text):
+            result["v"] = text
+            self._req_event.set()
+        self._input = {"cb": cb, "prompt": prompt}
+        self._invalidate()
+        self._req_event.wait()
+        self._input = None
+        self._invalidate()
+        return result["v"].strip()
 
     def present_plan(self, plan: str):
         self._flush_text()
@@ -621,16 +667,15 @@ class TUI:
         self._append(self._rich(f"[bold {th.accent}]{glyphs.BULLET} proposed plan[/]\n"
                                 + self._rich(self._md(plan or "(empty plan)"))))
         ans = self._ask({"kind": "plan",
-                         "options": ["build (auto)", "build (acceptEdits)", "build (default)", "keep planning"],
-                         "hint": "1 auto · 2 acceptEdits · 3 default · 4 keep planning"})
+                         "options": ["Build it (auto)", "Build (accept edits)", "Build (default)", "Keep planning"],
+                         "footer": "↑↓ · Enter build · Esc keep planning"})
         return {0: "auto", 1: "acceptEdits", 2: "default"}.get(ans)
 
     def propose_options(self, question: str, options: list[str]) -> str:
+        from rich.text import Text
         self._flush_text()
-        th = style_mod.theme()
-        self._append(self._rich(f"[bold]{_esc(question)}[/]"))
         ans = self._ask({"kind": "options", "options": list(options),
-                         "hint": " · ".join(f"{i+1} {o}" for i, o in enumerate(options))[:60]})
+                         "header": [Text(question, style="bold")]})
         return options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else options[0]
 
     # --------------------------------------------------------------- the app ---
@@ -1377,21 +1422,22 @@ class TUI:
 
         @kb.add("escape")
         def _(ev):
-            if self._overlay is not None:                   # close the floating overlay first
-                self._close_overlay()
-                return
-            if self.input_buf.complete_state is not None:   # `/` palette open → abandon it
-                self.input_buf.cancel_completion()
-                self.input_buf.reset()          # clear the partial command (else the next one concatenates)
-                return
-            if self._req is not None:
+            if self._req is not None:                       # blocking prompt (permission card) → deny/cancel
                 self._req_answer = None
                 self._req_event.set()
-            elif self._naming:
+                return
+            if self._input is not None:                     # blocking/free-text prompt → cancel (empty)
+                cb = self._input["cb"]; self._input = None
+                cb("")
+                return
+            if self._overlay is not None:                   # non-blocking picker/palette/modal → close
+                self._close_overlay()
+                return
+            if self._naming:
                 self._naming = False
                 self._flash("cancelled")
-            elif self._picker is not None or self._input is not None:
-                self._picker = self._input = None
+            elif self._picker is not None:
+                self._picker = None
                 self._flash("cancelled")
             elif self._turn.is_set():
                 self._cancel.set()
@@ -1402,6 +1448,10 @@ class TUI:
         @kb.add("c-d")
         @kb.add("c-q")
         def _(ev):
+            if self._req is not None:            # blocking prompt → cancel/deny (don't deadlock the worker)
+                self._req_answer = None; self._req_event.set(); return
+            if self._input is not None:
+                cb = self._input["cb"]; self._input = None; cb(""); return
             if self._turn.is_set():             # a turn is running → cancel it
                 self._cancel.set(); return
             if self._overlay is not None:        # a menu is open → close it
