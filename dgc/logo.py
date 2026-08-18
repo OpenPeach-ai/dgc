@@ -16,12 +16,12 @@ from . import style
 # A block "/// " mark (purple) + the block-shadow "DGC" wordmark (white). Leading spaces on the
 # slash rows create the diagonal, so these lines are NOT lstripped (see _slash_split).
 LOGO = [
-    "          ██      ██████╗  ██████╗  ██████╗",
-    "    ██   ██   ██  ██╔══██╗██╔════╝ ██╔════╝",
-    "   ██   ██   ██   ██║  ██║██║  ███╗██║",
-    "  ██   ██   ██    ██║  ██║██║   ██║██║",
-    " ██   ██   ██     ██████╔╝╚██████╔╝╚██████╗",
-    "██   ██           ╚═════╝  ╚═════╝  ╚═════╝",
+    "        ▄▄█       ██████╗  ██████╗  ██████╗",
+    "  ▄██  ▄██▀  ▄██▀ ██╔══██╗██╔════╝ ██╔════╝",
+    "  ██▀  ███   ███  ██║  ██║██║  ███╗██║",
+    " ███   ███  ▄██▀  ██║  ██║██║   ██║██║",
+    " ███  ▄██▀  ██▀   ██████╔╝╚██████╔╝╚██████╗",
+    "▄▀▀   █▀▀         ╚═════╝  ╚═════╝  ╚═════╝",
 ]
 _SLASH_COLS = 18                 # columns 0.._SLASH_COLS-1 are the purple slashes; the rest is DGC
 _ROWS = len(LOGO)
@@ -41,16 +41,18 @@ _REST = "#5E5E66"     # resting colour of the mark (muted grey)
 # grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
 # into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
 _GLINT = "#EDEDF2"
-# The /// mark is SOLID brand purple — a single flat colour (never a gradient), so it downsamples
-# cleanly on 256-colour terminals and can't scatter into cyan/rainbow the way a purple shimmer would.
-_ACCENT = "#7C5CFF"
+# The /// glint stays inside the purple family (brand purple → a light lavender). Both endpoints are
+# purples, so on a 256-colour terminal the sweep downsamples to a couple of neighbouring purples —
+# it never crosses into cyan/rainbow the way a full-spectrum gradient would.
+_ACCENT = "#7C5CFF"          # brand purple (resting colour of the slashes)
+_ACCENT_GLINT = "#D9CCFF"    # light lavender glint that sweeps across the slashes
 
 
 def _char_style(r: int, c: int, secs: float, hi: str) -> str:
-    """Colour a wordmark cell: the /// slashes are solid purple; the DGC letters get the grey→white glint."""
-    if c < _SLASH_COLS:
-        return "bold " + _ACCENT
+    """Colour a wordmark cell: the /// slashes get a purple glint sweep; the DGC letters a grey→white one."""
     diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
+    if c < _SLASH_COLS:
+        return "bold " + style.lerp_rgb(_ACCENT, _ACCENT_GLINT, _shine_opacity(diag, secs))
     return "bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs))
 
 
