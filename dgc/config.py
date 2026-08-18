@@ -35,6 +35,9 @@ DEFAULTS: dict = {
     "subagent_api_key": "",                     # key for the sub-agent host (empty: inherit main)
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "dark",                            # dark | light
+    "background": "auto",                       # auto (repaint only a light terminal) | dark | inherit
+    "sandbox": False,                           # confine bash to project dir + /tmp (bwrap/sandbox-exec)
+    "show_reasoning": True,                      # show the model's thinking (muted) in the chat
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.
@@ -59,6 +62,28 @@ PROVIDERS: dict[str, dict] = {
     "together":   {"base_url": "https://api.together.xyz/v1",    "api_key": "",          "needs_key": True,  "label": "Together AI (cloud)"},
     "mistral":    {"base_url": "https://api.mistral.ai/v1",      "api_key": "",          "needs_key": True,  "label": "Mistral (cloud)"},
 }
+
+
+# Known context windows (tokens) by model-name substring — so the context budget auto-sizes to
+# the model and long sessions compact at the right point. First match wins; unknown → keep current.
+MODEL_CATALOG: list[tuple[str, int]] = [
+    ("qwen3", 32768), ("qwen2.5", 32768), ("qwen2", 32768), ("qwen", 32768),
+    ("gpt-oss", 131072), ("llama3.1", 131072), ("llama-3.1", 131072), ("llama3.3", 131072),
+    ("llama-3.3", 131072), ("deepseek-v3", 65536), ("deepseek", 65536),
+    ("mixtral", 32768), ("mistral", 32768), ("codestral", 32768),
+    ("gpt-4o", 128000), ("gpt-5", 400000), ("gpt-4", 128000), ("o1", 200000), ("o3", 200000),
+    ("gemma", 8192), ("phi", 16384), ("command-r", 131072), ("claude", 200000),
+    ("kimi", 131072), ("glm", 131072),
+]
+
+
+def context_for_model(model: str) -> int | None:
+    """The known context window for `model`, or None if unrecognised (keep the current setting)."""
+    m = (model or "").lower()
+    for pat, ctx in MODEL_CATALOG:
+        if pat in m:
+            return ctx
+    return None
 
 
 def find_project_root(start: Path | None = None) -> Path:

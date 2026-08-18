@@ -1,6 +1,7 @@
 """The animated DGC wordmark — a diagonal shine/shimmer sweep that glints across the
-mark once at startup, then settles (Grok Build's welcome-logo technique), rendered
-mono→lavender in `rich`. TTY-gated, NO_COLOR/narrow-safe; never animates when piped.
+mark once at startup, then settles (a shine-sweep technique), rendered
+grey→light-grey in `rich` (terminal-safe: no purple gradient to scatter into rainbow
+on 256-colour terminals). TTY-gated, NO_COLOR/narrow-safe; never animates when piped.
 """
 from __future__ import annotations
 
@@ -21,9 +22,10 @@ LOGO = [
 ]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
+WIDTH = max(len(r.lstrip()) for r in LOGO)   # natural wordmark width (no indent)
 _BLANK = (" ", "⠀")     # skip blanks in the shimmer
 
-# shimmer constants (Grok's logo.rs): a raised-cosine band sweeps bottom-left→top-right
+# shimmer constants: a raised-cosine band sweeps bottom-left→top-right
 _BAND = 0.42          # half-width of the glint band (diagonal units)
 _CYCLE = 3.6          # seconds per sweep+rest cycle
 _SWEEP_FRAC = 0.34    # fraction of the cycle spent sweeping (rest of it parked off-screen)
@@ -31,6 +33,10 @@ _SHINE = 0.95         # peak glint strength (0..1 blend toward the highlight)
 _PULSE = 0.05         # faint global breathing
 _PULSE_SECS = 5.0
 _REST = "#5E5E66"     # resting colour of the mark (muted grey)
+# The glint is a light GREY (not lavender): grey→white downsamples cleanly to the 256-colour
+# grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
+# into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
+_GLINT = "#EDEDF2"
 
 
 def _shine_opacity(diag: float, secs: float) -> float:
@@ -44,7 +50,7 @@ def _shine_opacity(diag: float, secs: float) -> float:
 
 def _frame(secs: float, indent: bool = True):
     from rich.text import Text
-    hi = style.theme().accent_bright        # lavender glint
+    hi = _GLINT                               # light-grey glint (terminal-safe)
     t = Text()
     for r, line in enumerate(LOGO):
         if not indent:
@@ -67,7 +73,7 @@ def shimmer_text(secs: float, indent: bool = False):
 def shimmer_lines(secs: float, pad: int = 0):
     """The wordmark as a list of rich Text rows (one per line), each padded to `pad`."""
     from rich.text import Text
-    hi = style.theme().accent_bright
+    hi = _GLINT
     out = []
     for r, raw in enumerate(LOGO):
         line = raw.lstrip()
@@ -92,7 +98,7 @@ def frame_ansi(secs: float, width: int = 80) -> str:
     c = Console(file=_io.StringIO(), force_terminal=True, color_system="truecolor",
                 width=max(_COLS + 2, width), highlight=False)
     pad = max(0, (width - _COLS) // 2)
-    hi = _style.theme().accent_bright
+    hi = _GLINT
     from rich.text import Text
     body = Text("\n")
     for r, line in enumerate(LOGO):

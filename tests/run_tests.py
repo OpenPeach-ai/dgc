@@ -212,6 +212,323 @@ def unit_tests(tmp: Path):
           c2.model == "def-model" and c2.base_url == "http://def:1/v1")
 
 
+def test_mono_markdown():
+    """Assistant markdown renders mono+purple — never rich's default rainbow
+    (green inline-code / cyan list-numbers / multicolor syntax highlighting)."""
+    import io as _io
+    from rich.console import Console
+    from dgc import render, style as _style
+    _style.set_theme("dark")
+    th = _style.theme()
+    accent_hex = th.accent_bright.lstrip("#")
+    r, g, b = int(accent_hex[0:2], 16), int(accent_hex[2:4], 16), int(accent_hex[4:6], 16)
+
+    def colors_of(text):
+        c = Console(file=_io.StringIO(), force_terminal=True, color_system="truecolor",
+                    width=60, highlight=False, theme=render.markdown_theme())
+        c.print(render.render_markdown(text))
+        import re as _re
+        return set(_re.findall(r"38;2;(\d+);(\d+);(\d+)", c.file.getvalue()))
+
+    # monokai (rich's default code theme) markers we must NEVER emit
+    MONOKAI = {("102", "217", "239"), ("166", "226", "46"), ("249", "38", "114"),
+               ("255", "70", "137"), ("174", "129", "255"), ("248", "248", "242")}
+
+    def no_rainbow(cs):
+        green_cyan = any(cc[0] == "0" and int(cc[1]) > 100 and int(cc[2]) < 120 for cc in cs)
+        return not green_cyan and not (cs & MONOKAI)
+
+    complete = colors_of("call `sign()` then:\n\n```python\ndef sign():\n    pass\n```")
+    check("markdown emits our purple accent", (str(r), str(g), str(b)) in complete)
+    check("markdown (complete fence) has no rainbow", no_rainbow(complete), detail=str(sorted(complete)))
+
+    # THE bug that shipped: a still-open fence mid-stream fell back to rich's monokai rainbow
+    streaming = colors_of("Here is the fix:\n\n```python\ndef sign(sub):\n    return enc(sub)")
+    check("markdown (streaming/unclosed fence) has no rainbow", no_rainbow(streaming),
+          detail=str(sorted(streaming)))
+    # a fence with a language + attributes (regex-split missed these too)
+    attrs = colors_of("```python title=x\nx = 1\n```")
+    check("markdown (fence with lang attrs) has no rainbow", no_rainbow(attrs), detail=str(sorted(attrs)))
+
+
+def test_grey_logo():
+    """The wordmark shimmer must stay near-grey (r≈g≈b) so it downsamples to the 256-colour
+    grey ramp instead of scattering into cyan/rainbow on non-truecolor terminals (Mac/SSH)."""
+    import inspect
+    from dgc import logo
+
+    def spread(hexc):
+        h = hexc.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return max(r, g, b) - min(r, g, b)
+
+    check("logo rest colour is near-grey", spread(logo._REST) <= 20, detail=logo._REST)
+    check("logo glint colour is near-grey", spread(logo._GLINT) <= 20, detail=logo._GLINT)
+    check("logo glint is NOT the purple accent (would rainbow when downsampled)",
+          "accent_bright" not in inspect.getsource(logo))
+
+
+def test_trust():
+    """The first-run directory-trust gate remembers trusted dirs (and their subtrees)."""
+    import os as _os
+    import tempfile as _tf
+    from dgc import trust
+
+    class _Cfg:
+        def __init__(self): self.data = {}; self.saved = False
+        def save(self): self.saved = True
+
+    c = _Cfg()
+    d = _tf.mkdtemp()
+    check("fresh dir is untrusted", not trust.is_trusted(c, d))
+    trust.mark_trusted(c, d)
+    check("marked dir is trusted", trust.is_trusted(c, d))
+    check("mark_trusted persisted (save called)", c.saved)
+    sub = _os.path.join(d, "pkg", "src"); _os.makedirs(sub)
+    check("subtree of a trusted dir is trusted", trust.is_trusted(c, sub))
+    check("an unrelated dir stays untrusted", not trust.is_trusted(c, _tf.mkdtemp()))
+
+
+def test_edit_tiers():
+    """The edit tool tolerates a flaky local model's near-misses: smart quotes, nbsp,
+    and wrong indentation — while staying strict about ambiguity and honest on a real miss."""
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc.tools import edit_file
+
+    class _C:
+        def __init__(self, root): self.project_root = root
+
+    def edit(content, old, new, **kw):
+        d = _P(_tf.mkdtemp()); f = d / "t.py"; f.write_text(content)
+        r = edit_file({"path": str(f), "old_string": old, "new_string": new, **kw}, _C(d))
+        return r, (f.read_text() if "edited" in r else None)
+
+    r, out = edit("def f():\n    return 1\n", "return 1", "return 2")
+    check("edit exact match", out == "def f():\n    return 2\n")
+    # curly quotes in old_string, straight quotes in the file
+    r, out = edit('x = "hi"\n', 'x = “hi”', "x = 'yo'")
+    check("edit tolerates smart quotes", out == "x = 'yo'\n", detail=repr(out))
+    # non-breaking space in old_string
+    r, out = edit("a = 1 + 2\n", "a = 1\u00a0+ 2", "a = 3")
+    check("edit tolerates non-breaking space", out == "a = 3\n", detail=repr(out))
+    # wrong indentation → matched, and the file's indentation is re-applied
+    r, out = edit("class A:\n        def m(self):\n            return 7\n",
+                  "def m(self):\n    return 7", "def m(self):\n    return 8")
+    check("edit whitespace-flex re-indents the replacement",
+          out == "class A:\n        def m(self):\n            return 8\n", detail=repr(out))
+    # ambiguous without replace_all
+    r, out = edit("x=1\nx=1\n", "x=1", "x=2")
+    check("edit rejects ambiguous match", out is None and "matches 2 times" in r)
+    r, out = edit("x=1\nx=1\n", "x=1", "x=2", replace_all=True)
+    check("edit replace_all changes every occurrence", out == "x=2\nx=2\n")
+    # a genuine miss returns the closest region so the model can self-correct
+    r, out = edit("def alpha():\n    return 1\n", "def alpa():\n    return 9", "x")
+    check("edit miss shows the closest region", out is None and "closest region" in r)
+    # CRLF files keep their line endings (don't get flattened to LF)
+    d = _P(_tf.mkdtemp()); f = d / "w.txt"; f.write_bytes(b"a\r\nb\r\nc\r\n")
+    edit_file({"path": str(f), "old_string": "b", "new_string": "B"}, _C(d))
+    check("edit preserves CRLF line endings", f.read_bytes() == b"a\r\nB\r\nc\r\n", detail=repr(f.read_bytes()))
+
+
+def test_context_prune():
+    """Tier-1 mechanical prune caps stale tool outputs, protecting system + the recent tail."""
+    from dgc.agent import Agent
+
+    class _F:
+        pass
+
+    f = _F()
+    big = "Z" * 5000
+    f.messages = [{"role": "system", "content": "sys"}]
+    for i in range(12):
+        f.messages.append({"role": "tool", "tool_call_id": str(i), "content": big})
+    changed = Agent._mechanical_prune(f)
+    check("mechanical prune reports a change", changed)
+    check("system message is never pruned", f.messages[0]["content"] == "sys")
+    check("an early tool output is pruned", len(f.messages[1]["content"]) < 5000 and "pruned" in f.messages[1]["content"])
+    check("the most recent tool output is protected", f.messages[-1]["content"] == big)
+
+    from dgc.config import context_for_model
+    check("catalog sizes a qwen model", context_for_model("qwen3.5:122b") == 32768)
+    check("catalog sizes a gpt-oss model", context_for_model("gpt-oss:120b") == 131072)
+    check("catalog returns None for an unknown model", context_for_model("totally-unknown-xyz") is None)
+
+
+def test_supply_chain_guard():
+    """MCP server env is screened: process-hijacking vars are stripped, benign ones kept."""
+    from dgc.guards import screen_mcp_env
+    safe, dropped = screen_mcp_env({"API_KEY": "x", "LD_PRELOAD": "/evil.so",
+                                    "NODE_OPTIONS": "--require /evil", "FOO": "bar"})
+    check("guard keeps benign env vars", safe == {"API_KEY": "x", "FOO": "bar"})
+    check("guard drops LD_PRELOAD", "LD_PRELOAD" in dropped)
+    check("guard drops NODE_OPTIONS", "NODE_OPTIONS" in dropped)
+    check("guard drops a PATH override", "PATH" in screen_mcp_env({"PATH": "/evil:$PATH"})[1])
+
+    from dgc import sandbox
+    if sandbox.available():                    # skip where no bwrap/sandbox-exec
+        import tempfile as _tf
+        from pathlib import Path as _P
+        from dgc.tools import bash
+
+        class _SCfg:
+            def get(self, k, d=None): return {"sandbox": True, "bash_timeout": 30}.get(k, d)
+
+        class _SCtx:
+            def __init__(self, root): self.project_root = root; self.config = _SCfg()
+
+        proj = _P(_tf.mkdtemp())
+        check("sandbox allows a project write", "hi" in bash({"command": "echo hi > x && cat x"}, _SCtx(proj)))
+        bash({"command": "echo evil > $HOME/.dgc_escape_test 2>&1; true"}, _SCtx(proj))
+        escaped = (_P.home() / ".dgc_escape_test").exists()
+        (_P.home() / ".dgc_escape_test").unlink(missing_ok=True)
+        check("sandbox blocks a write outside the project", not escaped)
+
+
+def test_sessions_and_worktree():
+    """Named sessions persist a name; git worktrees are created/listed/removed."""
+    import subprocess as _sp
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc import sessions, worktree
+
+    d = _P(_tf.mkdtemp()); sp = d / "s.json"
+    sessions.save(sp, [{"role": "user", "content": "hi"}], d, name="my session")
+    check("session name is saved", sessions.name_of(sp) == "my session")
+    sessions.set_name(sp, "renamed")
+    check("session name is updatable", sessions.name_of(sp) == "renamed")
+    check("rename keeps the messages", sessions.load(sp) == [{"role": "user", "content": "hi"}])
+    check("session delete removes the file", sessions.delete(sp) is True and not sp.exists())
+    check("session delete on a missing file is False", sessions.delete(sp) is False)
+
+    if _sp.run(["git", "--version"], capture_output=True).returncode != 0:
+        return
+    repo = _P(_tf.mkdtemp())
+    _sp.run(["git", "init", "-q"], cwd=repo)
+    _sp.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-qm", "i"], cwd=repo)
+    check("worktree.in_repo detects a git repo", worktree.in_repo(repo))
+    check("worktree.in_repo rejects a non-repo", not worktree.in_repo(_P(_tf.mkdtemp())))
+    wt_path, branch, err = worktree.create(repo, "feature x")
+    check("worktree is created", err is None and wt_path is not None and wt_path.exists(), detail=str(err))
+    check("worktree branch is dgc/<slug>", branch == "dgc/feature-x")
+    check("worktree appears in the list",
+          any(w.get("branch") == "dgc/feature-x" for w in worktree.list_worktrees(repo)))
+    check("worktree is removable", worktree.remove(repo, "feature x") is None)
+
+
+def test_slash_palette():
+    """The `/` command palette filters commands by prefix and never fires without a leading slash."""
+    from prompt_toolkit.document import Document
+
+    from dgc.tui import SLASH_COMMANDS, SlashCompleter
+    c = SlashCompleter()
+
+    def comps(s):
+        return [x.text for x in c.get_completions(Document(s, len(s)), None)]
+
+    check("`/` offers every command", len(comps("/")) == len(SLASH_COMMANDS))
+    check("prefix filters (/th → think+thoughts+theme)", comps("/th") == ["/think", "/thoughts", "/theme"])
+    check("no completions without a slash", comps("hello") == [])
+    check("no completions after the command word", comps("/model q") == [])
+    check("all descriptions are non-empty", all(d for _, d in SLASH_COMMANDS))
+
+
+def test_steering():
+    """A mid-turn message is folded into the running turn as a <user-interjection>, not a new turn."""
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc.agent import Agent
+    from dgc.config import Config
+
+    class _UI:
+        def __getattr__(self, k):
+            return lambda *a, **kw: None
+    a = Agent(Config(project_root=_P(_tf.mkdtemp())), _UI())
+    a.steer("also write a test for it")
+    check("steer + drain injects a user-interjection", a._drain_steer() is True
+          and a.messages[-1]["role"] == "user"
+          and "user-interjection" in a.messages[-1]["content"]
+          and "write a test" in a.messages[-1]["content"])
+    check("drain with an empty queue is a no-op", a._drain_steer() is False)
+
+
+def test_add_skill_url():
+    """add_skill installs a SKILL.md fetched over HTTP and makes it usable immediately."""
+    import tempfile as _tf, threading as _th
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from types import SimpleNamespace
+    from pathlib import Path as _P
+    import dgc.config as _C, dgc.tools as _T, dgc.skills as _S
+
+    body = b"---\nname: pirate\ndescription: talk like a pirate\n---\nArrr. $ARGUMENTS"
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(body)
+        def log_message(self, *a):
+            pass
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    old = _C.USER_SKILLS
+    _C.USER_SKILLS = _S.USER_SKILLS = _P(_tf.mkdtemp()) / "skills"   # patch both bindings
+    _prox = {k: os.environ.get(k) for k in ("NO_PROXY", "no_proxy")}
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
+    try:
+        ctx = SimpleNamespace(skills={}, project_root=_P(_tf.mkdtemp()))
+        res = _T.add_skill({"url": f"http://127.0.0.1:{port}/SKILL.md"}, ctx)
+        check("add_skill installs from a URL",
+              "installed skill 'pirate'" in res and (_C.USER_SKILLS / "pirate" / "SKILL.md").exists())
+        check("add_skill refreshes the live skill set", "pirate" in ctx.skills)
+    finally:
+        _C.USER_SKILLS = _S.USER_SKILLS = old
+        for k, v in _prox.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        srv.shutdown()
+
+
+def test_toolcall_recovery():
+    """Recover tool calls local models emit as text: XML shapes, fence variants, near-JSON;
+    and split reasoning from several think-marker styles."""
+    from dgc.llm import _loads_lenient, _ThinkFilter, parse_text_tool_calls as P
+
+    def calls(content):
+        return P(content)[1]
+
+    c = calls('```tool_call\n{"name":"read_file","arguments":{"path":"a"}}\n```')
+    check("parse fenced tool_call", len(c) == 1 and c[0].name == "read_file" and c[0].arguments == {"path": "a"})
+    c = calls('<tool_call>{"name":"bash","arguments":{"command":"ls"}}</tool_call>')
+    check("parse XML <tool_call>", len(c) == 1 and c[0].name == "bash" and c[0].arguments == {"command": "ls"})
+    c = calls('<function=grep>{"pattern":"x"}</function>')
+    check("parse XML <function=name>", len(c) == 1 and c[0].name == "grep" and c[0].arguments == {"pattern": "x"})
+    c = calls('```tool_call\n{"name":"bash","arguments":{"command":"ls",}}\n```')
+    check("parse tolerates trailing comma", len(c) == 1 and c[0].arguments == {"command": "ls"})
+    c = calls("<tool_call>{'name':'bash','arguments':{'command':'pwd'}}</tool_call>")
+    check("parse tolerates single quotes", len(c) == 1 and c[0].arguments == {"command": "pwd"})
+    c = calls('{"name":"read_file","arguments":{"path":"z"}}')
+    check("parse bare tool-call object", len(c) == 1 and c[0].name == "read_file")
+    c = calls('<tool_call>{"name":"write_file","arguments":{"path":"a","content":"{x:1}"}}</tool_call>')
+    check("parse preserves nested-brace args", len(c) == 1 and c[0].arguments.get("content") == "{x:1}")
+    clean, cc = P("Here's how you'd read_file in Python — just prose.")
+    check("no false-positive tool call in prose", len(cc) == 0 and "prose" in clean)
+
+    def split(chunks):
+        f = _ThinkFilter(); ev = []
+        for ch in chunks:
+            ev += f.feed(ch)
+        ev += f.flush()
+        return ("".join(t for k, t in ev if k == "text"), "".join(t for k, t in ev if k == "think"))
+
+    check("think marker <think>", split(["<think>r</think>A"]) == ("A", "r"))
+    check("think marker <thinking>", split(["<thinking>r</thinking>A"]) == ("A", "r"))
+    check("think marker Kimi ◁think▷", split(["◁think▷z◁/think▷B"]) == ("B", "z"))
+    check("think tag split across chunks", split(["<thi", "nk>a</th", "ink>C"]) == ("C", "a"))
+    check("lenient loads python literals", _loads_lenient("{'a': True, 'b': None}") == {"a": True, "b": None})
+
+
 # ------------------------------------------------------------- mock server ---
 
 def sse_chunk(delta: dict, finish: str | None = None) -> str:
@@ -266,7 +583,11 @@ class MockHandler(BaseHTTPRequestHandler):
             any("<tool_results>" in str(m.get("content", "")) for m in messages)
         approved = any("Plan APPROVED" in str(m.get("content", "")) for m in messages)
 
-        if self.scenario == "plan":
+        if self.scenario == "loop":
+            # a stuck model: ALWAYS the same tool call, no matter the results — the agent's
+            # doom-loop guard must break out instead of spinning to max_turns.
+            payload = tool_delta("read_file", [json.dumps({"path": "nope.txt"})])
+        elif self.scenario == "plan":
             if not has_tool_result:
                 payload = tool_delta("present_plan", [json.dumps({"plan": "1. write planned.txt"})])
             elif approved and not any("wrote" in str(m.get("content", "")) for m in messages):
@@ -316,12 +637,46 @@ def e2e(port: int, native: bool, expect_file: str, tmp: Path,
     return ok
 
 
+def e2e_loop(port: int, tmp: Path) -> bool:
+    """A model that repeats one tool call forever must be broken out of by the loop guard —
+    the process should exit quickly (well before max_turns=40) and say it stopped repeating."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = "loop"
+    home = tmp / "home_loop"; work = tmp / "work_loop"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "read the file",
+             "--mode", "auto", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print("  --- doom-loop did NOT break out (timed out) ---")
+        return False
+    out = proc.stdout + proc.stderr
+    ok = "repeating" in out or "stuck" in out or "loop guard" in out
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-1500:])
+    return ok
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         unit_dir = tmp / "unit"   # keep .dgc markers out of the e2e project roots
         unit_dir.mkdir()
         unit_tests(unit_dir)
+        test_mono_markdown()
+        test_grey_logo()
+        test_trust()
+        test_edit_tiers()
+        test_context_prune()
+        test_supply_chain_guard()
+        test_sessions_and_worktree()
+        test_slash_palette()
+        test_steering()
+        test_add_skill_url()
+        test_toolcall_recovery()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)
@@ -332,6 +687,7 @@ def main():
             check("e2e text-protocol fallback", e2e(port, False, "fallback.txt", tmp))
             check("e2e plan mode → approve → build",
                   e2e(port, True, "planned.txt", tmp, mode="plan", scenario="plan", stdin="1\n"))
+            check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
         finally:
             server.shutdown()
 

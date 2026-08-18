@@ -2,7 +2,7 @@
 raw-ANSI surfaces (menu, logo, status line). No hardcoded colors anywhere else.
 
 DGC is monochrome — near-black canvas, white text, neutral greys — with a single
-purple accent (Grok Build register). The one non-mono colour is `err` (a coding
+purple accent. The one non-mono colour is `err` (a coding
 tool must show errors in red). Everything is defined as RGB hex; `NO_COLOR`/non-TTY
 degrade to plain text.
 """
@@ -96,7 +96,7 @@ ANSI_RESET = "" if NO_COLOR else "\x1b[0m"
 
 
 # --- backward-compatible names used across the existing CLI (plain strings) ---
-# Bound to the default dark theme. New Grok-style surfaces (logo, status, diff)
+# Bound to the default dark theme. New mono+purple surfaces (logo, status, diff)
 # read theme() directly so they honour /theme; the older markup stays dark.
 BRAND = DARK.accent                 # rich markup colour, e.g. f"[{BRAND}]…[/]"
 BRAND_MAGENTA = DARK.accent         # legacy alias — now purple, not magenta
@@ -106,6 +106,28 @@ GRADIENT = ["#7C5CFF"]              # legacy; the banner no longer uses a gradie
 # raw-ANSI for menu.py / logo / status
 ANSI_BRAND = ansi_fg(DARK.accent)
 ANSI_DIM = ansi_fg(DARK.faint)
+
+
+def detect_color_depth():
+    """The terminal's colour depth as a prompt_toolkit ColorDepth — one source of truth
+    (detect + adapt). 24-bit when $COLORTERM advertises truecolor OR the terminal is a
+    known truecolor emulator (rescues tmux/SSH sessions that strip COLORTERM); else 256,
+    so we downsample cleanly instead of dumping 24-bit codes a terminal mangles to rainbow.
+    """
+    from prompt_toolkit.output import ColorDepth
+    if NO_COLOR:
+        return ColorDepth.DEPTH_4_BIT
+    ct = os.environ.get("COLORTERM", "").lower()
+    if "truecolor" in ct or "24bit" in ct:
+        return ColorDepth.DEPTH_24_BIT
+    # brand allowlist — known 24-bit terminals that don't always export COLORTERM
+    tp = os.environ.get("TERM_PROGRAM", "").lower()
+    term = os.environ.get("TERM", "").lower()
+    if (os.environ.get("WT_SESSION")                      # Windows Terminal
+            or tp in ("vscode", "iterm.app", "wezterm", "ghostty", "rio", "warp", "hyper")
+            or any(b in term for b in ("kitty", "alacritty", "foot", "wezterm", "rio", "ghostty"))):
+        return ColorDepth.DEPTH_24_BIT
+    return ColorDepth.DEPTH_8_BIT
 
 
 def section(console, title: str, note: str | None = None) -> None:

@@ -31,14 +31,17 @@ class ChatResult:
 
 
 class _ThinkFilter:
-    """Incrementally split a token stream into ('text'|'think', chunk) events,
-    tolerating tags split across chunks."""
+    """Incrementally split a token stream into ('text'|'think', chunk) events, tolerating
+    tags split across chunks. Recognises several reasoning-marker pairs, because local
+    models disagree: <think>, <thinking>, <reasoning>, and Kimi-style ◁think▷."""
 
-    OPEN, CLOSE = "<think>", "</think>"
+    PAIRS = [("<think>", "</think>"), ("<thinking>", "</thinking>"),
+             ("<reasoning>", "</reasoning>"), ("◁think▷", "◁/think▷")]
 
     def __init__(self):
         self.buf = ""
         self.in_think = False
+        self._close = None                # the close tag we're waiting for while in_think
 
     @staticmethod
     def _hold(buf: str, tag: str) -> int:
@@ -52,15 +55,30 @@ class _ThinkFilter:
         self.buf += chunk
         events: list[tuple[str, str]] = []
         while self.buf:
-            tag = self.CLOSE if self.in_think else self.OPEN
-            i = self.buf.find(tag)
-            if i != -1:
-                if i:
-                    events.append(("think" if self.in_think else "text", self.buf[:i]))
-                self.buf = self.buf[i + len(tag):]
-                self.in_think = not self.in_think
-                continue
-            hold = self._hold(self.buf, tag)
+            if self.in_think:
+                i = self.buf.find(self._close)
+                if i != -1:
+                    if i:
+                        events.append(("think", self.buf[:i]))
+                    self.buf = self.buf[i + len(self._close):]
+                    self.in_think, self._close = False, None
+                    continue
+                hold = self._hold(self.buf, self._close)
+            else:
+                # earliest open marker among all known pairs
+                best_i, best = None, None
+                for op, cl in self.PAIRS:
+                    j = self.buf.find(op)
+                    if j != -1 and (best_i is None or j < best_i):
+                        best_i, best = j, (op, cl)
+                if best_i is not None:
+                    if best_i:
+                        events.append(("text", self.buf[:best_i]))
+                    op, cl = best
+                    self.buf = self.buf[best_i + len(op):]
+                    self.in_think, self._close = True, cl
+                    continue
+                hold = max((self._hold(self.buf, op) for op, _ in self.PAIRS), default=0)
             emit = self.buf[:len(self.buf) - hold] if hold else self.buf
             self.buf = self.buf[len(emit):]
             if emit:
@@ -76,32 +94,76 @@ class _ThinkFilter:
         return ev
 
 
-_TOOL_BLOCK = re.compile(r"```tool_call\s*\n(.*?)```", re.S)
+def _loads_lenient(s):
+    """Parse JSON a local model probably meant: tolerate trailing commas, single quotes,
+    unquoted keys, and Python literals (True/False/None). Returns a dict or None."""
+    if not isinstance(s, str):
+        return s if isinstance(s, dict) else None
+    s = s.strip()
+    if not s:
+        return {}
+    for candidate in (s, re.sub(r",\s*([}\]])", r"\1", s)):     # drop trailing commas
+        try:
+            v = json.loads(candidate)
+            return v if isinstance(v, dict) else None
+        except json.JSONDecodeError:
+            pass
+    try:
+        import ast
+        v = ast.literal_eval(s)                                  # single quotes / True/False/None
+        return v if isinstance(v, dict) else None
+    except (ValueError, SyntaxError):
+        return None
+
+
+# Fenced ```tool_call / ```tool_code / ```json blocks, and two XML shapes local models emit.
+_FENCE = re.compile(r"```+[ \t]*(tool_call|tool_code|json)?[ \t]*\n(.*?)\n?```+", re.S)
+_XML_TOOLCALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
+_XML_FUNCTION = re.compile(r"<function\s*=\s*([\w.\-]+)\s*>(.*?)</function>", re.S)
 
 
 def parse_text_tool_calls(content: str) -> tuple[str, list[ToolCall]]:
-    """Extract ```tool_call fenced blocks (the text-protocol fallback)."""
+    """Recover tool calls a model emitted as TEXT instead of native calls — fenced blocks
+    (```tool_call / ```json) and XML (<tool_call>{…}</tool_call>, <function=name>{…}</function>)
+    — parsing the arguments leniently. Returns (content-with-blocks-removed, calls)."""
     calls: list[ToolCall] = []
 
-    def _sub(m: re.Match) -> str:
-        raw = m.group(1).strip()
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return m.group(0)  # leave unparseable blocks alone
-        name = payload.get("name")
-        if not name:
+    def _add(name, args) -> None:
+        parsed = _loads_lenient(args) if isinstance(args, str) else args
+        calls.append(ToolCall(id=f"textcall_{len(calls)}", name=str(name),
+                              arguments=parsed if isinstance(parsed, dict) else {}))
+
+    def _obj_sub(m: re.Match) -> str:
+        payload = _loads_lenient(m.group(1))
+        if not isinstance(payload, dict) or not payload.get("name"):
             return m.group(0)
-        args = payload.get("arguments", {})
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                args = {}
-        calls.append(ToolCall(id=f"textcall_{len(calls)}", name=name, arguments=args))
+        _add(payload["name"], payload.get("arguments", {}))
         return ""
 
-    clean = _TOOL_BLOCK.sub(_sub, content)
+    def _fence_sub(m: re.Match) -> str:
+        lang, payload = m.group(1), _loads_lenient(m.group(2))
+        if not isinstance(payload, dict) or not payload.get("name"):
+            return m.group(0)
+        # a bare ```json block must clearly be a call (has "arguments") to avoid eating examples
+        if lang not in ("tool_call", "tool_code") and "arguments" not in payload:
+            return m.group(0)
+        _add(payload["name"], payload.get("arguments", {}))
+        return ""
+
+    def _fn_sub(m: re.Match) -> str:
+        body = m.group(2).strip()
+        _add(m.group(1), _loads_lenient(body) if body else {})
+        return ""
+
+    clean = _XML_TOOLCALL.sub(_obj_sub, content)
+    clean = _XML_FUNCTION.sub(_fn_sub, clean)
+    clean = _FENCE.sub(_fence_sub, clean)
+    if not calls:                                   # last-ditch: whole message is a bare call object
+        stripped = clean.strip()
+        payload = _loads_lenient(stripped) if stripped.startswith("{") else None
+        if isinstance(payload, dict) and payload.get("name") and "arguments" in payload:
+            _add(payload["name"], payload["arguments"])
+            clean = ""
     return clean.strip(), calls
 
 
@@ -192,19 +254,44 @@ class LLMClient:
                     time.sleep(0.5 * transient)
                     continue
                 raise LLMError(f"request timed out repeatedly: {last_err}") from e
-            if r.status_code == 400:
+            if r.status_code == 429:
+                # rate limited — back off (honour Retry-After) and retry within the budget
+                last_err = f"429 rate limited: {r.text[:200]}"
+                transient += 1
+                if transient < 4:
+                    ra = r.headers.get("Retry-After", "")
+                    try:
+                        delay = float(ra) if ra else 0.5 * transient
+                    except ValueError:
+                        delay = 0.5 * transient
+                    time.sleep(min(delay, 10))
+                    continue
+                raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
+            if r.status_code in (400, 413):
                 body = r.text[:600]
                 last_err = body
-                if "tools" in payload and self.tools_supported:
+                low = body.lower()
+                # only disable a capability when the server actually blames THAT capability —
+                # a 400 about something else must not permanently strip tools/reasoning.
+                if (r.status_code == 400 and self.tools_supported and "tools" in payload
+                        and re.search(r"tool|function", low)):
                     self.tools_supported = False
-                    payload.pop("tools")
-                    payload.pop("tool_choice", None)
+                    payload.pop("tools"); payload.pop("tool_choice", None)
                     continue
-                if "reasoning_effort" in payload and self.reasoning_supported:
+                if (r.status_code == 400 and self.reasoning_supported and "reasoning_effort" in payload
+                        and re.search(r"reason|effort|think", low)):
                     self.reasoning_supported = False
                     payload.pop("reasoning_effort")
                     continue
-                raise LLMError(f"400 from server: {body}")
+                if re.search(r"context|token|too long|max.{0,8}length|length.{0,8}exceed", low):
+                    raise LLMError("the conversation exceeds this model's context window — start a "
+                                   "new session (Ctrl+N) or lower context_size")
+                # unclear 400 with tools present: fall back to the text protocol (still robust)
+                if r.status_code == 400 and self.tools_supported and "tools" in payload:
+                    self.tools_supported = False
+                    payload.pop("tools"); payload.pop("tool_choice", None)
+                    continue
+                raise LLMError(f"{r.status_code} from server: {body}")
             if r.status_code >= 500:
                 # Transient upstream error — retry instead of killing the turn (Claude
                 # Code / Codex do the same). Ollama, for one, intermittently 500s
@@ -229,9 +316,14 @@ class LLMClient:
         raise LLMError(f"request failed repeatedly: {last_err}")
 
     def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None) -> ChatResult:
+        ctype = r.headers.get("Content-Type", "")
+        if "application/json" in ctype and "text/event-stream" not in ctype:
+            return self._consume_json(r, on_text, on_thinking)   # server ignored stream:true
         result = ChatResult()
         filt = _ThinkFilter()
         partial: dict[int, dict] = {}  # index -> accumulated native tool call
+        noidx = -1                     # fallback slot cursor when a server omits tool_call 'index'
+        idmap: dict[str, int] = {}     # tool-call id -> slot, so repeated ids don't split a call
 
         def emit(events):
             for kind, chunk in events:
@@ -276,7 +368,18 @@ class LLMClient:
             if delta.get("content"):
                 emit(filt.feed(delta["content"]))
             for tc in delta.get("tool_calls") or []:
-                idx = tc.get("index", 0)
+                if "index" in tc:
+                    idx = tc["index"]
+                else:                          # server omitted index — infer slots from ids
+                    tcid = tc.get("id")
+                    if tcid and tcid in idmap:
+                        idx = idmap[tcid]
+                    elif tcid:
+                        noidx += 1; idmap[tcid] = noidx; idx = noidx
+                    elif not partial:
+                        noidx += 1; idx = noidx
+                    else:
+                        idx = noidx if noidx >= 0 else 0
                 slot = partial.setdefault(idx, {"id": "", "name": "", "args": ""})
                 if tc.get("id"):
                     slot["id"] += tc["id"]
@@ -290,9 +393,8 @@ class LLMClient:
 
         for idx in sorted(partial):
             slot = partial[idx]
-            try:
-                args = json.loads(slot["args"]) if slot["args"] else {}
-            except json.JSONDecodeError:
+            args = _loads_lenient(slot["args"]) if slot["args"] else {}
+            if args is None:                   # repair (trailing comma etc.) before giving up
                 args = {"_unparsed": slot["args"]}
             result.tool_calls.append(ToolCall(
                 id=slot["id"] or f"call_{idx}", name=slot["name"], arguments=args))
@@ -303,4 +405,43 @@ class LLMClient:
             if text_calls:
                 result.content = clean
                 result.tool_calls = text_calls
+        return result
+
+    def _consume_json(self, r: requests.Response, on_text, on_thinking) -> ChatResult:
+        """A non-streaming server (ignored stream:true) returns one JSON completion — parse it
+        through the same think-splitter / lenient-args / text-fallback path as the SSE stream."""
+        result = ChatResult()
+        try:
+            obj = r.json()
+        except ValueError:
+            return result
+        choice = (obj.get("choices") or [{}])[0]
+        result.finish_reason = choice.get("finish_reason") or "stop"
+        msg = choice.get("message") or {}
+        reasoning = msg.get("reasoning") or msg.get("reasoning_content")
+        if reasoning:
+            result.thinking += reasoning
+            if on_thinking:
+                on_thinking(reasoning)
+        filt = _ThinkFilter()
+        for kind, chunk in filt.feed(msg.get("content") or "") + filt.flush():
+            if kind == "think":
+                result.thinking += chunk
+                if on_thinking:
+                    on_thinking(chunk)
+            else:
+                result.content += chunk
+                if on_text:
+                    on_text(chunk)
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            args = _loads_lenient(fn.get("arguments") or "{}")
+            if args is None:
+                args = {"_unparsed": fn.get("arguments")}
+            result.tool_calls.append(ToolCall(id=tc.get("id") or f"call_{len(result.tool_calls)}",
+                                              name=fn.get("name", ""), arguments=args))
+        if not result.tool_calls:
+            clean, text_calls = parse_text_tool_calls(result.content)
+            if text_calls:
+                result.content, result.tool_calls = clean, text_calls
         return result

@@ -22,7 +22,8 @@ class MCPServer:
         self.name = name
         self.command = command
         self.args = list(args or [])
-        self.env = dict(env or {})
+        from . import guards
+        self.env, self._env_dropped = guards.screen_mcp_env(env)   # strip process-hijacking vars
         self.proc: subprocess.Popen | None = None
         self.tools: list[dict] = []
         self.error: str | None = None

@@ -15,9 +15,7 @@ from pathlib import Path
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.table import Table
 
 from . import __version__, glyphs, logo as logo_mod, memory as memory_mod, render, sessions as sessions_mod
@@ -101,13 +99,14 @@ class UI:
     """All user-facing rendering + interaction. The agent calls back into this."""
 
     def __init__(self):
-        self.console = Console()
+        self.console = Console(theme=render.markdown_theme(), highlight=False)
         self._thinking = False
         self._streamed = False
         self._rule_hook = None  # set by CLI: fn(rule_text) -> None
         self._live = None       # set by CLI during a live turn: the key-reader that owns stdin
         self._work_stop = None  # set while a "working…" spinner is running
         self._tool_count = 0    # tools used in the current turn (for the done marker)
+        self.deny_reason = ""   # optional steer captured when the user denies a tool
 
     # --------------------------------------------------- working indicator ---
     def start_working(self, label: str = "working") -> None:
@@ -120,10 +119,10 @@ class UI:
         self._work_stop = stop
 
         def spin() -> None:
-            frames = glyphs.SPINNER
+            frames = glyphs.THINK_FRAMES
             acc, dim, rst = style_mod.ansi_fg(style_mod.theme().accent), ANSI_DIM, ANSI_RESET
             t0, i = time.time(), 0
-            while not stop.wait(0.1):
+            while not stop.wait(0.14):
                 el = int(time.time() - t0)
                 et = f" {el}s" if el else ""
                 sys.stdout.write(f"\r  {acc}{frames[i % len(frames)]}{rst} {dim}{label}…{et}"
@@ -230,7 +229,7 @@ class UI:
         self._yield_stdin()
         section(self.console, "permission requested", name)
         if name == "bash":
-            self.console.print(Syntax(str(args.get("command", "")), "bash", theme="ansi_dark"))
+            self.console.print(render.mono_syntax(str(args.get("command", "")), "bash"))
         else:
             summary = self._arg_summary(name, args)
             if summary:
@@ -239,13 +238,20 @@ class UI:
         idx = menu_select("Allow this?",
                           ["allow once", "always allow", "deny"],
                           ["just this time", f"add rule {rule}", "block it"])
-        return {0: "once", 1: "always"}.get(idx, "no")   # None (esc) or 2 → deny
+        if idx in (0, 1):
+            return {0: "once", 1: "always"}[idx]
+        # denied (or esc) — capture optional feedback so the model can adjust in one step
+        try:
+            self.deny_reason = input("  why / what to do instead (optional) › ").strip()
+        except (EOFError, KeyboardInterrupt):
+            self.deny_reason = ""
+        return "no"
 
     def present_plan(self, plan: str):
         """Return target mode string on approval, or None to keep planning."""
         self._yield_stdin()
         section(self.console, "📋 proposed plan")
-        self.console.print(Markdown(plan or "(empty plan)"))
+        self.console.print(render.render_markdown(plan or "(empty plan)"))
         idx = menu_select("Approve this plan?",
                           ["build in full-auto", "build with acceptEdits", "build in default",
                            "keep planning"],
@@ -494,14 +500,12 @@ class CLI:
                 from .menu import select
                 mi = select("Model", models)
                 if mi is not None:
-                    cfg.set("model", models[mi])
-                    self.agent.refresh_client()
-                    self.ui.info(f"model → {cfg.model}")
+                    self._set_model(models[mi])
         elif cmd == "model":
             if rest:
-                cfg.set("model", rest.strip())
-                self.agent.refresh_client()
-            self.ui.info(f"model: {cfg.model}")
+                self._set_model(rest.strip())
+            else:
+                self.ui.info(f"model: {cfg.model}")
         elif cmd in ("mode",):
             if not rest:
                 i = MODE_CYCLE.index(self.agent.mode) if self.agent.mode in MODE_CYCLE else 0
@@ -592,13 +596,21 @@ class CLI:
             self._search_cmd(rest)
         elif cmd == "resume":
             self._resume_cmd()
+        elif cmd == "name":
+            if rest.strip():
+                self.agent.name_session(rest.strip())
+                self.ui.info(f"session named: {rest.strip()}")
+            else:
+                self.ui.info(f"current session: {self.agent.session_name or '(unnamed)'} — /name <name>")
+        elif cmd == "worktree":
+            self._worktree_cmd(rest)
         elif cmd == "update":
             run_update()
         elif cmd == "agents":
             defs = self.agent.agent_defs
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"
-            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [cyan]{sm}[/]  ·  host [cyan]{sh}[/]")
+            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{sm}[/]  ·  host [{BRAND}]{sh}[/]")
             self.console.print("[dim]/subagent model NAME  ·  /subagent host URL [KEY]  ·  /subagent clear[/dim]")
             if not defs:
                 self.ui.info("no named agents — add .dgc/agents/<name>.md "
@@ -665,12 +677,63 @@ class CLI:
             self.ui.info("no saved sessions in this directory")
             return
         from .menu import select
-        labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (p, ts, prev, cnt) in items[:20]]
+        labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"
+                  for (p, ts, prev, cnt, nm) in items[:20]]
         si = select("Resume a session", labels)
         if si is None:
             return
         n = self.agent.load_session(items[si][0])
-        self.ui.info(f"resumed session ({n} messages)")
+        self.ui.info(f"resumed session ({n} messages)"
+                     + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
+
+    def _set_model(self, model: str) -> None:
+        from .config import context_for_model
+        self.config.set("model", model)
+        self.agent.refresh_client()
+        ctx = context_for_model(model)
+        if ctx and ctx != int(self.config.get("context_size", 32768)):
+            self.config.set("context_size", ctx)
+            self.ui.info(f"model → {model}  ·  context auto-set to {ctx // 1024}k (/context to change)")
+        else:
+            self.ui.info(f"model → {model}")
+
+    def _worktree_cmd(self, rest: str) -> None:
+        from . import worktree as wt
+        root = self.config.project_root
+        parts = rest.split()
+        if not parts or parts[0] == "list":
+            wts = wt.list_worktrees(root)
+            if not wts:
+                self.ui.info("not a git repo, or no worktrees — /worktree <name> to create one")
+                return
+            style_mod.section(self.console, "git worktrees")
+            for w in wts:
+                self.console.print(f"  [{BRAND}]{w.get('branch', '(detached)')}[/]  [{DIM}]{w['path']}[/]",
+                                   highlight=False)
+            return
+        if parts[0] == "remove" and len(parts) > 1:
+            err = wt.remove(root, " ".join(parts[1:]))
+            (self.ui.error if err else self.ui.info)(err or f"removed worktree '{parts[1]}'")
+            return
+        wt_path, branch, err = wt.create(root, rest.strip())
+        if err:
+            self.ui.error(err)
+            return
+        self.ui.info(f"created worktree on branch {branch}")
+        self._reroot(wt_path, f"worktree {branch}")
+
+    def _reroot(self, new_root, label: str) -> None:
+        import os as _os
+        try:
+            _os.chdir(new_root)
+        except OSError:
+            pass
+        self.config.project_root = new_root
+        self.agent.ctx.project_root = new_root
+        self.agent.reset()
+        self.agent.session_file = sessions_mod.new_path(new_root)
+        self.agent.session_name = label
+        self.ui.info(f"switched to {new_root} — fresh session")
 
     def _permissions_cmd(self, rest: str) -> None:
         if not rest:
@@ -987,9 +1050,13 @@ def run_update() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve", "acp"):
+    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve", "acp", "bug"):
         if raw_argv[0] == "help":
             run_help(); return
+        if raw_argv[0] == "bug":
+            print("\n  Report a bug or request a feature:\n"
+                  "    https://github.com/OpenPeach-ai/dgc/issues\n")
+            return
         if raw_argv[0] == "update":
             run_update(); return
         if raw_argv[0] == "serve":
@@ -1050,7 +1117,8 @@ def main(argv: list[str] | None = None) -> None:
         items = sessions_mod.listing(config.project_root)
         if items:
             from .menu import select
-            labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {prev}" for (pp, ts, prev, cnt) in items[:20]]
+            labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"
+                      for (pp, ts, prev, cnt, nm) in items[:20]]
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
@@ -1067,11 +1135,23 @@ def main(argv: list[str] | None = None) -> None:
         cli.agent.run_turn(cli.expand_mentions(args.prompt))
         cli.ui.end_stream()
         print()
-    elif args.classic or not sys.stdout.isatty():
-        cli.repl()
     else:
-        from .tui import TUI
-        TUI(config, agent=cli.agent).run()
+        import atexit
+
+        from . import termbg
+        termbg.apply(config)                 # dark canvas on a light terminal, for the whole session
+        atexit.register(termbg.reset)
+        try:
+            from .trust import confirm_trust
+            if not confirm_trust(config, config.project_root):   # first-run trust gate
+                return
+            if args.classic or not sys.stdout.isatty():
+                cli.repl()
+            else:
+                from .tui import TUI
+                TUI(config, agent=cli.agent).run()
+        finally:
+            termbg.reset()
 
 
 if __name__ == "__main__":

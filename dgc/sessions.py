@@ -32,12 +32,13 @@ def new_path(project_root) -> Path:
     return project_dir(project_root) / (datetime.now().strftime("%Y%m%d-%H%M%S") + ".json")
 
 
-def save(path: Path, messages: list, project_root) -> None:
+def save(path: Path, messages: list, project_root, name: str | None = None) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(
-            {"project": str(project_root), "updated": time.time(), "messages": messages},
-            default=str))
+        data = {"project": str(project_root), "updated": time.time(), "messages": messages}
+        if name:
+            data["name"] = name
+        path.write_text(json.dumps(data, default=str))
     except OSError:
         pass  # never let a failed save crash the turn
 
@@ -47,16 +48,44 @@ def load(path) -> list:
     return data.get("messages", [])
 
 
-def listing(project_root) -> list[tuple[Path, float, str, int]]:
-    """(path, updated_ts, first-user-message preview, message count), newest first."""
-    items: list[tuple[Path, float, str, int]] = []
+def delete(path) -> bool:
+    try:
+        Path(path).unlink()
+        return True
+    except OSError:
+        return False
+
+
+def name_of(path) -> str | None:
+    try:
+        return json.loads(Path(path).read_text()).get("name") or None
+    except (OSError, ValueError):
+        return None
+
+
+def set_name(path, name: str) -> None:
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        data = {"messages": []}
+    data["name"] = name
+    try:
+        Path(path).write_text(json.dumps(data, default=str))
+    except OSError:
+        pass
+
+
+def listing(project_root) -> list[tuple[Path, float, str, int, str]]:
+    """(path, updated_ts, first-user-message preview, message count, name), newest first."""
+    items: list[tuple[Path, float, str, int, str]] = []
     for p in project_dir(project_root).glob("*.json"):
         try:
             data = json.loads(p.read_text())
             msgs = data.get("messages", [])
             first = next((m.get("content", "") for m in msgs if m.get("role") == "user"), "")
             preview = re.sub(r"\s+", " ", str(first)).strip()[:56] or "(empty)"
-            items.append((p, float(data.get("updated", p.stat().st_mtime)), preview, len(msgs)))
+            items.append((p, float(data.get("updated", p.stat().st_mtime)), preview,
+                          len(msgs), data.get("name") or ""))
         except (OSError, ValueError):
             continue
     items.sort(key=lambda t: -t[1])

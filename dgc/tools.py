@@ -76,6 +76,11 @@ TOOL_SCHEMAS = [
             "required": ["content", "status"]}}}, ["todos"]),
     _fn("skill", "Load a skill (reusable instruction package) by name. Use when a listed skill matches the task.",
         {"name": {"type": "string"}, "args": {"type": "string", "default": ""}}, ["name"]),
+    _fn("add_skill", "Install a skill from a URL (a raw SKILL.md, or a GitHub link to one). Use when the "
+        "user shares a skill link and asks you to add/install it. After installing, it's available via the "
+        "`skill` tool.",
+        {"url": {"type": "string", "description": "URL to the SKILL.md (raw or a github.com/.../SKILL.md link)"},
+         "name": {"type": "string", "description": "Optional name; inferred from the skill if omitted"}}, ["url"]),
     _fn("save_memory", "Save a durable fact/preference to DGC.md memory.",
         {"memory": {"type": "string"},
          "scope": {"type": "string", "enum": ["project", "user"], "default": "project"}}, ["memory"]),
@@ -152,6 +157,133 @@ def write_file(args: dict, ctx) -> str:
     return f"wrote {len(content)} bytes to {p}\n{diff}"
 
 
+# Characters local models routinely substitute for their ASCII originals (1:1, so string
+# indices are preserved when we normalise both haystack and needle before matching).
+_CONFUSABLES = {
+    "‘": "'", "’": "'", "‛": "'",          # curly / reversed single quotes
+    "“": '"', "”": '"', "‟": '"',          # curly double quotes
+    "–": "-", "—": "-", "−": "-",           # en / em dash, minus sign
+    " ": " ", " ": " ", " ": " ", " ": " ",  # nbsp / thin-space variants
+    "…": "...",                                        # ellipsis (len change → tier skips index map)
+}
+# only the 1:1 entries are index-preserving; ellipsis (1→3) is excluded from the indexed tier
+_CONF_1TO1 = {k: v for k, v in _CONFUSABLES.items() if len(v) == 1}
+
+
+def _norm1(s: str) -> str:
+    return "".join(_CONF_1TO1.get(c, c) for c in s)
+
+
+class _Ambiguous(Exception):
+    def __init__(self, count: int):
+        self.count = count
+
+
+def _occ(hay: str, needle: str) -> list[int]:
+    out, i = [], 0
+    while needle:
+        j = hay.find(needle, i)
+        if j < 0:
+            break
+        out.append(j)
+        i = j + len(needle)
+    return out
+
+
+def _apply_edit(content: str, old: str, new: str, replace_all: bool):
+    """Tiered match, most-exact first, so a flaky local model's near-miss still lands.
+    Returns (updated, count, how) or None; raises _Ambiguous if a tier matches >1 unguarded."""
+    if not old:
+        return None
+    # Tiers 1 & 3 are index-aligned to `content` (identity / 1:1 confusable map), so we can
+    # splice replacements straight into the ORIGINAL text and preserve untouched bytes.
+    for how, hay, needle in (("exact", content, old),
+                             ("normalized quotes/spaces", _norm1(content), _norm1(old))):
+        occ = _occ(hay, needle)
+        if not occ:
+            continue
+        if len(occ) > 1 and not replace_all:
+            raise _Ambiguous(len(occ))
+        idxs = occ if replace_all else occ[:1]
+        parts, last = [], 0
+        for j in idxs:
+            parts.append(content[last:j]); parts.append(new); last = j + len(needle)
+        parts.append(content[last:])
+        return "".join(parts), len(idxs), how
+    # Tier 2: LF/CRLF mismatch (writes back normalised line endings)
+    if "\r\n" in content or "\r\n" in old:
+        nc, no = content.replace("\r\n", "\n"), old.replace("\r\n", "\n")
+        occ = _occ(nc, no)
+        if occ:
+            if len(occ) > 1 and not replace_all:
+                raise _Ambiguous(len(occ))
+            updated = nc.replace(no, new) if replace_all else nc.replace(no, new, 1)
+            return updated, len(occ) if replace_all else 1, "normalized line endings"
+    # Tier 4: whitespace-flexible, line-anchored (indentation / trailing-space differences)
+    return _lineflex(content, old, new, replace_all)
+
+
+def _lineflex(content: str, old: str, new: str, replace_all: bool):
+    clines = content.splitlines(keepends=True)
+    olines = old.splitlines()
+    if len(olines) < 1 or not any(l.strip() for l in olines):
+        return None                                # too weak to anchor safely
+
+    def key(s: str) -> str:
+        return _norm1(s).strip()
+
+    okeys = [key(l) for l in olines]
+    ckeys = [key(l) for l in clines]
+    n = len(okeys)
+    starts = [i for i in range(len(clines) - n + 1) if ckeys[i:i + n] == okeys]
+    if not starts:
+        return None
+    if len(starts) > 1 and not replace_all:
+        raise _Ambiguous(len(starts))
+    targets = set(starts if replace_all else starts[:1])
+
+    def indent(s: str) -> str:
+        return s[:len(s) - len(s.lstrip())]
+
+    o_ind = indent(next((l for l in olines if l.strip()), ""))   # old_string's own base indent
+    out, k = [], 0
+    while k < len(clines):
+        if k in targets:
+            # re-apply the indentation the FILE has beyond old_string, so the replacement
+            # doesn't collapse to column 0 when the model under-indented old/new.
+            c_ind = next((indent(clines[k + o]) for o in range(n) if clines[k + o].strip()), "")
+            extra = c_ind[:len(c_ind) - len(o_ind)] if len(c_ind) >= len(o_ind) else ""
+            block = "\n".join(extra + ln if ln.strip() else ln for ln in new.split("\n"))
+            end = k + n - 1
+            had_nl = clines[end].endswith("\n") if end < len(clines) else True
+            if had_nl and not block.endswith("\n"):
+                block += "\n"
+            out.append(block)
+            k += n
+        else:
+            out.append(clines[k]); k += 1
+    return "".join(out), len(targets), "flexible whitespace"
+
+
+def _edit_error(content: str, old: str) -> str:
+    """A self-correcting error: point the model at the closest region so it can retry."""
+    olines = old.splitlines() or [old]
+    clines = content.splitlines()
+    first = _norm1(olines[0]).strip()
+    best_i, best_r = None, 0.0
+    for i, cl in enumerate(clines):
+        r = difflib.SequenceMatcher(None, _norm1(cl).strip(), first).ratio()
+        if r > best_r:
+            best_r, best_i = r, i
+    if best_i is not None and best_r >= 0.6:
+        lo, hi = max(0, best_i - 2), min(len(clines), best_i + len(olines) + 2)
+        ctx = "\n".join(f"{j + 1:>5}  {clines[j]}" for j in range(lo, hi))
+        return ("error: old_string not found. The closest region in the file is below — the "
+                "difference is likely whitespace, indentation, or quotes. Copy it verbatim and "
+                f"retry:\n{ctx}")
+    return "error: old_string not found in file — read the file again and match it exactly"
+
+
 def edit_file(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root)
     if not p.exists():
@@ -159,24 +291,25 @@ def edit_file(args: dict, ctx) -> str:
     old_string, new_string = str(args.get("old_string", "")), str(args.get("new_string", ""))
     replace_all = bool(args.get("replace_all"))
     try:
-        content = p.read_text()
+        raw = p.read_bytes()
+        text = raw.decode("utf-8")
     except (OSError, UnicodeDecodeError) as e:
         return f"error: {e}"
-    if old_string not in content and "\n" in old_string:
-        # tolerate LF/CRLF mismatch
-        norm = content.replace("\r\n", "\n")
-        if old_string.replace("\r\n", "\n") in norm:
-            content = norm
-            old_string = old_string.replace("\r\n", "\n")
-    count = content.count(old_string)
-    if count == 0:
-        return "error: old_string not found in file — read the file again and match exactly"
-    if count > 1 and not replace_all:
-        return f"error: old_string matches {count} times — add more context or set replace_all"
-    updated = content.replace(old_string, new_string) if replace_all \
-        else content.replace(old_string, new_string, 1)
-    p.write_text(updated)
-    return f"edited {p} ({count if replace_all else 1} replacement(s))\n{_diff(content, updated, str(p))}"
+    crlf = raw.count(b"\r\n")                       # remember the file's dominant line ending
+    content = text.replace("\r\n", "\n")            # match on LF; restore on write
+    try:
+        result = _apply_edit(content, old_string.replace("\r\n", "\n"),
+                             new_string.replace("\r\n", "\n"), replace_all)
+    except _Ambiguous as a:
+        return (f"error: old_string matches {a.count} times — add more surrounding context to "
+                "make it unique, or set replace_all to change every occurrence")
+    if result is None:
+        return _edit_error(content, old_string.replace("\r\n", "\n"))
+    updated, count, how = result
+    out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else updated
+    p.write_bytes(out.encode("utf-8"))
+    note = "" if how == "exact" else f"  [matched via {how}]"
+    return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p))}"
 
 
 def _diff(old: str, new: str, path: str) -> str:
@@ -198,10 +331,16 @@ def bash(args: dict, ctx) -> str:
     if args.get("background"):
         return _bash_background(command, ctx)
     timeout = int(args.get("timeout") or ctx.config.get("bash_timeout", 120))
+    from . import sandbox
+    argv = sandbox.wrap(command, ctx.project_root) if sandbox.active(ctx.config) else None
     try:
-        proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                              timeout=timeout, cwd=str(ctx.project_root),
-                              executable="/bin/bash")
+        if argv:                                   # confined: writable project dir + /tmp only
+            proc = subprocess.run(argv, capture_output=True, text=True,
+                                  timeout=timeout, cwd=str(ctx.project_root))
+        else:
+            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
+                                  timeout=timeout, cwd=str(ctx.project_root),
+                                  executable="/bin/bash")
     except subprocess.TimeoutExpired:
         return f"error: command timed out after {timeout}s"
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -362,6 +501,45 @@ def skill_tool(args: dict, ctx) -> str:
     return f"<skill name={sk.name!r}>\n{sk.render(str(args.get('args', '')))}\n</skill>"
 
 
+def add_skill(args: dict, ctx) -> str:
+    from .config import USER_SKILLS
+    from .skills import discover_skills
+    url = str(args.get("url", "")).strip()
+    if not url:
+        return "error: a url is required"
+    raw = url                                    # normalise a GitHub blob link to its raw form
+    if "github.com" in raw and "/blob/" in raw:
+        raw = raw.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+    try:
+        r = requests.get(raw, timeout=20, headers={"User-Agent": "dgc/skill-install"})
+        r.raise_for_status()
+        content = r.text
+    except requests.RequestException as e:
+        return f"error fetching the skill: {e}"
+    if re.match(r"\s*(<!doctype|<html)", content, re.I):
+        return (f"error: {raw} returned an HTML page, not a SKILL.md. Point me at the RAW file "
+                "(e.g. a raw.githubusercontent.com URL or a link ending in /SKILL.md).")
+    name = str(args.get("name", "")).strip()
+    if not name:                                 # frontmatter `name:` wins, else the URL's folder/file
+        m = re.search(r"(?m)^name:\s*(.+)$", content)
+        name = m.group(1).strip() if m else raw.rstrip("/").rsplit("/", 1)[-1].removesuffix(".md")
+        if name.lower() in ("skill", "skill.md"):
+            name = raw.rstrip("/").split("/")[-2] if "/" in raw else name
+    name = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower() or "skill"
+    dest = USER_SKILLS / name
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "SKILL.md").write_text(content)
+    except OSError as e:
+        return f"error saving the skill: {e}"
+    try:
+        ctx.skills.clear(); ctx.skills.update(discover_skills(ctx.project_root))  # live, usable now
+    except Exception:
+        pass
+    return (f"installed skill '{name}' → {dest / 'SKILL.md'} ({len(content)} bytes). "
+            f"It's available now — call the `skill` tool with name={name!r} to use it.")
+
+
 def save_memory(args: dict, ctx) -> str:
     from .memory import add_memory
     scope = str(args.get("scope", "project"))
@@ -373,7 +551,8 @@ EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill,
     "glob": glob_tool, "grep": grep_tool, "web_fetch": web_fetch,
-    "web_search": web_search, "todo": todo, "skill": skill_tool, "save_memory": save_memory,
+    "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
+    "save_memory": save_memory,
 }
 
 

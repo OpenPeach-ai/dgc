@@ -1,5 +1,5 @@
 """One glyph vocabulary with guaranteed 1-column ASCII fallbacks, so layout never
-shifts on a legacy console / non-UTF terminal (Grok Build's glyphs.rs approach)."""
+shifts on a legacy console / non-UTF terminal (a portable-glyph approach)."""
 from __future__ import annotations
 
 import sys
@@ -26,8 +26,11 @@ CURSOR = _g("▍", "|")        # block cursor (the purple mark)
 ELLIPSIS_V = _g("…", "...")
 
 SPINNER = list("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏") if UNICODE else list("|/-\\")
+# the DGC mark, animated inline: the three slanted stripes light up one-by-one, hold, repeat
+THINK_FRAMES = (["╱  ", "╱╱ ", "╱╱╱", "╱╱╱", "╱╱╱"] if UNICODE
+                else ["/  ", "// ", "///", "///", "///"])
 
-# per-tool icon vocabulary (Grok/opencode register), each a single column
+# per-tool icon vocabulary (a compact register), each a single column
 TOOL_ICON = {
     "read_file": _g("→", ">"),
     "write_file": _g("←", "<"),

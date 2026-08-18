@@ -18,6 +18,20 @@ from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
 from .mcp import MCPManager
 from .skills import discover_skills
+
+_LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
+_LOOP_HARD = 6          # identical calls before we abort the turn outright
+_MAX_CONTINUE = 3       # length-truncation auto-continues per turn
+_MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
+_MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
+
+
+def _clamp(s: str, limit: int = _MAX_TOOL_OUT) -> str:
+    """Head+tail truncation so a single huge tool result can't blow the context window."""
+    if len(s) <= limit:
+        return s
+    head, tail = limit * 2 // 3, limit // 3
+    return f"{s[:head]}\n… [output clamped: {len(s) - limit} chars omitted] …\n{s[-tail:]}"
 from .tools import TOOL_SCHEMAS, execute
 
 THINK_LEVELS = ("off", "low", "medium", "high")
@@ -128,7 +142,10 @@ class Agent:
                                 on_todo=getattr(ui, "on_todo", None))
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
+        self.session_name = None  # optional user-given name for the current session
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
+        from collections import deque
+        self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager()
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
@@ -168,6 +185,7 @@ class Agent:
     def reset(self) -> None:
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
+        self.session_name = None
 
     def _refresh_system(self) -> None:
         if self.messages and self.messages[0]["role"] == "system":
@@ -269,9 +287,32 @@ class Agent:
                 level = bumped
         return level
 
+    def steer(self, text: str) -> None:
+        """Queue a message the user typed WHILE a turn is running; it's injected at the next
+        tool-loop boundary so the model reads it and adjusts (not a separate later turn)."""
+        self.steer_queue.append(text)
+
+    def _drain_steer(self) -> bool:
+        """Fold any mid-turn user messages into the conversation. Returns True if it added any."""
+        msgs = []
+        while self.steer_queue:
+            try:
+                msgs.append(self.steer_queue.popleft())
+            except IndexError:
+                break
+        joined = "\n".join(m for m in msgs if m and m.strip())
+        if not joined:
+            return False
+        self.messages.append({"role": "user", "content":
+            "<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
+            f"course now if it changes anything:\n{joined}\n</user-interjection>"})
+        self.ui.info(f"↳ steering: {joined[:80]}")
+        return True
+
     # ------------------------------------------------------------- main loop ---
     def run_turn(self, user_text: str) -> None:
         self.cancelled.clear()
+        self.steer_queue.clear()            # drop any stale interjections from a prior turn
         try:
             self._run_turn(user_text)
         finally:
@@ -280,7 +321,19 @@ class Agent:
     def _persist(self) -> None:
         if self.session_file:
             from . import sessions
-            sessions.save(self.session_file, self.messages, self.config.project_root)
+            sessions.save(self.session_file, self.messages, self.config.project_root,
+                          name=self.session_name)
+
+    def name_session(self, name: str) -> None:
+        """Give the current session a human name (shown in --resume / the session picker)."""
+        self.session_name = name.strip() or None
+        if self.session_file:
+            from . import sessions
+            if not self.session_file.exists():   # a brand-new session with no turns yet
+                sessions.save(self.session_file, self.messages, self.config.project_root,
+                              name=self.session_name)
+            elif self.session_name:
+                sessions.set_name(self.session_file, self.session_name)
 
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
@@ -288,6 +341,7 @@ class Agent:
         loaded = [m for m in sessions.load(path) if m.get("role") != "system"]
         self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
         self.session_file = path
+        self.session_name = sessions.name_of(path)
         return len(loaded)
 
     def _run_turn(self, user_text: str) -> None:
@@ -310,11 +364,17 @@ class Agent:
         thinking = self._effective_thinking(user_text)
         effort = thinking if thinking != "off" else None
         max_turns = int(self.config.get("max_turns", 40))
+        sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
+        continues = 0               # length-truncation auto-continues used this turn
+        mutating_total = 0          # edits/bash this turn — drives the TodoGate nudge
+        todo_nudged = False         # so the "make a todo list" nudge fires at most once
+        todo_gate = 0               # times we've refused to end the turn with open todos
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
                 self.ui.info("turn cancelled")
                 return
+            self._drain_steer()             # inject anything the user typed mid-turn
             self.maybe_compact()
             tools = self._tool_schemas() if self.client.tools_supported else None
             try:
@@ -347,11 +407,44 @@ class Agent:
             self.messages.append(assistant)
 
             if not result.tool_calls:
+                if result.finish_reason == "length" and continues < _MAX_CONTINUE:
+                    continues += 1              # reply cut off at the token limit — continue it
+                    self.messages.append({"role": "user", "content":
+                        "Your previous response was cut off at the length limit. Continue exactly "
+                        "where you left off — do not repeat what you already wrote."})
+                    continue
+                pending = [t for t in self.ctx.todos if t.get("status") != "done"]
+                if pending and todo_gate < _MAX_TODO_GATE:     # TodoGate: don't stop mid-plan
+                    todo_gate += 1
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nYou're stopping but these todos are still open: "
+                        + "; ".join(t["content"] for t in pending[:8]) + ". Finish them now (make the "
+                        "edits / run the commands) and mark each done with the `todo` tool — or, if a "
+                        "todo genuinely can't be done, say why. Do not stop with silent open todos.\n"
+                        "</system-reminder>"})
+                    continue
+                if self._drain_steer():     # user interjected as we were about to finish → keep going
+                    continue
                 return
 
             text_results: list[str] = []
             for call in result.tool_calls:
-                out = self._handle_call(call)
+                if self.cancelled.is_set():     # honour a mid-batch cancel between tool calls
+                    self.ui.info("turn cancelled")
+                    return
+                sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+                seen = sig_count[sig] = sig_count.get(sig, 0) + 1
+                if seen > _LOOP_HARD:
+                    self.ui.error("stopped — the model is stuck repeating the same tool call")
+                    return
+                if seen > _LOOP_SOFT:           # refuse the repeat and tell the model it's looping
+                    out = ("error: you have already made this exact tool call "
+                           f"{seen - 1} times with identical arguments and got the same result. "
+                           "This is a loop — do NOT call it again. Take a different approach, or if "
+                           "the task is done, give your final answer.")
+                    self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call")
+                else:
+                    out = self._handle_call(call)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -359,6 +452,26 @@ class Agent:
             if text_results:
                 self.messages.append({"role": "user",
                                       "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>"})
+
+            # keep flaky local models on track: nudge a todo list on multi-step work, and
+            # re-surface still-pending todos so they don't get dropped mid-task.
+            mutating_total += sum(1 for c in result.tool_calls
+                                  if c.name in ("write_file", "edit_file", "bash"))
+            reminders: list[str] = []
+            if mutating_total >= 3 and not self.ctx.todos and not todo_nudged:
+                todo_nudged = True
+                reminders.append("You've made several edits without a plan. For a multi-step task, "
+                                 "use the `todo` tool to list the steps and mark each done as you go.")
+            pending = [t for t in self.ctx.todos if t.get("status") != "done"]
+            if pending and not any(c.name == "todo" for c in result.tool_calls):
+                reminders.append("Still pending: " + "; ".join(t["content"] for t in pending[:6])
+                                 + " — advance these and mark each done with the `todo` tool.")
+            if reminders:
+                note = "<system-reminder>\n" + "\n".join(reminders) + "\n</system-reminder>"
+                if self.messages and self.messages[-1]["role"] == "user":   # fold into <tool_results>
+                    self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
+                else:                                                        # native: separate turn
+                    self.messages.append({"role": "user", "content": note})
         self.ui.error(f"stopped after {max_turns} tool iterations (max_turns) — say 'continue' to keep going")
 
     def _handle_call(self, call: ToolCall) -> str:
@@ -391,9 +504,19 @@ class Agent:
         if decision == DENY:
             self.ui.tool_denied(name, args, reason)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
+        if decision == ASK and name == "bash":
+            from . import sandbox
+            if sandbox.active(self.config):      # confined to project + /tmp → auto-approve
+                decision = ALLOW
         if decision == ASK:
             verdict = self.ui.approve(name, args)
             if verdict == "no":
+                reason = getattr(self.ui, "deny_reason", "") or ""
+                if hasattr(self.ui, "deny_reason"):
+                    self.ui.deny_reason = ""          # consume it
+                if reason:
+                    return (f"The user DENIED this action and said: \"{reason}\". Follow that "
+                            "guidance instead; do not retry the denied action.")
                 return "The user DENIED this action. Do not retry it; ask how to proceed or move on."
             if verdict == "always":
                 self.ui.add_permission_rule(name, args)
@@ -409,6 +532,7 @@ class Agent:
             return f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. Do not retry this exact action."
         self.ui.tool_call(name, args)
         out = self.mcp.call(name, args) if name.startswith("mcp__") else execute(name, args, self.ctx)
+        out = _clamp(out)                      # central ceiling — MCP + any future tool inherit it
         _, post = run_hooks("PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
                             self.config, self.config.project_root)
         if post:
@@ -459,9 +583,34 @@ class Agent:
     def estimate_tokens(self) -> int:
         return sum(len(json.dumps(m, default=str)) for m in self.messages) // 4
 
+    def _mechanical_prune(self) -> bool:
+        """Tier-1 context relief (no LLM): cap stale tool-result bodies so a few huge outputs
+        can't dominate the window. Protects the system message and the most-recent quarter of
+        the transcript (always at least KEEP_RECENT messages), and never touches assistant text."""
+        n = len(self.messages)
+        protect_from = max(1, n - max(KEEP_RECENT, n // 4))
+        cap = 2000
+        changed = False
+        for i in range(1, protect_from):
+            m = self.messages[i]
+            content = m.get("content")
+            if not isinstance(content, str) or len(content) <= cap:
+                continue
+            if m.get("role") == "tool":
+                m["content"] = content[:cap] + f"\n… [older tool output pruned: {len(content) - cap} chars]"
+                changed = True
+            elif m.get("role") == "user" and content.startswith("<tool_results>"):
+                m["content"] = content[:cap] + "\n… [older tool output pruned] …\n</tool_results>"
+                changed = True
+        return changed
+
     def maybe_compact(self, force: bool = False) -> None:
         budget = int(self.config.get("context_size", 32768)) * float(self.config.get("compact_threshold", COMPACT_THRESHOLD))
         if not force and self.estimate_tokens() < budget:
+            return
+        # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
+        if self._mechanical_prune() and not force and self.estimate_tokens() < budget:
+            self.ui.info("context pruned")
             return
         if len(self.messages) < KEEP_RECENT + 3:
             return

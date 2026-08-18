@@ -1,10 +1,88 @@
-"""Grok-style tool rendering: a clean unified-diff renderer (line-number gutter,
+"""Clean tool rendering: a clean unified-diff renderer (line-number gutter,
 mono+purple bands, collapsed unchanged runs) plus a per-tool line formatter."""
 from __future__ import annotations
 
 import re
 
 from . import glyphs, style
+
+
+def markdown_theme():
+    """A rich Theme that keeps Markdown monochrome + one purple accent (no rainbow)."""
+    from rich.theme import Theme as RTheme
+    t = style.theme()
+    return RTheme({
+        "markdown.h1": f"bold {t.text_strong}", "markdown.h2": f"bold {t.text_strong}",
+        "markdown.h3": f"bold {t.text}", "markdown.h4": f"bold {t.text}",
+        "markdown.h5": f"bold {t.muted}", "markdown.h6": f"bold {t.muted}",
+        "markdown.item.number": t.faint, "markdown.item.bullet": f"bold {t.accent}",
+        "markdown.code": t.accent_bright, "markdown.link": t.accent, "markdown.link_url": t.faint,
+        "markdown.block_quote": t.muted, "markdown.hr": t.border,
+        "markdown.strong": f"bold {t.text_strong}", "markdown.em": f"italic {t.muted}",
+        "repr.number": t.text, "repr.str": t.muted, "repr.bool_true": t.text, "repr.none": t.faint,
+    }, inherit=True)
+
+
+def _mono_syntax_theme():
+    from pygments.style import Style as PS
+    from pygments.token import Comment, Keyword, Name, Number, Operator, String, Token
+    from rich.syntax import PygmentsSyntaxTheme
+    t = style.theme()
+
+    class Mono(PS):
+        background_color = t.code
+        styles = {
+            Token: t.text, Comment: f"italic {t.faint}", Keyword: t.accent_bright,
+            Keyword.Constant: t.accent_bright, Keyword.Namespace: t.accent_bright,
+            Name: t.text, Name.Function: f"bold {t.text_strong}", Name.Class: f"bold {t.text_strong}",
+            Name.Builtin: t.accent_bright, Name.Decorator: t.accent, String: t.muted,
+            String.Doc: f"italic {t.faint}", Number: t.text, Operator: t.muted,
+        }
+    return PygmentsSyntaxTheme(Mono)
+
+
+_MONO_MD = None
+
+
+def _mono_markdown_class():
+    """A rich Markdown subclass whose EVERY code block (fence, indented, and — crucially —
+    the still-open fence mid-stream) renders through our monochrome syntax theme instead of
+    rich's default monokai rainbow. Splitting fences by regex missed all of those cases."""
+    global _MONO_MD
+    if _MONO_MD is not None:
+        return _MONO_MD
+    from rich.markdown import CodeBlock, Markdown
+    from rich.syntax import Syntax
+
+    class _MonoCodeBlock(CodeBlock):
+        def __rich_console__(self, console, options):
+            t = style.theme()
+            code = str(self.text).rstrip()
+            yield Syntax(code, self.lexer_name or "text", theme=_mono_syntax_theme(),
+                         background_color=t.code, word_wrap=True, padding=(0, 1))
+
+    class _MonoMarkdown(Markdown):
+        pass
+
+    _MonoMarkdown.elements = dict(Markdown.elements)
+    _MonoMarkdown.elements["fence"] = _MonoCodeBlock
+    _MonoMarkdown.elements["code_block"] = _MonoCodeBlock
+    _MONO_MD = _MonoMarkdown
+    return _MONO_MD
+
+
+def render_markdown(text: str):
+    """Assistant markdown, mono+purple — prose + code both monochrome, never rich's rainbow,
+    including the half-streamed code block whose closing fence hasn't arrived yet."""
+    return _mono_markdown_class()(text)
+
+
+def mono_syntax(code: str, lang: str):
+    """A syntax-highlighted block in our monochrome theme (not rich's colorful presets)."""
+    from rich.syntax import Syntax
+    t = style.theme()
+    return Syntax(code, lang, theme=_mono_syntax_theme(), background_color=t.code,
+                  word_wrap=True, padding=(0, 1))
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _CTX_COLLAPSE = 4   # context runs longer than this collapse to a single "… N unchanged" line
@@ -65,7 +143,7 @@ def fmt_tokens(n: int) -> str:
 
 
 def context_bar(used: int, size: int, width: int = 18):
-    """A `used/size ████░░ NN%` usage bar, purple → red past 85% (Grok context_bar)."""
+    """A `used/size ████░░ NN%` usage bar, purple → red past 85%."""
     from rich.text import Text
     t = style.theme()
     pct = (used / size) if size else 0.0
