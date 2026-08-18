@@ -455,9 +455,12 @@ class TUI:
                 clicks[6 + i] = action
                 content.append(mrow(lbl, key, slash, cw, hot=(base + 6 + i == self._hover_row)))
             logo_p = logo_mod.shimmer_lines(secs, pad=logo_w)
-            for i in range(max(len(logo_p), len(content))):
+            n = max(len(logo_p), len(content))
+            loff = max(0, (len(content) - len(logo_p)) // 2)   # vertically centre the mark beside the menu
+            for i in range(n):
                 row = Text()
-                row.append_text(logo_p[i] if i < len(logo_p) else Text(" " * logo_w))
+                li = i - loff
+                row.append_text(logo_p[li] if 0 <= li < len(logo_p) else Text(" " * logo_w))
                 row.append("  ")
                 row.append_text(content[i] if i < len(content) else Text(""))
                 rows.append(row)

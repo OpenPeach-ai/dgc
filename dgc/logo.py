@@ -13,17 +13,20 @@ from . import style
 
 # "/// DGC" — the three-slash mark (matching the logo + the ╱╱╱ thinking animation) + the
 # block-shadow "DGC" wordmark (figlet ansi_shadow).
+# A block "/// " mark (purple) + the block-shadow "DGC" wordmark (white). Leading spaces on the
+# slash rows create the diagonal, so these lines are NOT lstripped (see _slash_split).
 LOGO = [
-    " ╱╱ ╱╱ ╱╱  ██████╗  ██████╗  ██████╗",
-    " ╱╱ ╱╱ ╱╱  ██╔══██╗██╔════╝ ██╔════╝",
-    " ╱╱ ╱╱ ╱╱  ██║  ██║██║  ███╗██║",
-    " ╱╱ ╱╱ ╱╱  ██║  ██║██║   ██║██║",
-    " ╱╱ ╱╱ ╱╱  ██████╔╝╚██████╔╝╚██████╗",
-    " ╱╱ ╱╱ ╱╱  ╚═════╝  ╚═════╝  ╚═════╝",
+    "          ██      ██████╗  ██████╗  ██████╗",
+    "    ██   ██   ██  ██╔══██╗██╔════╝ ██╔════╝",
+    "   ██   ██   ██   ██║  ██║██║  ███╗██║",
+    "  ██   ██   ██    ██║  ██║██║   ██║██║",
+    " ██   ██   ██     ██████╔╝╚██████╔╝╚██████╗",
+    "██   ██           ╚═════╝  ╚═════╝  ╚═════╝",
 ]
+_SLASH_COLS = 18                 # columns 0.._SLASH_COLS-1 are the purple slashes; the rest is DGC
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
-WIDTH = max(len(r.lstrip()) for r in LOGO)   # natural wordmark width (no indent)
+WIDTH = _COLS                                # full mark width (/// + DGC, incl. the diagonal spaces)
 _BLANK = (" ", "⠀")     # skip blanks in the shimmer
 
 # shimmer constants: a raised-cosine band sweeps bottom-left→top-right
@@ -38,6 +41,17 @@ _REST = "#5E5E66"     # resting colour of the mark (muted grey)
 # grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
 # into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
 _GLINT = "#EDEDF2"
+# The /// mark is SOLID brand purple — a single flat colour (never a gradient), so it downsamples
+# cleanly on 256-colour terminals and can't scatter into cyan/rainbow the way a purple shimmer would.
+_ACCENT = "#7C5CFF"
+
+
+def _char_style(r: int, c: int, secs: float, hi: str) -> str:
+    """Colour a wordmark cell: the /// slashes are solid purple; the DGC letters get the grey→white glint."""
+    if c < _SLASH_COLS:
+        return "bold " + _ACCENT
+    diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
+    return "bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs))
 
 
 def _shine_opacity(diag: float, secs: float) -> float:
@@ -53,15 +67,12 @@ def _frame(secs: float, indent: bool = True):
     from rich.text import Text
     hi = _GLINT                               # light-grey glint (terminal-safe)
     t = Text()
-    for r, line in enumerate(LOGO):
-        if not indent:
-            line = line.lstrip()
+    for r, line in enumerate(LOGO):             # keep leading spaces — they form the /// diagonal
         for c, ch in enumerate(line):
             if ch in _BLANK:
                 t.append(" ")
                 continue
-            diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
-            t.append(ch, style="bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs)))
+            t.append(ch, style=_char_style(r, c, secs, hi))
         t.append("\n")
     return t
 
@@ -76,15 +87,13 @@ def shimmer_lines(secs: float, pad: int = 0):
     from rich.text import Text
     hi = _GLINT
     out = []
-    for r, raw in enumerate(LOGO):
-        line = raw.lstrip()
+    for r, line in enumerate(LOGO):             # NOT lstripped — leading spaces form the /// diagonal
         t = Text()
         for c, ch in enumerate(line):
             if ch in _BLANK:
                 t.append(" ")
             else:
-                diag = (c + (_ROWS - 1 - r)) / (_COLS + _ROWS)
-                t.append(ch, style="bold " + style.lerp_rgb(_REST, hi, _shine_opacity(diag, secs)))
+                t.append(ch, style=_char_style(r, c, secs, hi))
         if pad and len(line) < pad:
             t.append(" " * (pad - len(line)))
         out.append(t)
