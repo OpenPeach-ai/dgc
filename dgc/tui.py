@@ -18,6 +18,7 @@ import threading
 import time
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
@@ -84,6 +85,25 @@ class SlashCompleter(Completer):
                                  display="/" + name, display_meta=desc)
 
 
+class _NextSuggest(AutoSuggest):
+    """Ghost-text: show the predicted next prompt (dim) after the cursor. Full text on an empty
+    composer; the remaining suffix once the user types a matching prefix; nothing if they diverge."""
+
+    def __init__(self, tui):
+        self._tui = tui
+
+    def get_suggestion(self, buffer, document):
+        sug = self._tui._suggestion
+        if not sug:
+            return None
+        t = document.text
+        if not t:
+            return Suggestion(sug)
+        if sug.startswith(t) and len(sug) > len(t):
+            return Suggestion(sug[len(t):])
+        return None
+
+
 class TUI:
     """A full-screen app that also *is* the AgentUI the agent calls back into."""
 
@@ -124,6 +144,7 @@ class TUI:
         self._autotitled = False           # a title has been auto-derived for this session (once)
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
         self._turn_marks: list[tuple[int, str]] = []   # (block index, preview) per turn, for /jump
+        self._suggestion: str | None = None    # predicted next prompt (ghost text)
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -1198,7 +1219,7 @@ class TUI:
     # --------------------------------------------------------------- the app ---
     def _build(self) -> None:
         # `/` opens the command palette as an overlay (see the `/` key binding) — no completer.
-        self.input_buf = Buffer(multiline=True)
+        self.input_buf = Buffer(multiline=True, auto_suggest=_NextSuggest(self))   # ghost-text next-prompt
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
@@ -1312,12 +1333,21 @@ class TUI:
             self.agent.name_session(title)
             self._invalidate()
 
+    def _compute_suggestion(self, prompt: str, resp: str) -> None:
+        """Background: predict the next prompt (ghost text)."""
+        try:
+            s = self.agent.suggest_next(prompt, resp)
+        except Exception:
+            s = None
+        self._suggestion = s
+        self._invalidate()
+
     def _new_session(self, name: str | None = None) -> None:
         if self._turn.is_set():
             return
         self.agent.reset()
         self.blocks.clear()
-        self._turn_marks = []
+        self._turn_marks = []; self._suggestion = None
         self._buf = ""; self._think = ""
         from . import sessions as _sess
         self.agent.session_file = _sess.new_path(self.config.project_root)
@@ -2088,6 +2118,15 @@ class TUI:
         def _(ev):
             self._open_cheatsheet()         # keyboard cheatsheet
 
+        @kb.add("tab", filter=Condition(lambda: self.input_buf.suggestion is not None
+                                        and self._overlay is None and self.input_buf.complete_state is None))
+        @kb.add("right", filter=Condition(lambda: self.input_buf.suggestion is not None
+                                          and self.input_buf.document.is_cursor_at_the_end and self._overlay is None))
+        def _(ev):                          # accept the ghost-text suggestion (Grok: Tab / →)
+            s = self.input_buf.suggestion
+            if s:
+                self.input_buf.insert_text(s.text)
+
         for i in range(1, 5):               # number keys answer a blocking request
             @kb.add(str(i))
             def _(ev, n=i):
@@ -2124,6 +2163,7 @@ class TUI:
     def _submit(self, text: str) -> None:
         self._cancel.clear()
         self._tool_count = 0
+        self._suggestion = None                       # a new prompt supersedes the ghost text
         if text.strip():
             self._prompt_history.append(text)         # for /history (Ctrl+R) recall
         self.blocks.append(self._user_band(text))
@@ -2151,6 +2191,11 @@ class TUI:
                         and not self._cancel.is_set()):
                     self._autotitled = True
                     threading.Thread(target=self._autotitle, args=(text,), daemon=True).start()
+                if self.config.get("suggest", True) and not self._cancel.is_set():
+                    resp = next((m.get("content", "") for m in reversed(self.agent.messages)
+                                 if m.get("role") == "assistant"), "")
+                    threading.Thread(target=self._compute_suggestion,
+                                     args=(text, str(resp)), daemon=True).start()
                 self._invalidate()
                 if self._queue:
                     self._submit(self._queue.pop(0))

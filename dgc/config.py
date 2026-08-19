@@ -35,6 +35,7 @@ DEFAULTS: dict = {
     "subagent_api_key": "",                     # key for the sub-agent host (empty: inherit main)
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
+    "suggest": True,                            # ghost-text: predict the next prompt after each turn
     "background": "inherit",                    # inherit (never repaint — respect the terminal) | auto | dark
     "sandbox": False,                           # confine bash to project dir + /tmp (bwrap/sandbox-exec)
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat

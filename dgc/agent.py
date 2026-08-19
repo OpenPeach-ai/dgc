@@ -357,6 +357,24 @@ class Agent:
         title = _re.sub(r"\s+", " ", title).strip()[:60]
         return title or None
 
+    def suggest_next(self, user_prompt: str, assistant_response: str) -> str | None:
+        """Predict ONE plausible next prompt the user might type (Grok's ghost-text). Best-effort,
+        cheap (no tools/thinking); returns None on failure."""
+        import re as _re
+        sysmsg = ("Given the last exchange in a coding session, predict ONE short, natural next prompt "
+                  "the user is likely to type next. Output ONLY that prompt — imperative, under 12 words, "
+                  "no quotes, no trailing punctuation.")
+        ctx = f"User: {str(user_prompt)[:600]}\nAssistant: {str(assistant_response)[:800]}"
+        try:
+            res = self.client.chat([{"role": "system", "content": sysmsg},
+                                    {"role": "user", "content": ctx}], tools=None, reasoning_effort="off")
+        except Exception:
+            return None
+        s = (getattr(res, "content", "") or "").strip().splitlines()
+        s = (s[0] if s else "").strip().strip('"').strip("'").rstrip(".")
+        s = _re.sub(r"\s+", " ", s)[:120]
+        return s or None
+
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
