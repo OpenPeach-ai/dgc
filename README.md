@@ -85,8 +85,11 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ## What's in the box
 
-- **Interactive REPL** — streaming output, live tool-call display, diffs, todos.
-- **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode).
+- **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, and a top-right context-window meter (click it for a usage breakdown).
+- **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode). The plan is **saved to a `plan.md` beside the session**; reopen it any time with `/view-plan`.
+- **Artifacts** — when the agent builds something to *look at* (a web page, an app, a chart), the `artifact` tool serves it on a local `127.0.0.1` URL and DGC offers to open it in your browser. `/artifact` lists everything running — open one, or stop it to free its port. Frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
+- **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
+- **Next-prompt suggestions** — after each turn DGC predicts a sensible follow-up as ghost text; press **Tab / →** to accept it (toggle with the `suggest` config).
 - **Runs tiny local models** — if the endpoint has no native tool-calling, DGC auto-switches to a text tool-call protocol and parses it.
 - **Auto context compaction** — near ~85% of your model's context window (configurable via `compact_threshold`), older turns are summarized so long sessions don't overflow. `/compact` forces it.
 - **Thinking modes** — `/think off|low|medium|high`; `think` / `think hard` / `ultrathink` in a prompt bump it for that turn. `<think>` streams dim.
@@ -95,7 +98,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one (Claude Code / Codex style).
 - **Checkpoints & rewind** — every turn is checkpointed; `/rewind` restores both your code and the conversation to an earlier turn.
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
-- **Skills** — ships **10 built-in skills** (`code-review`, `debug`, `deep-research`, `doctor`, `verify`, `batch`, `dataviz`, `loop`, `fewer-permission-prompts`, `providers`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`.
+- **Skills** — ships **11 built-in skills** (`code-review`, `debug`, `deep-research`, `doctor`, `verify`, `batch`, `dataviz`, `loop`, `fewer-permission-prompts`, `providers`, `dgc-design`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`. `dgc-design` encodes DGC's frontend design language and stays off for normal coding — artifacts load it automatically.
 - **Sub-agents** — the `task` tool hands a self-contained job to a fresh autonomous sub-agent (its own context, the same tools). Sub-agents can run on a *different* local model/host than the main loop — set `subagent_model` / `subagent_base_url` / `subagent_api_key` globally, or define named agents in `.dgc/agents/<name>.md` (frontmatter: name, description, model, base_url, api_key, effort) and pick one with the task tool's `agent` argument. `/agents` lists them; `/subagent` sets the defaults.
 - **MCP servers** — connect stdio MCP servers (configured in `~/.dgc/config.json` → `mcp_servers`) and their tools join DGC's own; `/mcp` lists what's connected.
 - **Lifecycle hooks** — run your own shell commands on `PreToolUse` / `PostToolUse` / `UserPromptSubmit` (config → `hooks`).
@@ -104,7 +107,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`.
 - **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
 - **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
-- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `bash_output` · `bash_kill` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `task` · `save_memory` · `present_plan` · `propose_options`.
+- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `bash_output` · `bash_kill` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options`.
 
 ## REPL conveniences
 
@@ -113,7 +116,11 @@ just type            ask DGC — it uses tools to act on your project
 #fact                quick-add a memory to DGC.md
 !cmd                 run a shell command directly
 @path/to/file        attach a file's contents to your message
-/help                every command
+Tab / →              accept the ghost-text next-prompt suggestion
+/help                every command      ·  /keys  keyboard cheatsheet
+/docs                in-app how-to guides
+/artifact            open / stop localhost artifact previews
+/view-plan           reopen the plan saved in plan mode
 ```
 
 ## Commands

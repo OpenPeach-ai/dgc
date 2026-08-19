@@ -316,19 +316,22 @@
   <div class="measure">
     <p class="eyebrow">Why DGC</p>
     <h2>A real harness, not a chat wrapper.</h2>
-    <p class="lede">Tools, four permission modes, plan mode, memory, web search — everything a serious coding agent needs, running against whatever model you point it at.</p>
+    <p class="lede">Tools, four permission modes, plan mode, memory, web search, localhost artifacts — everything a serious coding agent needs, running against whatever model you point it at.</p>
   </div>
   <div class="grid g3">
     <div class="card"><div class="ic">Local-first</div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud endpoint. Code stays local unless <b>you</b> pick a cloud model.</p></div>
     <div class="card"><div class="ic">Agentic</div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. Permission modes decide how much rope it gets — <b>ask</b>, auto-edit, plan-first, or full-auto.</p></div>
     <div class="card"><div class="ic">In your editor</div><h3>Terminal or IDE</h3><p>A full-screen Python TUI, and a native <b>VS&nbsp;Code & Cursor</b> extension — same agent, same local models, a docked panel with inline diffs.</p></div>
     <div class="card"><div class="ic">More than one loop</div><h3>Sub-agents & hooks</h3><p>Spawn <b>sub-agents</b> with <code>task</code> — each can run a <b>different model or host</b>. Plus background shells, <b>MCP servers</b>, checkpoints & rewind, and lifecycle hooks.</p></div>
+    <div class="card"><div class="ic">See what it builds</div><h3>Artifacts on localhost</h3><p>When the agent builds something to look at, the <code>artifact</code> tool serves it on a local URL and DGC offers to open it. <code>/artifact</code> lists them — open one, or stop it to free the port. Frontends follow the built-in <b>dgc-design</b> language.</p></div>
+    <div class="card"><div class="ic">Plan first</div><h3>Plan mode that sticks</h3><p>Read-only research → an approved plan → execute. The plan is <b>saved to <code>plan.md</code></b> beside the session; reopen it any time with <code>/view-plan</code>.</p></div>
+    <div class="card"><div class="ic">Polished TUI</div><h3>Built to be lived in</h3><p>A highlighted prompt band, collapsible thinking, a top-right context meter, in-app <code>/docs</code>, and ghost-text next-prompt suggestions — press <b>Tab</b> to accept.</p></div>
   </div>
   <p class="subhead">The toolbox</p>
   <div class="chips">
-    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
+    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
   </div>
-  <p class="note">Also in the box: vision / image input, model fallback, custom slash-commands, bundled default skills, and MCP servers.</p>
+  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 11 bundled skills, and MCP servers.</p>
 </div></section>
 
 <section id="terminal"><div class="wrap">
