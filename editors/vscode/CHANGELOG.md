@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 — 2026-08-19
+
+- **New Marketplace icon** — the current `///` + `DGC` brand mark (on black), replacing the old pixel-block logo. Matches vibedgc.com and the CLI.
+
 ## 0.7.0 — 2026-08-19
 
 - **Publisher renamed to `vibedgc`** (matching vibedgc.com). The extension id is now **`vibedgc.dgc`**. The old `daguccicode.dgc` is deprecated — reinstall from Open VSX / the Marketplace / vibedgc.com.
