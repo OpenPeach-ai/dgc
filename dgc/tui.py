@@ -37,8 +37,10 @@ from .agent import Agent
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("help", "list every command"),
-    ("new", "start a new session (asks a name)"),
+    ("keys", "keyboard shortcuts cheatsheet"),
+    ("new", "start a new session"),
     ("resume", "reopen a past session · dN deletes one"),
+    ("history", "search & recall a past prompt"),
     ("model", "switch the model"),
     ("connect", "pick a provider or a custom LAN host"),
     ("subagent", "set the sub-agent model + host"),
@@ -118,6 +120,7 @@ class TUI:
         self._flash_until = 0.0
         self._naming = False               # inline "name this new session" prompt is active
         self._autotitled = False           # a title has been auto-derived for this session (once)
+        self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -653,6 +656,49 @@ class TUI:
         ]
         self._open_overlay([], on_pick=lambda r: None, header=header,
                            footer="Esc close", accent=True, info=True)
+
+    def _open_history(self) -> None:
+        """A filterable list of your past prompts — Enter recalls one into the composer (Ctrl+R)."""
+        seen, hist = set(), []
+        for h in reversed(self._prompt_history):        # most-recent-first, de-duped
+            k = h.strip()
+            if k and k not in seen:
+                seen.add(k); hist.append(h)
+        if not hist:
+            self._flash("no prompt history yet"); return
+        rows = [{"label": h.replace("\n", " ⏎ ")[:140], "value": h} for h in hist]
+
+        def pick(row):
+            self.input_buf.text = row["value"]
+            self.input_buf.cursor_position = len(row["value"])
+        self._open_overlay(rows, on_pick=pick, title="Recall a prompt",
+                           footer="↑↓ move · type to filter · Enter recall · Esc cancel")
+
+    def _open_cheatsheet(self) -> None:
+        """A grouped keyboard + command reference — Grok's shortcuts_help (Ctrl+G)."""
+        from rich.text import Text
+        th = style_mod.theme()
+        groups = [
+            ("Compose", [("Enter", "send"), ("Shift+Enter", "newline"), ("Shift+Tab", "cycle permission mode"),
+                         ("/", "command palette"), ("@ path", "attach a file"), ("Ctrl+R", "recall a past prompt"),
+                         ("! command", "run a shell command"), ("# note", "save a memory")]),
+            ("This turn", [("Esc", "stop the turn"), ("Ctrl+C", "cancel · clear draft · quit")]),
+            ("Navigate", [("PageUp / PageDn", "scroll the transcript"), ("End", "jump to the latest"),
+                          ("click ◆ Thought", "expand the reasoning"), ("click token count", "context details")]),
+            ("Session", [("Ctrl+N", "new session"), ("/resume", "reopen a past one"), ("/name", "rename this one")]),
+        ]
+        lines = []
+        for title, keys in groups:
+            lines.append(Text(title.upper(), style=f"bold {th.accent_bright}"))
+            for k, d in keys:
+                t = Text("  ")
+                t.append(f"{k:<20}", style=f"bold {th.muted}")
+                t.append(d, style=th.faint)
+                lines.append(t)
+            lines.append(Text(""))
+        if lines:
+            lines.pop()                                  # drop the trailing blank
+        self._open_overlay([], on_pick=lambda r: None, header=lines, footer="Esc close", accent=True, info=True)
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
@@ -1274,6 +1320,10 @@ class TUI:
             self.input_buf.reset()
             self.input_buf.insert_text("/")
             self._open_command_palette()
+        elif cmd in ("keys", "shortcuts", "cheatsheet"):
+            self._open_cheatsheet()
+        elif cmd in ("history", "hist"):
+            self._open_history()
         elif cmd in ("new", "session"):
             self._prompt_new_session()
         elif cmd == "name":
@@ -1344,8 +1394,7 @@ class TUI:
             val = rest or ("light" if cfg.get("theme") == "dark" else "dark")
             cfg.set("theme", val); style_mod.set_theme(val); self._flash(f"theme → {val}")
         elif cmd == "context":
-            used, size = self.agent.estimate_tokens(), int(cfg.get("context_size", 32768))
-            self._append(self._rich(render_mod.context_bar(used, size, width=26)))
+            self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
             self.agent.maybe_compact(force=True); self._flash("context compacted")
         elif cmd == "status":
@@ -1964,6 +2013,15 @@ class TUI:
             self._scroll_off = 0            # jump back to the live bottom
             self._invalidate()
 
+        @kb.add("c-r", filter=Condition(lambda: self._overlay is None and self._req is None
+                                        and not self._turn.is_set() and not self._naming))
+        def _(ev):
+            self._open_history()            # recall a past prompt
+
+        @kb.add("c-g", filter=Condition(lambda: self._overlay is None and self._req is None))
+        def _(ev):
+            self._open_cheatsheet()         # keyboard cheatsheet
+
         for i in range(1, 5):               # number keys answer a blocking request
             @kb.add(str(i))
             def _(ev, n=i):
@@ -2000,6 +2058,8 @@ class TUI:
     def _submit(self, text: str) -> None:
         self._cancel.clear()
         self._tool_count = 0
+        if text.strip():
+            self._prompt_history.append(text)         # for /history (Ctrl+R) recall
         self.blocks.append(self._user_band(text))
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._turn.set()
