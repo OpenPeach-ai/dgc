@@ -207,15 +207,23 @@
       }
       case "options_request": {
         ensureTurn();
-        const btns = ev.options.map((o, i) => `<button class="act${i === 0 ? " primary" : ""}" data-i="${i + 1}">${esc(o)}</button>`).join("");
-        const c = decisionCard(`<div class="q">${esc(ev.question)}</div><div class="btns">${btns}</div>`);
+        // Stacked, numbered, wrapping rows — long options stay fully visible (never overflow
+        // the card), and the recommended one is marked with an accent bar, not an unreadable
+        // solid-purple fill.
+        const opts = ev.options.map((o, i) =>
+          `<button class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
+        const c = decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`);
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) }); resolveCard(c); });
         break;
       }
       case "todos": {
         ensureTurn();
         if (!turn._todo) { turn._todo = el("div", "todos"); turn.block.appendChild(turn._todo); }
-        turn._todo.innerHTML = ev.todos.map((t) => `<div class="t ${t.status === "in_progress" ? "doing" : ""}">${t.status === "done" ? "☑" : t.status === "in_progress" ? "◐" : "◻"} ${esc(t.content)}</div>`).join("");
+        const TG = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
+        const dn = ev.todos.filter((t) => t.status === "done").length;
+        turn._todo.innerHTML = `<div class="thead">Tasks <span>${dn}/${ev.todos.length}</span></div>` +
+          ev.todos.map((t) => { const g = TG[t.status] || TG.pending;
+            return `<div class="t ${g[1]}"><span class="ti">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`; }).join("");
         break;
       }
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;

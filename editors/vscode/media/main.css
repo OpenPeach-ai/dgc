@@ -108,16 +108,36 @@ body {
 .card .q b { color: var(--text-strong); }
 .card pre { margin: 4px 0 10px; font: 400 11.5px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; background: var(--code); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; }
 .card .btns { display: flex; gap: 7px; flex-wrap: wrap; }
-button.act { font: 600 12px/1 var(--sans); cursor: pointer; border: 1px solid var(--border-strong); border-radius: 7px; padding: 7px 12px; background: var(--surface2); color: var(--text); }
-button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.act { font: 600 12px/1.35 var(--sans); cursor: pointer; border: 1px solid var(--border-strong); border-radius: 7px; padding: 7px 12px; background: var(--surface2); color: var(--text); text-align: left; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+/* recommended = accent bar + soft tint, NOT a solid-purple fill (that was white-on-#7C5CFF ≈ 4.3:1, unreadable) */
+button.act.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--text-strong); box-shadow: inset 2px 0 0 var(--accent); }
 button.act:hover { border-color: var(--accent); }
-button.act.primary:hover { background: var(--accent-hover); }
+button.act.primary:hover { background: rgba(124,92,255,.2); }
+/* propose_options: a vertical list of readable, wrapping rows */
+.opts { display: flex; flex-direction: column; gap: 6px; }
+button.opt { display: flex; gap: 9px; align-items: baseline; width: 100%; text-align: left; cursor: pointer;
+  font: 500 12.5px/1.45 var(--sans); color: var(--text); background: var(--surface2);
+  border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 12px; }
+button.opt .n { flex: none; min-width: 14px; color: var(--muted); font: 700 11px/1.45 var(--mono); }
+button.opt .ol { min-width: 0; overflow-wrap: anywhere; }
+button.opt:hover { border-color: var(--accent); background: var(--surface); }
+button.opt.rec { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+button.opt.rec .n { color: var(--accent); }
+.card.resolved .opts { display: none; }
 .card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
 .card.resolved .btns { display: none; }
 
 /* todos */
-.todos { border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; font: 400 12px/1.7 var(--mono); background: var(--surface); color: var(--muted); }
-.todos .t { display: flex; gap: 7px; } .todos .t.doing { color: var(--text); font-weight: 600; }
+.todos { border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; font: 400 12px/1.7 var(--mono); background: var(--surface); color: var(--text); }
+.todos .thead { color: var(--faint); font: 600 10.5px/1.6 var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; }
+.todos .thead span { color: var(--muted); }
+.todos .t { display: flex; gap: 8px; align-items: baseline; }
+.todos .t .ti { flex: none; width: 12px; text-align: center; }
+.todos .t .tc { min-width: 0; overflow-wrap: anywhere; }
+.todos .t.pend .ti { color: var(--muted); }
+.todos .t.doing { color: var(--text); font-weight: 600; } .todos .t.doing .ti { color: #E0A24E; }
+.todos .t.done { color: var(--muted); text-decoration: line-through; } .todos .t.done .ti { color: #57C08A; }
+.todos .t.cancel { color: var(--faint); text-decoration: line-through; } .todos .t.cancel .ti { color: #DC5A64; }
 
 /* system lines */
 .sys { font: 400 11px/1.5 var(--mono); color: var(--faint); }
