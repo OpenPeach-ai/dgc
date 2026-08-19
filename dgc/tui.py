@@ -48,7 +48,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("worktree", "isolate edits in a git worktree"),
     ("sandbox", "confine bash to the project + /tmp"),
     ("bg", "terminal background: auto · dark · inherit"),
-    ("theme", "colour theme: dark · light"),
+    ("theme", "colour theme: auto · dark · light"),
     ("context", "context-window usage"),
     ("compact", "summarise the older turns now"),
     ("status", "model · host · mode · context"),
@@ -190,7 +190,8 @@ class TUI:
                  lambda s: s.agent.mode),
         "bg": ([("Auto", "auto"), ("Dark", "dark"), ("Inherit", "inherit")],
                lambda s: s.config.get("background", "auto")),
-        "theme": ([("Dark", "dark"), ("Light", "light")], lambda s: s.config.get("theme", "dark")),
+        "theme": ([("Auto — match the terminal", "auto"), ("Dark", "dark"), ("Light", "light")],
+                  lambda s: s.config.get("theme", "auto")),
         "sandbox": ([("On — confine bash", "on"), ("Off", "off")],
                     lambda s: "on" if s.config.get("sandbox") else "off"),
     }
@@ -512,6 +513,28 @@ class TUI:
         return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]Shift+Tab to switch mode "
                                f"{glyphs.MIDDOT} /help for commands {glyphs.MIDDOT} Esc to stop a turn[/]"))
 
+    def _shortcut_bar(self):
+        """A persistent, context-aware key-hint bar pinned to the very bottom — Grok's
+        shortcuts_bar.rs ported: bold-bright key + dim label chips, a dim separator, and a
+        'press again to quit' takeover. Rebuilt every frame so keys track the current state."""
+        th = style_mod.theme()
+        armed = (time.monotonic() - self._quit_armed) < 2.0
+        if armed and not self._turn.is_set() and self._overlay is None and self._req is None:
+            chips = [("Ctrl+C", "press again to quit")]
+        elif self._req is not None or self._input is not None or self._naming:
+            chips = [("Enter", "confirm"), ("Esc", "cancel")]
+        elif self._overlay is not None:
+            chips = [("↑↓", "move"), ("Enter", "select"), ("Esc", "close")]
+        elif self._turn.is_set():
+            chips = [("Esc", "stop"), ("Enter", "queue")]
+        else:
+            chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
+                     ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
+        key, lbl, sep = f"bold {th.muted}", th.faint, th.faint
+        body = f"[{sep}]  {glyphs.RAIL}  [/]".join(
+            f"[{key}]{_esc(k)}[/] [{lbl}]{_esc(l)}[/]" for k, l in chips)
+        return ANSI("  " + self._rich(body))
+
     @staticmethod
     def _md(text: str):
         return render_mod.render_markdown(text)
@@ -530,7 +553,7 @@ class TUI:
     def _right_rows(self, upd) -> int:
         return 9 + (2 if upd else 1)
 
-    _CHROME_BELOW = 5     # rows under the header at welcome: tip(1) + status(1) + composer box(3)
+    _CHROME_BELOW = 5     # rows under the header at welcome: status(1) + composer box(3) + shortcut bar(1)
     _WIDE_MIN = 82       # below this terminal WIDTH the card stacks (logo on top) — Grok's breakpoint feel
     _CARD_W = 96         # FIXED card width (like Grok's capped box): it never stretches — it stays this
                           # size and centered no matter how large the terminal gets.
@@ -971,7 +994,7 @@ class TUI:
             ]),
             Window(FormattedTextControl(self._bottom_border), height=1),
         ])
-        tip = Window(FormattedTextControl(self._tip), height=1, style="class:status")
+        shortcut_bar = Window(FormattedTextControl(self._shortcut_bar), height=1, style="class:status")
         # The floating overlay (pickers / tabbed modal) grows a region ABOVE the composer —
         # it pushes the transcript up instead of dumping the menu into the chat.
         overlay_panel = ConditionalContainer(
@@ -985,7 +1008,7 @@ class TUI:
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
             filter=Condition(self._todos_visible))
-        root = HSplit([header, transcript, overlay_panel, todo_panel, tip, status, composer_box])
+        root = HSplit([header, transcript, overlay_panel, todo_panel, status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
@@ -1010,7 +1033,13 @@ class TUI:
         return max(card_h, self._height - self._CHROME_BELOW)
 
     def _composer_height(self) -> int:
-        return min(max(1, self.input_buf.text.count("\n") + 1), 8)
+        # Grow with WRAPPED lines, not just explicit newlines: the composer wraps (wrap_lines=True),
+        # so a long line that runs past the terminal width needs extra rows or its tail is hidden.
+        w = max(8, self._width - 5)                     # inside the │ borders, minus the `❯ ` prefix
+        rows = 0
+        for ln in self.input_buf.text.split("\n"):
+            rows += max(1, -(-len(ln) // w))            # ceil(len / width) visual rows per logical line
+        return min(max(1, rows), 10)
 
     def _line_prefix(self, line_no, wrap_count):
         th = style_mod.theme()

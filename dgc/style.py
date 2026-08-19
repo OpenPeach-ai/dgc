@@ -58,8 +58,23 @@ def theme() -> Theme:
     return _current
 
 
+def _detect_theme() -> str:
+    """Pick light/dark to MATCH the terminal, so `background: inherit` stays readable on either.
+    Falls back to dark when we can't ask the terminal (non-TTY, no OSC-11 reply)."""
+    import sys
+    if not (sys.stdout.isatty() and sys.stdin.isatty()):
+        return "dark"
+    try:
+        from . import termbg
+        return "light" if termbg._terminal_is_light() else "dark"
+    except Exception:
+        return "dark"
+
+
 def set_theme(name: str) -> bool:
     global _current
+    if name == "auto":
+        name = _detect_theme()
     t = THEMES.get(name)
     if t:
         _current = t
