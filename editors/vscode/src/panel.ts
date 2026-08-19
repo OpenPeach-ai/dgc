@@ -298,7 +298,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "clear": this.post({ type: "cleared" }); break;
       case "rewind": this.rewind(); break;
       case "subagent": vscode.commands.executeCommand("workbench.action.openSettings", "dgc.subagent"); break;
-      case "settings": vscode.commands.executeCommand("workbench.action.openSettings", "@ext:daguccicode.dgc"); break;
+      case "settings": vscode.commands.executeCommand("workbench.action.openSettings", "@ext:vibedgc.dgc"); break;
       case "bug": vscode.env.openExternal(vscode.Uri.parse("https://github.com/OpenPeach-ai/dgc/issues")); break;
     }
   }

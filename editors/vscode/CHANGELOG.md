@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0 — 2026-08-19
+
+- **Publisher renamed to `vibedgc`** (matching vibedgc.com). The extension id is now **`vibedgc.dgc`**. The old `daguccicode.dgc` is deprecated — reinstall from Open VSX / the Marketplace / vibedgc.com.
+
 ## 0.6.5 — 2026-08-19
 
 - **Update the CLI from the editor.** New command **DGC: Update CLI to Latest** runs the installer in a terminal (parity with the CLI's `/update`), then prompts you to restart the backend.
