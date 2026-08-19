@@ -1290,40 +1290,65 @@ class TUI:
         res = tools.add_skill({"url": url}, self.agent.ctx)
         self._flash(res.split(".")[0][:70])
 
-    def _mcp_add_flow(self) -> None:
-        """Interactive: add an MCP server (remote URL+token or a local command) via prompts."""
-        def got_name(name):
-            name = re.sub(r"\s+", "-", name.strip())
-            if not name:
-                self._flash("cancelled — no name"); return
+    def _mcp_add_flow(self, st: dict | None = None) -> None:
+        """A single FORM modal to add an MCP server: every field is visible; arrow to a field and
+        Enter to edit it (or toggle the type), then choose 'Add server'. Esc cancels."""
+        st = st if st is not None else {"name": "", "transport": "local", "target": "", "token": ""}
+        remote = st["transport"] == "remote"
 
-            def pick_type(i):
-                if i == 0:                       # remote server over a URL
-                    def got_url(url):
-                        url = url.strip()
-                        if not url:
-                            self._flash("cancelled — no URL"); return
+        def frow(label, value, key):
+            return {"label": f"{label:<12}{value}", "value": key}
 
-                        def got_token(tok):
-                            # bridge a remote MCP endpoint through the standard `mcp-remote` stdio proxy
-                            args = ["-y", "mcp-remote", url]
-                            if tok.strip():
-                                args += ["--header", f"Authorization: Bearer {tok.strip()}"]
-                            self._mcp_save(name, {"command": "npx", "args": args})
-                        self._ask_input(f"auth token for '{name}' (leave blank if none):", got_token)
-                    self._ask_input(f"URL for '{name}' (e.g. https://host/mcp):", got_url)
-                else:                            # local stdio command
-                    def got_cmd(cmdline):
-                        parts = cmdline.split()
-                        if not parts:
-                            self._flash("cancelled — no command"); return
-                        self._mcp_save(name, {"command": parts[0], "args": parts[1:]})
-                    self._ask_input(f"command for '{name}' "
-                                    f"(e.g. npx -y @modelcontextprotocol/server-filesystem ~/):", got_cmd)
-            self._show_picker(f"Add MCP server '{name}' — which kind?",
-                              ["Remote server  (a URL, optional token)",
-                               "Local server  (a command that speaks MCP over stdio)"], pick_type)
-        self._ask_input("name for the MCP server (e.g. github, filesystem):", got_name)
+        rows = [
+            frow("Name", st["name"] or "—", "name"),
+            frow("Type", "Remote — a URL" if remote else "Local — a command", "transport"),
+            frow("URL" if remote else "Command", st["target"] or "—", "target"),
+        ]
+        if remote:
+            rows.append(frow("Auth token", "•" * 8 if st["token"] else "(none)", "token"))
+        rows += [{"label": "✓  Add server", "value": "save"},
+                 {"label": "✗  Cancel", "value": "cancel"}]
+
+        def pick(row):
+            v = row["value"]
+            if v == "cancel":
+                self._close_overlay(); return
+            if v == "transport":                         # toggle local ⇄ remote, keep the form open
+                st["transport"] = "remote" if st["transport"] == "local" else "local"
+                self._mcp_add_flow(st); return
+            if v == "save":
+                if not st["name"].strip():
+                    self._flash("a name is required"); self._mcp_add_flow(st); return
+                if not st["target"].strip():
+                    self._flash(("a URL" if remote else "a command") + " is required")
+                    self._mcp_add_flow(st); return
+                name = re.sub(r"\s+", "-", st["name"].strip())
+                if st["transport"] == "remote":          # bridge via the standard mcp-remote stdio proxy
+                    args = ["-y", "mcp-remote", st["target"].strip()]
+                    if st["token"].strip():
+                        args += ["--header", f"Authorization: Bearer {st['token'].strip()}"]
+                    self._mcp_save(name, {"command": "npx", "args": args})
+                else:
+                    parts = st["target"].split()
+                    self._mcp_save(name, {"command": parts[0], "args": parts[1:]})
+                return
+            # a text field → close the form, prompt for the value, re-open the form on submit
+            prompts = {
+                "name": "Server name (e.g. github, filesystem)",
+                "target": ("Server URL (e.g. https://mcp.example.com/mcp)" if remote
+                           else "Command (e.g. npx -y @modelcontextprotocol/server-filesystem ~/)"),
+                "token": "Auth token for the Authorization header (blank = none)",
+            }
+
+            def got(val):
+                st[v] = val.strip()
+                self._mcp_add_flow(st)
+            self._close_overlay()
+            self._ask_input(prompts[v], got)
+
+        self._open_overlay(rows, on_pick=pick, title="Add an MCP server",
+                           footer="↑↓ move · Enter edit / toggle / add · Esc cancel",
+                           back=self._palette_back)
 
     def _mcp_save(self, name: str, spec: dict) -> None:
         cfg = self.config
