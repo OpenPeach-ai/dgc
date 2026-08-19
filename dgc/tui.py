@@ -163,8 +163,19 @@ class TUI:
                 self._run_command("/" + row["value"])
             elif typed.startswith("/") and len(typed) > 1:
                 self._run_command(typed)
+            else:
+                return
+            # if the command opened ANOTHER menu (sub-menu, model/provider/subagent picker, Skills modal…),
+            # give it Esc-back to this palette so one Esc steps back and a second Esc closes.
+            if self._overlay is not None and not self._overlay.get("back"):
+                self._overlay["back"] = self._palette_back
         self._open_overlay([], on_pick=lambda r: None, rebuild=rebuild, on_submit=submit,
                            footer="↑↓ move · type to filter · Enter run · Esc close", keep_input=True)
+
+    def _palette_back(self) -> None:
+        """Reopen the `/` palette — the Esc-back target for any menu opened from it."""
+        self.input_buf.reset(); self.input_buf.insert_text("/")
+        self._open_command_palette()
 
     # commands that take a fixed set of options → the palette opens a SUB-MENU to pick one
     _SUBMENUS = {
@@ -196,12 +207,9 @@ class TUI:
         opts, current = self._SUBMENUS[cmd]
         cur = current(self)
         rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
-
-        def back():                                     # Esc in a sub-menu → return to the `/` palette
-            self.input_buf.reset(); self.input_buf.insert_text("/")
-            self._open_command_palette()
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
-                           title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back", back=back)
+                           title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back",
+                           back=self._palette_back)   # Esc → back to the `/` palette
 
     def _close_overlay(self) -> None:
         self._overlay = None
@@ -381,9 +389,9 @@ class TUI:
                                    f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]"))
         return ANSI(self._welcome_card())
 
-    # rows the right column needs = title + blank + (2 update-CTA | 1 tagline) + blank + cta + blank + 4 menu
+    # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
-        return 4 + 4 + (2 if upd else 1)
+        return 9 + (2 if upd else 1)
 
     def _welcome_metrics(self):
         """Card width W, inner content width, layout mode, and the exact header height.
