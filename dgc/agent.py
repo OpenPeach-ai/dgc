@@ -211,7 +211,11 @@ class Agent:
             "- Read a file before editing it. Make minimal, focused changes.",
             "- For multi-step work, keep a todo list with the todo tool.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
-            "- Be concise in text replies; the user sees your tool calls and results directly.",
+            "- Keep the running commentary between tool calls short — the user sees your tool calls "
+            "and results directly.",
+            "- ALWAYS finish a turn with a clear final response (normal text, NOT the thinking channel): "
+            "a short summary of what you did, the outcome, files you changed, and anything the user "
+            "should know or do next. Never end a turn with only tool calls and no closing message.",
         ]
 
         mode = self.mode
@@ -369,6 +373,8 @@ class Agent:
         mutating_total = 0          # edits/bash this turn — drives the TodoGate nudge
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
+        did_tools = False           # did the model actually call any tools this turn?
+        summary_nudged = False      # so the "give a closing summary" nudge fires at most once
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
@@ -423,10 +429,18 @@ class Agent:
                         "todo genuinely can't be done, say why. Do not stop with silent open todos.\n"
                         "</system-reminder>"})
                     continue
+                if did_tools and not (result.content or "").strip() and not summary_nudged:
+                    summary_nudged = True   # did real work but gave no closing message → ask for one
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nYou did work this turn but ended without any message to the "
+                        "user. Give a brief final summary now — what you changed, the outcome, and any "
+                        "next step — as a normal reply, not in the thinking channel.\n</system-reminder>"})
+                    continue
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
                     continue
                 return
 
+            did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
             for call in result.tool_calls:
                 if self.cancelled.is_set():     # honour a mid-batch cancel between tool calls
