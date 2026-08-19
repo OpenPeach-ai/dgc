@@ -60,6 +60,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("artifact", "open / stop localhost artifact previews"),
     ("compact", "summarise the older turns now"),
     ("status", "model · host · mode · context"),
+    ("dashboard", "one-glance overview of this session"),
     ("name", "name this session"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
@@ -838,6 +839,74 @@ class TUI:
             return
         self._open_reader(md, footer="the saved plan · ↑↓ scroll · Esc close")
 
+    @staticmethod
+    def _reltime(secs: float) -> str:
+        secs = int(max(0, secs))
+        if secs < 60:
+            return f"{secs}s"
+        if secs < 3600:
+            return f"{secs // 60}m"
+        if secs < 86400:
+            return f"{secs // 3600}h"
+        return f"{secs // 86400}d"
+
+    def _open_dashboard(self) -> None:
+        """A one-glance overview — Grok's dashboard, sized to DGC: this session, the model,
+        context, running artifacts, and recent sessions."""
+        from rich.text import Text
+        from . import sessions, artifacts
+        th = style_mod.theme()
+        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        pct = used * 100 / size if size else 0.0
+        col = self._ctx_color(pct, th)
+        full, part, empty = render_mod.frac_bar(pct, 28)
+        turns = sum(1 for m in self.agent.messages if m.get("role") == "user")
+        lines: list = []
+
+        def head(s):
+            lines.append(Text(s.upper(), style=f"bold {th.accent_bright}"))
+
+        def row(k, v, vstyle=None):
+            t = Text("  "); t.append(f"{k:<12}", style=th.muted)
+            t.append(str(v), style=vstyle or th.text); lines.append(t)
+
+        head("Session")
+        row("name", self.agent.session_name or "(unnamed)")
+        row("activity", f"{turns} turns · {self._tool_count} tool calls")
+        lines.append(Text(""))
+        head("Model")
+        row("model", self.config.model)
+        row("host", self.config.base_url, th.faint)
+        row("mode", f"{self.agent.mode} · think {self.config.get('thinking', 'off')}")
+        if self.config.get("subagent_model"):
+            row("sub-agent", self.config.get("subagent_model"), th.faint)
+        lines.append(Text(""))
+        head("Context")
+        t = Text("  "); t.append(f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}  ", style=th.text)
+        t.append("█" * full + part, style=col); t.append("░" * empty, style=th.border_strong)
+        t.append(f"  {pct:.1f}%", style=col); lines.append(t)
+        lines.append(Text(""))
+        arts = artifacts.registry()
+        head(f"Artifacts · {len(arts)} running")
+        if arts:
+            for a in arts[:5]:
+                row(a.name[:10], f"{a.url}  · up {a.uptime}", th.faint)
+        else:
+            lines.append(Text("  none — the agent serves one with the artifact tool", style=th.faint))
+        lines.append(Text(""))
+        recent = sessions.listing(self.config.project_root)
+        head(f"Recent sessions · {len(recent)}")
+        now = time.time()
+        for p, ts, preview, n, name in recent[:6]:
+            line = Text("  ")
+            line.append(f"{(name or preview)[:36]:<36}", style=th.text)
+            line.append(f"  {self._reltime(now - ts):>4}  {n} msgs", style=th.faint)
+            lines.append(line)
+        if not recent:
+            lines.append(Text("  no past sessions yet", style=th.faint))
+        self._open_overlay([], on_pick=lambda r: None, header=lines,
+                           footer="/resume to reopen · Esc close", accent=True, info=True)
+
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
         return 9 + (2 if upd else 1)
@@ -1533,6 +1602,8 @@ class TUI:
             self._open_plan_view()
         elif cmd in ("artifact", "artifacts"):
             self._open_artifacts()
+        elif cmd in ("dashboard", "dash", "home"):
+            self._open_dashboard()
         elif cmd == "jump":
             self._open_jump()
         elif cmd == "rewind":

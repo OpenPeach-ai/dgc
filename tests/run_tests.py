@@ -201,6 +201,19 @@ def unit_tests(tmp: Path):
     check("frac_bar keeps exact width", _fb_ok)
     check("frac_bar sub-cell partial", frac_bar(6.2, 12)[1] in "▏▎▍▌▋▊▉" and frac_bar(100, 10) == (10, "", 0))
 
+    # --- #9 /dashboard: a one-glance overview overlay builds from live state without raising
+    check("dashboard reltime", TUI._reltime(30) == "30s" and TUI._reltime(3700) == "1h" and TUI._reltime(90000) == "1d")
+    ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
+    ui._tool_count = 3
+    ui.agent = type("A", (), {"session_name": "demo", "mode": "default",
+                              "messages": [{"role": "user", "content": "x"}],
+                              "estimate_tokens": lambda self: 1200})()
+    ui.config = type("C", (), {"model": "m", "base_url": "u", "project_root": tmp,
+                               "get": lambda self, k, d=None: {"context_size": 32768}.get(k, d)})()
+    ui._open_dashboard()
+    check("dashboard builds header", ui._overlay.get("info") and len(ui._overlay["header"]) > 8)
+    ui._render_overlay()
+
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
     from dgc.headless import Backend
     import threading as _th
