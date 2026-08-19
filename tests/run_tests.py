@@ -184,6 +184,19 @@ def unit_tests(tmp: Path):
     check("headless failing turn emits error", "error" in b.em.evs)
     check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
 
+    # --- headless: a bad command raises a catchable (non-_Shutdown) error, so the serve loop's
+    #     guard keeps the backend alive instead of crashing the whole session
+    from dgc.headless import _Shutdown
+    bare = object.__new__(Backend)
+    outcome = None
+    try:
+        bare.dispatch({"type": "rewind", "index": "not-a-number"})
+    except _Shutdown:
+        outcome = "shutdown"
+    except Exception:
+        outcome = "caught"
+    check("headless bad command is catchable (backend survives)", outcome == "caught")
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)

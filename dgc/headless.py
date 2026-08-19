@@ -343,6 +343,11 @@ def serve(config: Config) -> None:
                 backend.dispatch(cmd)
             except _Shutdown:
                 break
+            except Exception as e:             # one bad command must NOT kill the whole backend
+                import traceback
+                detail = str(e).strip() or e.__class__.__name__
+                backend.em.emit("error", message=f"Command '{cmd.get('type', '?')}' failed — {detail}")
+                sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
     except (KeyboardInterrupt, BrokenPipeError):
         pass
     backend.agent.cancelled.set()  # release any in-flight turn on the way out
