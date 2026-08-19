@@ -49,6 +49,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("connect", "pick a provider or a custom LAN host"),
     ("subagent", "set the sub-agent model + host"),
     ("mode", "permission mode: default · acceptEdits · plan · auto"),
+    ("view-plan", "reopen the plan saved in plan mode"),
     ("think", "how hard the model reasons: off · low · medium · high"),
     ("thoughts", "show or hide the model's thinking in the transcript"),
     ("worktree", "isolate edits in a git worktree"),
@@ -807,14 +808,9 @@ class TUI:
         self._open_overlay(rows, on_pick=lambda r: self._open_doc_reader(r["value"]),
                            title="DGC docs", footer="↑↓ move · Enter read · Esc close", accent=True)
 
-    def _open_doc_reader(self, title: str) -> None:
-        """Render one doc's markdown into a scrollable reader overlay."""
+    def _open_reader(self, md: str, *, footer: str, back=None) -> None:
+        """Render markdown into a scrollable reader overlay (shared by /docs and /view-plan)."""
         from rich.text import Text
-        from . import docs as docs_mod
-        entry = docs_mod.find(title)
-        if not entry:
-            return
-        _, _, md = entry
         w = min(max(46, self._width - 6), 108) - 6           # ~= the panel's inner text width
         c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
                     width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
@@ -822,7 +818,24 @@ class TUI:
         ansi = c.file.getvalue().rstrip("\n")
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
         self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
-                           footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
+                           footer=footer, back=back)
+
+    def _open_doc_reader(self, title: str) -> None:
+        """Render one doc's markdown into a scrollable reader overlay."""
+        from . import docs as docs_mod
+        entry = docs_mod.find(title)
+        if not entry:
+            return
+        self._open_reader(entry[2], footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
+
+    def _open_plan_view(self) -> None:
+        """Grok's /view-plan — reopen the plan saved during the last plan-mode turn."""
+        from . import sessions
+        md = sessions.load_plan(self.agent.session_file) if self.agent.session_file else None
+        if not md:
+            self._flash("no saved plan yet — /mode plan, then ask for one")
+            return
+        self._open_reader(md, footer="the saved plan · ↑↓ scroll · Esc close")
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
@@ -1463,6 +1476,8 @@ class TUI:
                 self._open_docs()
         elif cmd in ("history", "hist"):
             self._open_history()
+        elif cmd in ("view-plan", "plan-view", "viewplan"):
+            self._open_plan_view()
         elif cmd == "jump":
             self._open_jump()
         elif cmd == "rewind":

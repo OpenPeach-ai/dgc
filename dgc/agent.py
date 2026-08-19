@@ -529,6 +529,9 @@ class Agent:
 
         if name == "present_plan":
             plan = str(args.get("plan", ""))
+            if self.session_file and plan:              # persist it (Grok's plan.md) → /view-plan reopens
+                from . import sessions
+                sessions.save_plan(self.session_file, plan)
             choice = self.ui.present_plan(plan)
             if choice is None:
                 return "Plan NOT approved — the user wants to keep planning. Address their feedback and revise."

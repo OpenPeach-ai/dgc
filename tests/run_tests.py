@@ -177,6 +177,14 @@ def unit_tests(tmp: Path):
     check("doc reader scrolls not selects", ui._overlay["scroll"] == 4 and ui._overlay["sel"] == 0)
     ui._render_overlay()                             # renders without raising (styled Text.from_ansi lines)
 
+    # --- plan persistence: present_plan saves a plan.md sidecar; /view-plan reloads it (Grok plan.md)
+    import dgc.sessions as _sess
+    _sf = tmp / "20260101-000000.json"
+    check("no plan initially", _sess.load_plan(_sf) is None)
+    _sess.save_plan(_sf, "# Plan\n\n- step one\n- step two")
+    check("plan saved + reloads", _sess.load_plan(_sf) == "# Plan\n\n- step one\n- step two"
+          and _sess.plan_path(_sf).name == "20260101-000000.plan.md")
+
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
     from dgc.headless import Backend
     import threading as _th
