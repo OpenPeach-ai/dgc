@@ -167,6 +167,23 @@ def unit_tests(tmp: Path):
     ui._overlay_switch_tab(1); ui._render_overlay()  # click the MCP tab → list rebuilds
     check("overlay tab switch rebuilds", ov["tab"] == 1 and [r["label"] for r in ui._overlay_rows()] == ["m0"])
 
+    # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
+    from dgc.headless import Backend
+    import threading as _th
+    class _Em:
+        def __init__(self): self.evs = []
+        def emit(self, t, **k): self.evs.append(t)
+    class _StubAgent:
+        cancelled = _th.Event()
+        def run_turn(self, text): raise RuntimeError("cannot connect to the model endpoint")
+        def estimate_tokens(self): return 0
+    b = object.__new__(Backend)
+    b.em, b.agent, b._queue, b._turn_n, b._emit_context = _Em(), _StubAgent(), [], 0, lambda: None
+    b._start_turn("Hi")
+    b._worker.join(timeout=5)
+    check("headless failing turn emits error", "error" in b.em.evs)
+    check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)

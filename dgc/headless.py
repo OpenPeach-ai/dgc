@@ -156,13 +156,25 @@ class Backend:
 
         def run():
             self.em.emit("turn_start", turn_id=tid, prompt=text)
-            self.agent.run_turn(text)
+            failed = False
+            try:
+                self.agent.run_turn(text)
+            except Exception as e:                 # a model/endpoint failure must NOT kill the turn silently
+                failed = True                      # (unreachable base_url, model not pulled, HTTP error, …)
+                import traceback
+                detail = str(e).strip() or e.__class__.__name__
+                self.em.emit("error", message=f"Turn failed — {detail}")
+                sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
             cancelled = self.agent.cancelled.is_set()
+            try:
+                est = self.agent.estimate_tokens()
+            except Exception:
+                est = 0
             self.em.emit("turn_end", turn_id=tid,
-                         reason="cancelled" if cancelled else "completed",
-                         token_estimate=self.agent.estimate_tokens())
+                         reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                         token_estimate=est)
             self._emit_context()
-            if self._queue and not cancelled:      # drain a queued follow-up
+            if self._queue and not cancelled and not failed:   # drain a queued follow-up
                 nxt = self._queue.pop(0)
                 self._start_turn(nxt[0], nxt[1])
 
