@@ -194,6 +194,13 @@ def unit_tests(tmp: Path):
     check("artifact stop frees registry", _art.stop(_a.id) is True and not _art.registry())
     check("dgc-design skill ships + off by default", "dgc-design" in discover_skills(tmp))
 
+    # --- #8 micro-polish: sub-cell fractional context bar (eighth-block precision, exact width)
+    from dgc.render import frac_bar
+    _fb_ok = all(f + (1 if p else 0) + e == w for (pct, w) in [(0, 10), (42.3, 20), (87.6, 18), (100, 10)]
+                 for (f, p, e) in [frac_bar(pct, w)])
+    check("frac_bar keeps exact width", _fb_ok)
+    check("frac_bar sub-cell partial", frac_bar(6.2, 12)[1] in "▏▎▍▌▋▊▉" and frac_bar(100, 10) == (10, "", 0))
+
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
     from dgc.headless import Backend
     import threading as _th

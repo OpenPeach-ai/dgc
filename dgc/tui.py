@@ -663,8 +663,8 @@ class TUI:
         if not hover:
             return f"[{col}]{default:<{total_w}}[/]", total_w
         bw = total_w - 6                                      # 6 = 1 gap + 5-char pct
-        filled = round(pct / 100 * bw)
-        bar = "█" * filled + " " * (bw - filled)
+        _full, _part, _empty = render_mod.frac_bar(pct, bw)
+        bar = "█" * _full + _part + " " * _empty
         pctstr = (f"{pct:.2f}%" if pct < 10 else f"{pct:.1f}%") if pct < 100 else "MAX %"
         return f"[{col}]{bar}[/] [{th.muted}]{pctstr:>5}[/]", total_w
 
@@ -677,7 +677,7 @@ class TUI:
         pct = used * 100 / size if size else 0.0
         col = self._ctx_color(pct, th)
         barw = 34
-        filled = round(pct / 100 * barw)
+        _full, _part, _empty = render_mod.frac_bar(pct, barw)
         # rough split: the system prompt (messages[0]) vs the rest of the conversation
         sys_tok = 0
         try:
@@ -689,7 +689,7 @@ class TUI:
             Text.from_markup(f"[bold]Context[/]  [{th.faint}]{_esc(self.config.model)}[/]"),
             Text(""),
             Text.from_markup(f"[{th.text}]{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)} tokens[/]  [{col}]({pct:.1f}%)[/]"),
-            Text.from_markup(f"[{col}]{'█' * filled}[/][{th.border_strong}]{'░' * (barw - filled)}[/]"),
+            Text.from_markup(f"[{col}]{'█' * _full}{_part}[/][{th.border_strong}]{'░' * _empty}[/]"),
             Text(""),
             Text.from_markup(f"[{th.text}]{glyphs.DIAMOND}[/] [{th.muted}]System prompt[/]   [{th.faint}]{render_mod.fmt_tokens(sys_tok)}[/]"),
             Text.from_markup(f"[{th.accent}]{glyphs.DIAMOND}[/] [{th.muted}]Conversation[/]    [{th.faint}]{render_mod.fmt_tokens(msg_tok)}[/]"),

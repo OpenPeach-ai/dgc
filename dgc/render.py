@@ -147,18 +147,34 @@ def fmt_tokens(n: int) -> str:
     return str(n)
 
 
+_EIGHTHS = " ▏▎▍▌▋▊▉█"   # 0..8 eighths of a cell → smooth, sub-cell-precise bar fills
+
+
+def frac_bar(pct: float, width: int):
+    """Sub-cell-precise bar of `width` cells for pct in [0,100].
+    Returns (full_cells:int, partial_glyph:str, empty_cells:int) — the partial glyph fills the
+    next cell from the left by eighths (empty '' when the fill lands on a cell edge)."""
+    pct = 0.0 if pct < 0 else (100.0 if pct > 100 else pct)
+    eighths = round(pct / 100 * width * 8)
+    full, rem = divmod(eighths, 8)
+    if full >= width:
+        return width, "", 0
+    partial = _EIGHTHS[rem] if rem else ""
+    return full, partial, width - full - (1 if partial else 0)
+
+
 def context_bar(used: int, size: int, width: int = 18):
-    """A `used/size ████░░ NN%` usage bar, purple → red past 85%."""
+    """A `used/size ████▊░ NN%` usage bar, purple → red past 85%."""
     from rich.text import Text
     t = style.theme()
     pct = (used / size) if size else 0.0
     pct = 1.0 if pct > 1 else pct
-    filled = int(round(pct * width))
     color = t.accent if pct < 0.85 else t.err
+    full, part, empty = frac_bar(pct * 100, width)
     bar = Text()
     bar.append(f"{fmt_tokens(used)} / {fmt_tokens(size)}  ", style=t.muted)
-    bar.append("█" * filled, style=color)
-    bar.append("░" * (width - filled), style=t.border_strong)
+    bar.append("█" * full + part, style=color)
+    bar.append("░" * empty, style=t.border_strong)
     bar.append(f"  {int(pct * 100)}%", style=color)
     return bar
 
