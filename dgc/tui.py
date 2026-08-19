@@ -1293,7 +1293,8 @@ class TUI:
     def _mcp_add_flow(self, st: dict | None = None) -> None:
         """A single FORM modal to add an MCP server: every field is visible; arrow to a field and
         Enter to edit it (or toggle the type), then choose 'Add server'. Esc cancels."""
-        st = st if st is not None else {"name": "", "transport": "local", "target": "", "token": ""}
+        st = st if st is not None else {"name": "", "transport": "local", "target": "", "token": "", "env": ""}
+        st.setdefault("env", "")
         remote = st["transport"] == "remote"
 
         def frow(label, value, key):
@@ -1306,6 +1307,9 @@ class TUI:
         ]
         if remote:
             rows.append(frow("Auth token", "•" * 8 if st["token"] else "(none)", "token"))
+        else:                                          # local servers get their token as an env var
+            keys = [kv.split("=", 1)[0] for kv in st["env"].split() if "=" in kv]
+            rows.append(frow("Env / token", ", ".join(keys) if keys else "(none)", "env"))
         rows += [{"label": "✓  Add server", "value": "save"},
                  {"label": "✗  Cancel", "value": "cancel"}]
 
@@ -1330,7 +1334,11 @@ class TUI:
                     self._mcp_save(name, {"command": "npx", "args": args})
                 else:
                     parts = st["target"].split()
-                    self._mcp_save(name, {"command": parts[0], "args": parts[1:]})
+                    spec = {"command": parts[0], "args": parts[1:]}
+                    env = dict(kv.split("=", 1) for kv in st["env"].split() if "=" in kv)
+                    if env:                             # service tokens etc. → passed as env vars
+                        spec["env"] = env
+                    self._mcp_save(name, spec)
                 return
             # a text field → close the form, prompt for the value, re-open the form on submit
             prompts = {
@@ -1338,6 +1346,8 @@ class TUI:
                 "target": ("Server URL (e.g. https://mcp.example.com/mcp)" if remote
                            else "Command (e.g. npx -y @modelcontextprotocol/server-filesystem ~/)"),
                 "token": "Auth token for the Authorization header (blank = none)",
+                "env": "Env vars as KEY=VALUE, space-separated "
+                       "(e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_… )",
             }
 
             def got(val):
