@@ -85,7 +85,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ## What's in the box
 
-- **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, and a top-right context-window meter (click it for a usage breakdown).
+- **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a top-right context-window meter (click it for a usage breakdown), and a `/dashboard` overview of the session.
 - **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode). The plan is **saved to a `plan.md` beside the session**; reopen it any time with `/view-plan`.
 - **Artifacts** — when the agent builds something to *look at* (a web page, an app, a chart), the `artifact` tool serves it on a local `127.0.0.1` URL and DGC offers to open it in your browser. `/artifact` lists everything running — open one, or stop it to free its port. Frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
 - **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
@@ -121,6 +121,7 @@ Tab / →              accept the ghost-text next-prompt suggestion
 /docs                in-app how-to guides
 /artifact            open / stop localhost artifact previews
 /view-plan           reopen the plan saved in plan mode
+/dashboard           one-glance overview of this session
 ```
 
 ## Commands
