@@ -416,10 +416,10 @@ class TUI:
         upd = cached_update()
         margin = 4 if w < 62 else 6
         W = max(30, min(w - margin, self._CARD_W))         # capped → fixed size on big terminals
-        cw_area = W - 8                                    # inside border(2) + padding(2*3)
+        cw_area = W - 10                                   # inside border(2) + padding(2*4)
         avail = h - self._CHROME_BELOW
-        wide_h = self._card_body_rows("wide", upd) + 4     # + border(2) + padding(2)
-        stack_h = self._card_body_rows("stacked", upd) + 4
+        wide_h = self._card_body_rows("wide", upd) + 6     # + border(2) + padding(2*2)
+        stack_h = self._card_body_rows("stacked", upd) + 6
         if w >= self._WIDE_MIN and avail >= wide_h + 2:
             return W, cw_area, "wide", wide_h, upd
         if w >= 40 and avail >= stack_h + 2:
@@ -455,7 +455,7 @@ class TUI:
         avail = self._height - self._CHROME_BELOW
         top_pad = max(1, (avail - card_h) // 2)
         left_margin = max(0, (self._width - W) // 2)
-        base = top_pad + 2                                 # top padding + top border + panel pad
+        base = top_pad + 3                                 # top-pad + top border(1) + panel v-pad(2)
 
         # ── figure logo geometry + the content-column offset FIRST, so click/hover rows are exact ──
         if mode == "stacked":
@@ -464,7 +464,7 @@ class TUI:
             content_off = len(logo_p) + 1                  # logo rows + one blank
             logo_w = gap = loff = 0
         else:                                              # wide
-            logo_w, gap = logo_mod.WIDTH, 4                # gap = breathing room between logo and text
+            logo_w, gap = logo_mod.WIDTH, 6                # gap = breathing room between logo and text
             text_w = cw_area - logo_w - gap
             logo_p = logo_mod.shimmer_lines(secs, small=False, pad=logo_w)
             n_right = self._right_rows(upd)
@@ -540,7 +540,7 @@ class TUI:
                 rows.append(r)
 
         body = Text("\n").join(rows)
-        panel = Panel(body, box=box.ROUNDED, border_style=th.border_strong, padding=(1, 3), width=W)
+        panel = Panel(body, box=box.ROUNDED, border_style=th.border_strong, padding=(2, 4), width=W)
         return self._rich(Padding(panel, (top_pad, 0, 0, left_margin)))
 
     # ---- status line ----

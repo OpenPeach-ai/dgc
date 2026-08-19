@@ -16,31 +16,25 @@ from . import style
 # diagonals stay sharp instead of stair-stepping. Middle bar tallest, right bar shortest — like the
 # logo. Leading spaces on each row create the diagonal, so these lines are NOT lstripped.
 LOGO = [
-    '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⡆',
-    '⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⢠⣴⣾⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⢀',
-    '⠀⠀⠀⠀⣀⣴⣾⣿⠀⠀⠀⠀⣼⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⣀⣴⣾⡿',
-    '⠀⠀⠀⣿⣿⣿⣿⡏⠀⠀⠀⠀⣿⣿⣿⣿⣿⠀⠀⠀⠀⢠⣿⣿⣿⣿⡇',
-    '⠀⠀⢸⣿⣿⣿⣿⡇⠀⠀⠀⢠⣿⣿⣿⣿⡇⠀⠀⠀⠀⢸⣿⣿⣿⣿⠁',
-    '⠀⠀⣸⣿⣿⣿⣿⠀⠀⠀⠀⢸⣿⣿⣿⣿⡇⠀⠀⠀⠀⣾⣿⣿⣿⣿',
-    '⠀⠀⣿⣿⣿⣿⡿⠀⠀⠀⠀⣾⣿⣿⣿⣿⠁⠀⠀⠀⢀⣿⣿⣿⣿⡇',
-    '⠀⢠⣿⣿⣿⣿⡇⠀⠀⠀⠀⣿⣿⣿⣿⣿⠀⠀⠀⠀⢸⣿⣿⣿⣿⠃',
-    '⠀⢸⣿⣿⣿⣿⠇⠀⠀⠀⢠⣿⣿⣿⣿⡏⠀⠀⠀⠀⣼⣿⣿⣿⣿',
-    '⠀⣼⣿⣿⣿⣿⠀⠀⠀⠀⢸⣿⣿⣿⣿⡇⠀⠀⠀⠀⣿⣿⣿⣿⡏',
-    '⠀⣿⣿⣿⣿⡿⠀⠀⠀⠀⣼⣿⣿⣿⣿⠀⠀⠀⠀⢸⣿⣿⣿⣿⠇',
-    '⢰⣿⣿⣿⣿⡇⠀⠀⠀⠀⣿⣿⣿⣿⣿⠀⠀⠀⠀⣼⣿⡿⠛⠉',
-    '⢸⣿⣿⣿⠿⠃⠀⠀⠀⢀⣿⣿⣿⡿⠇⠀⠀⠀⠀⠋⠁',
-    '⣿⠟⠋⠁⠀⠀⠀⠀⠀⢸⠿⠛⠉',
+    '⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⠇',
+    '⠀⠀⠀⢀⣠⡆⠀⠀⢰⣿⣿⣿⠀⠀⠀⠀⠀⣠⣴',
+    '⠀⠀⣾⣿⣿⡇⠀⠀⢸⣿⣿⡿⠀⠀⠀⣰⣿⣿⡏',
+    '⠀⢠⣿⣿⣿⠀⠀⠀⣾⣿⣿⡇⠀⠀⠀⣿⣿⣿⠇',
+    '⠀⢸⣿⣿⡿⠀⠀⠀⣿⣿⣿⡇⠀⠀⢰⣿⣿⣿',
+    '⠀⣾⣿⣿⡇⠀⠀⢰⣿⣿⣿⠀⠀⠀⢸⣿⣿⡏',
+    '⠀⣿⣿⣿⠇⠀⠀⢸⣿⣿⣿⠀⠀⠀⣿⣿⣿⡇',
+    '⢰⣿⣿⣿⠀⠀⠀⣼⣿⣿⡇⠀⠀⢠⣿⣿⣿',
+    '⢸⣿⣿⡟⠀⠀⠀⣿⣿⣿⡇⠀⠀⠸⠟⠋',
+    '⡿⠟⠋⠀⠀⠀⢠⡿⠟⠉',
 ]
 # A smaller build of the same mark, for medium-height terminals that can't fit the full one.
 LOGO_SMALL = [
-    '⠀⠀⠀⠀⠀⠀⠀⣀⣤⡆',
-    '⠀⢀⣠⣶⡇⠀⢀⣿⣿⡇⠀⠀⣀⣴⣾',
-    '⠀⢸⣿⣿⠀⠀⢸⣿⣿⠃⠀⠀⣿⣿⡇',
-    '⠀⣼⣿⣿⠀⠀⣸⣿⣿⠀⠀⢸⣿⣿⠃',
-    '⠀⣿⣿⡇⠀⠀⣿⣿⡟⠀⠀⣸⣿⣿',
-    '⢰⣿⣿⡇⠀⠀⣿⣿⡇⠀⠀⣿⣿⡏',
-    '⢸⣿⣿⠀⠀⢸⣿⣿⠇⠀⢰⡿⠟⠁',
-    '⡿⠟⠋⠀⠀⢸⠿⠋⠀⠀⠈',
+    '⠀⠀⠀⡀⠀⢀⣴⡖⠀⠀⠀⢀',
+    '⠀⣴⣿⡇⠀⣸⣿⡇⠀⢠⣾⡟',
+    '⠀⣿⣿⠀⠀⣿⣿⠃⠀⣸⣿⡇',
+    '⢰⣿⡿⠀⢀⣿⣿⠀⠀⣿⣿⠁',
+    '⢸⣿⡇⠀⢸⣿⡟⠀⢰⣿⠿',
+    '⡿⠟⠁⠀⣸⠟⠃⠀⠈⠁',
 ]
 _ROWS = len(LOGO)
 _COLS = max(len(r) for r in LOGO)
@@ -55,11 +49,11 @@ _SWEEP_FRAC = 0.34    # fraction of the cycle spent sweeping (rest of it parked 
 _SHINE = 0.95         # peak glint strength (0..1 blend toward the highlight)
 _PULSE = 0.05         # faint global breathing
 _PULSE_SECS = 5.0
-_REST = "#5E5E66"     # resting colour of the mark (muted grey)
-# The glint is a light GREY (not lavender): grey→white downsamples cleanly to the 256-colour
-# grey ramp on non-truecolor terminals (macOS Terminal.app, SSH), so the mark never scatters
-# into cyan/rainbow the way a purple gradient does. Brand purple lives in the UI accents.
-_GLINT = "#EDEDF2"
+_REST = "#7C5CFF"     # resting colour of the mark = brand PURPLE (matches the website's dotted logo)
+# The glint is a light LAVENDER. Both endpoints sit in the purple family, so the sweep stays purple
+# on 256-colour terminals (downsamples to a couple of neighbouring purples) — it never scatters into
+# cyan/rainbow the way a full-spectrum gradient would. (Verified across the whole sweep.)
+_GLINT = "#D9CCFF"
 def _char_style(r: int, c: int, secs: float, hi: str, rows: int = _ROWS, cols: int = _COLS) -> str:
     """Colour a mark cell — the /// gets a grey→white glint sweeping bottom-left→top-right."""
     diag = (c + (rows - 1 - r)) / (cols + rows)
