@@ -217,7 +217,7 @@ class TUI:
         self.input_buf.reset()
         self._invalidate()
 
-    _OVERLAY_CAP = 10                                   # max rows shown at once
+    _OVERLAY_CAP = 14                                   # max rows shown at once (fits all built-in skills)
 
     def _overlay_rows(self) -> list:
         """Rows for the overlay; a rebuild callback owns its own filtering, otherwise filter by
@@ -243,23 +243,30 @@ class TUI:
         self._invalidate()
 
     def _overlay_row_at(self, y: int):
-        """Map a mouse y (within the overlay window) to a filtered-row index, or None."""
+        """Map a mouse y (within the overlay window) to a filtered-row index, or None.
+        Reads the row→screen-y map recorded by the last _render_overlay — Grok's
+        record-rects-at-render, hit-test-at-event pattern — so it stays exact across
+        tabs, titles, headers and scrolling instead of guessing from a formula."""
         ov = self._overlay
         if not ov:
             return None
-        off = 1                                         # panel top border
-        if ov.get("tabs"):
-            off += 2                                     # tab strip + separator
-        elif ov.get("title"):
-            off += 1
-        if ov.get("header"):
-            off += len(ov["header"]) + 1                 # header block + separator
-        rows = self._overlay_rows()
-        scroll = ov.get("scroll", 0)
-        i = y - off
-        if 0 <= i < min(len(rows) - scroll, self._OVERLAY_CAP):
-            return scroll + i
+        return ov.get("_rowmap", {}).get(y)
+
+    def _overlay_tab_at(self, x: int, y: int):
+        """Map a mouse (x, y) to a tab index when it lands on the tab strip, else None."""
+        ov = self._overlay
+        if not ov or not ov.get("tabs") or y != ov.get("_tab_y"):
+            return None
+        for x0, x1, i in ov.get("_tabmap", []):
+            if x0 <= x < x1:
+                return i
         return None
+
+    def _overlay_switch_tab(self, i: int) -> None:
+        ov = self._overlay
+        if ov and ov.get("tabs") and 0 <= i < len(ov["tabs"]) and ov.get("tab") != i:
+            ov["tab"], ov["sel"], ov["scroll"] = i, 0, 0
+            self._invalidate()
 
     def _overlay_select(self) -> None:
         """Commit the current overlay selection (shared by Enter and mouse-click)."""
@@ -277,17 +284,39 @@ class TUI:
             on_pick(sel)
 
     def _overlay_hover(self, position) -> None:
+        ov = self._overlay
+        if not ov:
+            return
+        t = self._overlay_tab_at(position.x, position.y)    # over a tab → highlight it
+        if t is not None:
+            if ov.get("_tab_hover") != t:
+                ov["_tab_hover"] = t
+                self._invalidate()
+            return
+        if ov.get("_tab_hover") is not None:                # cursor left the tab strip
+            ov["_tab_hover"] = None
+            self._invalidate()
         r = self._overlay_row_at(position.y)
-        if r is not None and self._overlay is not None and self._overlay.get("sel") != r:
-            self._overlay["sel"] = r
+        if r is not None and ov.get("sel") != r:
+            ov["sel"] = r
             self._invalidate()
 
     def _overlay_click(self, position) -> bool:
-        r = self._overlay_row_at(position.y)
-        if r is None or self._overlay is None:
+        ov = self._overlay
+        if not ov:
             return False
-        self._overlay["sel"] = r
-        self._overlay_select()
+        t = self._overlay_tab_at(position.x, position.y)    # click a tab → switch to it
+        if t is not None:
+            self._overlay_switch_tab(t)
+            return True
+        r = self._overlay_row_at(position.y)
+        if r is None:
+            return False
+        ov["sel"] = r
+        if ov.get("tabs"):                                  # tabbed modal: click just selects; a/x/r act
+            self._invalidate()
+        else:
+            self._overlay_select()
         return True
 
     def _overlay_height(self) -> int:
@@ -321,21 +350,45 @@ class TUI:
         ov["scroll"] = scroll = max(0, scroll)
         visible = rows[scroll:scroll + cap]
         labw = min(max((len(r.get("label", "")) for r in rows), default=8), 34)
+        # Hit-map recorded during render (Grok's pattern): screen-y → row index, and the
+        # tab strip's x-ranges. Panel line 0 is the top border, so the k-th content line
+        # sits at screen y = 1 + k. Every content line is kept to ONE screen row (truncated,
+        # never wrapped) so the map stays exact. XOFF = 2 left pad + 1 border + 1 panel pad.
+        ov["_rowmap"], ov["_tabmap"], ov["_tab_y"], XOFF = {}, [], None, 4
         lines: list = []
+
+        def emit(line):                                 # append, clamped to one screen row
+            if not isinstance(line, Text):
+                line = Text(str(line))
+            line.truncate(inner, overflow="ellipsis")
+            lines.append(line)
+
         if ov.get("tabs"):                              # tab strip (tabbed modal)
             strip = Text()
+            ov["_tab_y"] = 1 + len(lines)
+            cx = XOFF
             for i, t in enumerate(ov["tabs"]):
-                strip.append(f" {t} ", style=(f"bold {th.bg} on {th.accent}" if i == ov["tab"] else th.muted))
+                seg = f" {t} "
+                if i == ov["tab"]:
+                    stl = f"bold {th.bg} on {th.accent}"
+                elif i == ov.get("_tab_hover"):
+                    stl = f"bold {th.text} on {th.surface2}"     # hover feedback
+                else:
+                    stl = th.muted
+                ov["_tabmap"].append((cx, cx + len(seg), i))
+                strip.append(seg, style=stl)
                 strip.append(" ")
-            lines += [strip, Text("─" * inner, style=th.border)]
+                cx += len(seg) + 1
+            lines.append(strip)                          # (2 short tabs never wrap)
+            emit(Text("─" * inner, style=th.border))
         elif ov.get("title"):
-            lines.append(Text(ov["title"], style="bold"))
+            emit(Text(ov["title"], style="bold"))
         if ov.get("header"):                            # a rich block (e.g. the command being approved)
             for h in ov["header"]:
-                lines.append(h if isinstance(h, Text) else Text(str(h)))
-            lines.append(Text("─" * inner, style=th.border))
+                emit(h if isinstance(h, Text) else Text(str(h)))
+            emit(Text("─" * inner, style=th.border))
         if not visible:
-            lines.append(Text("  (no matches)", style=th.faint))
+            emit(Text("  (no matches)", style=th.faint))
         for i, r in enumerate(visible):
             hot = (scroll + i == sel)
             line = Text()
@@ -343,16 +396,19 @@ class TUI:
             line.append(r.get("label", "").ljust(labw), style="bold" if hot else th.text)
             if r.get("desc"):
                 line.append("  " + r["desc"], style=th.muted if hot else th.faint)
+            line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
             pad = inner - line.cell_len
             if pad > 0:
                 line.append(" " * pad)
             if hot:
                 line.stylize(f"on {th.surface2}")       # subtle full-width highlight bar
+            ov["_rowmap"][1 + len(lines)] = scroll + i
             lines.append(line)
         if len(rows) > cap:                             # scroll indicator
-            lines.append(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
+            emit(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
         if ov.get("footer"):
-            lines += [Text(""), Text(ov["footer"], style=th.faint)]
+            lines.append(Text(""))
+            emit(Text(ov["footer"], style=th.faint))
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
                       border_style=(th.accent if ov.get("accent") else th.border_strong),
                       padding=(0, 1), width=W)

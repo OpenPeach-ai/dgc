@@ -141,6 +141,32 @@ def unit_tests(tmp: Path):
     check("skill args substitution", sk.render("things") == "Do things now.")
     check("skill discovery", "demo" in discover_skills(tmp))
 
+    # --- overlay hit-map: tabs are mouse-clickable and rows hover-map exactly (Grok parity)
+    from dgc.tui import TUI
+    import dgc.style as _sty
+    _sty.set_theme("dark")
+    ui = object.__new__(TUI)                       # bare — skip the heavy __init__
+    ui._width, ui._OVERLAY_CAP = 100, 14
+    ui.input_buf = type("B", (), {"text": ""})()
+    ui._invalidate = lambda: None
+    from rich.console import Console as _Con
+    import io as _io
+    ui._rich = lambda r: (lambda b: (_Con(file=b, force_terminal=True, width=ui._width).print(r, end=""), b.getvalue())[1])(_io.StringIO())
+    ui._overlay = {"rows": [], "on_pick": lambda r: None, "title": None,
+                   "tabs": ["Skills", "MCP Servers"], "tab": 0, "sel": 0, "scroll": 0,
+                   "footer": "f", "rebuild": lambda ov: (
+                       [{"label": f"s{i}", "desc": "d", "value": ("skill", i)} for i in range(3)]
+                       if ov["tab"] == 0 else [{"label": "m0", "desc": "d", "value": ("mcp", 0)}])}
+    ui._render_overlay()
+    ov = ui._overlay
+    x0, x1, _ = ov["_tabmap"][1]                    # the "MCP Servers" tab's x-range
+    check("overlay tab hit-test", ui._overlay_tab_at((x0 + x1) // 2, ov["_tab_y"]) == 1)
+    check("overlay off-strip = no tab", ui._overlay_tab_at(2, 999) is None)
+    first_row_y = min(ov["_rowmap"])
+    check("overlay row hit-test", ui._overlay_row_at(first_row_y) == 0)
+    ui._overlay_switch_tab(1); ui._render_overlay()  # click the MCP tab → list rebuilds
+    check("overlay tab switch rebuilds", ov["tab"] == 1 and [r["label"] for r in ui._overlay_rows()] == ["m0"])
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)
