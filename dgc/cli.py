@@ -1019,7 +1019,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--api-key", help="API key for the endpoint (persisted)")
     parser.add_argument("-c", "--continue", dest="cont", action="store_true",
                         help="resume the most recent session in this directory")
-    parser.add_argument("--resume", action="store_true", help="pick a past session to resume")
+    parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
+                        help="resume a past session by id (dgc --resume <id>), or pick one (dgc --resume)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
@@ -1049,7 +1050,15 @@ def main(argv: list[str] | None = None) -> None:
         else:
             cli.ui.info("no previous session here — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
-    elif args.resume:
+    elif args.resume is not None and args.resume != "":     # `dgc --resume <id>` → load it directly
+        p = sessions_mod.by_id(config.project_root, args.resume)
+        if p:
+            n = cli.agent.load_session(p)
+            cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
+        else:
+            cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
+            cli.agent.session_file = sessions_mod.new_path(config.project_root)
+    elif args.resume is not None:                           # `dgc --resume` → pick from a list
         items = sessions_mod.listing(config.project_root)
         if items:
             from .menu import select
@@ -1088,6 +1097,25 @@ def main(argv: list[str] | None = None) -> None:
                 TUI(config, agent=cli.agent).run()
         finally:
             termbg.reset()
+            _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
+
+
+def _print_resume_hint(agent, config) -> None:
+    """Grok-style epilogue printed to the normal screen after the full-screen app exits:
+        Resume this session with:
+          dgc --resume <id>
+    Only when a real conversation happened, so a glance-and-quit leaves nothing behind."""
+    sf = getattr(agent, "session_file", None)
+    if not sf or len([m for m in getattr(agent, "messages", []) if m.get("role") != "system"]) < 2:
+        return
+    name = None
+    try:
+        name = sessions_mod.name_of(sf)
+    except Exception:
+        pass
+    sys.stdout.write("\nResume this session with:\n")
+    sys.stdout.write(f"  dgc --resume {sf.stem}" + (f"   ({name})" if name else "") + "\n")
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

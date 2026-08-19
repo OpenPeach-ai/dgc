@@ -244,6 +244,25 @@ def unit_tests(tmp: Path):
     check("transcript paged up keeps an earlier line visible",
           _FTC(sc._cursor_ft(_txt)).create_content(60, 40).cursor_position.y == _txt.count("\n") - 8)
 
+    # --- resume-by-id + the Grok-style resume-on-exit epilogue
+    import dgc.sessions as _S, dgc.cli as _C
+    _proj = Path(tempfile.mkdtemp())
+    _sp = _S.new_path(_proj)
+    _S.save(_sp, [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}], _proj, name="demo")
+    _sid = _sp.stem
+    check("session by_id exact", _S.by_id(_proj, _sid) == _sp)
+    check("session by_id prefix", _S.by_id(_proj, _sid[:8]) == _sp)
+    check("session by_id miss", _S.by_id(_proj, "zzz-none") is None)
+    class _Ag:
+        def __init__(s, f, m): s.session_file, s.messages = f, m
+    _b = _io.StringIO(); _o = sys.stdout; sys.stdout = _b
+    _C._print_resume_hint(_Ag(_sp, [{"role": "system", "content": "x"}, {"role": "user", "content": "hi"}, {"role": "assistant", "content": "y"}]), None)
+    _C._print_resume_hint(_Ag(_sp, [{"role": "system", "content": "x"}]), None)   # no real turn → nothing
+    sys.stdout = _o
+    _hint = _b.getvalue()
+    check("resume hint prints for a real session", "Resume this session with" in _hint and _sid in _hint)
+    check("resume hint silent on an empty session", _hint.count("Resume this session with") == 1)
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)

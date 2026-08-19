@@ -97,5 +97,17 @@ def latest(project_root) -> Path | None:
     return items[0][0] if items else None
 
 
+def by_id(project_root, sid: str) -> Path | None:
+    """Resolve a session id (the file stem, e.g. 20260819-153045, or a unique prefix) to its
+    path in this project — for `dgc --resume <id>`. Returns None if nothing matches."""
+    sid = str(sid).strip().removesuffix(".json")
+    d = project_dir(project_root)
+    exact = d / f"{sid}.json"
+    if exact.exists():
+        return exact
+    matches = sorted(d.glob(f"{sid}*.json"))          # allow a short prefix
+    return matches[-1] if matches else None
+
+
 def when(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
