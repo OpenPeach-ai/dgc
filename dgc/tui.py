@@ -122,6 +122,7 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
+        self._todos: list = []             # live task list (pinned pane above the composer)
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
@@ -395,7 +396,7 @@ class TUI:
             line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
             line.append(r.get("label", "").ljust(labw), style="bold" if hot else th.text)
             if r.get("desc"):
-                line.append("  " + r["desc"], style=th.muted if hot else th.faint)
+                line.append("  " + r["desc"], style=th.muted)   # readable (not dim faint) either way
             line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
             pad = inner - line.cell_len
             if pad > 0:
@@ -781,12 +782,38 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]{glyphs.CROSS} {name} denied[/] [{th.faint}]{reason}[/]"))
 
+    # Grok-style task list: icon glyph + icon colour + text style, per status.
+    _TODO_STYLE = {
+        "pending":     ("SQUARE", "text",  "{text}"),
+        "in_progress": ("PLAY",   "warn",  "bold {text}"),
+        "done":        ("CHECK",  "ok",    "strike {faint}"),
+        "cancelled":   ("CROSS",  "err",   "strike {faint}"),
+    }
+
     def on_todo(self, todos: list) -> None:
+        # Store + render live in a PINNED pane above the composer (Grok-style), instead of
+        # re-printing the whole list into the transcript on every update.
+        self._todos = list(todos or [])
+        self._invalidate()
+
+    def _todos_visible(self) -> bool:
+        return bool(self._todos) and (self._turn.is_set()
+                                      or any(t.get("status") not in ("done", "cancelled") for t in self._todos))
+
+    def _todo_pane_height(self) -> int:
+        return (len(self._todos) + 1) if self._todos_visible() else 0   # title row + one per task
+
+    def _todo_pane(self):
         th = style_mod.theme()
-        marks = {"done": glyphs.CHECK, "in_progress": glyphs.DIAMOND, "pending": glyphs.DIAMOND_O}
-        rows = "\n".join(f"  [{th.accent if t['status'] == 'in_progress' else th.faint}]"
-                         f"{marks.get(t['status'], glyphs.DIAMOND_O)}[/] {_esc(t['content'])}" for t in todos)
-        self._append(self._rich(f"[{th.faint}]todos[/]\n{rows}"))
+        cols = {"text": th.text, "warn": th.warn, "ok": th.ok, "err": th.err, "faint": th.faint}
+        rail = f"[{th.border_strong}]{glyphs.RAIL}[/]"
+        done_n = sum(1 for t in self._todos if t.get("status") == "done")
+        out = [f"{rail} [bold {th.muted}]Tasks[/] [{th.faint}]{done_n}/{len(self._todos)}[/]"]
+        for t in self._todos:
+            g, icol, tstyle = self._TODO_STYLE.get(t.get("status"), self._TODO_STYLE["pending"])
+            icon = getattr(glyphs, g)
+            out.append(f"{rail} [{cols[icol]}]{icon}[/] [{tstyle.format(**cols)}]{_esc(t.get('content', ''))}[/]")
+        return ANSI(self._rich("\n".join(out)))
 
     def info(self, msg: str) -> None:
         th = style_mod.theme()
@@ -820,7 +847,7 @@ class TUI:
         self._req = req
         self._req_event.clear()
         options = req.get("options", [])
-        rows = [{"label": o, "value": i} for i, o in enumerate(options)]
+        rows = [{"label": f"{i + 1}  {o}", "value": i} for i, o in enumerate(options)]   # 1-9 shortcuts
 
         def pick(row):
             self._req_answer = row["value"]
@@ -921,7 +948,13 @@ class TUI:
                    height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
-        root = HSplit([header, transcript, overlay_panel, tip, status, composer_box])
+        # A live task list pinned just above the composer (Grok-style) — shows while a turn
+        # runs or any task is still open, then folds away.
+        todo_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
+                   dont_extend_height=True),
+            filter=Condition(self._todos_visible))
+        root = HSplit([header, transcript, overlay_panel, todo_panel, tip, status, composer_box])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the

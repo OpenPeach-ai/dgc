@@ -25,7 +25,7 @@ class Theme:
     # the single accent (purple) + a bright lavender for glints/selection
     accent: str; accent_dim: str; accent_bright: str
     # semantic
-    err: str
+    err: str; warn: str; ok: str
     # diff (monochrome: added brighter, removed faint)
     diff_add: str; diff_del: str
 
@@ -36,7 +36,7 @@ DARK = Theme(
     border="#232326", border_strong="#303034",
     text="#F5F5F5", text_strong="#FFFFFF", muted="#9A9A9E", faint="#6A6A6E",
     accent="#7C5CFF", accent_dim="#6A4BF0", accent_bright="#A78BFA",
-    err="#DC5A64",
+    err="#DC5A64", warn="#E0A24E", ok="#57C08A",
     diff_add="#F5F5F5", diff_del="#6A6A6E",
 )
 
@@ -46,7 +46,7 @@ LIGHT = Theme(
     border="#E6E6E8", border_strong="#D2D2D6",
     text="#141416", text_strong="#000000", muted="#5E5E64", faint="#8A8A90",
     accent="#5B3FE0", accent_dim="#4A31C8", accent_bright="#7C5CFF",
-    err="#C43A44",
+    err="#C43A44", warn="#B4791E", ok="#2E9E68",
     diff_add="#141416", diff_del="#9A9A9E",
 )
 

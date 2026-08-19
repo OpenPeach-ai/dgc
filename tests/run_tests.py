@@ -217,6 +217,20 @@ def unit_tests(tmp: Path):
     _srv.shutdown()
     check("llm cancel interrupts a prefill stall", _dt < 3 and _r.finish_reason == "cancelled")
 
+    # --- todo pane: Grok-style per-status glyphs render, and it stays pinned while a turn runs
+    import dgc.glyphs as _gl
+    tp = object.__new__(TUI)
+    tp._width = 80
+    tp._rich = lambda r: (lambda b: (_Con(file=b, force_terminal=True, width=80).print(r, end=""), b.getvalue())[1])(io.StringIO())
+    tp._turn = _th.Event(); tp._turn.set()
+    tp._todos = [{"content": "a", "status": "pending"}, {"content": "b", "status": "in_progress"},
+                 {"content": "c", "status": "done"}, {"content": "d", "status": "cancelled"}]
+    _pane = tp._todo_pane().value
+    check("todo pane renders all status glyphs", all(g in _pane for g in (_gl.SQUARE, _gl.PLAY, _gl.CHECK, _gl.CROSS)))
+    check("todo pane pinned while a turn runs", tp._todos_visible())
+    tp._turn.clear(); tp._todos = [{"content": "c", "status": "done"}]
+    check("todo pane folds away when idle + all done", not tp._todos_visible())
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)
