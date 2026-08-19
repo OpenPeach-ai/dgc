@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import math
+import re
 import threading
 import time
 
@@ -240,6 +241,54 @@ class TUI:
         if n:
             ov["sel"] = (ov["sel"] + d) % n             # wrap-around
         self._invalidate()
+
+    def _overlay_row_at(self, y: int):
+        """Map a mouse y (within the overlay window) to a filtered-row index, or None."""
+        ov = self._overlay
+        if not ov:
+            return None
+        off = 1                                         # panel top border
+        if ov.get("tabs"):
+            off += 2                                     # tab strip + separator
+        elif ov.get("title"):
+            off += 1
+        if ov.get("header"):
+            off += len(ov["header"]) + 1                 # header block + separator
+        rows = self._overlay_rows()
+        scroll = ov.get("scroll", 0)
+        i = y - off
+        if 0 <= i < min(len(rows) - scroll, self._OVERLAY_CAP):
+            return scroll + i
+        return None
+
+    def _overlay_select(self) -> None:
+        """Commit the current overlay selection (shared by Enter and mouse-click)."""
+        ov = self._overlay
+        if not ov or ov.get("tabs"):                    # tabbed modals use a/x/r, not a row-pick
+            return
+        rows = self._overlay_rows()
+        sel = rows[ov["sel"]] if rows else None
+        typed = self.input_buf.text.strip()
+        submit, on_pick = ov.get("on_submit"), ov["on_pick"]
+        self._close_overlay()
+        if submit:
+            submit(sel, typed)
+        elif sel:
+            on_pick(sel)
+
+    def _overlay_hover(self, position) -> None:
+        r = self._overlay_row_at(position.y)
+        if r is not None and self._overlay is not None and self._overlay.get("sel") != r:
+            self._overlay["sel"] = r
+            self._invalidate()
+
+    def _overlay_click(self, position) -> bool:
+        r = self._overlay_row_at(position.y)
+        if r is None or self._overlay is None:
+            return False
+        self._overlay["sel"] = r
+        self._overlay_select()
+        return True
 
     def _overlay_height(self) -> int:
         if not self._overlay:
@@ -812,7 +861,8 @@ class TUI:
         # The floating overlay (pickers / tabbed modal) grows a region ABOVE the composer —
         # it pushes the transcript up instead of dumping the menu into the chat.
         overlay_panel = ConditionalContainer(
-            Window(FormattedTextControl(self._render_overlay), height=self._overlay_height,
+            Window(_ClickControl(self._render_overlay, self._overlay_click, self._overlay_hover),
+                   height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
         root = HSplit([header, transcript, overlay_panel, tip, status, composer_box])
@@ -1479,18 +1529,7 @@ class TUI:
         @kb.add("enter")
         def _(ev):
             if self._overlay is not None:           # floating picker/modal
-                ov = self._overlay
-                if ov.get("tabs"):                  # tabbed modal → Enter is inert (use a/x/r · Esc)
-                    return
-                rows = self._overlay_rows()
-                sel = rows[ov["sel"]] if rows else None
-                typed = self.input_buf.text.strip()
-                submit, on_pick = ov.get("on_submit"), ov["on_pick"]
-                self._close_overlay()
-                if submit:                          # command palette: (selected row, typed text)
-                    submit(sel, typed)
-                elif sel:
-                    on_pick(sel)
+                self._overlay_select()              # shared with mouse-click
                 return
             buf = self.input_buf
             if buf.complete_state is not None:      # the `/` command palette is open → resolve + RUN
