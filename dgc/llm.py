@@ -5,10 +5,26 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 
 import requests
+
+
+def _raw_socket(resp):
+    """Best-effort reach into requests/urllib3 for the live socket, so a cancel can shut it
+    down (SHUT_RDWR) and unblock a stalled read. Returns None if the internals differ."""
+    raw = getattr(resp, "raw", None)
+    for path in (("_connection", "sock"), ("_fp", "fp", "raw", "_sock"), ("_fp", "fp", "_sock")):
+        obj = raw
+        for attr in path:
+            obj = getattr(obj, attr, None)
+            if obj is None:
+                break
+        if obj is not None and hasattr(obj, "shutdown"):
+            return obj
+    return None
 
 
 class LLMError(Exception):
@@ -339,12 +355,47 @@ class LLMClient:
                     if on_text:
                         on_text(chunk)
 
-        for line in r.iter_lines(decode_unicode=True):
+        # Cancel watcher: a stalled iter_lines() — the model still prefilling a huge resumed
+        # context, with no first token yet — never runs the in-loop cancel check, because the
+        # loop body doesn't execute until a line arrives. Closing the socket from a watcher
+        # thread unblocks the read, so Esc / Stop takes effect immediately instead of hanging
+        # forever on "responding…".
+        stop_watch = threading.Event()
+        if cancel is not None:
+            def _watch(resp=r, ev=stop_watch, cx=cancel):
+                while not ev.wait(0.15):
+                    if cx.is_set():
+                        # Shutting the raw socket down is what actually unblocks a stalled
+                        # recv(); resp.close() alone races and often waits for the server.
+                        sock = _raw_socket(resp)
+                        if sock is not None:
+                            try:
+                                import socket as _socket
+                                sock.shutdown(_socket.SHUT_RDWR)
+                            except Exception:
+                                pass
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+            threading.Thread(target=_watch, daemon=True).start()
+        _lines = r.iter_lines(decode_unicode=True)
+        while True:
+            try:
+                line = next(_lines)
+            except StopIteration:
+                break
+            except Exception:
+                # Closing the socket mid-read (the watcher, on cancel) surfaces as any of
+                # several low-level errors depending on timing — swallow them ONLY when the
+                # user actually cancelled; otherwise it's a real stream error, re-raise.
+                if cancel is not None and cancel.is_set():
+                    result.finish_reason = "cancelled"
+                    break
+                stop_watch.set()
+                raise
             if cancel is not None and cancel.is_set():
-                try:
-                    r.close()
-                except Exception:
-                    pass
                 result.finish_reason = "cancelled"
                 break
             if not line or not line.startswith("data:"):
@@ -390,6 +441,7 @@ class LLMClient:
                 if fn.get("arguments"):
                     slot["args"] += fn["arguments"]
 
+        stop_watch.set()               # stop the cancel watcher (all loop-exit paths pass here)
         emit(filt.flush())
 
         for idx in sorted(partial):

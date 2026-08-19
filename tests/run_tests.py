@@ -197,6 +197,26 @@ def unit_tests(tmp: Path):
         outcome = "caught"
     check("headless bad command is catchable (backend survives)", outcome == "caught")
 
+    # --- llm: a stalled stream (model prefilling a huge context, no first token) must be
+    #     interruptible by cancel — Esc/Stop can't wait on iter_lines() forever
+    import http.server as _hs, socketserver as _ss, threading as _th2, time as _t2
+    from dgc.llm import LLMClient
+    class _Hang(_hs.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            _t2.sleep(30)                                  # hold the connection: model "prefilling"
+        def log_message(self, *a): pass
+    _srv = _ss.TCPServer(("127.0.0.1", 0), _Hang); _port = _srv.server_address[1]
+    _th2.Thread(target=_srv.serve_forever, daemon=True).start()
+    _cl = LLMClient(base_url=f"http://127.0.0.1:{_port}/v1", api_key="x", model="m")
+    _cx = _th2.Event()
+    _th2.Thread(target=lambda: (_t2.sleep(0.5), _cx.set()), daemon=True).start()
+    _t0 = _t2.monotonic()
+    _r = _cl.chat([{"role": "user", "content": "hi"}], cancel=_cx)
+    _dt = _t2.monotonic() - _t0
+    _srv.shutdown()
+    check("llm cancel interrupts a prefill stall", _dt < 3 and _r.finish_reason == "cancelled")
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)
