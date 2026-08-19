@@ -463,17 +463,51 @@ class TUI:
 
     # ---- the transcript control ----
     def _transcript(self):
+        from prompt_toolkit.formatted_text import to_formatted_text
         th = style_mod.theme()
-        parts = list(self.blocks)
-        if self._think:                     # the in-flight reasoning (muted)
-            parts.append(self._rich(f"[{th.faint} italic]{glyphs.RAIL} reasoning… "
-                                    f"{_esc(self._think)}[/]"))
+        ft, first = [], True
+        def add(frags):
+            nonlocal first
+            if not first:
+                ft.append(("", "\n"))
+            ft.extend(frags)
+            first = False
+        for blk in self.blocks:
+            if isinstance(blk, dict) and blk.get("kind") == "think":
+                add(self._think_frags(blk))
+            elif blk:
+                add(list(to_formatted_text(ANSI(blk))))
+        if self._think:                     # the in-flight reasoning (muted, live)
+            add(list(to_formatted_text(ANSI(self._rich(
+                f"[{th.faint} italic]{glyphs.RAIL} reasoning… {_esc(self._think)}[/]")))))
         if self._buf:                       # the in-flight assistant text
-            parts.append(self._rich(self._md(self._buf)))
-        if not parts:
+            add(list(to_formatted_text(ANSI(self._rich(self._md(self._buf))))))
+        if first:
             self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
-        return self._cursor_ft("\n".join(p for p in parts if p) + "\n")
+        ft.append(("", "\n"))
+        return self._place_cursor(ft)
+
+    def _think_frags(self, b: dict):
+        """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
+        (▾) to the full reasoning on click — Grok's thinking.rs collapse/expand."""
+        from prompt_toolkit.mouse_events import MouseEventType
+        th = style_mod.theme()
+        secs = b.get("secs", 0)
+        tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
+        head = f"Thought for {tstr}" if secs else "Thought"
+        caret = "▾" if b.get("exp") else "▸"
+
+        def toggle(mouse_event):
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                b["exp"] = not b.get("exp")
+                self._invalidate()
+        frags = [(f"fg:{th.faint}", f"{glyphs.DIAMOND} {caret} {head}", toggle)]
+        if b.get("exp"):
+            for ln in b.get("text", "").strip().split("\n"):
+                frags.append(("", "\n"))
+                frags.append((f"fg:{th.faint} italic", f"  {glyphs.RAIL} {ln}"))
+        return frags
 
     def _cursor_ft(self, text: str):
         """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept
@@ -483,19 +517,26 @@ class TUI:
         Placing the cursor at the bottom (scroll_off 0) makes it follow new output; a paged-up
         offset keeps that line visible instead."""
         from prompt_toolkit.formatted_text import to_formatted_text
-        frags = list(to_formatted_text(ANSI(text)))
-        total = text.count("\n") + 1
+        return self._place_cursor(list(to_formatted_text(ANSI(text))))
+
+    def _place_cursor(self, frags):
+        """Insert a [SetCursorPosition] marker into a fragment list at the line to keep visible
+        (scroll-follow). Preserves per-fragment mouse handlers (3-tuples) so clickable blocks
+        (e.g. collapsible thinking) keep working."""
+        total = 1 + sum(f[1].count("\n") for f in frags)
         target = total - 1 - max(0, min(self._scroll_off, total - 1))
         if target <= 0:
             return [("[SetCursorPosition]", "")] + frags
         out, line, placed = [], 0, False
-        for style, txt in frags:
+        for frag in frags:
+            style, txt = frag[0], frag[1]
+            handler = frag[2] if len(frag) > 2 else None
             if placed or "\n" not in txt:
-                out.append((style, txt)); continue
+                out.append(frag); continue
             segs = txt.split("\n")
             for k, seg in enumerate(segs):
                 if seg:
-                    out.append((style, seg))
+                    out.append((style, seg, handler) if handler else (style, seg))
                 if k < len(segs) - 1:
                     line += 1
                     out.append((style, "\n"))
@@ -864,11 +905,11 @@ class TUI:
         starts — Grok's thinking.rs auto-collapse (the live reasoning still streams during the turn;
         it just folds away after, instead of leaving a wall of grey text in the transcript)."""
         if self._think.strip():
-            th = style_mod.theme()
             secs = (time.monotonic() - self._think_t0) if self._think_t0 else 0
-            tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
-            head = f"Thought for {tstr}" if secs else "Thought"
-            self._append(self._rich(f"[{th.faint}]{glyphs.DIAMOND} {head}[/]"))
+            self.blocks.append({"kind": "think", "secs": secs,        # keep the text so it can re-expand
+                                "text": self._think.strip(), "exp": False})
+            self._scroll_off = 0
+            self._invalidate()
         self._think = ""
         self._think_t0 = None
 

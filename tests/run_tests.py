@@ -244,6 +244,19 @@ def unit_tests(tmp: Path):
     check("transcript paged up keeps an earlier line visible",
           _FTC(sc._cursor_ft(_txt)).create_content(60, 40).cursor_position.y == _txt.count("\n") - 8)
 
+    # --- collapsible thinking: a stored reasoning block renders collapsed with a CLICKABLE header,
+    #     and expands to the full reasoning when toggled (Grok thinking.rs)
+    from prompt_toolkit.formatted_text import fragment_list_to_text as _fltt
+    tt = object.__new__(TUI); tt._width = 80; tt._scroll_off = 0
+    tt._invalidate = lambda: None; tt._buf = ""; tt._think = ""
+    tb = {"kind": "think", "secs": 2.0, "text": "reason one\nreason two", "exp": False}
+    tt.blocks = [tb, "the answer"]
+    ftc = tt._transcript()
+    check("thinking collapses to a Thought header", "Thought for 2.0s" in _fltt(ftc) and "reason one" not in _fltt(ftc))
+    check("thinking header is clickable", any(len(f) > 2 and callable(f[2]) for f in ftc))
+    tb["exp"] = True
+    check("thinking expands to show the reasoning", "reason one" in _fltt(tt._transcript()))
+
     # --- resume-by-id + the Grok-style resume-on-exit epilogue
     import dgc.sessions as _S, dgc.cli as _C
     _proj = Path(tempfile.mkdtemp())
