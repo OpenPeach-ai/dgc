@@ -251,21 +251,30 @@ def test_mono_markdown():
     check("markdown (fence with lang attrs) has no rainbow", no_rainbow(attrs), detail=str(sorted(attrs)))
 
 
-def test_grey_logo():
-    """The wordmark shimmer must stay near-grey (r≈g≈b) so it downsamples to the 256-colour
-    grey ramp instead of scattering into cyan/rainbow on non-truecolor terminals (Mac/SSH)."""
-    import inspect
-    from dgc import logo
+def test_logo_stays_in_family():
+    """The wordmark shimmer must stay within a SINGLE colour family across the whole sweep, so it
+    downsamples cleanly on 256-colour terminals instead of scattering into cyan/rainbow (Mac/SSH).
+    The mark is brand PURPLE (blue-dominant): every colour in the sweep must keep blue on top and
+    never let GREEN dominate (which is what reads as cyan when quantised)."""
+    from dgc import logo, style  # noqa: F401
 
-    def spread(hexc):
+    def rgb(hexc):
         h = hexc.lstrip("#")
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return max(r, g, b) - min(r, g, b)
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
-    check("logo rest colour is near-grey", spread(logo._REST) <= 20, detail=logo._REST)
-    check("logo glint colour is near-grey", spread(logo._GLINT) <= 20, detail=logo._GLINT)
-    check("logo glint is NOT the purple accent (would rainbow when downsampled)",
-          "accent_bright" not in inspect.getsource(logo))
+    cols = set()
+    for secs in (0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4, 2.8, 3.2):
+        for c in range(logo._COLS):
+            for r in range(logo._ROWS):
+                cols.add(logo._char_style(r, c, secs, logo._GLINT).split()[-1])
+    ok = True
+    for hexc in cols:
+        rr, gg, bb = rgb(hexc)
+        if bb < rr or gg > rr or gg > bb:      # blue must lead; green must never dominate → no cyan
+            ok = False
+    check("logo shimmer stays in the purple family (no cyan/rainbow when downsampled)", ok,
+          detail=f"{len(cols)} colours, e.g. {sorted(cols)[0]}..{sorted(cols)[-1]}")
+    check("logo resting colour is the brand purple", logo._REST.upper() == "#7C5CFF", detail=logo._REST)
 
 
 def test_trust():
@@ -667,7 +676,7 @@ def main():
         unit_dir.mkdir()
         unit_tests(unit_dir)
         test_mono_markdown()
-        test_grey_logo()
+        test_logo_stays_in_family()
         test_trust()
         test_edit_tiers()
         test_context_prune()
