@@ -823,7 +823,9 @@ class TUI:
         self.app = Application(layout=Layout(root, focused_element=composer),
                                key_bindings=self._keys(), full_screen=True, mouse_support=True,
                                style=self._pt_style(), refresh_interval=0.08,
-                               erase_when_done=True,   # wipe the TUI frame on exit — no blank gap above the hint
+                               # NOT erase_when_done: full-screen uses the alternate screen, which the
+                               # terminal restores on exit. erase_when_done ALSO erases on top of that
+                               # and, with the tall centered header, left ~a screen of blank lines.
                                color_depth=style_mod.detect_color_depth())
 
     def _header_height(self) -> int:
