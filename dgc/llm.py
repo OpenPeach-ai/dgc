@@ -201,10 +201,11 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
 
 
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.read_timeout = read_timeout  # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
         self.tools_supported = True      # flips off on first 400 about tools
         self.reasoning_supported = True  # flips off if server rejects the param
 
@@ -242,7 +243,7 @@ class LLMClient:
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             try:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
-                                  stream=True, timeout=(10, 900))
+                                  stream=True, timeout=(15, self.read_timeout))
             except requests.ConnectionError as e:
                 raise LLMError(
                     f"cannot connect to {self.base_url} — is your local LLM server running? "

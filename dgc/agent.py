@@ -128,7 +128,7 @@ class Agent:
     def __init__(self, config: Config, ui, mcp: MCPManager | None = None):
         self.config = config
         self.ui = ui
-        self.client = LLMClient(config.base_url, config.api_key, config.model)
+        self.client = LLMClient(config.base_url, config.api_key, config.model, read_timeout=int(config.get("request_timeout", 1800)))
         self.skills = discover_skills(config.project_root)
         if mcp is not None:                       # subagents share the parent's MCP servers
             self.mcp = mcp
@@ -155,7 +155,7 @@ class Agent:
 
     # ------------------------------------------------------------ setup ---
     def refresh_client(self) -> None:
-        self.client = LLMClient(self.config.base_url, self.config.api_key, self.config.model)
+        self.client = LLMClient(self.config.base_url, self.config.api_key, self.config.model, read_timeout=int(self.config.get("request_timeout", 1800)))
 
     def _tool_schemas(self) -> list[dict]:
         """Built-in tools plus any tools from connected MCP servers."""
