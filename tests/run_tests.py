@@ -231,6 +231,19 @@ def unit_tests(tmp: Path):
     tp._turn.clear(); tp._todos = [{"content": "c", "status": "done"}]
     check("todo pane folds away when idle + all done", not tp._todos_visible())
 
+    # --- transcript scroll: with wrap_lines=True, PT ignores get_vertical_scroll and follows the
+    #     CURSOR. A tall resumed transcript used to pin to line 0 (top), hiding the live stream at
+    #     the bottom. The [SetCursorPosition] marker must sit on the line we want kept visible.
+    from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
+    sc = object.__new__(TUI)
+    _txt = "\n".join(f"line{i}" for i in range(30)) + "\n"
+    sc._scroll_off = 0
+    check("transcript sticks to the bottom (cursor on last line)",
+          _FTC(sc._cursor_ft(_txt)).create_content(60, 40).cursor_position.y == _txt.count("\n"))
+    sc._scroll_off = 8
+    check("transcript paged up keeps an earlier line visible",
+          _FTC(sc._cursor_ft(_txt)).create_content(60, 40).cursor_position.y == _txt.count("\n") - 8)
+
     # --- memory
     p = add_memory("always run pytest", tmp)
     proj, _ = load_memories(tmp)

@@ -113,7 +113,7 @@ class TUI:
         import shutil
         _sz = shutil.get_terminal_size((100, 30))
         self._width, self._height = _sz.columns, _sz.lines   # os.terminal_size uses .lines
-        self._stick = True                 # transcript auto-scrolls to bottom
+        self._scroll_off = 0               # transcript scroll: 0 = follow the bottom, >0 = lines paged up
         self._flash_msg = ""               # transient confirmation (clicks / mode switch)
         self._flash_until = 0.0
         self._naming = False               # inline "name this new session" prompt is active
@@ -447,7 +447,7 @@ class TUI:
 
     def _append(self, ansi: str) -> None:
         self.blocks.append(ansi)
-        self._stick = True
+        self._scroll_off = 0               # new output snaps the view back to the bottom
         self._invalidate()
 
     def _invalidate(self) -> None:
@@ -467,8 +467,39 @@ class TUI:
         if self._buf:                       # the in-flight assistant text
             parts.append(self._rich(self._md(self._buf)))
         if not parts:
+            self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
-        return ANSI("\n".join(p for p in parts if p) + "\n")
+        return self._cursor_ft("\n".join(p for p in parts if p) + "\n")
+
+    def _cursor_ft(self, text: str):
+        """Transcript formatted text with a [SetCursorPosition] marker at the line we want kept
+        visible. With wrap_lines=True prompt_toolkit IGNORES get_vertical_scroll and instead
+        scrolls to keep the cursor visible — so for a tall transcript (e.g. a resumed chat) the
+        default cursor at line 0 pins the view to the TOP and hides the live stream at the bottom.
+        Placing the cursor at the bottom (scroll_off 0) makes it follow new output; a paged-up
+        offset keeps that line visible instead."""
+        from prompt_toolkit.formatted_text import to_formatted_text
+        frags = list(to_formatted_text(ANSI(text)))
+        total = text.count("\n") + 1
+        target = total - 1 - max(0, min(self._scroll_off, total - 1))
+        if target <= 0:
+            return [("[SetCursorPosition]", "")] + frags
+        out, line, placed = [], 0, False
+        for style, txt in frags:
+            if placed or "\n" not in txt:
+                out.append((style, txt)); continue
+            segs = txt.split("\n")
+            for k, seg in enumerate(segs):
+                if seg:
+                    out.append((style, seg))
+                if k < len(segs) - 1:
+                    line += 1
+                    out.append((style, "\n"))
+                    if not placed and line >= target:
+                        out.append(("[SetCursorPosition]", "")); placed = True
+        if not placed:
+            out.append(("[SetCursorPosition]", ""))
+        return out
 
     def _tip(self):
         th = style_mod.theme()
@@ -924,7 +955,7 @@ class TUI:
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
         transcript = Window(FormattedTextControl(self._transcript), wrap_lines=True,
-                            get_vertical_scroll=self._vscroll, height=Dimension(weight=1))
+                            height=Dimension(weight=1))   # scroll is driven by the cursor marker (_cursor_ft)
         self._transcript_win = transcript
         status = Window(FormattedTextControl(self._status), height=1, style="class:status")
         composer = Window(BufferControl(self.input_buf, focus_on_click=True),
@@ -986,15 +1017,6 @@ class TUI:
         if line_no == 0 and wrap_count == 0:
             return ANSI(f" {style_mod.ansi_fg(th.accent)}{glyphs.ARROW}{style_mod.ANSI_RESET} ")
         return "   "
-
-    def _vscroll(self, win) -> int:
-        if not self._stick:
-            return win.vertical_scroll
-        # stick to bottom: show the last screenful
-        info = win.render_info
-        if info is None:
-            return 0
-        return max(0, info.content_height - info.window_height)
 
     def _pt_style(self):
         from prompt_toolkit.styles import Style
@@ -1301,7 +1323,7 @@ class TUI:
             # role == "tool" (results) and "system" are omitted — too verbose for the recap
         if self.blocks:
             self.blocks.append(self._rich(f"[{th.faint}]{'─' * 20} resumed here {'─' * 20}[/]"))
-        self._stick = True
+        self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
     def _resume_flow(self) -> None:
         from . import sessions
@@ -1764,16 +1786,18 @@ class TUI:
 
         @kb.add("pageup")
         def _(ev):
-            self._stick = False
-            self._transcript_win.vertical_scroll = max(0, self._transcript_win.vertical_scroll - 8)
+            self._scroll_off += 10          # page up: keep an earlier line visible
+            self._invalidate()
 
         @kb.add("pagedown")
         def _(ev):
-            self._transcript_win.vertical_scroll += 8
+            self._scroll_off = max(0, self._scroll_off - 10)
+            self._invalidate()
 
         @kb.add("end")
         def _(ev):
-            self._stick = True
+            self._scroll_off = 0            # jump back to the live bottom
+            self._invalidate()
 
         for i in range(1, 5):               # number keys answer a blocking request
             @kb.add(str(i))
@@ -1791,7 +1815,7 @@ class TUI:
         self._cancel.clear()
         self._tool_count = 0
         self.blocks.append(self._rich(f"[bold]{glyphs.ARROW}[/] {_esc(text)}"))
-        self._stick = True                  # ALWAYS snap to the bottom so the prompt + stream are visible
+        self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._turn.set()
         self._turn_t0 = time.monotonic()
 
