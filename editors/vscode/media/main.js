@@ -226,6 +226,21 @@
             return `<div class="t ${g[1]}"><span class="ti">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`; }).join("");
         break;
       }
+      case "artifact_ready": {
+        ensureTurn();
+        const c = el("div", "artifact");
+        c.innerHTML = `<div class="ahead"><span class="aico">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><a class="aurl">${esc(ev.url)}</a>`;
+        const row = el("div", "abtns");
+        const open = el("button", "abtn primary", "Open in browser");
+        open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
+        const stop = el("button", "abtn", "Stop");
+        stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: ev.id }); c.classList.add("stopped"); };
+        row.appendChild(open); row.appendChild(stop); c.appendChild(row);
+        c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
+        turn.block.appendChild(c); breakText(); scroll();
+        break;
+      }
+      case "artifacts": break;   // reserved: a future artifacts manager panel
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
       case "compacted": sysLine("context compacted"); break;

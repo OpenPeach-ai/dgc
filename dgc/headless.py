@@ -61,6 +61,9 @@ class HeadlessUI:
     def on_todo(self, todos: list) -> None:
         self.em.emit("todos", todos=todos)
 
+    def artifact_ready(self, art) -> None:
+        self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
+
     # notices ------------------------------------------------------------------
     def info(self, message: str) -> None:
         self.em.emit("info", message=message)
@@ -188,6 +191,12 @@ class Backend:
             used = 0
         self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)))
 
+    def _emit_artifacts(self) -> None:
+        from . import artifacts
+        self.em.emit("artifacts", items=[{"id": a.id, "name": a.name, "url": a.url,
+                                          "rel": a.rel, "uptime": a.uptime}
+                                         for a in artifacts.registry()])
+
     def _emit_config(self) -> None:
         c = self.config
         self.em.emit("config", model=c.model, mode=self.agent.mode,
@@ -307,6 +316,12 @@ class Backend:
         elif t == "compact":
             self.agent.maybe_compact(force=True)
             self._emit_context()
+        elif t == "list_artifacts":
+            self._emit_artifacts()
+        elif t == "stop_artifact":
+            from . import artifacts
+            artifacts.stop(str(cmd.get("id", "")))
+            self._emit_artifacts()
         elif t == "set_config":
             allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
                        "fallback_model", "fallback_base_url", "context_size", "search_provider")

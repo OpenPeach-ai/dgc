@@ -257,6 +257,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "openFile":
         this.openFile(msg.path, msg.line);
         break;
+      case "openExternal":
+        if (msg.url) vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
+        break;
+      case "listArtifacts":
+        this.ensureBackend().send({ type: "list_artifacts" });
+        break;
+      case "stopArtifact":
+        this.ensureBackend().send({ type: "stop_artifact", id: msg.id });
+        break;
       case "copy":
         vscode.env.clipboard.writeText(String(msg.text || ""));
         break;

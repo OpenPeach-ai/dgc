@@ -221,3 +221,18 @@ pre.code { position: relative; background: var(--code); border: 1px solid var(--
 pre.code .copy { position: absolute; top: 6px; right: 6px; font: 400 10px/1 var(--mono); cursor: pointer; background: var(--surface2); color: var(--muted); border: 1px solid var(--border-strong); border-radius: 5px; padding: 3px 7px; opacity: 0; }
 pre.code:hover .copy { opacity: 1; }
 pre.code .copy:hover { color: var(--text); border-color: var(--accent); }
+
+/* artifact ready card — propose opening a localhost preview */
+.artifact { margin: 9px 0; padding: 12px 13px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: inset 3px 0 0 var(--accent); }
+.artifact.stopped { opacity: .5; box-shadow: inset 3px 0 0 var(--faint); }
+.artifact .ahead { display: flex; align-items: center; gap: 8px; }
+.artifact .aico { color: var(--accent); font: 700 12px/1 var(--mono); }
+.artifact .anm { font: 700 12.5px/1 var(--sans); color: var(--text-strong); }
+.artifact .alabel { font: 400 12px/1 var(--mono); color: var(--muted); }
+.artifact .aurl { display: block; margin: 7px 0 10px; font: 500 12.5px/1.4 var(--mono); color: var(--accent); cursor: pointer; word-break: break-all; }
+.artifact .aurl:hover { color: var(--lav); text-decoration: underline; }
+.artifact .abtns { display: flex; gap: 8px; }
+.artifact .abtn { cursor: pointer; font: 600 12px/1 var(--sans); border-radius: 7px; padding: 7px 13px; border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+.artifact .abtn:hover { border-color: var(--accent); }
+.artifact .abtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.artifact .abtn.primary:hover { background: var(--accent-hover); }
