@@ -93,6 +93,13 @@ TOOL_SCHEMAS = [
          "options": {"type": "array", "items": {"type": "string"},
                      "description": "The choices, most-recommended first"}},
         ["question", "options"]),
+    _fn("artifact", "Serve something visual you built — a web page, a small app, a chart, a report — "
+        "on a local URL and offer to open it in the user's browser. Pass a directory (served as a site) "
+        "or a single .html file. Runs on 127.0.0.1 only; '/artifact' lets the user open or stop it. "
+        "Use this instead of just telling the user to open a file whenever the result is meant to be LOOKED AT.",
+        {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
+         "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
+        ["path"]),
     _fn("task", "Delegate a self-contained sub-task to a fresh sub-agent that works autonomously "
         "(its own context, the same tools) and returns a summary. Use for large, independent chunks "
         "of work you want handled end-to-end without cluttering the main conversation.",

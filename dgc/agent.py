@@ -238,6 +238,22 @@ class Agent:
                 "questions you can answer yourself with tools.",
             ]
 
+        if mode != "plan":
+            parts += [
+                "",
+                "# Building things to look at (artifacts)",
+                "- When what you build is meant to be SEEN — a web page, a small web app, a chart, a "
+                "visual report — finish by calling the `artifact` tool on the file or folder. It serves "
+                "the result on a local URL and DGC offers to open it in the user's browser. Prefer this "
+                "over telling the user to open a file by hand.",
+                "- Hold artifact frontends to a high visual bar. Before you build one, load the "
+                "`dgc-design` skill (via the skill tool) for DGC's design language and follow it: "
+                "Inter + JetBrains Mono, a near-black canvas, a single purple accent, clean type "
+                "hierarchy, generous spacing, no clutter.",
+                "- Make artifacts self-contained — inline the CSS/JS, no build step, no CDN needed — "
+                "so they run straight from disk.",
+            ]
+
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
         if think:
             parts += ["", "# Reasoning", think]
@@ -551,6 +567,22 @@ class Agent:
                 return "Max sub-agent depth reached — handle this sub-task directly instead."
             return self._run_subagent(str(args.get("description", "")), str(args.get("prompt", "")),
                                       str(args.get("agent", "")))
+
+        if name == "artifact":
+            if self.mode == "plan":
+                return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
+            from . import artifacts
+            try:
+                art = artifacts.serve(str(args.get("path", "")), self.config.project_root,
+                                      str(args.get("name", "") or ""))
+            except Exception as e:
+                return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
+            notify = getattr(self.ui, "artifact_ready", None)
+            if notify:
+                notify(art)                          # the TUI proposes opening it in the terminal
+            return (f"Artifact '{art.name}' is live at {art.url} (serving {art.rel}). "
+                    f"Tell the user they can open that URL in a browser; '/artifact' lists and stops "
+                    f"running previews. Do NOT start another server for the same thing.")
 
         perms = PermissionEngine(self.mode, self.config.permissions)  # fresh: mode may have just changed
         decision, reason = perms.decide(name, args)

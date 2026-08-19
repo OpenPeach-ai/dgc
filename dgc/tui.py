@@ -57,6 +57,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("bg", "terminal background: auto · dark · inherit"),
     ("theme", "colour theme: auto · dark · light"),
     ("context", "context-window usage"),
+    ("artifact", "open / stop localhost artifact previews"),
     ("compact", "summarise the older turns now"),
     ("status", "model · host · mode · context"),
     ("name", "name this session"),
@@ -1174,6 +1175,58 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {_esc(msg)}[/]"))
 
+    def artifact_ready(self, art) -> None:
+        """Propose opening a freshly-served localhost artifact, right in the transcript."""
+        from rich.text import Text
+        th = style_mod.theme()
+        t = Text()
+        t.append("  ▶ ", style=f"bold {th.accent}")
+        t.append("Artifact ready", style=f"bold {th.text_strong}")
+        t.append(f"   {art.name}", style=th.muted)
+        t.append("\n     ")
+        t.append(art.url, style=f"bold {th.accent_bright}")
+        t.append("   ← open in your browser", style=th.faint)
+        t.append("\n     ", style=th.faint)
+        t.append("/artifact", style=th.muted)
+        t.append(" to open or stop running previews", style=th.faint)
+        self._append(self._rich(t))
+        self._flash(f"artifact live → {art.url}")
+
+    def _open_url(self, url: str) -> bool:
+        import webbrowser
+        try:
+            return bool(webbrowser.open(url))
+        except Exception:
+            return False
+
+    def _open_artifacts(self) -> None:
+        """`/artifact` — a roster of running localhost previews: Enter opens one, x stops it."""
+        from . import artifacts
+        arts = artifacts.registry()
+        if not arts:
+            self._flash("no running artifacts — the agent serves one with the artifact tool")
+            return
+        rows = [{"label": a.name, "desc": f"{a.url}  ·  {a.rel}  ·  up {a.uptime}", "value": a.id}
+                for a in arts]
+        self._open_overlay(rows, on_pick=lambda r: self._artifact_open(r["value"]),
+                           on_action=self._artifact_action, title="Running artifacts",
+                           footer="Enter open · x stop (frees the port) · Esc close", accent=True)
+
+    def _artifact_open(self, aid: str) -> None:
+        from . import artifacts
+        art = artifacts.get(aid)
+        if not art:
+            return
+        opened = self._open_url(art.url)
+        self._flash((f"opened {art.url}" if opened else f"open {art.url} in your browser"))
+
+    def _artifact_action(self, key: str, row) -> None:
+        if not row or key not in ("x", "space"):
+            return
+        from . import artifacts
+        artifacts.stop(row["value"])
+        self._open_artifacts()                      # refresh (closes if none remain)
+
     def error(self, msg: str) -> None:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]error:[/] {_esc(msg)}"))
@@ -1478,6 +1531,8 @@ class TUI:
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
             self._open_plan_view()
+        elif cmd in ("artifact", "artifacts"):
+            self._open_artifacts()
         elif cmd == "jump":
             self._open_jump()
         elif cmd == "rewind":

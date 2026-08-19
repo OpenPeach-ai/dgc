@@ -185,6 +185,15 @@ def unit_tests(tmp: Path):
     check("plan saved + reloads", _sess.load_plan(_sf) == "# Plan\n\n- step one\n- step two"
           and _sess.plan_path(_sf).name == "20260101-000000.plan.md")
 
+    # --- artifacts: serve a localhost preview on a free 5-digit port, list it, stop it (frees the port)
+    import dgc.artifacts as _art
+    _ad = tmp / "site"; _ad.mkdir(); (_ad / "index.html").write_text("<h1>hi</h1>")
+    _a = _art.serve("site", tmp, "demo")
+    check("artifact serves + registers", _a.id in [x.id for x in _art.registry()]
+          and 45000 <= _a.port < 46000 and _a.entry == "" and _a.url == f"http://127.0.0.1:{_a.port}/")
+    check("artifact stop frees registry", _art.stop(_a.id) is True and not _art.registry())
+    check("dgc-design skill ships + off by default", "dgc-design" in discover_skills(tmp))
+
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
     from dgc.headless import Backend
     import threading as _th
