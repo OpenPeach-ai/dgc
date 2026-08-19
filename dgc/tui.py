@@ -117,6 +117,7 @@ class TUI:
         self._flash_msg = ""               # transient confirmation (clicks / mode switch)
         self._flash_until = 0.0
         self._naming = False               # inline "name this new session" prompt is active
+        self._autotitled = False           # a title has been auto-derived for this session (once)
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -1146,12 +1147,22 @@ class TUI:
 
     # ---- shared menu actions (invoked by both keys and mouse clicks) ----
     def _prompt_new_session(self) -> None:
-        """ask for an optional name before creating the session."""
+        """Start a fresh session immediately — no name prompt (Grok never asks). A title is
+        auto-derived from the first prompt; /name overrides it."""
         if self._turn.is_set():
             return
-        self._naming = True
-        self.input_buf.reset()
-        self._invalidate()
+        self._new_session()
+
+    def _autotitle(self, prompt: str) -> None:
+        """Background: derive a session title from the first prompt (Grok-style) and apply it,
+        unless the user already named it. Silent on failure."""
+        try:
+            title = self.agent.generate_title(prompt)
+        except Exception:
+            title = None
+        if title and not self.agent.session_name:
+            self.agent.name_session(title)
+            self._invalidate()
 
     def _new_session(self, name: str | None = None) -> None:
         if self._turn.is_set():
@@ -1164,6 +1175,7 @@ class TUI:
         if name:
             self.agent.name_session(name)
         self._naming = False
+        self._autotitled = bool(name)                # a manual name skips auto-titling
         self._flash(f"new session{f': {name}' if name else ''}")
         self._invalidate()
 
@@ -1966,6 +1978,11 @@ class TUI:
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
+                # Grok-style: auto-derive a title for an unnamed session from the first prompt
+                if (not self.agent.session_name and not self._autotitled
+                        and not self._cancel.is_set()):
+                    self._autotitled = True
+                    threading.Thread(target=self._autotitle, args=(text,), daemon=True).start()
                 self._invalidate()
                 if self._queue:
                     self._submit(self._queue.pop(0))

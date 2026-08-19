@@ -339,6 +339,24 @@ class Agent:
             elif self.session_name:
                 sessions.set_name(self.session_file, self.session_name)
 
+    def generate_title(self, prompt: str) -> str | None:
+        """A short, distinctive 5-10 word session title derived from the first prompt (Grok's
+        session_summary.rs). Best-effort, no tools/thinking; returns None on any failure."""
+        import re as _re
+        sysmsg = ("You generate a session title: a short, distinctive 5-10 word descriptive title "
+                  "for a software-engineering session. Super info-dense, no filler, no quotes, no "
+                  "trailing punctuation. Output ONLY the title.")
+        msgs = [{"role": "system", "content": sysmsg},
+                {"role": "user", "content": f"<user_query>{str(prompt)[:2000]}</user_query>"}]
+        try:
+            res = self.client.chat(msgs, tools=None, reasoning_effort="off")
+        except Exception:
+            return None
+        title = (getattr(res, "content", "") or "").strip()
+        title = (title.splitlines()[0] if title else "").strip().strip('"').strip("'")
+        title = _re.sub(r"\s+", " ", title).strip()[:60]
+        return title or None
+
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
