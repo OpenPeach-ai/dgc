@@ -372,18 +372,24 @@
   };
 
   function renderHistory(items) {
-    log.innerHTML = ""; turn = null;
+    // Non-destructive: replace only the history block, and place it ABOVE any live
+    // content. A resumed session's `history` event can arrive AFTER the user has
+    // already sent a prompt (slow session load) — clearing the whole log here used
+    // to wipe that just-sent prompt while the turn kept streaming.
+    log.querySelectorAll(".hist").forEach((e) => e.remove());
+    const frag = document.createDocumentFragment();
     items.forEach((it) => {
       if (it.role === "user") {
-        const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
-        m.appendChild(el("div", "bubble", esc(it.text))); log.appendChild(m);
+        const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
+        m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
       } else {
-        const m = el("div", "msg dgc"); m.appendChild(el("div", "role dgc", "DGC"));
+        const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
         if (it.text) m.appendChild(el("div", "text", md(it.text)));
         if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
-        log.appendChild(m);
+        frag.appendChild(m);
       }
     });
+    log.insertBefore(frag, log.firstChild);   // history above any live user prompt / streaming turn
     scroll();
   }
   // copy-code (delegated)

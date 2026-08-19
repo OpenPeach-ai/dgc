@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2 — 2026-08-19
+
+- **Fixed: your prompt vanishing after resuming a session.** A resumed session's history could arrive *after* you'd already sent a prompt (slow session load), and rendering it wiped the whole log — including your just-sent message — while the turn kept streaming. History now renders non-destructively, above any live prompt/turn.
+
 ## 0.7.1 — 2026-08-19
 
 - **New Marketplace icon** — the current `///` + `DGC` brand mark (on black), replacing the old pixel-block logo. Matches vibedgc.com and the CLI.
