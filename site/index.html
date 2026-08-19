@@ -99,9 +99,17 @@
     font-family:var(--mono);background:var(--term)}
   .tui-card{border:1px solid var(--border-strong);border-radius:11px;padding:clamp(14px,2vw,20px) clamp(16px,2.4vw,26px);
     display:flex;gap:clamp(16px,3vw,34px);align-items:flex-start}
-  .tui-logo{flex:none;height:clamp(104px,14vw,158px);width:auto;margin:0 clamp(4px,1vw,12px) 0 0;
-    filter:drop-shadow(0 3px 16px rgba(124,92,255,.22));animation:logobreathe 4.8s ease-in-out infinite}
-  @keyframes logobreathe{0%,100%{opacity:.86}50%{opacity:1}}
+  /* dotted /// mark: the SVG is a MASK; colour + the diagonal shimmer sweep come from the CSS
+     gradient (background-position animation), so it lights up exactly like the CLI mark. */
+  .tui-logo{flex:none;height:clamp(104px,14vw,158px);aspect-ratio:46/34;margin:0 clamp(6px,1.4vw,16px) 0 0;
+    -webkit-mask:url(/dgc-logo-dots.svg) center/contain no-repeat;
+    mask:url(/dgc-logo-dots.svg) center/contain no-repeat;
+    background:linear-gradient(112deg,#7C5CFF 0%,#8B6FFF 36%,#F3EEFF 50%,#A78BFA 64%,#6A4BF0 100%);
+    background-size:300% 100%;
+    filter:drop-shadow(0 3px 16px rgba(124,92,255,.24));
+    animation:logoshine 4.6s ease-in-out infinite}
+  @keyframes logoshine{0%{background-position:130% 0}55%{background-position:-50% 0}100%{background-position:-50% 0}}
+  @media (prefers-reduced-motion:reduce){.tui-logo{animation:none;background-position:50% 0}}
   @media (prefers-reduced-motion:reduce){.tui-logo{animation:none}}
   .tui-meta{min-width:0;flex:1;font-size:clamp(12px,1.5vw,14px);line-height:1.85}
   .tui-title{font-weight:700;color:var(--text-strong);display:flex;align-items:center} .tui-title span{color:var(--faint);font-weight:400}
@@ -245,7 +253,7 @@
 </head>
 <body>
 
-<div class="topbar"><div class="wrap"><span><b>v0.17.8</b> — a dotted <code>///</code> welcome, a built-in update nudge, and a VS&nbsp;Code&nbsp;&&nbsp;Cursor extension&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
+<div class="topbar"><div class="wrap"><span><b>v0.17.9</b> — a dotted <code>///</code> welcome, a built-in update nudge, and a VS&nbsp;Code&nbsp;&&nbsp;Cursor extension&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
 
 <nav><div class="wrap">
   <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
@@ -278,9 +286,9 @@
     <div class="bar"><i></i><i></i><i></i><span class="ti">dgc — ~/project</span></div>
     <div class="tui-body">
       <div class="tui-card">
-<img class="tui-logo" src="/dgc-logo-dots.svg" alt="/// DGC" width="46" height="34">
+<div class="tui-logo" role="img" aria-label="/// DGC"></div>
         <div class="tui-meta">
-          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.17.8</span></div>
+          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.17.9</span></div>
           <div class="tui-tag">a coding agent for the models you run</div>
           <div class="tui-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
           <div class="tui-menu">
