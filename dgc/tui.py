@@ -393,27 +393,36 @@ class TUI:
     def _right_rows(self, upd) -> int:
         return 9 + (2 if upd else 1)
 
-    def _welcome_metrics(self):
-        """Card width W, inner content width, layout mode, and the exact header height.
+    _CHROME_BELOW = 5     # rows under the header at welcome: tip(1) + status(1) + composer box(3)
+    _WIDE_MIN = 82       # below this terminal WIDTH the card stacks (logo on top) — Grok's breakpoint feel
+    _CARD_W = 96         # FIXED card width (like Grok's capped box): it never stretches — it stays this
+                          # size and centered no matter how large the terminal gets.
 
-        mode: 'wide' (Grok-style — braille logo LEFT, text RIGHT), 'stacked' (narrow: logo on top,
-        menu below), or 'compact' (too short → a 1-line header, so a phone terminal never hits
-        'window too small'). header_h is the full rendered height so _header_height matches the card.
+    def _card_body_rows(self, mode, upd) -> int:
+        """Rows INSIDE the panel (before its border+padding) for the chosen layout."""
+        right = self._right_rows(upd)
+        if mode == "stacked":
+            return len(logo_mod.LOGO_SMALL) + 1 + right     # logo on top + blank + right column
+        return max(len(logo_mod.LOGO), right)               # wide: the taller of the two columns
+
+    def _welcome_metrics(self):
+        """Card width W (FIXED, centered — never stretches), inner width, layout mode, and the card's
+        PANEL height (border+pad included). The vertical/horizontal centering is added in _welcome_card.
+
+        mode: 'wide' (Grok-style — braille logo LEFT, text RIGHT, centered), 'stacked' (narrow → logo
+        on TOP, menu below), or 'compact' (too short → 1-line header, so a phone never hits 'too small').
         """
         w, h = self._width, getattr(self, "_height", 30)
         upd = cached_update()
         margin = 4 if w < 62 else 6
-        W = max(30, min(w - margin, 150))
+        W = max(30, min(w - margin, self._CARD_W))         # capped → fixed size on big terminals
         cw_area = W - 8                                    # inside border(2) + padding(2*3)
-        RESERVED = 6                                       # tip + status + composer(3) + transcript(1)
-        avail = h - RESERVED
-        wide_inner = max(len(logo_mod.LOGO), self._right_rows(upd))
-        wide_h = wide_inner + 4 + 2                        # panel pad(2)+border(2) + top pad(2)
-        stack_inner = len(logo_mod.LOGO_SMALL) + self._right_rows(upd) + 1
-        stack_h = stack_inner + 4 + 2
-        if w >= 72 and avail >= wide_h:
+        avail = h - self._CHROME_BELOW
+        wide_h = self._card_body_rows("wide", upd) + 4     # + border(2) + padding(2)
+        stack_h = self._card_body_rows("stacked", upd) + 4
+        if w >= self._WIDE_MIN and avail >= wide_h + 2:
             return W, cw_area, "wide", wide_h, upd
-        if w >= 40 and avail >= stack_h:
+        if w >= 40 and avail >= stack_h + 2:
             return W, cw_area, "stacked", stack_h, upd
         return W, cw_area, "compact", 1, upd
 
@@ -429,7 +438,7 @@ class TUI:
         from rich.text import Text
         th = style_mod.theme()
         secs = time.monotonic() - self._start
-        W, cw_area, mode, _hh, upd = self._welcome_metrics()
+        W, cw_area, mode, card_h, upd = self._welcome_metrics()
         if mode == "compact":                              # tiny terminal → 1-line header only
             self._menu_rows = {}
             t = Text()
@@ -441,7 +450,11 @@ class TUI:
                 t.append(f"  {glyphs.MIDDOT} ⬆ v{upd} /update", style=f"bold {self._GOLD}")
             return self._rich(Padding(t, (0, 0, 0, 1)))
 
-        top_pad, left_margin = 2, 3
+        # centre the fixed-size card on screen (like Grok): top-pad within the filled header height,
+        # left-margin within the terminal width.
+        avail = self._height - self._CHROME_BELOW
+        top_pad = max(1, (avail - card_h) // 2)
+        left_margin = max(0, (self._width - W) // 2)
         base = top_pad + 2                                 # top padding + top border + panel pad
 
         # ── figure logo geometry + the content-column offset FIRST, so click/hover rows are exact ──
@@ -817,10 +830,12 @@ class TUI:
         if self.blocks or self._buf or self._overlay:
             return 1
         self._sync_width()
-        _, _, mode, header_h, _ = self._welcome_metrics()
+        _, _, mode, card_h, _ = self._welcome_metrics()
         if mode == "compact":                   # tiny / in-between terminal → 1-line header
             return 1
-        return max(1, min(header_h, self._height - 6))   # never exceed the terminal (belt + suspenders)
+        # Fill the space above the tip/status/composer so the card can float centered vertically
+        # inside it (_welcome_card's top-pad does the centering).
+        return max(card_h, self._height - self._CHROME_BELOW)
 
     def _composer_height(self) -> int:
         return min(max(1, self.input_buf.text.count("\n") + 1), 8)
