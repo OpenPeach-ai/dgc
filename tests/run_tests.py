@@ -167,6 +167,16 @@ def unit_tests(tmp: Path):
     ui._overlay_switch_tab(1); ui._render_overlay()  # click the MCP tab → list rebuilds
     check("overlay tab switch rebuilds", ov["tab"] == 1 and [r["label"] for r in ui._overlay_rows()] == ["m0"])
 
+    # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls (Grok /docs)
+    import dgc.docs as _docs
+    check("docs library", len(_docs.DOCS) >= 8 and _docs.find("Plan mode") is not None)
+    ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
+    ui._open_doc_reader("Plan mode")
+    check("doc reader builds rows", ui._overlay.get("reader") and len(ui._overlay["rows"]) > 5)
+    ui._overlay_move(4)                              # arrows scroll a reader, never move a selection
+    check("doc reader scrolls not selects", ui._overlay["scroll"] == 4 and ui._overlay["sel"] == 0)
+    ui._render_overlay()                             # renders without raising (styled Text.from_ansi lines)
+
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
     from dgc.headless import Backend
     import threading as _th

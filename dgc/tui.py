@@ -39,6 +39,7 @@ from .agent import Agent
 SLASH_COMMANDS: list[tuple[str, str]] = [
     ("help", "list every command"),
     ("keys", "keyboard shortcuts cheatsheet"),
+    ("docs", "in-app how-to guides"),
     ("new", "start a new session"),
     ("resume", "reopen a past session · dN deletes one"),
     ("history", "search & recall a past prompt"),
@@ -168,13 +169,15 @@ class TUI:
 
     def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
-                      keep_input=False, header=None, accent=False, back=None, info=False) -> None:
+                      keep_input=False, header=None, accent=False, back=None, info=False,
+                      reader=False) -> None:
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
                          "rebuild": rebuild, "on_submit": on_submit, "header": header,
-                         "accent": accent, "sel": 0, "scroll": 0, "back": back, "info": info}
+                         "accent": accent, "sel": 0, "scroll": 0, "back": back, "info": info,
+                         "reader": reader}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
@@ -269,6 +272,10 @@ class TUI:
 
     def _overlay_move(self, d: int) -> None:
         ov = self._overlay
+        if ov.get("reader"):                            # a doc reader — arrows scroll, no selection
+            ov["scroll"] = max(0, ov.get("scroll", 0) + d)
+            self._invalidate()
+            return
         n = len(self._overlay_rows())
         if n:
             ov["sel"] = (ov["sel"] + d) % n             # wrap-around
@@ -303,7 +310,7 @@ class TUI:
     def _overlay_select(self) -> None:
         """Commit the current overlay selection (shared by Enter and mouse-click)."""
         ov = self._overlay
-        if not ov or ov.get("tabs"):                    # tabbed modals use a/x/r, not a row-pick
+        if not ov or ov.get("tabs") or ov.get("reader"):   # tabbed modals use a/x/r; readers just scroll
             return
         rows = self._overlay_rows()
         sel = rows[ov["sel"]] if rows else None
@@ -376,10 +383,14 @@ class TUI:
         rows = self._overlay_rows()
         sel, cap = ov["sel"], self._OVERLAY_CAP
         scroll = ov.get("scroll", 0)
-        scroll = min(scroll, sel)
-        if sel >= scroll + cap:
-            scroll = sel - cap + 1
-        ov["scroll"] = scroll = max(0, scroll)
+        if ov.get("reader"):                            # a scrollable doc — scroll is independent of sel
+            scroll = max(0, min(scroll, len(rows) - cap)) if len(rows) > cap else 0
+        else:
+            scroll = min(scroll, sel)
+            if sel >= scroll + cap:
+                scroll = sel - cap + 1
+            scroll = max(0, scroll)
+        ov["scroll"] = scroll
         visible = rows[scroll:scroll + cap]
         labw = min(max((len(r.get("label", "")) for r in rows), default=8), 34)
         # Hit-map recorded during render (Grok's pattern): screen-y → row index, and the
@@ -422,6 +433,13 @@ class TUI:
         if not visible and not ov.get("info"):
             emit(Text("  (no matches)", style=th.faint))
         for i, r in enumerate(visible):
+            if ov.get("reader"):                        # a doc line — render pre-styled, no cursor/bar
+                t = r.get("text")
+                line = t.copy() if isinstance(t, Text) else Text(r.get("label", ""))
+                line.truncate(inner, overflow="ellipsis")
+                ov["_rowmap"][1 + len(lines)] = scroll + i
+                lines.append(line)
+                continue
             hot = (scroll + i == sel)
             line = Text()
             line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
@@ -781,6 +799,30 @@ class TUI:
         if lines:
             lines.pop()                                  # drop the trailing blank
         self._open_overlay([], on_pick=lambda r: None, header=lines, footer="Esc close", accent=True, info=True)
+
+    def _open_docs(self) -> None:
+        """Grok's /docs — a picker over the in-app how-to library."""
+        from . import docs as docs_mod
+        rows = [{"label": t, "desc": d, "value": t} for t, d, _ in docs_mod.DOCS]
+        self._open_overlay(rows, on_pick=lambda r: self._open_doc_reader(r["value"]),
+                           title="DGC docs", footer="↑↓ move · Enter read · Esc close", accent=True)
+
+    def _open_doc_reader(self, title: str) -> None:
+        """Render one doc's markdown into a scrollable reader overlay."""
+        from rich.text import Text
+        from . import docs as docs_mod
+        entry = docs_mod.find(title)
+        if not entry:
+            return
+        _, _, md = entry
+        w = min(max(46, self._width - 6), 108) - 6           # ~= the panel's inner text width
+        c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
+                    width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
+        c.print(render_mod.render_markdown(md))
+        ansi = c.file.getvalue().rstrip("\n")
+        rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
+        self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
+                           footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
@@ -1414,6 +1456,11 @@ class TUI:
             self._open_command_palette()
         elif cmd in ("keys", "shortcuts", "cheatsheet"):
             self._open_cheatsheet()
+        elif cmd in ("docs", "doc", "guide"):
+            if rest:
+                self._open_doc_reader(rest)
+            else:
+                self._open_docs()
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd == "jump":
@@ -2096,11 +2143,15 @@ class TUI:
 
         @kb.add("pageup")
         def _(ev):
+            if self._overlay is not None and self._overlay.get("reader"):
+                self._overlay_move(-(self._OVERLAY_CAP - 1)); return   # page the doc reader
             self._scroll_off += 10          # page up: keep an earlier line visible
             self._invalidate()
 
         @kb.add("pagedown")
         def _(ev):
+            if self._overlay is not None and self._overlay.get("reader"):
+                self._overlay_move(self._OVERLAY_CAP - 1); return
             self._scroll_off = max(0, self._scroll_off - 10)
             self._invalidate()
 
