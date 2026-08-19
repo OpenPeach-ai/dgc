@@ -221,7 +221,7 @@ def unit_tests(tmp: Path):
     import dgc.glyphs as _gl
     tp = object.__new__(TUI)
     tp._width = 80
-    tp._rich = lambda r: (lambda b: (_Con(file=b, force_terminal=True, width=80).print(r, end=""), b.getvalue())[1])(io.StringIO())
+    tp._rich = lambda r: (lambda b: (_Con(file=b, force_terminal=True, width=80).print(r, end=""), b.getvalue())[1])(_io.StringIO())
     tp._turn = _th.Event(); tp._turn.set()
     tp._todos = [{"content": "a", "status": "pending"}, {"content": "b", "status": "in_progress"},
                  {"content": "c", "status": "done"}, {"content": "d", "status": "cancelled"}]
