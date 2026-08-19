@@ -257,6 +257,13 @@ def unit_tests(tmp: Path):
     tb["exp"] = True
     check("thinking expands to show the reasoning", "reason one" in _fltt(tt._transcript()))
 
+    # --- /jump: scrolls the transcript to a chosen turn
+    jt = object.__new__(TUI); jt._width = 80; jt._scroll_off = 0; jt._invalidate = lambda: None
+    jt.blocks = ["a\nb\nc", "d", "e\nf"]
+    jt._jump_to_block(2); off_new = jt._scroll_off          # newest turn → near the bottom
+    jt._jump_to_block(0)                                     # oldest turn → scrolled further up
+    check("jump scrolls to an earlier turn", jt._scroll_off > off_new)
+
     # --- resume-by-id + the Grok-style resume-on-exit epilogue
     import dgc.sessions as _S, dgc.cli as _C
     _proj = Path(tempfile.mkdtemp())

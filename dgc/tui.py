@@ -41,6 +41,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("new", "start a new session"),
     ("resume", "reopen a past session · dN deletes one"),
     ("history", "search & recall a past prompt"),
+    ("jump", "jump the transcript to a past turn"),
+    ("rewind", "restore code + conversation to a past turn"),
     ("model", "switch the model"),
     ("connect", "pick a provider or a custom LAN host"),
     ("subagent", "set the sub-agent model + host"),
@@ -121,6 +123,7 @@ class TUI:
         self._naming = False               # inline "name this new session" prompt is active
         self._autotitled = False           # a title has been auto-derived for this session (once)
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
+        self._turn_marks: list[tuple[int, str]] = []   # (block index, preview) per turn, for /jump
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -656,6 +659,64 @@ class TUI:
         ]
         self._open_overlay([], on_pick=lambda r: None, header=header,
                            footer="Esc close", accent=True, info=True)
+
+    def _block_lines(self, blk) -> int:
+        if isinstance(blk, dict) and blk.get("kind") == "think":
+            return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
+        return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
+
+    def _jump_to_block(self, i: int) -> None:
+        """Scroll the transcript so block `i` (a turn's prompt) is in view — Grok's /jump."""
+        if not (0 <= i < len(self.blocks)):
+            return
+        before = sum(self._block_lines(b) for b in self.blocks[:i]) + i          # +i newline separators
+        total = sum(self._block_lines(b) for b in self.blocks) + max(0, len(self.blocks) - 1) + 1
+        self._scroll_off = max(0, total - 1 - before)
+        self._invalidate()
+
+    def _open_jump(self) -> None:
+        """A picker of every turn — Enter scrolls the transcript to it (Grok's jump.rs)."""
+        if not self._turn_marks:
+            self._flash("no turns to jump to yet"); return
+        rows = [{"label": f"{n + 1}.", "desc": prev, "value": bi}
+                for n, (bi, prev) in enumerate(self._turn_marks)]
+        self._open_overlay(rows, on_pick=lambda r: self._jump_to_block(r["value"]),
+                           title="Jump to a turn", footer="↑↓ move · Enter jump · Esc cancel")
+
+    def _open_rewind(self) -> None:
+        """Pick a past turn to restore code + conversation to (Grok's /rewind), then confirm."""
+        pts = self.agent.checkpoints.listing()
+        if not pts:
+            self._flash("no checkpoints yet — run a turn first"); return
+        rows = [{"label": prev, "desc": f"{nf} file{'' if nf == 1 else 's'}", "value": i}
+                for (i, prev, nf) in pts]
+        self._open_overlay(rows, on_pick=lambda r: self._confirm_rewind(r["value"]),
+                           title="Rewind to (restores code + conversation)",
+                           footer="↑↓ move · Enter select · Esc cancel")
+
+    def _confirm_rewind(self, idx: int) -> None:
+        from rich.text import Text
+        th = style_mod.theme()
+        info = {i: (prev, nf) for (i, prev, nf) in self.agent.checkpoints.listing()}
+        prev, nf = info.get(idx, ("", 0))
+        header = [Text.from_markup(f"[bold]Rewind to:[/] {_esc(prev)}"),
+                  Text.from_markup(f"[{th.warn}]Reverts {nf} file(s) and truncates the conversation. "
+                                   f"This cannot be undone.[/]")]
+        rows = [{"label": f"{glyphs.CHECK}  Rewind", "value": "yes"},
+                {"label": f"{glyphs.CROSS}  Cancel", "value": "no"}]
+        self._open_overlay(rows, on_pick=lambda r: self._do_rewind(idx) if r["value"] == "yes" else None,
+                           header=header, footer="Enter select · Esc cancel", accent=True)
+
+    def _do_rewind(self, idx: int) -> None:
+        try:
+            _msgs, nfiles = self.agent.rewind(idx)
+        except Exception as e:
+            self._flash(f"rewind failed: {type(e).__name__}"); return
+        self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._think = ""
+        self._render_history()
+        self._scroll_off = 0
+        self._flash(f"{glyphs.ARROW_L if hasattr(glyphs, 'ARROW_L') else '↩'} rewound — restored {nfiles} file(s)")
+        self._invalidate()
 
     def _open_history(self) -> None:
         """A filterable list of your past prompts — Enter recalls one into the composer (Ctrl+R)."""
@@ -1256,6 +1317,7 @@ class TUI:
             return
         self.agent.reset()
         self.blocks.clear()
+        self._turn_marks = []
         self._buf = ""; self._think = ""
         from . import sessions as _sess
         self.agent.session_file = _sess.new_path(self.config.project_root)
@@ -1324,6 +1386,10 @@ class TUI:
             self._open_cheatsheet()
         elif cmd in ("history", "hist"):
             self._open_history()
+        elif cmd == "jump":
+            self._open_jump()
+        elif cmd == "rewind":
+            self._open_rewind()
         elif cmd in ("new", "session"):
             self._prompt_new_session()
         elif cmd == "name":
@@ -1436,7 +1502,7 @@ class TUI:
                                     f"  [{th.text}]https://github.com/OpenPeach-ai/dgc/issues[/]  "
                                     f"[{th.faint}](include your `dgc --version`)[/]"))
         elif cmd == "clear":
-            self.blocks.clear(); self._buf = ""; self._flash("cleared")
+            self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._flash("cleared")
         elif cmd == "update":
             # exit the full-screen app cleanly, THEN run the installer on the raw terminal
             # (curl | bash needs a normal TTY; it can't run inside the alt-screen app).
@@ -1446,7 +1512,7 @@ class TUI:
                     self.app.exit()
             else:
                 self._flash(f"you're on the latest — DGC v{__version__}")
-        elif cmd in ("rewind", "init", "search"):
+        elif cmd in ("init", "search"):
             self._flash(f"/{cmd} is available in the classic REPL — run: dgc --classic")
         elif cmd in ("quit", "exit"):
             if self.app:
@@ -2061,6 +2127,7 @@ class TUI:
         if text.strip():
             self._prompt_history.append(text)         # for /history (Ctrl+R) recall
         self.blocks.append(self._user_band(text))
+        self._turn_marks.append((len(self.blocks) - 1, text.replace("\n", " ")[:70]))   # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._turn.set()
         self._turn_t0 = time.monotonic()
