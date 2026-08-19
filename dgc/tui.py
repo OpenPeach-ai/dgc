@@ -119,6 +119,8 @@ class TUI:
         self._naming = False               # inline "name this new session" prompt is active
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
+        self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
+        self._ctx_x0 = self._ctx_x1 = -1       # context chip x-range on row 0, for hover/click hit-testing
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
@@ -138,13 +140,13 @@ class TUI:
 
     def _open_overlay(self, rows, on_pick, *, title=None, tabs=None, tab=0, footer=None,
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
-                      keep_input=False, header=None, accent=False, back=None) -> None:
+                      keep_input=False, header=None, accent=False, back=None, info=False) -> None:
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
                          "rebuild": rebuild, "on_submit": on_submit, "header": header,
-                         "accent": accent, "sel": 0, "scroll": 0, "back": back}
+                         "accent": accent, "sel": 0, "scroll": 0, "back": back, "info": info}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
@@ -389,7 +391,7 @@ class TUI:
             for h in ov["header"]:
                 emit(h if isinstance(h, Text) else Text(str(h)))
             emit(Text("─" * inner, style=th.border))
-        if not visible:
+        if not visible and not ov.get("info"):
             emit(Text("  (no matches)", style=th.faint))
         for i, r in enumerate(visible):
             hot = (scroll + i == sel)
@@ -544,10 +546,71 @@ class TUI:
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
         if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
+            import re
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
-            return ANSI(self._rich(f"[bold {th.accent}]Vibe DGC[/] "
-                                   f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]"))
+            left = self._rich(f" [bold {th.accent}]Vibe DGC[/] "
+                              f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]")
+            chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter (Grok context_bar)
+            right = self._rich(chip)
+            lw = len(re.sub(r"\x1b\[[0-9;?]*m", "", left))
+            gap = max(2, self._width - lw - cw - 1)
+            self._ctx_x0, self._ctx_x1 = lw + gap, lw + gap + cw   # record for hover/click
+            return ANSI(left + " " * gap + right)
+        self._ctx_x0 = self._ctx_x1 = -1
         return ANSI(self._welcome_card())
+
+    def _ctx_color(self, pct: float, th):
+        return th.err if pct >= 90 else th.warn if pct >= 75 else th.muted if pct >= 50 else th.text
+
+    def _context_chip(self, hover: bool):
+        """Top-right context counter — Grok's context_bar.rs. Default: `used / total` (colored by an
+        urgency gradient). Hover: morph to `█████ 42.0%` at the SAME width (no layout shift)."""
+        th = style_mod.theme()
+        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        pct = min(100.0, used * 100 / size) if size else 0.0
+        col = self._ctx_color(pct, th)
+        default = f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}"
+        total_w = max(len(default), 6)                        # reserve ≥ bar(…)+gap+pct
+        if not hover:
+            return f"[{col}]{default:<{total_w}}[/]", total_w
+        bw = total_w - 6                                      # 6 = 1 gap + 5-char pct
+        filled = round(pct / 100 * bw)
+        bar = "█" * filled + " " * (bw - filled)
+        pctstr = (f"{pct:.2f}%" if pct < 10 else f"{pct:.1f}%") if pct < 100 else "MAX %"
+        return f"[{col}]{bar}[/] [{th.muted}]{pctstr:>5}[/]", total_w
+
+    def _open_context_popup(self) -> None:
+        """Click the context chip → a details popup (Grok's usage-modal Context tab): the token
+        summary, a bar, the model, and turn/tool stats."""
+        from rich.text import Text
+        th = style_mod.theme()
+        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        pct = used * 100 / size if size else 0.0
+        col = self._ctx_color(pct, th)
+        barw = 34
+        filled = round(pct / 100 * barw)
+        # rough split: the system prompt (messages[0]) vs the rest of the conversation
+        sys_tok = 0
+        try:
+            sys_tok = len(str(self.agent.messages[0].get("content", ""))) // 4 if self.agent.messages else 0
+        except Exception:
+            pass
+        msg_tok = max(0, used - sys_tok)
+        header = [
+            Text.from_markup(f"[bold]Context[/]  [{th.faint}]{_esc(self.config.model)}[/]"),
+            Text(""),
+            Text.from_markup(f"[{th.text}]{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)} tokens[/]  [{col}]({pct:.1f}%)[/]"),
+            Text.from_markup(f"[{col}]{'█' * filled}[/][{th.border_strong}]{'░' * (barw - filled)}[/]"),
+            Text(""),
+            Text.from_markup(f"[{th.text}]{glyphs.DIAMOND}[/] [{th.muted}]System prompt[/]   [{th.faint}]{render_mod.fmt_tokens(sys_tok)}[/]"),
+            Text.from_markup(f"[{th.accent}]{glyphs.DIAMOND}[/] [{th.muted}]Conversation[/]    [{th.faint}]{render_mod.fmt_tokens(msg_tok)}[/]"),
+            Text.from_markup(f"[{th.border_strong}]{glyphs.DIAMOND_O}[/] [{th.muted}]Free[/]            [{th.faint}]{render_mod.fmt_tokens(max(0, size - used))}[/]"),
+            Text(""),
+            Text.from_markup(f"[{th.faint}]Turns {sum(1 for m in self.agent.messages if m.get('role') == 'user')}"
+                             f"  {glyphs.MIDDOT}  Tool calls {self._tool_count}[/]"),
+        ]
+        self._open_overlay([], on_pick=lambda r: None, header=header,
+                           footer="Esc close", accent=True, info=True)
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
@@ -720,21 +783,32 @@ class TUI:
                                    f"[{th.text}]waiting for your answer[/] "
                                    f"[{th.faint}]· {self._req.get('hint', '')}[/]"))
         if self._turn.is_set():
-            el = int(time.monotonic() - self._turn_t0)
+            el = time.monotonic() - self._turn_t0
             fr = glyphs.THINK_FRAMES[int(time.monotonic() * 6) % len(glyphs.THINK_FRAMES)]
-            toks = render_mod.fmt_tokens(len(self._buf) // 4) if self._buf else "0"
             if self._streaming:
-                act = "responding"
+                act = "Responding"
             elif self._cur_tool:
                 act = self._cur_tool            # "Run npm test" · "Read x.py" · "Search …"
             elif self._thinking:
-                act = "thinking"
+                act = "Thinking"
             else:
-                act = "working"
-            return ANSI(self._rich(f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}… {el}s "
-                                   f"{glyphs.MIDDOT} {toks} tok[/]  [{th.faint}]esc to stop[/]"))
-        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
-        return ANSI(self._rich(render_mod.context_bar(used, size, width=14)))
+                act = "Working"
+            # Grok turn-status structure: activity (left), total-time + ⇣tokens + [stop] (right).
+            tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
+            toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
+            left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/]"
+            right = f"[{th.faint}]{tstr}  {glyphs.ELLIPSIS_V if False else '⇣'}{toks}[/]  [{th.err}][stop][/]"
+            return self._pad_lr(left, right)
+        return ANSI("")                          # idle: the context bar now lives top-right in the header
+
+    def _pad_lr(self, left: str, right: str, indent: str = "  "):
+        """One row with `left` markup at the start and `right` markup flush to the terminal edge —
+        Grok's status layout (activity left; timer + tokens + [stop] right)."""
+        import re
+        L, R = self._rich(left), self._rich(right)
+        vis = lambda s: len(re.sub(r"\x1b\[[0-9;?]*m", "", s))   # visible width (ANSI stripped)
+        gap = max(2, self._width - len(indent) - vis(L) - vis(R) - 1)
+        return ANSI(indent + L + " " * gap + R)
 
     # ---- composer info line (model · mode) ----
     def _info(self):
@@ -785,13 +859,15 @@ class TUI:
         self._invalidate()
 
     def _flush_think(self) -> None:
-        """Move the streamed reasoning into a permanent muted block above the answer."""
+        """Collapse the streamed reasoning to a single dim `◆ Thought for Xs` line once the answer
+        starts — Grok's thinking.rs auto-collapse (the live reasoning still streams during the turn;
+        it just folds away after, instead of leaving a wall of grey text in the transcript)."""
         if self._think.strip():
             th = style_mod.theme()
-            secs = int(time.monotonic() - self._think_t0) if self._think_t0 else 0
-            head = f"Thought for {secs}s" if secs else "Thought"
-            self._append(self._rich(f"[{th.faint} italic]{glyphs.RAIL} {head}[/]\n"
-                                    f"[{th.faint} italic]{_esc(self._think.strip())}[/]"))
+            secs = (time.monotonic() - self._think_t0) if self._think_t0 else 0
+            tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
+            head = f"Thought for {tstr}" if secs else "Thought"
+            self._append(self._rich(f"[{th.faint}]{glyphs.DIAMOND} {head}[/]"))
         self._think = ""
         self._think_t0 = None
 
@@ -1099,7 +1175,11 @@ class TUI:
         self._invalidate()
 
     def _menu_hover(self, position) -> None:
-        """Highlight the welcome-menu row under the mouse (hover)."""
+        """Welcome-menu row hover + the top-right context chip hover (→ morph to a bar + %)."""
+        ch = (position.y == 0 and self._ctx_x0 >= 0 and self._ctx_x0 <= position.x < self._ctx_x1)
+        if ch != self._ctx_hover:
+            self._ctx_hover = ch
+            self._invalidate()
         new = position.y if (not self.blocks and not self._buf
                              and position.y in self._menu_rows) else None
         if new != self._hover_row:
@@ -1109,6 +1189,9 @@ class TUI:
     def _menu_click(self, position) -> bool:
         """Map a click on the welcome card to its menu action, using the row map that
         _welcome_card records for the current layout (wide or stacked-narrow)."""
+        if position.y == 0 and self._ctx_x0 >= 0 and self._ctx_x0 <= position.x < self._ctx_x1:
+            self._open_context_popup()          # click the top-right context chip → details popup
+            return True
         if self.blocks or self._buf:            # only the welcome screen has a menu
             return False
         action = self._menu_rows.get(position.y)
@@ -1840,10 +1923,31 @@ class TUI:
                     self.input_buf.insert_text(str(n))
         return kb
 
+    def _user_band(self, text: str):
+        """The user's prompt as a bg-tinted band with a ❯ prefix (Grok's user.rs) — a highlighted
+        block that reads distinctly from the assistant text. No border/rail; continuation lines
+        indent under the arrow, and the whole thing sits on a subtle raised background."""
+        from rich.text import Text
+        th = style_mod.theme()
+        W = min(max(30, self._width - 4), 104)
+        t = Text()
+        lines = (text.rstrip("\n") or "").split("\n")
+        for i, ln in enumerate(lines):
+            pre = f"{glyphs.ARROW} " if i == 0 else "  "
+            t.append(pre, style=f"bold {th.accent}")
+            t.append(ln, style=th.text_strong)
+            pad = W - len(pre) - len(ln)
+            if pad > 0:
+                t.append(" " * pad)                 # fill the row so the band spans a clean width
+            if i < len(lines) - 1:
+                t.append("\n")
+        t.stylize(f"on {th.surface2}")               # the raised background band
+        return self._rich(t)
+
     def _submit(self, text: str) -> None:
         self._cancel.clear()
         self._tool_count = 0
-        self.blocks.append(self._rich(f"[bold]{glyphs.ARROW}[/] {_esc(text)}"))
+        self.blocks.append(self._user_band(text))
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._turn.set()
         self._turn_t0 = time.monotonic()

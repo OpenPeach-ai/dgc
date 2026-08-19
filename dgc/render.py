@@ -135,8 +135,13 @@ def render_diff(diff_text: str):
 
 
 def fmt_tokens(n: int) -> str:
+    # Grok's fmt: 1 decimal only in the low band of each unit, integer above (500K, not 500.0K).
+    if n >= 10_000_000:
+        return f"{n // 1_000_000}M"
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n // 1_000}K"
     if n >= 1_000:
         return f"{n / 1_000:.1f}K"
     return str(n)
