@@ -143,6 +143,7 @@ class AgentSession:
         self._req_answer = None
         self._req_event = threading.Event()
         self.pinned = False
+        self.draft = ""                    # unsent composer text, restored when you switch back
         self.created = time.monotonic()
         self.last_activity = time.monotonic()
 
@@ -939,9 +940,9 @@ class TUI:
         return f"{secs // 86400}d"
 
     def _open_dashboard(self) -> None:
-        """An interactive session roster. DGC runs ONE agent per process, so this is a switcher
-        over this project's sessions: a status header, a `+ New session` action, and every
-        session as a selectable row (Enter opens · x deletes)."""
+        """The agent fleet console — every concurrent session in one place. A status header, a
+        `+ New agent` action, each LIVE session with its state (active/running/needs-input/idle),
+        then saved sessions you can reopen. Enter attaches/opens · x closes/deletes · p pins · r renames."""
         from rich.text import Text
         from . import sessions, artifacts
         th = style_mod.theme()
@@ -950,52 +951,81 @@ class TUI:
         col = self._ctx_color(pct, th)
         full, part, empty = render_mod.frac_bar(pct, 22)
         arts = artifacts.registry()
+        running = sum(1 for s in self._sessions if s.state == "running")
+        needs = sum(1 for s in self._sessions if s.state == "needs_input")
 
-        # header: a compact status band (model · mode · context · artifacts) above the roster
         h1 = Text("  "); h1.append(self.config.model, style=f"bold {th.text_strong}")
         h1.append(f"   {self.agent.mode} · think {self.config.get('thinking', 'off')}", style=th.muted)
         h2 = Text("  "); h2.append(f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}  ", style=th.faint)
         h2.append("█" * full + part, style=col); h2.append("░" * empty, style=th.border_strong)
         h2.append(f"  {pct:.0f}%", style=col)
-        h2.append(f"    ◈ {len(arts)} artifact" + ("" if len(arts) == 1 else "s"),
-                  style=(th.warn if arts else th.faint))
+        h2.append(f"    {len(self._sessions)} agent" + ("" if len(self._sessions) == 1 else "s"), style=th.muted)
+        if running:
+            h2.append(f" · {running} running", style=th.warn)
+        if needs:
+            h2.append(f" · {needs} need you", style=th.err)
+        if arts:
+            h2.append(f" · ◈ {len(arts)}", style=th.warn)
         header = [h1, h2]
 
-        # rows: a "+ New session" action, then every saved session (current one marked)
-        recent = sessions.listing(self.config.project_root)
+        rows = [{"label": "+ New agent", "desc": "spawn a concurrent agent", "value": ("new", None)}]
+        # live fleet — pinned first, then most-recently-active
+        _MARK = {"active": "●", "needs_input": "◆", "running": "⋮", "idle": "○"}
+        _DESC = {"active": "on screen", "needs_input": "waiting for you", "running": "working…", "idle": "idle"}
+        open_files = set()
+        for s in sorted(self._sessions, key=lambda s: (not s.pinned, -s.last_activity)):
+            st = "active" if s is self.active else s.state
+            preview = next((str(m.get("content", "")) for m in s.agent.messages if m.get("role") == "user"), "")
+            title = (s.name or (preview[:40] if preview else "(new agent)"))[:40]
+            pin = "⟐ " if s.pinned else ""
+            tools = f" · {s._tool_count} tools" if s._tool_count else ""
+            rows.append({"label": f"{_MARK.get(st, '○')} {pin}{title}", "desc": _DESC.get(st, "idle") + tools,
+                         "value": ("switch", s), "action": True})
+            if s.agent.session_file:
+                open_files.add(str(s.agent.session_file))
+        # saved sessions not currently open in the fleet
         now = time.time()
-        cur = self.agent.session_file
-        rows = [{"label": "+ New session", "desc": "start a fresh conversation",
-                 "value": ("new", None), "action": False}]
-        for p, ts, preview, n, name in recent[:40]:
-            is_cur = cur is not None and str(p) == str(cur)
-            mark = "● " if is_cur else "○ "
-            title = (name or preview or "(empty)")[:40]
-            tail = f"{self._reltime(now - ts):>4} · {n} msg" + ("" if n == 1 else "s")
-            rows.append({"label": mark + title,
-                         "desc": tail + ("  · current" if is_cur else ""),
-                         "value": ("open", p), "action": not is_cur})
+        for p, ts, prev, n, name in sessions.listing(self.config.project_root)[:30]:
+            if str(p) in open_files:
+                continue
+            title = (name or prev or "(empty)")[:40]
+            rows.append({"label": "○ " + title, "value": ("open", p), "action": True,
+                         "desc": f"saved · {self._reltime(now - ts)} · {n} msg" + ("" if n == 1 else "s")})
 
         def on_pick(r):
-            kind, p = r["value"]
+            kind, v = r["value"]
             if kind == "new":
                 self._new_session()
-            else:
-                n = self.agent.load_session(p)
+            elif kind == "switch":
+                if v in self._sessions:
+                    self._switch_to(self._sessions.index(v))
+            else:                                        # open a saved session into a fresh fleet slot
+                self._new_session()
+                n = self.agent.load_session(v)
                 self.blocks.clear(); self._buf = ""; self._think = ""
                 self._render_history()
-                self._flash(f"resumed ({n} messages)"
-                            + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
+                self._flash(f"opened ({n} messages)")
 
         def on_action(key, r):
-            if key in ("x", "space") and r and r["value"][0] == "open" and r.get("action"):
-                sessions.delete(r["value"][1])
-                self._flash("session deleted")
-                self._open_dashboard()          # re-show the updated roster
+            if not r:
+                return
+            kind, v = r["value"]
+            if key in ("x", "space"):
+                if kind == "switch" and v in self._sessions:
+                    self._close_session(self._sessions.index(v)); self._open_dashboard()
+                elif kind == "open":
+                    sessions.delete(v); self._flash("deleted"); self._open_dashboard()
+            elif key == "p" and kind == "switch":
+                v.pinned = not v.pinned; self._open_dashboard()
+            elif key == "r" and kind == "switch":
+                self._close_overlay()
+                self._ask_input(f"rename '{v.name or 'agent'}' then Enter",
+                                lambda nm, _v=v: (_v.agent.name_session(nm.strip()) if nm.strip() else None,
+                                                  self._open_dashboard()))
 
         self._open_overlay(rows, on_pick=on_pick, on_action=on_action, header=header,
-                           title="Sessions", accent=True,
-                           footer="Enter open · x delete · Esc close")
+                           title="Agents", accent=True,
+                           footer="Enter open · x close · p pin · r rename · Esc close")
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:
@@ -1605,10 +1635,8 @@ class TUI:
 
     # ---- shared menu actions (invoked by both keys and mouse clicks) ----
     def _prompt_new_session(self) -> None:
-        """Start a fresh session immediately — no name prompt . A title is
-        auto-derived from the first prompt; /name overrides it."""
-        if self._turn.is_set():
-            return
+        """Spawn a fresh agent into the fleet immediately (even while another is running — that's
+        the point). A title is auto-derived from the first prompt; /name overrides it."""
         self._new_session()
 
     def _autotitle(self, prompt: str) -> None:
@@ -1632,19 +1660,44 @@ class TUI:
         self._invalidate()
 
     def _new_session(self, name: str | None = None) -> None:
-        if self._turn.is_set():
-            return
-        self.agent.reset()
-        self.blocks.clear()
-        self._turn_marks = []; self._suggestion = None
-        self._buf = ""; self._think = ""
+        """SPAWN a new agent into the fleet and switch to it. The previous session keeps running
+        in the background (it doesn't reset) — reach it again via /dashboard."""
         from . import sessions as _sess
-        self.agent.session_file = _sess.new_path(self.config.project_root)
+        sess = AgentSession(self.config, self)
+        sess.agent.session_file = _sess.new_path(self.config.project_root)
         if name:
-            self.agent.name_session(name)
+            sess.agent.name_session(name)
+            sess._autotitled = True                  # a manual name skips auto-titling
+        self._sessions.append(sess)
         self._naming = False
-        self._autotitled = bool(name)                # a manual name skips auto-titling
-        self._flash(f"new session{f': {name}' if name else ''}")
+        self._switch_to(len(self._sessions) - 1)
+        self._flash(f"new agent{f': {name}' if name else ''}  ·  {len(self._sessions)} running")
+
+    def _switch_to(self, idx: int) -> None:
+        """Make session `idx` the active (on-screen) one; the others keep running in the background."""
+        if not self._sessions:
+            return
+        self.active.draft = self.input_buf.text          # stash the current draft
+        self._active_idx = max(0, min(idx, len(self._sessions) - 1))
+        self._close_overlay()
+        self.input_buf.reset()
+        if self.active.draft:
+            self.input_buf.insert_text(self.active.draft)
+        self._invalidate()
+
+    def _close_session(self, idx: int) -> None:
+        """Stop + remove a session (its turn is cancelled). The fleet always keeps at least one."""
+        if not (0 <= idx < len(self._sessions)) or len(self._sessions) <= 1:
+            self._flash("can't close the only session"); return
+        sess = self._sessions.pop(idx)
+        try:
+            sess.agent.cancelled.set()                   # stop its turn if one is running
+        except Exception:
+            pass
+        if self._active_idx >= len(self._sessions):
+            self._active_idx = len(self._sessions) - 1
+        elif idx < self._active_idx:
+            self._active_idx -= 1
         self._invalidate()
 
     def _cycle_mode(self) -> None:
@@ -2279,7 +2332,7 @@ class TUI:
             rows = self._overlay_rows()
             ov["on_action"](key, rows[ov["sel"]] if rows else None)
 
-        for _ch in ("a", "x", "r"):
+        for _ch in ("a", "x", "r", "p"):
             @kb.add(_ch, filter=has_actions)
             def _(ev, _ch=_ch):
                 _ov_action(_ch)
@@ -2396,6 +2449,18 @@ class TUI:
         def _(ev):
             self._prompt_new_session()
 
+        # cycle the active agent (Ctrl+] → next, wraps) — /dashboard for the full fleet. NOT Ctrl+[:
+        # that's the same byte as Esc in a terminal, so binding it would break Escape.
+        @kb.add("c-]", filter=Condition(lambda: self._overlay is None and len(self._sessions) > 1))
+        def _(ev):
+            self._switch_to((self._active_idx + 1) % len(self._sessions))
+
+        # open the fleet dashboard — works even mid-turn (typing then would just steer the turn)
+        @kb.add("c-\\", filter=Condition(lambda: self._overlay is None and self._req is None
+                                         and not self._naming and self._input is None))
+        def _(ev):
+            self._open_dashboard()
+
         @kb.add("s-tab")
         def _(ev):
             self._cycle_mode()
@@ -2478,6 +2543,7 @@ class TUI:
 
     def _submit(self, text: str) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session
+        sess.last_activity = time.monotonic()
         self._cancel.clear()
         self._tool_count = 0
         self._suggestion = None                       # a new prompt supersedes the ghost text

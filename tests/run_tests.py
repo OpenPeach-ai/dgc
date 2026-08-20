@@ -215,16 +215,18 @@ def unit_tests(tmp: Path):
     # --- /dashboard: an INTERACTIVE session roster (status header + "+ New session" + session rows)
     check("dashboard reltime", TUI._reltime(30) == "30s" and TUI._reltime(3700) == "1h" and TUI._reltime(90000) == "1d")
     ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
-    ui._tool_count = 3
-    ui.agent = type("A", (), {"session_name": "demo", "mode": "default", "session_file": None,
-                              "messages": [{"role": "user", "content": "x"}],
-                              "estimate_tokens": lambda self: 1200})()
+    _fa = type("A", (), {"session_name": "demo", "mode": "default", "session_file": None,
+                         "messages": [{"role": "user", "content": "hi"}], "estimate_tokens": lambda self: 1200})()
+    _fs = type("S", (), {"agent": _fa, "pinned": False, "last_activity": 0.0, "_tool_count": 3,
+                         "name": "demo", "state": "idle"})()
+    ui._sessions = [_fs]; ui._active_idx = 0            # a one-agent fleet
     ui.config = type("C", (), {"model": "m", "base_url": "u", "project_root": tmp,
                                "get": lambda self, k, d=None: {"context_size": 32768}.get(k, d)})()
     ui._open_dashboard()
     _dov = ui._overlay
-    check("dashboard is interactive roster", not _dov.get("info") and _dov.get("on_action") is not None
-          and _dov["rows"][0]["value"][0] == "new" and len(_dov["header"]) == 2)
+    check("dashboard is fleet console", not _dov.get("info") and _dov.get("on_action") is not None
+          and _dov["rows"][0]["value"][0] == "new" and _dov["rows"][1]["value"][0] == "switch"
+          and len(_dov["header"]) == 2)
     ui._render_overlay()
 
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
