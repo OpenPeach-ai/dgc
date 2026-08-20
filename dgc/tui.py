@@ -1703,7 +1703,8 @@ class TUI:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
         if not self._sessions:
             return
-        self.active.draft = self.input_buf.text          # stash the current draft
+        if self._overlay is None:                        # stash a REAL draft, not an overlay's filter text
+            self.active.draft = self.input_buf.text
         self._active_idx = max(0, min(idx, len(self._sessions) - 1))
         self._close_overlay()
         self.input_buf.reset()
