@@ -42,7 +42,7 @@ class Artifact:
     @property
     def url(self) -> str:
         """The single-port shell URL, with this artifact pre-selected in the dropdown."""
-        return f"http://127.0.0.1:{_SRV.port}/?a={self.id}" if _SRV.port else f"/?a={self.id}"
+        return f"http://{_SRV.host}:{_SRV.port}/?a={self.id}" if _SRV.port else f"/?a={self.id}"
 
     @property
     def rel(self) -> str:
@@ -68,11 +68,25 @@ def _port_free(port: int) -> bool:
             return False
 
 
+def _lan_ip() -> str:
+    """This machine's primary LAN IP (best effort) — used to build a shareable URL in LAN mode."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))          # no packets sent; just picks the outbound interface
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 class _Server:
     """The single shared artifact server + registry (module singleton)."""
 
     def __init__(self):
         self.port: int | None = None
+        self.host = "127.0.0.1"     # the host shown in URLs (LAN IP when bound to 0.0.0.0)
+        self.lan = False
         self.httpd = None
         self.thread = None
         self.counter = 0
@@ -107,15 +121,19 @@ class _Server:
             pass
 
     # ---- lifecycle -------------------------------------------------------
-    def ensure_started(self, preferred: int | None = None) -> int:
-        """Start the server if it isn't running; return the bound port."""
+    def ensure_started(self, preferred: int | None = None, lan: bool = False) -> int:
+        """Start the server if it isn't running; return the bound port.
+        lan=True binds 0.0.0.0 so other devices on your network can view; else 127.0.0.1 only."""
         with self.lock:
             if self.httpd is not None:
                 return self.port
             port = self._pick_port(preferred)
+            bind = "0.0.0.0" if lan else "127.0.0.1"
             handler = _make_handler(self)
-            self.httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
+            self.httpd = ThreadingHTTPServer((bind, port), handler)
             self.port = port
+            self.lan = lan
+            self.host = _lan_ip() if lan else "127.0.0.1"
             self.thread = threading.Thread(target=self.httpd.serve_forever,
                                            name="artifact-server", daemon=True)
             self.thread.start()
@@ -137,7 +155,8 @@ class _Server:
         return self.httpd is not None
 
     # ---- registry --------------------------------------------------------
-    def add(self, path: str, project_root, name: str = "", preferred_port: int | None = None) -> Artifact:
+    def add(self, path: str, project_root, name: str = "", preferred_port: int | None = None,
+            lan: bool = False) -> Artifact:
         root = Path(project_root)
         target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
         if not target.exists():
@@ -150,7 +169,7 @@ class _Server:
                     entry = htmls[0].name
         else:
             directory, entry = target.parent, target.name
-        self.ensure_started(preferred_port)
+        self.ensure_started(preferred_port, lan)
         with self.lock:
             self.counter += 1
             aid = f"a{self.counter}"
@@ -168,7 +187,17 @@ class _Server:
             return gone
 
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self.port}" if self.port else ""
+        return f"http://{self.host}:{self.port}" if self.port else ""
+
+    def set_bind(self, lan: bool, preferred: int | None = None) -> None:
+        """Switch localhost<->LAN. Restarts the server (same registry) if the mode changed."""
+        if self.running() and self.lan == lan:
+            return
+        was_running = self.running()
+        if was_running:
+            self.shutdown()
+        if was_running or self.artifacts:
+            self.ensure_started(preferred or self.port, lan)
 
     def url_for(self, aid: str) -> str:
         return f"{self.base_url()}/?a={aid}"
@@ -193,13 +222,15 @@ _SRV = _Server()
 
 
 # ---- public API (kept stable for callers) --------------------------------
-def add(path: str, project_root, name: str = "", preferred_port: int | None = None) -> Artifact:
-    return _SRV.add(path, project_root, name, preferred_port)
+def add(path: str, project_root, name: str = "", preferred_port: int | None = None,
+        lan: bool = False) -> Artifact:
+    return _SRV.add(path, project_root, name, preferred_port, lan)
 
 
 # back-compat alias for the old per-port name
-def serve(path: str, project_root, name: str = "", preferred_port: int | None = None) -> Artifact:
-    return _SRV.add(path, project_root, name, preferred_port)
+def serve(path: str, project_root, name: str = "", preferred_port: int | None = None,
+          lan: bool = False) -> Artifact:
+    return _SRV.add(path, project_root, name, preferred_port, lan)
 
 
 def registry() -> list[Artifact]:
@@ -230,10 +261,18 @@ def running() -> bool:
     return _SRV.running()
 
 
-def autostart_if_pending(preferred_port: int | None = None) -> bool:
+def is_lan() -> bool:
+    return _SRV.lan
+
+
+def set_bind(lan: bool, preferred_port: int | None = None) -> None:
+    _SRV.set_bind(lan, preferred_port)
+
+
+def autostart_if_pending(preferred_port: int | None = None, lan: bool = False) -> bool:
     """On dgc launch: bring the server up if there are saved artifacts. Returns True if started."""
     if _SRV.artifacts and not _SRV.running():
-        _SRV.ensure_started(preferred_port)
+        _SRV.ensure_started(preferred_port, lan)
         return True
     return False
 
@@ -330,6 +369,8 @@ def _shell_html(server: "_Server", selected: str) -> str:
         for a in arts)
     initial = next((a.path for a in arts if a.id == selected), "")
     empty = "" if arts else '<div class="empty">No artifacts yet — the agent serves one with the <code>artifact</code> tool.</div>'
+    reach = (f'<span class="reach" title="reachable by other devices on your network">◈ LAN · {server.host}</span>'
+             if server.lan else '')
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DGC Artifacts</title>
@@ -359,12 +400,15 @@ def _shell_html(server: "_Server", selected: str) -> str:
     color:var(--muted);font-size:14px;padding:24px;text-align:center}}
   .empty code{{font-family:var(--mono);color:var(--accent);background:var(--surface-2);padding:2px 6px;border-radius:5px}}
   .count{{color:var(--faint);font:500 12px/1 var(--mono)}}
+  .reach{{color:#E0AF68;font:600 11px/1 var(--mono);border:1px solid rgba(224,175,104,.4);
+    border-radius:6px;padding:4px 8px;letter-spacing:.02em}}
 </style></head>
 <body>
   <div class="bar">
     <span class="mark">///</span>
     <span class="sel-wrap"><select id="sel" title="Switch artifact">{opts}</select></span>
     <span class="count" id="count"></span>
+    {reach}
     <span class="spacer"></span>
     <a class="act" id="open" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
     <button class="act stop" id="stop">Stop</button>

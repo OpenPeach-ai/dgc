@@ -19,6 +19,7 @@ class Theme:
     name: str
     # surfaces
     bg: str; surface: str; surface2: str; code: str
+    band: str                       # the user-prompt band — a clearly-visible tinted lift off bg
     border: str; border_strong: str
     # text
     text: str; text_strong: str; muted: str; faint: str
@@ -33,6 +34,7 @@ class Theme:
 DARK = Theme(
     name="dark",
     bg="#0B0B0C", surface="#141416", surface2="#1A1A1D", code="#0E0E10",
+    band="#241C39",                 # purple-tinted, clearly visible off #0B0B0C (Grok's band is bg_light)
     border="#232326", border_strong="#303034",
     text="#F5F5F5", text_strong="#FFFFFF", muted="#9A9A9E", faint="#6A6A6E",
     accent="#7C5CFF", accent_dim="#6A4BF0", accent_bright="#A78BFA",
@@ -43,6 +45,7 @@ DARK = Theme(
 LIGHT = Theme(
     name="light",
     bg="#FFFFFF", surface="#F6F6F7", surface2="#EFEFF1", code="#F2F2F4",
+    band="#ECE7FB",                 # light lavender band
     border="#E6E6E8", border_strong="#D2D2D6",
     text="#141416", text_strong="#000000", muted="#5E5E64", faint="#8A8A90",
     accent="#5B3FE0", accent_dim="#4A31C8", accent_bright="#7C5CFF",

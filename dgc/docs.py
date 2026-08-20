@@ -118,8 +118,13 @@ chart — it serves it as an **artifact** and offers to open it.
   (`http://127.0.0.1:45000` by default). The page has a **dropdown, top-left**,
   that lists all your artifacts — pick one to switch, like Claude Code.
 - DGC prints the URL in the terminal; open it in your browser.
-- Run **/artifact** to see them, open one, or **stop** one (removes it from the
-  list).
+- Run **/artifact** to see them, open one, **stop** one, or toggle **localhost ⇄
+  LAN** with `b`.
+- **Localhost or your LAN.** By default the server binds `127.0.0.1` (only this
+  machine). Switch it to your **local network** (`artifact_bind: lan`, or press
+  `b` in `/artifact`) and it binds `0.0.0.0` with a shareable `192.168.x.x` URL —
+  open your artifact on your phone or another device. (LAN means anyone on the
+  network can view it — there's no auth.)
 - **It persists.** The list is saved, so after you restart `dgc` the server
   comes back up on the same port with your artifacts intact (set the port with
   `artifact_port`, turn off relaunch with `artifact_autostart`).

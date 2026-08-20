@@ -141,7 +141,7 @@ def unit_tests(tmp: Path):
     check("skill args substitution", sk.render("things") == "Do things now.")
     check("skill discovery", "demo" in discover_skills(tmp))
 
-    # --- overlay hit-map: tabs are mouse-clickable and rows hover-map exactly (Grok parity)
+    # --- overlay hit-map: tabs are mouse-clickable and rows hover-map exactly 
     from dgc.tui import TUI
     import dgc.style as _sty
     _sty.set_theme("dark")
@@ -167,7 +167,7 @@ def unit_tests(tmp: Path):
     ui._overlay_switch_tab(1); ui._render_overlay()  # click the MCP tab → list rebuilds
     check("overlay tab switch rebuilds", ov["tab"] == 1 and [r["label"] for r in ui._overlay_rows()] == ["m0"])
 
-    # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls (Grok /docs)
+    # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls 
     import dgc.docs as _docs
     check("docs library", len(_docs.DOCS) >= 8 and _docs.find("Plan mode") is not None)
     ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
@@ -177,7 +177,7 @@ def unit_tests(tmp: Path):
     check("doc reader scrolls not selects", ui._overlay["scroll"] == 4 and ui._overlay["sel"] == 0)
     ui._render_overlay()                             # renders without raising (styled Text.from_ansi lines)
 
-    # --- plan persistence: present_plan saves a plan.md sidecar; /view-plan reloads it (Grok plan.md)
+    # --- plan persistence: present_plan saves a plan.md sidecar; /view-plan reloads it 
     import dgc.sessions as _sess
     _sf = tmp / "20260101-000000.json"
     check("no plan initially", _sess.load_plan(_sf) is None)
@@ -275,7 +275,7 @@ def unit_tests(tmp: Path):
     _srv.shutdown()
     check("llm cancel interrupts a prefill stall", _dt < 3 and _r.finish_reason == "cancelled")
 
-    # --- todo pane: Grok-style per-status glyphs render, and it stays pinned while a turn runs
+    # --- todo pane: modern-CLI-style per-status glyphs render, and it stays pinned while a turn runs
     import dgc.glyphs as _gl
     tp = object.__new__(TUI)
     tp._width = 80
@@ -303,7 +303,7 @@ def unit_tests(tmp: Path):
           _FTC(sc._cursor_ft(_txt)).create_content(60, 40).cursor_position.y == _txt.count("\n") - 8)
 
     # --- collapsible thinking: a stored reasoning block renders collapsed with a CLICKABLE header,
-    #     and expands to the full reasoning when toggled (Grok thinking.rs)
+    #     and expands to the full reasoning when toggled 
     from prompt_toolkit.formatted_text import fragment_list_to_text as _fltt
     tt = object.__new__(TUI); tt._width = 80; tt._scroll_off = 0
     tt._invalidate = lambda: None; tt._buf = ""; tt._think = ""
@@ -322,7 +322,7 @@ def unit_tests(tmp: Path):
     jt._jump_to_block(0)                                     # oldest turn → scrolled further up
     check("jump scrolls to an earlier turn", jt._scroll_off > off_new)
 
-    # --- resume-by-id + the Grok-style resume-on-exit epilogue
+    # --- resume-by-id + the modern-CLI-style resume-on-exit epilogue
     import dgc.sessions as _S, dgc.cli as _C
     _proj = Path(tempfile.mkdtemp())
     _sp = _S.new_path(_proj)

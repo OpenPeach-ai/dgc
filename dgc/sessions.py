@@ -48,7 +48,7 @@ def load(path) -> list:
     return data.get("messages", [])
 
 
-# Plan persistence — Grok saves the approved/proposed plan to a `plan.md` beside the session so
+# Plan persistence  the approved/proposed plan to a `plan.md` beside the session so
 # it survives the turn (reopen with /view-plan). We keep a `<session>.plan.md` sidecar.
 def plan_path(session_file) -> Path:
     p = Path(session_file)

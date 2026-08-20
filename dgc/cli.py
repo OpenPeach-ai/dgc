@@ -1093,7 +1093,9 @@ def main(argv: list[str] | None = None) -> None:
             if config.get("artifact_autostart", True):   # bring saved artifact previews back up
                 try:
                     from . import artifacts
-                    artifacts.autostart_if_pending(int(config.get("artifact_port", 45000)))
+                    artifacts.autostart_if_pending(
+                        int(config.get("artifact_port", 45000)),
+                        lan=(str(config.get("artifact_bind", "localhost")).lower() == "lan"))
                 except Exception:
                     pass
             if args.classic or not sys.stdout.isatty():
@@ -1107,7 +1109,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _print_resume_hint(agent, config) -> None:
-    """Grok-style epilogue printed to the normal screen after the full-screen app exits:
+    """modern-CLI-style epilogue printed to the normal screen after the full-screen app exits:
         Resume this session with:
           dgc --resume <id>
     Only when a real conversation happened, so a glance-and-quit leaves nothing behind."""

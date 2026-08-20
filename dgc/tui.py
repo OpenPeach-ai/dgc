@@ -286,7 +286,7 @@ class TUI:
 
     def _overlay_row_at(self, y: int):
         """Map a mouse y (within the overlay window) to a filtered-row index, or None.
-        Reads the row→screen-y map recorded by the last _render_overlay — Grok's
+        Reads the row→screen-y map recorded by the last _render_overlay — 
         record-rects-at-render, hit-test-at-event pattern — so it stays exact across
         tabs, titles, headers and scrolling instead of guessing from a formula."""
         ov = self._overlay
@@ -383,6 +383,7 @@ class TUI:
             return ANSI("")
         W = min(max(46, self._width - 6), 108)
         inner = W - 4
+        lpad = max(2, (self._width - W) // 2)           # centered horizontally (Grok's modals are centered)
         rows = self._overlay_rows()
         sel, cap = ov["sel"], self._OVERLAY_CAP
         scroll = ov.get("scroll", 0)
@@ -396,11 +397,11 @@ class TUI:
         ov["scroll"] = scroll
         visible = rows[scroll:scroll + cap]
         labw = min(max((len(r.get("label", "")) for r in rows), default=8), 34)
-        # Hit-map recorded during render (Grok's pattern): screen-y → row index, and the
+        # Hit-map recorded during render : screen-y → row index, and the
         # tab strip's x-ranges. Panel line 0 is the top border, so the k-th content line
         # sits at screen y = 1 + k. Every content line is kept to ONE screen row (truncated,
-        # never wrapped) so the map stays exact. XOFF = 2 left pad + 1 border + 1 panel pad.
-        ov["_rowmap"], ov["_tabmap"], ov["_tab_y"], XOFF = {}, [], None, 4
+        # never wrapped) so the map stays exact. XOFF = left pad + 1 border + 1 panel pad.
+        ov["_rowmap"], ov["_tabmap"], ov["_tab_y"], XOFF = {}, [], None, lpad + 2
         lines: list = []
 
         def emit(line):                                 # append, clamped to one screen row
@@ -465,7 +466,7 @@ class TUI:
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
                       border_style=(th.accent if ov.get("accent") else th.border_strong),
                       padding=(0, 1), width=W)
-        return ANSI(self._rich(Padding(panel, (0, 0, 0, 2))))
+        return ANSI(self._rich(Padding(panel, (0, 0, 0, lpad))))
 
     def _ask_input(self, prompt: str, cb) -> None:
         self._input = {"cb": cb, "prompt": prompt}
@@ -525,9 +526,9 @@ class TUI:
                 add(self._think_frags(blk))
             elif blk:
                 add(list(to_formatted_text(ANSI(blk))))
-        if self._think:                     # the in-flight reasoning (muted, live)
+        if self._think:                     # the in-flight reasoning (muted, live) — same label as the status
             add(list(to_formatted_text(ANSI(self._rich(
-                f"[{th.faint} italic]{glyphs.RAIL} reasoning… {_esc(self._think)}[/]")))))
+                f"[{th.faint} italic]{glyphs.RAIL} Thinking… {_esc(self._think)}[/]")))))
         if self._buf:                       # the in-flight assistant text
             add(list(to_formatted_text(ANSI(self._rich(self._md(self._buf))))))
         if first:
@@ -538,7 +539,7 @@ class TUI:
 
     def _think_frags(self, b: dict):
         """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
-        (▾) to the full reasoning on click — Grok's thinking.rs collapse/expand."""
+        (▾) to the full reasoning on click  collapse/expand."""
         from prompt_toolkit.mouse_events import MouseEventType
         th = style_mod.theme()
         secs = b.get("secs", 0)
@@ -599,14 +600,14 @@ class TUI:
         if self.blocks or self._buf or self._overlay or self._welcome_metrics()[2] == "compact":
             return ANSI("")
         upd = cached_update()
-        if upd:                                            # echo the update CTA in the tip, like Grok
+        if upd:                                            # echo the update CTA in the tip, like 
             return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]a newer DGC ([bold {self._GOLD}]v{upd}[/]) "
                                    f"is out — type [bold {self._GOLD}]/update[/] or click [ Update now ][/]"))
         return ANSI(self._rich(f"  [bold]Tip:[/] [{th.faint}]Shift+Tab to switch mode "
                                f"{glyphs.MIDDOT} /help for commands {glyphs.MIDDOT} Esc to stop a turn[/]"))
 
     def _shortcut_bar(self):
-        """A persistent, context-aware key-hint bar pinned to the very bottom — Grok's
+        """A persistent, context-aware key-hint bar pinned to the very bottom — 
         shortcuts_bar.rs ported: bold-bright key + dim label chips, a dim separator, and a
         'press again to quit' takeover. Rebuilt every frame so keys track the current state."""
         th = style_mod.theme()
@@ -640,7 +641,7 @@ class TUI:
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             left = self._rich(f" [bold {th.accent}]Vibe DGC[/] "
                               f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]")
-            chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter (Grok context_bar)
+            chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter 
             right = self._rich(chip)
             lw = len(re.sub(r"\x1b\[[0-9;?]*m", "", left))
             gap = max(2, self._width - lw - cw - 1)
@@ -653,7 +654,7 @@ class TUI:
         return th.err if pct >= 90 else th.warn if pct >= 75 else th.muted if pct >= 50 else th.text
 
     def _context_chip(self, hover: bool):
-        """Top-right context counter — Grok's context_bar.rs. Default: `used / total` (colored by an
+        """Top-right context counter  Default: `used / total` (colored by an
         urgency gradient). Hover: morph to `█████ 42.0%` at the SAME width (no layout shift)."""
         th = style_mod.theme()
         used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
@@ -670,7 +671,7 @@ class TUI:
         return f"[{col}]{bar}[/] [{th.muted}]{pctstr:>5}[/]", total_w
 
     def _open_context_popup(self) -> None:
-        """Click the context chip → a details popup (Grok's usage-modal Context tab): the token
+        """Click the context chip → a details popup : the token
         summary, a bar, the model, and turn/tool stats."""
         from rich.text import Text
         th = style_mod.theme()
@@ -708,7 +709,7 @@ class TUI:
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
     def _jump_to_block(self, i: int) -> None:
-        """Scroll the transcript so block `i` (a turn's prompt) is in view — Grok's /jump."""
+        """Scroll the transcript so block `i` (a turn's prompt) is in view """
         if not (0 <= i < len(self.blocks)):
             return
         before = sum(self._block_lines(b) for b in self.blocks[:i]) + i          # +i newline separators
@@ -717,7 +718,7 @@ class TUI:
         self._invalidate()
 
     def _open_jump(self) -> None:
-        """A picker of every turn — Enter scrolls the transcript to it (Grok's jump.rs)."""
+        """A picker of every turn — Enter scrolls the transcript to it ."""
         if not self._turn_marks:
             self._flash("no turns to jump to yet"); return
         rows = [{"label": f"{n + 1}.", "desc": prev, "value": bi}
@@ -726,7 +727,7 @@ class TUI:
                            title="Jump to a turn", footer="↑↓ move · Enter jump · Esc cancel")
 
     def _open_rewind(self) -> None:
-        """Pick a past turn to restore code + conversation to (Grok's /rewind), then confirm."""
+        """Pick a past turn to restore code + conversation to , then confirm."""
         pts = self.agent.checkpoints.listing()
         if not pts:
             self._flash("no checkpoints yet — run a turn first"); return
@@ -778,7 +779,7 @@ class TUI:
                            footer="↑↓ move · type to filter · Enter recall · Esc cancel")
 
     def _open_cheatsheet(self) -> None:
-        """A grouped keyboard + command reference — Grok's shortcuts_help (Ctrl+G)."""
+        """A grouped keyboard + command reference  (Ctrl+G)."""
         from rich.text import Text
         th = style_mod.theme()
         groups = [
@@ -804,7 +805,7 @@ class TUI:
         self._open_overlay([], on_pick=lambda r: None, header=lines, footer="Esc close", accent=True, info=True)
 
     def _open_docs(self) -> None:
-        """Grok's /docs — a picker over the in-app how-to library."""
+        """a reference TUI's /docs — a picker over the in-app how-to library."""
         from . import docs as docs_mod
         rows = [{"label": t, "desc": d, "value": t} for t, d, _ in docs_mod.DOCS]
         self._open_overlay(rows, on_pick=lambda r: self._open_doc_reader(r["value"]),
@@ -831,7 +832,7 @@ class TUI:
         self._open_reader(entry[2], footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
 
     def _open_plan_view(self) -> None:
-        """Grok's /view-plan — reopen the plan saved during the last plan-mode turn."""
+        """a reference TUI's /view-plan — reopen the plan saved during the last plan-mode turn."""
         from . import sessions
         md = sessions.load_plan(self.agent.session_file) if self.agent.session_file else None
         if not md:
@@ -851,7 +852,7 @@ class TUI:
         return f"{secs // 86400}d"
 
     def _open_dashboard(self) -> None:
-        """A one-glance overview — Grok's dashboard, sized to DGC: this session, the model,
+        """A one-glance overview , sized to DGC: this session, the model,
         context, running artifacts, and recent sessions."""
         from rich.text import Text
         from . import sessions, artifacts
@@ -912,8 +913,8 @@ class TUI:
         return 9 + (2 if upd else 1)
 
     _CHROME_BELOW = 5     # rows under the header at welcome: status(1) + composer box(3) + shortcut bar(1)
-    _WIDE_MIN = 82       # below this terminal WIDTH the card stacks (logo on top) — Grok's breakpoint feel
-    _CARD_W = 96         # FIXED card width (like Grok's capped box): it never stretches — it stays this
+    _WIDE_MIN = 82       # below this terminal WIDTH the card stacks (logo on top)  feel
+    _CARD_W = 96         # FIXED card width (like a reference TUI's capped box): it never stretches — it stays this
                           # size and centered no matter how large the terminal gets.
 
     def _card_body_rows(self, mode, upd) -> int:
@@ -927,7 +928,7 @@ class TUI:
         """Card width W (FIXED, centered — never stretches), inner width, layout mode, and the card's
         PANEL height (border+pad included). The vertical/horizontal centering is added in _welcome_card.
 
-        mode: 'wide' (Grok-style — braille logo LEFT, text RIGHT, centered), 'stacked' (narrow → logo
+        mode: 'wide' , 'stacked' (narrow → logo
         on TOP, menu below), or 'compact' (too short → 1-line header, so a phone never hits 'too small').
         """
         w, h = self._width, getattr(self, "_height", 30)
@@ -947,7 +948,7 @@ class TUI:
     # (label, keyboard shortcut, slash command, click-action) — the card shows BOTH ways in.
     _MENU = [("New session", "Ctrl+N", "/new", "new"), ("Switch mode", "Shift+Tab", "/mode", "switch"),
              ("Commands", "type /", "/help", "commands"), ("Quit", "Ctrl+Q", "/quit", "quit")]
-    _GOLD = "#E0A24E"                                       # update CTA accent (stands out, like Grok's)
+    _GOLD = "#E0A24E"                                       # update CTA accent (stands out, like )
 
     def _welcome_card(self) -> str:
         from rich import box
@@ -968,7 +969,7 @@ class TUI:
                 t.append(f"  {glyphs.MIDDOT} ⬆ v{upd} /update", style=f"bold {self._GOLD}")
             return self._rich(Padding(t, (0, 0, 0, 1)))
 
-        # centre the fixed-size card on screen (like Grok): top-pad within the filled header height,
+        # centre the fixed-size card on screen (like ): top-pad within the filled header height,
         # left-margin within the terminal width.
         avail = self._height - self._CHROME_BELOW
         top_pad = max(1, (avail - card_h) // 2)
@@ -1087,18 +1088,23 @@ class TUI:
             elif self._thinking:
                 act = "Thinking"
             else:
-                act = "Working"
-            # Grok turn-status structure: activity (left), total-time + ⇣tokens + [stop] (right).
+                act = "Waiting"                 # Grok never shows a bare "Working" for an inference turn
+            # per-phase timer (Grok's `Thinking… 0.4s`): reset whenever the activity label changes.
+            if getattr(self, "_phase_act", None) != act:
+                self._phase_act, self._phase_t0 = act, time.monotonic()
+            pel = time.monotonic() - self._phase_t0
+            pstr = f"{pel:.1f}s" if pel < 60 else f"{int(pel // 60)}m{int(pel % 60)}s"
+            #  turn-status structure: spinner + activity + phase-timer (left); total-time + ⇣tokens + [stop] (right).
             tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
             toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
-            left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/]"
-            right = f"[{th.faint}]{tstr}  {glyphs.ELLIPSIS_V if False else '⇣'}{toks}[/]  [{th.err}][stop][/]"
+            left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/] [{th.faint}]{pstr}[/]"
+            right = f"[{th.faint}]{tstr}  ⇣{toks}[/]  [{th.err}][stop][/]"
             return self._pad_lr(left, right)
         return ANSI("")                          # idle: the context bar now lives top-right in the header
 
     def _pad_lr(self, left: str, right: str, indent: str = "  "):
         """One row with `left` markup at the start and `right` markup flush to the terminal edge —
-        Grok's status layout (activity left; timer + tokens + [stop] right)."""
+        a reference TUI's status layout (activity left; timer + tokens + [stop] right)."""
         import re
         L, R = self._rich(left), self._rich(right)
         vis = lambda s: len(re.sub(r"\x1b\[[0-9;?]*m", "", s))   # visible width (ANSI stripped)
@@ -1155,7 +1161,7 @@ class TUI:
 
     def _flush_think(self) -> None:
         """Collapse the streamed reasoning to a single dim `◆ Thought for Xs` line once the answer
-        starts — Grok's thinking.rs auto-collapse (the live reasoning still streams during the turn;
+        starts  auto-collapse (the live reasoning still streams during the turn;
         it just folds away after, instead of leaving a wall of grey text in the transcript)."""
         if self._think.strip():
             secs = (time.monotonic() - self._think_t0) if self._think_t0 else 0
@@ -1207,7 +1213,7 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]{glyphs.CROSS} {name} denied[/] [{th.faint}]{reason}[/]"))
 
-    # Grok-style task list: icon glyph + icon colour + text style, per status.
+    # modern-CLI-style task list: icon glyph + icon colour + text style, per status.
     _TODO_STYLE = {
         "pending":     ("SQUARE", "text",  "{text}"),
         "in_progress": ("PLAY",   "warn",  "bold {text}"),
@@ -1216,7 +1222,7 @@ class TUI:
     }
 
     def on_todo(self, todos: list) -> None:
-        # Store + render live in a PINNED pane above the composer (Grok-style), instead of
+        # Store + render live in a PINNED pane above the composer , instead of
         # re-printing the whole list into the transcript on every update.
         self._todos = list(todos or [])
         self._invalidate()
@@ -1269,17 +1275,17 @@ class TUI:
             return False
 
     def _open_artifacts(self) -> None:
-        """`/artifact` — a roster of running localhost previews: Enter opens one, x stops it."""
+        """`/artifact` — the roster of artifacts: Enter opens one, x removes it, b toggles bind."""
         from . import artifacts
         arts = artifacts.registry()
+        mode = "LAN (network)" if str(self.config.get("artifact_bind", "localhost")).lower() == "lan" else "localhost only"
         if not arts:
-            self._flash("no running artifacts — the agent serves one with the artifact tool")
+            self._flash(f"no artifacts yet · reach: {mode} · the agent serves one with the artifact tool")
             return
-        rows = [{"label": a.name, "desc": f"{a.url}  ·  {a.rel}  ·  up {a.uptime}", "value": a.id}
-                for a in arts]
+        rows = [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id} for a in arts]
         self._open_overlay(rows, on_pick=lambda r: self._artifact_open(r["value"]),
-                           on_action=self._artifact_action, title="Running artifacts",
-                           footer="Enter open · x stop (frees the port) · Esc close", accent=True)
+                           on_action=self._artifact_action, title=f"Artifacts · {mode}",
+                           footer="Enter open · x remove · b localhost/LAN · Esc close", accent=True)
 
     def _artifact_open(self, aid: str) -> None:
         from . import artifacts
@@ -1290,11 +1296,18 @@ class TUI:
         self._flash((f"opened {art.url}" if opened else f"open {art.url} in your browser"))
 
     def _artifact_action(self, key: str, row) -> None:
-        if not row or key not in ("x", "space"):
-            return
         from . import artifacts
-        artifacts.stop(row["value"])
-        self._open_artifacts()                      # refresh (closes if none remain)
+        if key == "b":                                   # toggle localhost <-> LAN reach + restart
+            lan = str(self.config.get("artifact_bind", "localhost")).lower() != "lan"
+            self.config.set("artifact_bind", "lan" if lan else "localhost")
+            artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
+            self._flash("artifacts reachable on your LAN — anyone on the network can view"
+                        if lan else "artifacts now localhost-only")
+            self._open_artifacts()
+            return
+        if row and key in ("x", "space"):
+            artifacts.stop(row["value"])
+            self._open_artifacts()                       # refresh (closes if none remain)
 
     def error(self, msg: str) -> None:
         th = style_mod.theme()
@@ -1425,7 +1438,7 @@ class TUI:
                    height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
-        # A live task list pinned just above the composer (Grok-style) — shows while a turn
+        # A live task list pinned just above the composer  — shows while a turn
         # runs or any task is still open, then folds away.
         todo_panel = ConditionalContainer(
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
@@ -1493,14 +1506,14 @@ class TUI:
 
     # ---- shared menu actions (invoked by both keys and mouse clicks) ----
     def _prompt_new_session(self) -> None:
-        """Start a fresh session immediately — no name prompt (Grok never asks). A title is
+        """Start a fresh session immediately — no name prompt . A title is
         auto-derived from the first prompt; /name overrides it."""
         if self._turn.is_set():
             return
         self._new_session()
 
     def _autotitle(self, prompt: str) -> None:
-        """Background: derive a session title from the first prompt (Grok-style) and apply it,
+        """Background: derive a session title from the first prompt  and apply it,
         unless the user already named it. Silent on failure."""
         try:
             title = self.agent.generate_title(prompt)
@@ -2314,7 +2327,7 @@ class TUI:
                                         and self._overlay is None and self.input_buf.complete_state is None))
         @kb.add("right", filter=Condition(lambda: self.input_buf.suggestion is not None
                                           and self.input_buf.document.is_cursor_at_the_end and self._overlay is None))
-        def _(ev):                          # accept the ghost-text suggestion (Grok: Tab / →)
+        def _(ev):                          # accept the ghost-text suggestion 
             s = self.input_buf.suggestion
             if s:
                 self.input_buf.insert_text(s.text)
@@ -2332,13 +2345,14 @@ class TUI:
         return kb
 
     def _user_band(self, text: str):
-        """The user's prompt as a bg-tinted band with a ❯ prefix (Grok's user.rs) — a highlighted
+        """The user's prompt as a bg-tinted band with a ❯ prefix  — a highlighted
         block that reads distinctly from the assistant text. No border/rail; continuation lines
         indent under the arrow, and the whole thing sits on a subtle raised background."""
         from rich.text import Text
         th = style_mod.theme()
-        W = min(max(30, self._width - 4), 104)
+        W = max(30, self._width)                      # full-width band (Grok fills the block edge-to-edge)
         t = Text()
+        t.append(" " * W + "\n")                      # vpad: a blank tinted line above (Grok's vpad:true)
         lines = (text.rstrip("\n") or "").split("\n")
         for i, ln in enumerate(lines):
             pre = f"{glyphs.ARROW} " if i == 0 else "  "
@@ -2346,10 +2360,10 @@ class TUI:
             t.append(ln, style=th.text_strong)
             pad = W - len(pre) - len(ln)
             if pad > 0:
-                t.append(" " * pad)                 # fill the row so the band spans a clean width
-            if i < len(lines) - 1:
-                t.append("\n")
-        t.stylize(f"on {th.surface2}")               # the raised background band
+                t.append(" " * pad)                 # fill the row so the band spans the full width
+            t.append("\n")
+        t.append(" " * W)                             # vpad: a blank tinted line below
+        t.stylize(f"on {th.band}")                    # a clearly-visible raised background band
         return self._rich(t)
 
     def _submit(self, text: str) -> None:
@@ -2378,7 +2392,7 @@ class TUI:
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
-                # Grok-style: auto-derive a title for an unnamed session from the first prompt
+                # modern-CLI-style: auto-derive a title for an unnamed session from the first prompt
                 if (not self.agent.session_name and not self._autotitled
                         and not self._cancel.is_set()):
                     self._autotitled = True

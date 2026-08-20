@@ -356,7 +356,7 @@ class Agent:
                 sessions.set_name(self.session_file, self.session_name)
 
     def generate_title(self, prompt: str) -> str | None:
-        """A short, distinctive 5-10 word session title derived from the first prompt (Grok's
+        """A short, distinctive 5-10 word session title derived from the first prompt (
         session_summary.rs). Best-effort, no tools/thinking; returns None on any failure."""
         import re as _re
         sysmsg = ("You generate a session title: a short, distinctive 5-10 word descriptive title "
@@ -374,7 +374,7 @@ class Agent:
         return title or None
 
     def suggest_next(self, user_prompt: str, assistant_response: str) -> str | None:
-        """Predict ONE plausible next prompt the user might type (Grok's ghost-text). Best-effort,
+        """Predict ONE plausible next prompt the user might type . Best-effort,
         cheap (no tools/thinking); returns None on failure."""
         import re as _re
         sysmsg = ("Given the last exchange in a coding session, predict ONE short, natural next prompt "
@@ -545,7 +545,7 @@ class Agent:
 
         if name == "present_plan":
             plan = str(args.get("plan", ""))
-            if self.session_file and plan:              # persist it (Grok's plan.md) → /view-plan reopens
+            if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
                 sessions.save_plan(self.session_file, plan)
             choice = self.ui.present_plan(plan)
@@ -575,7 +575,8 @@ class Agent:
             try:
                 art = artifacts.add(str(args.get("path", "")), self.config.project_root,
                                     str(args.get("name", "") or ""),
-                                    preferred_port=int(self.config.get("artifact_port", 45000)))
+                                    preferred_port=int(self.config.get("artifact_port", 45000)),
+                                    lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"))
             except Exception as e:
                 return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
             notify = getattr(self.ui, "artifact_ready", None)
