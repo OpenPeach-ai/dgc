@@ -1,0 +1,6 @@
+# benchmark working data — not committed (large / regenerable)
+data/
+results/
+__pycache__/
+*.pyc
+edit_corpus/
