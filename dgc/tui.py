@@ -1058,7 +1058,9 @@ class TUI:
 
         # ── figure logo geometry + the content-column offset FIRST, so click/hover rows are exact ──
         if mode == "stacked":
-            logo_p = logo_mod.shimmer_lines(secs, small=True)
+            # pad every row to the SAME width so the mark is a rigid block — then it can be centered
+            # with ONE offset. Centering each row by its own length would shear the /// diagonal apart.
+            logo_p = logo_mod.shimmer_lines(secs, small=True, pad=logo_mod.WIDTH_SMALL)
             text_w = cw_area
             content_off = len(logo_p) + 1                  # logo rows + one blank
             logo_w = gap = loff = 0
@@ -1122,9 +1124,9 @@ class TUI:
         # ── compose rows ──
         rows: list = []
         if mode == "stacked":
+            block_pad = max(0, (cw_area - logo_mod.WIDTH_SMALL) // 2)   # ONE offset → diagonal intact
             for lr in logo_p:
-                pad = max(0, (cw_area - lr.cell_len) // 2)
-                r = Text(" " * pad); r.append_text(lr); rows.append(r)
+                r = Text(" " * block_pad); r.append_text(lr); rows.append(r)
             rows.append(Text(""))
             rows.extend(content)
         else:
