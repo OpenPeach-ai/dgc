@@ -142,6 +142,7 @@ class AgentSession:
         self._req: dict | None = None
         self._req_answer = None
         self._req_event = threading.Event()
+        self._req_pick = None              # the on-pick callback bound to THIS session's request
         self.pinned = False
         self.draft = ""                    # unsent composer text, restored when you switch back
         self.created = time.monotonic()
@@ -714,6 +715,17 @@ class TUI:
         key, lbl, sep = f"bold {th.muted}", th.faint, th.faint
         body = f"[{sep}]  {glyphs.RAIL}  [/]".join(
             f"[{key}]{_esc(k)}[/] [{lbl}]{_esc(l)}[/]" for k, l in chips)
+        # fleet indicator: how many agents + whether a BACKGROUND one is running / needs you (^\ = dashboard)
+        if len(self._sessions) > 1:
+            need = sum(1 for i, s in enumerate(self._sessions) if i != self._active_idx and s.state == "needs_input")
+            run = sum(1 for i, s in enumerate(self._sessions) if i != self._active_idx and s.state == "running")
+            seg = f"[bold {th.accent}]⧉ {len(self._sessions)}[/]"
+            if need:
+                seg += f" [bold {th.err}]◆{need} need you[/]"
+            elif run:
+                seg += f" [{th.warn}]⋮{run}[/]"
+            seg += f" [{th.faint}]Ctrl+\\ [/]"          # trailing space: avoid rich reading \] as an escape
+            body += f"[{sep}]  {glyphs.RAIL}  [/]" + seg
         return ANSI("  " + self._rich(body))
 
     @staticmethod
@@ -1452,26 +1464,40 @@ class TUI:
         self._streaming = False
 
     # ---- blocking prompts (run on the worker thread; answered by the UI) ----
-    def _ask(self, req: dict):
-        """Render a blocking prompt as a navigable overlay CARD (↑↓ + Enter + number shortcuts).
-        Runs on the worker thread; the UI thread answers via on_pick / number keys / Esc."""
-        self._req = req
-        self._req_event.clear()
+    def _show_req_overlay(self, sess: "AgentSession") -> None:
+        """Open the approval/plan/options card for `sess`'s pending request (on screen now)."""
+        req = sess._req
+        if not req:
+            return
         options = req.get("options", [])
         rows = [{"label": f"{i + 1}  {o}", "value": i} for i, o in enumerate(options)]   # 1-9 shortcuts
-
-        def pick(row):
-            self._req_answer = row["value"]
-            self._req_event.set()
-        self._open_overlay(rows, on_pick=pick, title=req.get("title"), header=req.get("header"),
+        self._open_overlay(rows, on_pick=sess._req_pick, title=req.get("title"), header=req.get("header"),
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
+
+    def _ask(self, req: dict):
+        """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
+        thread answers via on_pick / number keys / Esc. If the session is on screen the card opens
+        now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
+        sess = self._cur_session()
+        sess._req = req
+        sess._req_event.clear()
+
+        def pick(row):
+            sess._req_answer = row["value"]
+            sess._req_event.set()
+        sess._req_pick = pick
+        if sess is self.active:
+            self._show_req_overlay(sess)
+        else:
+            self._flash(f"◆ {sess.name or 'agent'} needs you — ^\\ to answer")
         self._invalidate()
-        self._req_event.wait()
-        self._req = None
-        self._overlay = None                            # closed (option chosen or Esc-cancelled)
+        sess._req_event.wait()
+        sess._req = None
+        if sess is self.active and self._overlay is not None:
+            self._overlay = None                        # close (option chosen or Esc-cancelled)
         self._invalidate()
-        return self._req_answer
+        return sess._req_answer
 
     def approve(self, name: str, args: dict) -> str:
         from rich.text import Text
@@ -1683,6 +1709,8 @@ class TUI:
         self.input_buf.reset()
         if self.active.draft:
             self.input_buf.insert_text(self.active.draft)
+        if self.active._req is not None:                 # this agent was waiting on you → show its card
+            self._show_req_overlay(self.active)
         self._invalidate()
 
     def _close_session(self, idx: int) -> None:
@@ -2564,12 +2592,15 @@ class TUI:
             finally:
                 self._flush_text()
                 self._turn.clear()
+                sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
                 th = style_mod.theme()
                 verb = "stopped" if self._cancel.is_set() else "done"
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
+                if sess is not self.active and not self._cancel.is_set():   # a background agent finished
+                    self._flash(f"⧉ {sess.name or 'agent'} finished — ^\\ to view")
                 # auto-derive a title for an unnamed session from the first prompt
                 if (not self.agent.session_name and not self._autotitled
                         and not self._cancel.is_set()):
