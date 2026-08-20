@@ -22,7 +22,7 @@ Built by Mohit Kalra.
 
 ---
 
-DGC is an interactive coding agent that lives in your terminal — in the spirit of Claude Code, Codex CLI and Kimi Code, but pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
+DGC is an interactive coding agent that lives in your terminal, pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
 
 ![DGC landing — vibedgc.com](docs/screenshot.png)
 
@@ -78,7 +78,7 @@ Switch live with `/mode` (cycles) or `/mode <name>`, or launch with `--mode`:
 | `plan` | **read-only** — the agent researches and proposes a plan you approve |
 | `auto` | **full-auto** — everything approved, the agent works unattended until done |
 
-Fine-grained rules on top (Claude Code syntax, evaluated deny → ask → allow):
+Fine-grained rules on top (evaluated deny → ask → allow):
 
 ```
 /permissions allow Bash(npm run *)
@@ -94,7 +94,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Multiple agents at once** — run a **fleet**: `Ctrl+N` spawns a new agent (even while one is running), `Ctrl+O` cycles, `Ctrl+\` opens the **dashboard** — every agent with its live state (● on screen · ⋮ working · ◆ needs you · ○ idle), where you attach, close, pin, and rename. A background agent that finishes or needs a decision flags itself in the bottom bar. Each agent can use a different model/endpoint.
 - **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a per-phase status timer (`Thinking… 0.4s`), a top-right context-window meter (click it for a usage breakdown), and centered dialogs.
 - **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode). The plan is **saved to a `plan.md` beside the session**; reopen it any time with `/view-plan`.
-- **Artifacts** — how the agent proposes something visual on a localhost URL, most often a **plan**: in plan mode DGC renders `plan.md` as a clean page (like a Claude Code artifact) and offers to open it. It also serves any page/app/chart the agent builds. Every artifact shares **one local server on one port** (`127.0.0.1:45000` by default) with a **dropdown, top-left**, to switch between them — like Claude Code. The list is **saved**, so it survives a `dgc` restart (`artifact_port` / `artifact_autostart` to tune). `/artifact` lists them; frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
+- **Artifacts** — how the agent proposes something visual on a localhost URL, most often a **plan**: in plan mode DGC renders `plan.md` as a clean page and offers to open it. It also serves any page/app/chart the agent builds. Every artifact shares **one local server on one port** (`127.0.0.1:45000` by default) with a **dropdown, top-left**, to switch between them. The list is **saved**, so it survives a `dgc` restart (`artifact_port` / `artifact_autostart` to tune). `/artifact` lists them; frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
 - **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
 - **Next-prompt suggestions** — after each turn DGC predicts a sensible follow-up as ghost text; press **Tab / →** to accept it (toggle with the `suggest` config).
 - **Runs tiny local models** — if the endpoint has no native tool-calling, DGC auto-switches to a text tool-call protocol and parses it.
@@ -102,7 +102,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Thinking modes** — `/think off|low|medium|high`; `think` / `think hard` / `ultrathink` in a prompt bump it for that turn. `<think>` streams dim.
 - **Memory** — `DGC.md` in your project (and `~/.dgc/DGC.md` personal) load into every session; `#a fact` quick-adds; `/init` writes a project guide.
 - **Web search** — the model gets a `web_search` tool. DuckDuckGo works keyless out of the box; add Brave/Tavily (API key) or SearXNG (self-hosted URL) via `dgc setup` or `/search`.
-- **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one (Claude Code / Codex style).
+- **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one.
 - **Checkpoints & rewind** — every turn is checkpointed; `/rewind` restores both your code and the conversation to an earlier turn.
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
 - **Skills** — ships **11 built-in skills** (`code-review`, `debug`, `deep-research`, `doctor`, `verify`, `batch`, `dataviz`, `loop`, `fewer-permission-prompts`, `providers`, `dgc-design`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`. `dgc-design` encodes DGC's frontend design language and stays off for normal coding — artifacts load it automatically.
@@ -157,7 +157,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 ## Let your agent install it
 
-Paste this to your Claude Code / Codex / any coding agent:
+Paste this to any coding agent:
 
 > Install DGC for me: run `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup` and connect it to my local Ollama (or ask me which provider). Verify with `dgc doctor`.
 

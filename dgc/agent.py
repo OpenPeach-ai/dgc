@@ -21,6 +21,8 @@ from .skills import discover_skills
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
+_FAIL_SOFT = 4          # consecutive failing bash runs (no success) before we nudge a rethink
+_FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn (grind guard)
 _MAX_CONTINUE = 3       # length-truncation auto-continues per turn
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
@@ -43,7 +45,7 @@ THINK_INSTRUCTIONS = {
              "explore alternative approaches, verify assumptions against the actual code, "
              "and double-check every action before taking it."),
 }
-# prompt keywords bump the thinking level for that turn (Claude Code style)
+# prompt keywords bump the thinking level for that turn
 THINK_KEYWORDS = [
     ("ultrathink", "high"), ("think harder", "high"),
     ("think hard", "medium"), ("think", "low"),
@@ -128,7 +130,11 @@ class Agent:
     def __init__(self, config: Config, ui, mcp: MCPManager | None = None):
         self.config = config
         self.ui = ui
-        self.client = LLMClient(config.base_url, config.api_key, config.model, read_timeout=int(config.get("request_timeout", 1800)))
+        self.client = LLMClient(config.base_url, config.api_key, config.model,
+                                read_timeout=int(config.get("request_timeout", 1800)),
+                                think_budget_tokens=int(config.get("think_budget_tokens", 8000)),
+                                max_tokens=int(config.get("max_tokens", 16384)),
+                                ollama_keep_alive=str(config.get("ollama_keep_alive", "30m")))
         self.skills = discover_skills(config.project_root)
         if mcp is not None:                       # subagents share the parent's MCP servers
             self.mcp = mcp
@@ -155,7 +161,11 @@ class Agent:
 
     # ------------------------------------------------------------ setup ---
     def refresh_client(self) -> None:
-        self.client = LLMClient(self.config.base_url, self.config.api_key, self.config.model, read_timeout=int(self.config.get("request_timeout", 1800)))
+        self.client = LLMClient(self.config.base_url, self.config.api_key, self.config.model,
+                                read_timeout=int(self.config.get("request_timeout", 1800)),
+                                think_budget_tokens=int(self.config.get("think_budget_tokens", 8000)),
+                                max_tokens=int(self.config.get("max_tokens", 16384)),
+                                ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")))
 
     def _tool_schemas(self) -> list[dict]:
         """Built-in tools plus any tools from connected MCP servers."""
@@ -261,7 +271,7 @@ class Agent:
         project_mem, user_mem = load_memories(cfg.project_root)
         agents_md = cfg.project_root / "AGENTS.md"
         # only adopt AGENTS.md as project memory in a real project dir — never the bare home dir,
-        # where it may belong to a different agent (Codex, another assistant) and hijack the session.
+        # where it may belong to a different agent (another assistant) and hijack the session.
         if not project_mem and agents_md.exists() and cfg.project_root != Path.home():
             try:
                 project_mem = agents_md.read_text().strip()
@@ -418,9 +428,17 @@ class Agent:
             content = user_text
         self.messages.append({"role": "user", "content": content})
         thinking = self._effective_thinking(user_text)
-        effort = thinking if thinking != "off" else None
+        # Pass the raw level; the client maps it to the right per-provider reasoning
+        # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
+        # Ollama it becomes reasoning_effort:"none" (omitting would force thinking ON).
+        effort = thinking
         max_turns = int(self.config.get("max_turns", 40))
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
+        fail_streak = 0             # consecutive non-zero bash exits (no success) — grind guard
+        fail_nudged = False
+        verify_runs = 0             # E: verify_before_done attempts this turn (bounded)
+        last_fail_fp = None         # fingerprint of the last failing bash output
+        same_fail = 0               # consecutive failures with the SAME fingerprint (stuck signal)
         continues = 0               # length-truncation auto-continues used this turn
         mutating_total = 0          # edits/bash this turn — drives the TodoGate nudge
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
@@ -490,6 +508,25 @@ class Agent:
                     continue
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
                     continue
+                if (verify_runs < 2 and mutating_total > 0                       # E: verify-before-done gate
+                        and self.config.get("verify_before_done") and self.config.get("verify_command")):
+                    verify_runs += 1
+                    cmd = str(self.config.get("verify_command"))
+                    self.ui.info(f"⧗ verify: {cmd}")
+                    import subprocess as _sp
+                    try:
+                        pr = _sp.run(["bash", "-lc", cmd], cwd=str(self.config.project_root),
+                                     capture_output=True, text=True,
+                                     timeout=int(self.config.get("bash_timeout", 120)))
+                        if pr.returncode != 0:
+                            tail = ((pr.stdout or "") + "\n" + (pr.stderr or ""))[-3000:]
+                            self.messages.append({"role": "user", "content":
+                                "<system-reminder>\nverify_before_done: your changes fail "
+                                f"`{cmd}` (exit {pr.returncode}). Fix them, then finish:\n" + tail
+                                + "\n</system-reminder>"})
+                            continue
+                    except Exception as e:
+                        self.ui.info(f"verify skipped: {e}")
                 return
 
             did_tools = True                # the model called tools → expect a closing summary
@@ -511,6 +548,15 @@ class Agent:
                     self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call")
                 else:
                     out = self._handle_call(call)
+                if call.name == "bash" and out.startswith("exit code: "):   # grind guard
+                    head, _, body = out.partition("\n")
+                    if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
+                        fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
+                    else:
+                        fail_streak += 1
+                        fp = "".join(c for c in body if not c.isdigit())[:400]  # ignore line #s / timings
+                        same_fail = same_fail + 1 if fp == last_fail_fp else 1
+                        last_fail_fp = fp
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -519,11 +565,20 @@ class Agent:
                 self.messages.append({"role": "user",
                                       "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>"})
 
+            if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
+                self.ui.error(f"stopped — the same command failure repeated {same_fail}× with no progress")
+                return
+
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
             mutating_total += sum(1 for c in result.tool_calls
-                                  if c.name in ("write_file", "edit_file", "bash"))
+                                  if c.name in ("write_file", "edit_file", "multi_edit", "bash"))
             reminders: list[str] = []
+            if fail_streak >= _FAIL_SOFT and not fail_nudged:   # grind guard: nudge a rethink
+                fail_nudged = True
+                reminders.append(f"The last {fail_streak} commands all failed with no success. Stop "
+                                 "retrying variations — re-read the failing output carefully, reconsider "
+                                 "the approach from scratch, or state plainly what is blocking you.")
             if mutating_total >= 3 and not self.ctx.todos and not todo_nudged:
                 todo_nudged = True
                 reminders.append("You've made several edits without a plan. For a multi-step task, "
@@ -622,7 +677,7 @@ class Agent:
             if verdict == "always":
                 self.ui.add_permission_rule(name, args)
 
-        if name in ("write_file", "edit_file") and args.get("path"):
+        if name in ("write_file", "edit_file", "multi_edit") and args.get("path"):
             raw = str(args["path"])
             abs_path = raw if Path(raw).is_absolute() else str(self.config.project_root / raw)
             self.checkpoints.record_file(abs_path)     # snapshot before the edit, for rewind

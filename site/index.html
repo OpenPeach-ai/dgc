@@ -157,6 +157,9 @@
   .card .ic{font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
   .card h3{font:600 18px/1.3 var(--sans);margin-bottom:8px}
   .card p{font-size:15px;color:var(--muted);margin:0} .card p b{color:var(--text);font-weight:600}
+  .card .ico{width:40px;height:40px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;background:rgba(124,92,255,.12);color:var(--accent);margin-bottom:16px}
+  .card .ico svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .card:hover .ico{background:rgba(124,92,255,.18)}
   code{font:400 .88em/1 var(--mono);background:var(--surface-2);color:var(--text);padding:.18em .42em;border-radius:5px}
   .subhead{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:40px 0 16px}
   .chips{display:flex;flex-wrap:wrap;gap:9px}
@@ -304,7 +307,7 @@
 </head>
 <body>
 
-<div class="topbar"><div class="wrap"><span><b>v0.19.1</b> — run a <b>fleet of agents</b> at once, and see the agent&rsquo;s plan as an <b>artifact</b> on a local URL&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
+<div class="topbar"><div class="wrap"><span><b>v0.20.0</b> — edits that land on any local model, <b>multi-edit</b>, and a thinking switch that works on every provider&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
 
 <nav><div class="wrap">
   <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
@@ -341,7 +344,7 @@
       <div class="tui-card">
 <div class="tui-logo" role="img" aria-label="/// DGC"></div>
         <div class="tui-meta">
-          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.19.1</span></div>
+          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.20.0</span></div>
           <div class="tui-tag">a coding agent for the models you run</div>
           <div class="tui-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
           <div class="tui-menu">
@@ -368,18 +371,18 @@
     <p class="lede">Tools, four permission modes, plan mode, memory, web search, localhost artifacts — everything a serious coding agent needs, running against whatever model you point it at.</p>
   </div>
   <div class="grid g3">
-    <div class="card"><div class="ic">Local-first</div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud endpoint. Code stays local unless <b>you</b> pick a cloud model.</p></div>
-    <div class="card"><div class="ic">Agentic</div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. Permission modes decide how much rope it gets — <b>ask</b>, auto-edit, plan-first, or full-auto.</p></div>
-    <div class="card"><div class="ic">In your editor</div><h3>Terminal or IDE</h3><p>A full-screen Python TUI, and a native <b>VS&nbsp;Code & Cursor</b> extension — same agent, same local models, a docked panel with inline diffs.</p></div>
-    <div class="card"><div class="ic">Run a fleet</div><h3>Many agents at once</h3><p><b>Ctrl+N</b> spawns another agent — even mid-turn. <b>Ctrl+\</b> opens the <b>dashboard</b>: every agent with its live state (<b>&#9679;</b> on screen &middot; <b>&#8942;</b> working &middot; <b>&#9670;</b> needs you &middot; &#9675; idle), where you attach, close, pin and rename. A background agent that finishes or needs a decision flags itself.</p></div>
-    <div class="card"><div class="ic">More than one loop</div><h3>Sub-agents & hooks</h3><p>The <code>task</code> tool delegates to a <b>sub-agent</b> — its own context, optionally a <b>different model or host</b>. Plus background shells, <b>MCP servers</b>, checkpoints & rewind, and lifecycle hooks.</p></div>
-    <div class="card"><div class="ic">See what it builds</div><h3>Artifacts on localhost</h3><p>When the agent builds something to look at, the <code>artifact</code> tool serves it and DGC offers to open it. All artifacts share <b>one port</b> with a <b>dropdown to switch</b> between them, Claude-Code style — and the list survives a restart. Frontends follow the built-in <b>dgc-design</b> language.</p></div>
-    <div class="card"><div class="ic">Plan first</div><h3>Plan mode that sticks</h3><p>Read-only research → an approved plan → execute. The plan is <b>saved to <code>plan.md</code></b> beside the session; reopen it any time with <code>/view-plan</code>.</p></div>
-    <div class="card"><div class="ic">Polished TUI</div><h3>Built to be lived in</h3><p>A highlighted prompt band, collapsible thinking, a top-right context meter, a <code>/dashboard</code> overview, in-app <code>/docs</code>, and ghost-text suggestions — press <b>Tab</b> to accept.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud. Code stays local unless <b>you</b> pick a cloud model.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. <b>Four permission modes</b> set the rope: ask, auto-edit, plan-first, or full-auto.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div><h3>Terminal or IDE</h3><p>A full-screen Python TUI <b>and</b> a native VS&nbsp;Code &amp; Cursor extension — same agent, same local models, inline diffs.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><h3>A fleet, not one agent</h3><p><b>Ctrl+N</b> spawns another agent — even mid-turn; <b>Ctrl+\</b> opens a dashboard of every agent's live state, to attach, pin or rename.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div><h3>Sub-agents &amp; hooks</h3><p>The <code>task</code> tool delegates to a sub-agent on <b>its own model or host</b>. Plus MCP servers, background shells, checkpoints, rewind and hooks.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><h3>Artifacts on localhost</h3><p>A proposed plan (or app, or chart) rendered as a page on <b>one local port</b>, with a dropdown to switch — the list survives a restart.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M9 3h6v2H9z"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 14l2 2 4-4"/></svg></div><h3>Plan mode that sticks</h3><p>Read-only research → an approved plan → execute. Saved to <b><code>plan.md</code></b> beside the session; reopen with <code>/view-plan</code>.</p></div>
+    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div><h3>Edits that land</h3><p>A tiered matcher forgives a local model's near-misses — smart quotes, indentation, a drifted line — and <b><code>multi_edit</code></b> applies many hunks at once, keeping the good ones.</p></div>
   </div>
   <p class="subhead">The toolbox</p>
   <div class="chips">
-    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
+    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
   </div>
   <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 11 bundled skills, and MCP servers.</p>
 </div></section>
@@ -402,7 +405,7 @@
   <div class="center">
     <p class="eyebrow">The part no local-model harness does</p>
     <h2>Your <code>plan.md</code> &mdash; made to look at.</h2>
-    <p class="lede">When the agent proposes a plan, DGC renders it as a clean page at a <b>localhost URL</b> &mdash; the steps, the files it&rsquo;ll touch, the approach &mdash; the way Claude Code shows an artifact, not raw markdown scrolling past the terminal. The CLI offers to open it; you approve in the terminal, or keep planning. Every proposal shares one port behind a dropdown.</p>
+    <p class="lede">When the agent proposes a plan, DGC renders it as a clean page at a <b>localhost URL</b> &mdash; the steps, the files it&rsquo;ll touch, the approach &mdash; as a rendered page, not raw markdown scrolling past the terminal. The CLI offers to open it; you approve in the terminal, or keep planning. Every proposal shares one port behind a dropdown.</p>
   </div>
   <div class="browser" role="img" aria-label="A localhost browser previewing DGC artifacts with a dropdown to switch between them">
     <div class="chrome">

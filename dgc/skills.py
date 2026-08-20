@@ -1,4 +1,4 @@
-"""Skills — reusable prompt packages, Claude Code style.
+"""Skills — reusable prompt packages.
 
 A skill is a directory containing SKILL.md:
 

@@ -378,7 +378,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return (data?.data ?? []).map((m: any) => m.id).sort();
   }
 
-  // in-composer model menu (Claude-Code style — rendered inside the webview)
+  // in-composer model menu (rendered inside the webview)
   async listModels(): Promise<void> {
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {

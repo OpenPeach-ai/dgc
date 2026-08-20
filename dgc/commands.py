@@ -1,5 +1,5 @@
 """Custom user slash-commands — Markdown prompt templates the user drops in a directory
-(like Claude Code's .claude/commands/*.md).
+(project `.dgc/commands/*.md`).
 
 Discovered from ~/.dgc/commands/*.md (personal) and <project>/.dgc/commands/*.md (project,
 which overrides personal). `/name some args` runs the template with `$ARGUMENTS` (or

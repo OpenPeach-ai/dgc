@@ -1,5 +1,5 @@
 """Localhost artifact previews — ONE persistent server hosting every artifact, with a
-frontend dropdown to switch between them (like Claude Code's artifact panel).
+frontend dropdown to switch between them.
 
 One fixed port, one URL. Each artifact is a directory (or an .html file's directory)
 served under `/a/<id>/`. The root `/` is a dgc-design *shell*: a top-left dropdown that

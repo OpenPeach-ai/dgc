@@ -1,4 +1,4 @@
-"""Permission engine — modes and rules modelled on Claude Code / Kimi Code.
+"""Permission engine — a modes-and-rules permission model.
 
 Modes:
   default        read-only tools auto-allowed; writes & bash ask
@@ -6,7 +6,7 @@ Modes:
   plan           read-only; all mutations denied (plan-then-approve workflow)
   auto           full-auto: everything allowed unless a deny rule matches
 
-Rules use Claude Code syntax:  Tool  or  Tool(pattern)
+Rules use a simple syntax:  Tool  or  Tool(pattern)
   Bash(npm run *)   Write(src/**)   Edit   Read
 Actions: allow | ask | deny.  Deny rules always win.
 """
@@ -26,7 +26,7 @@ MODE_DESCRIPTIONS = {
 
 # internal tool name -> display name used in rules
 DISPLAY = {
-    "read_file": "Read", "write_file": "Write", "edit_file": "Edit",
+    "read_file": "Read", "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
     "bash": "Bash", "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch",
     "todo": "Todo", "skill": "Skill", "save_memory": "SaveMemory",
     "present_plan": "PresentPlan",
@@ -36,15 +36,15 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 # which argument a rule's pattern is matched against
 RULE_ARG = {
     "bash": "command", "read_file": "path", "write_file": "path",
-    "edit_file": "path", "glob": "pattern", "grep": "pattern",
+    "edit_file": "path", "multi_edit": "path", "glob": "pattern", "grep": "pattern",
     "web_fetch": "url", "skill": "name", "save_memory": "scope",
 }
 
 READ_ONLY_TOOLS = {"read_file", "glob", "grep", "web_fetch", "todo", "skill",
                    "bash_output", "bash_kill"}
-EDIT_TOOLS = {"write_file", "edit_file"}
+EDIT_TOOLS = {"write_file", "edit_file", "multi_edit"}
 
-# bash commands that never mutate state — auto-allowed in every mode (Claude Code style)
+# bash commands that never mutate state — auto-allowed in every mode
 READ_ONLY_BASH = {
     "ls", "cat", "echo", "pwd", "head", "tail", "grep", "find", "wc", "which",
     "diff", "stat", "du", "df", "file", "tree", "date", "uname", "whoami", "env",

@@ -45,6 +45,18 @@ TOOL_SCHEMAS = [
          "new_string": {"type": "string"},
          "replace_all": {"type": "boolean", "default": False}},
         ["path", "old_string", "new_string"]),
+    _fn("multi_edit", "Apply SEVERAL edits to ONE file in a single call, in order, against the "
+        "evolving file. Each edit is {old_string, new_string, replace_all?} with the same exact-"
+        "match rules as edit_file. Edits that apply are KEPT even if a later one fails; the result "
+        "lists which failed — do not re-send the ones that already applied.",
+        {"path": {"type": "string"},
+         "edits": {"type": "array", "description": "Ordered edits to apply to this file",
+                   "items": {"type": "object",
+                             "properties": {"old_string": {"type": "string"},
+                                            "new_string": {"type": "string"},
+                                            "replace_all": {"type": "boolean", "default": False}},
+                             "required": ["old_string", "new_string"]}}},
+        ["path", "edits"]),
     _fn("bash", "Run a bash command on the user's machine. Returns stdout+stderr. "
         "Set background:true for long-running commands (dev servers, watchers) — it returns "
         "immediately with a task id; read its output later with bash_output.",
@@ -227,7 +239,17 @@ def _apply_edit(content: str, old: str, new: str, replace_all: bool):
             updated = nc.replace(no, new) if replace_all else nc.replace(no, new, 1)
             return updated, len(occ) if replace_all else 1, "normalized line endings"
     # Tier 4: whitespace-flexible, line-anchored (indentation / trailing-space differences)
-    return _lineflex(content, old, new, replace_all)
+    r = _lineflex(content, old, new, replace_all)
+    if r is not None:
+        return r
+    # Tier 5: block anchor — first/last line + interior similarity (a drifted interior line)
+    r = _blockanchor(content, old, new, replace_all)
+    if r is not None:
+        return r
+    # Tier 6: elision — a lazy `...`/`... existing code ...` SEARCH bounding a unique region
+    return _elision(content, old, new, replace_all)
+    # (A whole-block fuzzy Tier 7 was evaluated on the micro-benchmark and DROPPED: it caught
+    #  ~0.1% of misses, introduced a wrong_apply, and slowed every failed edit — a net negative.)
 
 
 def _lineflex(content: str, old: str, new: str, replace_all: bool):
@@ -272,18 +294,189 @@ def _lineflex(content: str, old: str, new: str, replace_all: bool):
     return "".join(out), len(targets), "flexible whitespace"
 
 
-def _edit_error(content: str, old: str) -> str:
-    """A self-correcting error: point the model at the closest region so it can retry."""
+_BLOCKANCHOR_RATIO = 0.5       # interior LINE-similarity floor for the block-anchor tier
+
+
+def _blockanchor(content: str, old: str, new: str, replace_all: bool):
+    """Tier 5: match a >=3-line block by its first + last non-blank lines plus an interior
+    SIMILARITY floor — recovers an edit whose boundaries are right but one interior line
+    drifted (a reworded comment, a renamed local) so _lineflex's exact-interior match fails.
+    Guarded: strong anchors only, window size bounded to old's, and a uniqueness margin."""
+    clines = content.splitlines(keepends=True)
+    olines = old.splitlines()
+
+    def key(s: str) -> str:
+        return _norm1(s).strip()
+
+    okeys = [key(l) for l in olines]
+    nb = [i for i, k in enumerate(okeys) if k]
+    if len(nb) < 3:
+        return None                                # too few lines to anchor safely
+    fi, li = nb[0], nb[-1]
+    first_anchor, last_anchor = okeys[fi], okeys[li]
+    if len(first_anchor) < 3 or len(last_anchor) < 3:
+        return None                                # weak anchor (`}`, `);`) → would collide everywhere
+    n = len(okeys)
+    tol = max(1, n // 4)                           # window size must stay within ±n/4 of old (span guard)
+    o_interior = okeys[fi + 1:li]                  # interior line-keys — matched at LINE level, not char
+    ckeys = [key(l) for l in clines]
+    cands: list[tuple[int, int, float]] = []       # (start, end, interior line-similarity)
+    for i in range(len(clines)):
+        if ckeys[i] != first_anchor:
+            continue
+        for j in range(i + 2, min(len(clines), i + n + tol + 1)):
+            if ckeys[j] != last_anchor or abs((j - i + 1) - n) > tol:
+                continue
+            ratio = difflib.SequenceMatcher(None, ckeys[i + 1:j], o_interior).ratio()
+            if ratio >= _BLOCKANCHOR_RATIO:
+                cands.append((i, j, ratio))
+            break                                  # nearest last-anchor for this first-anchor
+    if not cands:
+        return None
+    cands.sort(key=lambda c: -c[2])
+    if not replace_all and len(cands) > 1 and cands[0][2] - cands[1][2] < 0.05:
+        raise _Ambiguous(len(cands))               # two near-equal windows → refuse, don't guess
+    spans = sorted((i, j) for i, j, _ in (cands if replace_all else cands[:1]))
+
+    def indent(s: str) -> str:
+        return s[:len(s) - len(s.lstrip())]
+
+    nlines = new.split("\n")
+    nnb = [i for i, l in enumerate(nlines) if l.strip()]
+    if not nnb:
+        return None                                # `new` is all-blank → would delete the block; refuse
+    ncore = nlines[nnb[0]:nnb[-1] + 1]             # match old's non-blank core, so surrounding blanks stay put
+    o_base = indent(olines[fi])
+    out, k, si = [], 0, 0
+    while k < len(clines):
+        if si < len(spans) and k == spans[si][0]:
+            i0, j0 = spans[si]
+            c_ind = next((indent(clines[i0 + o]) for o in range(j0 - i0 + 1) if clines[i0 + o].strip()), "")
+            extra = c_ind[:len(c_ind) - len(o_base)] if len(c_ind) >= len(o_base) else ""
+            block = "\n".join(extra + ln if ln.strip() else ln for ln in ncore)
+            if clines[j0].endswith("\n") and not block.endswith("\n"):
+                block += "\n"
+            out.append(block)
+            k = j0 + 1
+            si += 1
+        else:
+            out.append(clines[k]); k += 1
+    return "".join(out), len(spans), "block anchor"
+
+
+def _is_elision(line: str) -> bool:
+    """A lazy `...` / `# ... existing code ...` / `// ...` placeholder line."""
+    core = line.strip().lstrip("#").lstrip("/").lstrip("*").strip()
+    return core.startswith("...")
+
+
+def _elision(content: str, old: str, new: str, replace_all: bool):
+    """Tier 6: the model wrote a lazy SEARCH with a single `...` line eliding the middle.
+    Anchor on the head + tail segments; replace the region they bound with `new` ONLY if that
+    region is unique. Fails closed on anything ambiguous — an elided segment is never fuzzed."""
+    olines = old.split("\n")
+    marks = [i for i, l in enumerate(olines) if _is_elision(l)]
+    if len(marks) != 1:                              # only the single-elision case (conservative)
+        return None
+    if any(_is_elision(l) for l in new.split("\n")):  # `...` in new = "keep the middle" — not this tier
+        return None
+    m = marks[0]
+
+    def key(s: str) -> str:
+        return _norm1(s).strip()
+
+    head = [key(l) for l in olines[:m] if l.strip()]
+    tail = [key(l) for l in olines[m + 1:] if l.strip()]
+    if not head or not tail:
+        return None
+    if any(len(k) < 3 for k in (head[0], head[-1], tail[0], tail[-1])):
+        return None                                  # weak anchors would bind anywhere
+    clines = content.splitlines(keepends=True)
+    ckeys = [key(l) for l in clines]
+
+    def occs(keys):
+        return [i for i in range(len(ckeys) - len(keys) + 1) if ckeys[i:i + len(keys)] == keys]
+
+    hstarts, tstarts = occs(head), occs(tail)
+    if not hstarts or not tstarts:
+        return None
+    if replace_all:                                  # every head with a single tail after it
+        regions = []
+        for hs in hstarts:
+            after = [t for t in tstarts if t >= hs + len(head)]
+            if len(after) == 1:
+                regions.append((hs, after[0] + len(tail)))
+        if not regions:
+            return None
+    else:                                            # strict: exactly one head, exactly one tail after it
+        if len(hstarts) != 1:
+            raise _Ambiguous(len(hstarts))
+        after = [t for t in tstarts if t >= hstarts[0] + len(head)]
+        if not after:
+            return None
+        if len(after) > 1:                           # the region end is ambiguous → refuse, don't guess
+            raise _Ambiguous(len(after))
+        regions = [(hstarts[0], after[0] + len(tail))]
+    spans = sorted(regions)
+
+    def indent(s: str) -> str:
+        return s[:len(s) - len(s.lstrip())]
+
+    nlines = new.split("\n")
+    nnb = [i for i, l in enumerate(nlines) if l.strip()]
+    if not nnb:
+        return None
+    ncore = nlines[nnb[0]:nnb[-1] + 1]
+    o_base = indent(next((l for l in olines[:m] if l.strip()), ""))
+    out, k, si = [], 0, 0
+    while k < len(clines):
+        if si < len(spans) and k == spans[si][0]:
+            i0, j0 = spans[si]
+            c_ind = next((indent(clines[i0 + o]) for o in range(j0 - i0) if clines[i0 + o].strip()), "")
+            extra = c_ind[:len(c_ind) - len(o_base)] if len(c_ind) >= len(o_base) else ""
+            block = "\n".join(extra + ln if ln.strip() else ln for ln in ncore)
+            if clines[j0 - 1].endswith("\n") and not block.endswith("\n"):
+                block += "\n"
+            out.append(block)
+            k = j0
+            si += 1
+        else:
+            out.append(clines[k]); k += 1
+    return "".join(out), len(spans), "elision"
+
+
+def _block_present(content: str, block: str) -> bool:
+    """Do the non-blank lines of `block` appear as a consecutive run in `content` (normalized)?"""
+    bl = [_norm1(l).strip() for l in block.split("\n") if l.strip()]
+    if not bl:
+        return False
+    cl = [_norm1(l).strip() for l in content.split("\n")]
+    return any(cl[i:i + len(bl)] == bl for i in range(len(cl) - len(bl) + 1))
+
+
+def _edit_error(content: str, old: str, new: str = "") -> str:
+    """A self-correcting error: detect an already-applied edit, else point the model at the
+    closest region (anchored on the first AND last line) so it can retry (B5, Gap E)."""
+    if new and _block_present(content, new) and not _block_present(content, old):
+        return ("error: old_string not found, but new_string is already present — this edit looks "
+                "already applied. Re-read the file before retrying; do not re-apply it.")
     olines = old.splitlines() or [old]
     clines = content.splitlines()
-    first = _norm1(olines[0]).strip()
-    best_i, best_r = None, 0.0
-    for i, cl in enumerate(clines):
-        r = difflib.SequenceMatcher(None, _norm1(cl).strip(), first).ratio()
-        if r > best_r:
-            best_r, best_i = r, i
-    if best_i is not None and best_r >= 0.6:
-        lo, hi = max(0, best_i - 2), min(len(clines), best_i + len(olines) + 2)
+
+    def anchor(line: str):
+        k = _norm1(line).strip()
+        bi, br = None, 0.0
+        for i, cl in enumerate(clines):
+            r = difflib.SequenceMatcher(None, _norm1(cl).strip(), k).ratio()
+            if r > br:
+                br, bi = r, i
+        return bi, br
+
+    fi, fr = anchor(olines[0])
+    li, lr = anchor(olines[-1]) if len(olines) > 1 else (fi, fr)
+    if fi is not None and fr >= 0.6:
+        end = li if (li is not None and lr >= 0.6 and li >= fi) else fi + len(olines) - 1
+        lo, hi = max(0, fi - 2), min(len(clines), end + 3)
         ctx = "\n".join(f"{j + 1:>5}  {clines[j]}" for j in range(lo, hi))
         return ("error: old_string not found. The closest region in the file is below — the "
                 "difference is likely whitespace, indentation, or quotes. Copy it verbatim and "
@@ -311,12 +504,57 @@ def edit_file(args: dict, ctx) -> str:
         return (f"error: old_string matches {a.count} times — add more surrounding context to "
                 "make it unique, or set replace_all to change every occurrence")
     if result is None:
-        return _edit_error(content, old_string.replace("\r\n", "\n"))
+        return _edit_error(content, old_string.replace("\r\n", "\n"),
+                           new_string.replace("\r\n", "\n"))
     updated, count, how = result
     out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else updated
     p.write_bytes(out.encode("utf-8"))
     note = "" if how == "exact" else f"  [matched via {how}]"
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p))}"
+
+
+def multi_edit(args: dict, ctx) -> str:
+    """B4: apply an ordered list of edits to ONE file against the evolving buffer. Non-atomic —
+    edits that apply are kept even if a later one fails, with per-edit failure accounting."""
+    p = _resolve(str(args.get("path", "")), ctx.project_root)
+    if not p.exists():
+        return f"error: no such file: {p} (use write_file to create it)"
+    edits = args.get("edits")
+    if not isinstance(edits, list) or not edits:
+        return "error: 'edits' must be a non-empty list of {old_string, new_string, replace_all?}"
+    try:
+        raw = p.read_bytes()
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return f"error: {e}"
+    crlf = raw.count(b"\r\n")
+    content = text.replace("\r\n", "\n")
+    buf = content
+    applied, failures = 0, []
+    for i, e in enumerate(edits):
+        if not isinstance(e, dict):
+            failures.append(f"#{i + 1}: not an object")
+            continue
+        old = str(e.get("old_string", "")).replace("\r\n", "\n")
+        new = str(e.get("new_string", "")).replace("\r\n", "\n")
+        try:
+            res = _apply_edit(buf, old, new, bool(e.get("replace_all")))
+        except _Ambiguous as a:
+            failures.append(f"#{i + 1}: matches {a.count} times — add more context, or replace_all")
+            continue
+        if res is None:
+            failures.append(f"#{i + 1}: {_edit_error(buf, old, new).splitlines()[0]}")
+            continue
+        buf = res[0]
+        applied += 1
+    if applied == 0:
+        return "error: no edits applied.\n" + "\n".join(failures)
+    out = buf.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else buf
+    p.write_bytes(out.encode("utf-8"))
+    msg = f"applied {applied}/{len(edits)} edits to {p}"
+    if failures:
+        msg += "\nFAILED (do NOT re-send the applied edits, only fix these):\n" + "\n".join(failures)
+    return msg + "\n" + _diff(content, buf, str(p))
 
 
 def _diff(old: str, new: str, path: str) -> str:
@@ -555,7 +793,7 @@ def save_memory(args: dict, ctx) -> str:
 
 
 EXECUTORS = {
-    "read_file": read_file, "write_file": write_file, "edit_file": edit_file,
+    "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill,
     "glob": glob_tool, "grep": grep_tool, "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,

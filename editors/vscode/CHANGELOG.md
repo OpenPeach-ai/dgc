@@ -41,7 +41,7 @@
 
 ## 0.3.0 — 2026-08-17
 
-- **Claude-Code-style composer** — model, permission mode and thinking level now live in the prompt box: inline model menu, mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes.
+- **In-composer controls** — model, permission mode and thinking level now live in the prompt box: inline model menu, mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes.
 - **In-panel Settings page** (gear icon) — edit provider / host / API key / model, sub-agent model + host, fallback model + host, permission mode, thinking level and context size, all live. The same settings are also exposed as native VS Code settings (Settings UI → DGC), which override the CLI config when set.
 - **Sub-agent model/host selection** — point the `task` tool's sub-agents at a different model or host from the settings.
 - **Session resume** now renders the full transcript.

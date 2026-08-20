@@ -1,4 +1,4 @@
-"""Lifecycle hooks — run user-configured shell commands at agent events (like Claude Code).
+"""Lifecycle hooks — run user-configured shell commands at agent events.
 
 Config (~/.dgc/config.json or project .dgc/config.json):
     "hooks": {

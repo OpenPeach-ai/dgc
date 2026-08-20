@@ -538,6 +538,29 @@ def test_edit_tiers():
     # a genuine miss returns the closest region so the model can self-correct
     r, out = edit("def alpha():\n    return 1\n", "def alpa():\n    return 9", "x")
     check("edit miss shows the closest region", out is None and "closest region" in r)
+    # block-anchor (B2): boundaries match but ONE interior line drifted → still applies
+    r, out = edit("def area(w, h):\n    # compute the area\n    a = w * h\n    return a\n",
+                  "def area(w, h):\n    # a totally reworded comment\n    a = w * h\n    return a",
+                  "def area(w, h):\n    # compute the area\n    a = w * h\n    return a * 2")
+    check("edit block-anchor recovers a drifted interior line",
+          out == "def area(w, h):\n    # compute the area\n    a = w * h\n    return a * 2\n", detail=repr(out))
+    # block-anchor stays SAFE: unrelated interior between the same anchors → miss, no false apply
+    r, out = edit("def area(w, h):\n    completely different\n    unrelated stuff\n    return a\n",
+                  "def area(w, h):\n    x = 1\n    y = 2\n    return a", "X")
+    check("edit block-anchor misses when interior is unrelated", out is None, detail=repr(r))
+    # elision (B3): a lazy `... existing code ...` SEARCH bounding a UNIQUE region → applies
+    r, out = edit("def f(x):\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n",
+                  "def f(x):\n... existing code ...\n    return a + b + c",
+                  "def f(x):\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c + 1")
+    check("edit elision applies to a unique region",
+          out == "def f(x):\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c + 1\n", detail=repr(out))
+    # elision stays SAFE: a repeated end-anchor makes the region ambiguous → refuse
+    r, out = edit("def f():\n    return 0\n    return 0\n",
+                  "def f():\n... existing code ...\n    return 0", "X")
+    check("edit elision refuses an ambiguous region", out is None, detail=repr(r))
+    # already-applied detection (B5): old_string is gone but new_string is already present
+    r, out = edit("def f():\n    return 2\n", "def f():\n    return 1", "def f():\n    return 2")
+    check("edit detects an already-applied edit", out is None and "already applied" in r, detail=repr(r))
     # CRLF files keep their line endings (don't get flattened to LF)
     d = _P(_tf.mkdtemp()); f = d / "w.txt"; f.write_bytes(b"a\r\nb\r\nc\r\n")
     edit_file({"path": str(f), "old_string": "b", "new_string": "B"}, _C(d))
@@ -800,6 +823,21 @@ class MockHandler(BaseHTTPRequestHandler):
             # a stuck model: ALWAYS the same tool call, no matter the results — the agent's
             # doom-loop guard must break out instead of spinning to max_turns.
             payload = tool_delta("read_file", [json.dumps({"path": "nope.txt"})])
+        elif self.scenario == "grind":
+            # a model that keeps running FAILING commands with VARIED args (so the identical-
+            # call guard won't fire) but the SAME failure output — the grind guard must stop it.
+            n = sum(1 for m in messages if m.get("role") == "tool")
+            payload = tool_delta("bash", [json.dumps({"command": f"echo 'still failing'  # {n}\nexit 1"})])
+        elif self.scenario == "overthink":
+            # a model that streams a huge reasoning block with NO output — the F4 watchdog must
+            # abort + retry; after two aborts we return a real tool call so DGC recovers.
+            MockHandler.otcount = getattr(MockHandler, "otcount", 0) + 1
+            if MockHandler.otcount <= 2:
+                payload = (sse_chunk({"reasoning": "z" * 40000})
+                           + sse_chunk({}, finish="stop") + "data: [DONE]\n\n")
+            else:
+                args = json.dumps({"path": "hello.txt", "content": "ok\n"})
+                payload = tool_delta("write_file", [args])
         elif self.scenario == "plan":
             if not has_tool_result:
                 payload = tool_delta("present_plan", [json.dumps({"plan": "1. write planned.txt"})])
@@ -873,6 +911,138 @@ def e2e_loop(port: int, tmp: Path) -> bool:
     return ok
 
 
+def e2e_grind(port: int, tmp: Path) -> bool:
+    """A model that keeps running failing commands with no progress (varied args so the
+    identical-call guard won't fire, but the SAME failure output) must be stopped by the
+    grind guard — quickly, well before max_turns."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = "grind"
+    home = tmp / "home_grind"; work = tmp / "work_grind"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "make the tests pass",
+             "--mode", "auto", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print("  --- grind guard did NOT break out (timed out) ---")
+        return False
+    out = proc.stdout + proc.stderr
+    ok = "no progress" in out or "repeated" in out
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-1500:])
+    return ok
+
+
+def test_reasoning_payload():
+    """F1: DGC's thinking level → the right per-provider reasoning wire shape."""
+    from dgc.llm import _provider_family as fam, _reasoning_payload as rp
+    check("family: ollama by port", fam("http://localhost:11434/v1") == "ollama")
+    check("family: openai cloud", fam("https://api.openai.com/v1") == "openai")
+    check("family: deepseek", fam("https://api.deepseek.com/v1") == "deepseek")
+    check("family: vllm by port", fam("http://localhost:8000/v1") == "vllm")
+    check("family: unknown → compat", fam("http://localhost:1234/v1") == "compat")
+    # Ollama: OFF must SEND reasoning_effort:none (omitting forces thinking ON) — the D5 bug
+    check("ollama off → effort:none", rp("ollama", "qwen3", "off") == {"reasoning_effort": "none"})
+    check("ollama None → effort:none", rp("ollama", "qwen3", None) == {"reasoning_effort": "none"})
+    check("ollama high → effort:high", rp("ollama", "qwen3", "high") == {"reasoning_effort": "high"})
+    # vLLM/SGLang: enable_thinking switch (server renders template)
+    check("vllm off → enable_thinking:false",
+          rp("vllm", "qwen3", "off") == {"chat_template_kwargs": {"enable_thinking": False}})
+    check("vllm high → enable_thinking:true + effort",
+          rp("vllm", "qwen3", "high") == {"chat_template_kwargs": {"enable_thinking": True}, "reasoning_effort": "high"})
+    # OpenAI cloud: only o-series/gpt-5 accept effort; no "none"; non-reasoning gets nothing
+    check("openai o3 off → low", rp("openai", "o3-mini", "off") == {"reasoning_effort": "low"})
+    check("openai o3 high → high", rp("openai", "o3-mini", "high") == {"reasoning_effort": "high"})
+    check("openai gpt-4o off → {}", rp("openai", "gpt-4o", "off") == {})
+    check("openai gpt-4o high → {}", rp("openai", "gpt-4o", "high") == {})
+    # DeepSeek: reasoning is selected by the model id → send nothing
+    check("deepseek → {}", rp("deepseek", "deepseek-reasoner", "high") == {})
+    # Anthropic-compat: budget when on, nothing when off
+    check("anthropic off → {}", rp("anthropic", "claude", "off") == {})
+    check("anthropic high → budget",
+          rp("anthropic", "claude", "high") == {"thinking": {"type": "enabled", "budget_tokens": 16384}})
+    # Unknown compat host → belt-and-suspenders both switches for OFF
+    check("compat off → both switches",
+          rp("compat", "x", "off") == {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}})
+
+
+def test_overthink_watchdog():
+    """F4: reasoning that runs past the budget with no output → finish_reason 'overthink'."""
+    from dgc.llm import LLMClient
+
+    class _FakeResp:
+        def __init__(self, lines):
+            self._lines = lines
+            self.headers = {"Content-Type": "text/event-stream"}
+        def iter_lines(self, decode_unicode=True):
+            yield from self._lines
+        def close(self):
+            pass
+
+    c = LLMClient("http://localhost:11434/v1", "k", "m", think_budget_tokens=10)   # 40-char budget
+    big = "x" * 100
+    runaway = ['data: {"choices":[{"delta":{"reasoning":"%s"}}]}' % big, "data: [DONE]"]
+    r = c._consume(_FakeResp(runaway), None, None, think_budget=c.think_budget_chars)
+    check("watchdog fires on runaway reasoning", r.finish_reason == "overthink")
+    r2 = c._consume(_FakeResp(runaway), None, None, think_budget=0)                # disabled
+    check("watchdog off → no overthink", r2.finish_reason != "overthink")
+    ok = ['data: {"choices":[{"delta":{"reasoning":"xx"}}]}',                       # content before budget
+          'data: {"choices":[{"delta":{"content":"hi"}}]}',
+          'data: {"choices":[{"delta":{"reasoning":"%s"}}]}' % big,
+          "data: [DONE]"]
+    r3 = c._consume(_FakeResp(ok), None, None, think_budget=c.think_budget_chars)
+    check("watchdog disarmed once output starts", r3.finish_reason != "overthink")
+
+
+def e2e_overthink(port: int, tmp: Path) -> bool:
+    """F4 end-to-end: a server that streams runaway reasoning with no output must be aborted by
+    the watchdog and retried, and DGC must recover (the 3rd request returns a real tool call)."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = "overthink"
+    MockHandler.otcount = 0
+    home = tmp / "home_ot"; work = tmp / "work_ot"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "make the file",
+             "--mode", "auto", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print("  --- overthink watchdog did NOT recover (timed out) ---")
+        return False
+    ok = (work / "hello.txt").exists()
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-1500:])
+    return ok
+
+
+def test_multi_edit():
+    """B4: apply several edits to one file; keep the good ones even if one fails."""
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc.tools import multi_edit
+
+    class _C:
+        def __init__(self, root): self.project_root = root
+
+    d = _P(_tf.mkdtemp()); f = d / "t.py"
+    f.write_text("a = 1\nb = 2\nc = 3\n")
+    r = multi_edit({"path": str(f), "edits": [
+        {"old_string": "a = 1", "new_string": "a = 10"},
+        {"old_string": "c = 3", "new_string": "c = 30"}]}, _C(d))
+    check("multi_edit applies all hunks",
+          f.read_text() == "a = 10\nb = 2\nc = 30\n" and "applied 2/2" in r, detail=repr(r))
+    f.write_text("x = 1\ny = 2\n")
+    r = multi_edit({"path": str(f), "edits": [
+        {"old_string": "x = 1", "new_string": "x = 100"},
+        {"old_string": "NOPE", "new_string": "nope"}]}, _C(d))
+    check("multi_edit keeps the good hunk + reports the failure",
+          f.read_text() == "x = 100\ny = 2\n" and "applied 1/2" in r and "FAILED" in r, detail=repr(r))
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -890,6 +1060,9 @@ def main():
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()
+        test_reasoning_payload()
+        test_overthink_watchdog()
+        test_multi_edit()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)
@@ -901,6 +1074,8 @@ def main():
             check("e2e plan mode → approve → build",
                   e2e(port, True, "planned.txt", tmp, mode="plan", scenario="plan", stdin="1\n"))
             check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
+            check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
+            check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
         finally:
             server.shutdown()
 

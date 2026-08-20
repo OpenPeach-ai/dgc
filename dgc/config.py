@@ -19,8 +19,17 @@ DEFAULTS: dict = {
     "model": "qwen3:8b",
     "mode": "default",                          # default | acceptEdits | plan | auto
     "thinking": "off",                          # off | low | medium | high
+    "think_budget_tokens": 8000,                # over-thinking watchdog: abort+retry-with-less if a
+                                                #   model reasons past this many tokens with no output (0=off)
+    "max_tokens": 16384,                        # output-token backstop per request; length-truncation
+                                                #   auto-continues (0=don't send, respect the server)
     "context_size": 32768,
-    "max_turns": 40,                            # max tool-use iterations per user turn
+    "max_turns": 80,                            # max tool-use iterations per user turn (the grind +
+                                                #   doom-loop guards catch thrash, so this is a backstop)
+    "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
+                                                #   only sent to the ollama provider; "" = don't send)
+    "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
+    "verify_command": "",                       #   feed failures back once. e.g. "npm test" / "pytest -q"
     "bash_timeout": 120,
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng

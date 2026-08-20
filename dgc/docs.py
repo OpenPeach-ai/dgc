@@ -113,13 +113,13 @@ copy, ask the agent to write it to a markdown file.
 
 An artifact is how the agent **proposes something visual** on a local URL — most
 often a **plan**. In plan mode, DGC renders the plan (`plan.md`) as a clean page
-and serves it, the way Claude Code shows an artifact — so you read the steps,
+and serves it, as a rendered page — so you read the steps,
 files and approach in your browser instead of raw markdown scrolling past. The
 agent can also serve any page/app/chart it builds the same way.
 
 - **One server, one port.** Every artifact shares a single local server
   (`http://127.0.0.1:45000` by default). The page has a **dropdown, top-left**,
-  that lists all your artifacts — pick one to switch, like Claude Code.
+  that lists all your artifacts — pick one to switch.
 - DGC prints the URL in the terminal; open it in your browser.
 - Run **/artifact** to see them, open one, **stop** one, or toggle **localhost ⇄
   LAN** with `b`.
@@ -210,7 +210,15 @@ file by hand.
 Useful keys:
 
 - `base_url`, `api_key`, `model` — the endpoint and model (`/connect`, `/model`).
-- `mode`, `thinking` — permission mode and reasoning effort.
+- `mode`, `thinking` — permission mode and reasoning effort. `thinking` is **`off`
+  by default** (a coding agent should act, not deliberate at length). DGC sends the
+  correct reasoning switch **per provider** automatically — so `off` genuinely turns
+  reasoning off on Ollama, vLLM, OpenAI, etc. **Reasoning models (o-series,
+  DeepSeek-R1, qwen-thinking) do better on hard tasks with `/think high`.**
+- `think_budget_tokens`, `max_tokens` — safety backstops: a reasoning phase that
+  runs away with no output is aborted + retried with less reasoning
+  (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
+  auto-continues, 0=don't send).
 - `context_size` — auto-sized to the model; long sessions compact at
   `compact_threshold` of it.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never

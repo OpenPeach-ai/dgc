@@ -1,4 +1,4 @@
-"""Memory — DGC.md files (the Claude Code CLAUDE.md equivalent).
+"""Memory — DGC.md files (a project memory file).
 
 Two scopes:
   project:  <project-root>/DGC.md   — project conventions, loaded every session

@@ -1,6 +1,6 @@
 """Checkpoints + rewind — snapshot the conversation length and the pre-edit content of any
 file DGC touches, per user turn, so the user can rewind both the conversation and the code
-to an earlier point (like Claude Code's rewind).
+to an earlier point (for /rewind).
 
 File state is captured lazily: the first time a file is written/edited in a turn, its prior
 content (or None if it didn't exist) is saved. Rewinding to checkpoint K restores every file

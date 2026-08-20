@@ -216,12 +216,82 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
     return merged
 
 
+# --- reasoning / thinking control, per provider (F1) -------------------------
+# There is no single wire format that toggles reasoning across every OpenAI-
+# compatible backend, so we express DGC's thinking level in the right shape for
+# the detected provider. Golden rule: never OMIT for a thinking-capable Ollama
+# model — omitting forces thinking ON (Ollama routes.go), the bug behind the
+# "200s think, never edits" symptom.
+_REASONING_OFF = {None, "", "off", "none"}
+_REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking")
+
+
+def _provider_family(base_url: str) -> str:
+    u = base_url.lower()
+    if "11434" in u or "ollama" in u:
+        return "ollama"
+    if "api.openai.com" in u:
+        return "openai"
+    if "deepseek.com" in u:
+        return "deepseek"
+    if "anthropic" in u:
+        return "anthropic"
+    if ":8000" in u or ":30000" in u or "vllm" in u or "sglang" in u:
+        return "vllm"
+    return "compat"                 # LM Studio, llama.cpp, or any other OpenAI-compatible host
+
+
+def _openai_reasoning_model(model: str) -> bool:
+    m = model.lower()
+    return m.startswith(("o1", "o3", "o4")) or m.startswith("gpt-5") or "gpt-5" in m
+
+
+def is_reasoning_model(model: str) -> bool:
+    """Heuristic: does this model reason by default (so `/think high` tends to help)?"""
+    m = model.lower()
+    return (_openai_reasoning_model(model) or "reasoner" in m or "-r1" in m or "deepseek-r" in m
+            or "qwq" in m or "think" in m)
+
+
+def _reasoning_payload(family: str, model: str, level) -> dict:
+    """Request fields expressing thinking `level` (off|low|medium|high|None) for
+    this provider. `{}` means 'let the model's own default stand'."""
+    off = level in _REASONING_OFF
+    if family == "ollama":                              # omitting forces thinking ON → always send
+        return {"reasoning_effort": "none" if off else level}
+    if family == "vllm":                                # server renders the chat template
+        p = {"chat_template_kwargs": {"enable_thinking": not off}}
+        if not off:
+            p["reasoning_effort"] = level
+        return p
+    if family == "openai":                              # only o-series / gpt-5 accept effort; no "none"
+        if not _openai_reasoning_model(model):
+            return {}
+        return {"reasoning_effort": "low" if off else level}
+    if family == "deepseek":                            # reasoning is selected by the model id
+        return {}
+    if family == "anthropic":
+        if off:
+            return {}
+        budget = {"low": 2048, "medium": 8192, "high": 16384}.get(level, 8192)
+        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    # unknown OpenAI-compatible host → send both switches; each server ignores the other's field
+    if off:
+        return {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}}
+    return {"reasoning_effort": level, "chat_template_kwargs": {"enable_thinking": True}}
+
+
 class LLMClient:
-    def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800):
+    def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
+                 think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = ""):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.family = _provider_family(self.base_url)   # picks the reasoning wire format
         self.read_timeout = read_timeout  # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
+        self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
+        self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
+        self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
         self.tools_supported = True      # flips off on first 400 about tools
         self.reasoning_supported = True  # flips off if server rejects the param
 
@@ -250,12 +320,19 @@ class LLMClient:
         if tools and self.tools_supported:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        if reasoning_effort and reasoning_effort != "off" and self.reasoning_supported:
-            payload["reasoning_effort"] = reasoning_effort
+        if self.reasoning_supported:        # F1: provider-aware reasoning/thinking control
+            payload.update(_reasoning_payload(self.family, self.model, reasoning_effort))
+        if self.max_tokens:                 # F3: output-token backstop (dropped on a 400 if unwanted)
+            payload["max_tokens"] = self.max_tokens
+        if self.family == "ollama" and self.keep_alive:   # D2: model residency (Ollama honours it on /v1)
+            payload["keep_alive"] = self.keep_alive
 
         last_err = ""
         transient = 0      # count of retried timeouts / 5xx (bounded, with backoff)
         repaired = False   # whether we've swapped in the endpoint-agnostic repaired shape
+        overthink = 0      # F4: times the reasoning-watchdog fired this turn (bounded)
+        level = reasoning_effort   # current thinking level; the watchdog steps it down on a runaway
+        _LOWER = {"high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             try:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
@@ -295,10 +372,16 @@ class LLMClient:
                     self.tools_supported = False
                     payload.pop("tools"); payload.pop("tool_choice", None)
                     continue
-                if (r.status_code == 400 and self.reasoning_supported and "reasoning_effort" in payload
-                        and re.search(r"reason|effort|think", low)):
-                    self.reasoning_supported = False
-                    payload.pop("reasoning_effort")
+                if (r.status_code == 400 and self.reasoning_supported
+                        and any(k in payload for k in _REASONING_KEYS)
+                        and re.search(r"reason|effort|think|template", low)):
+                    self.reasoning_supported = False        # F2: server rejects our reasoning shape →
+                    for k in _REASONING_KEYS:               # strip every reasoning key, respect its default
+                        payload.pop(k, None)
+                    continue
+                if (r.status_code == 400 and "max_tokens" in payload
+                        and re.search(r"max_tokens|max_completion|max.{0,8}output", low)):
+                    payload.pop("max_tokens", None)         # F3: server rejects our cap → drop it, retry
                     continue
                 if re.search(r"context|token|too long|max.{0,8}length|length.{0,8}exceed", low):
                     raise LLMError("the conversation exceeds this model's context window — start a "
@@ -310,8 +393,8 @@ class LLMClient:
                     continue
                 raise LLMError(f"{r.status_code} from server: {body}")
             if r.status_code >= 500:
-                # Transient upstream error — retry instead of killing the turn (Claude
-                # Code / Codex do the same). Ollama, for one, intermittently 500s
+                # Transient upstream error — retry instead of killing the turn (robust
+                # clients do the same). Ollama, for one, intermittently 500s
                 # "no user query found in messages" on long tool-loops.
                 last_err = f"HTTP {r.status_code}: {r.text[:300]}"
                 transient += 1
@@ -329,15 +412,27 @@ class LLMClient:
                     f"HTTP {r.status_code} from {self._url} after {transient} tries: {r.text[:400]}")
             if r.status_code != 200:
                 raise LLMError(f"HTTP {r.status_code} from {self._url}: {r.text[:400]}")
-            return self._consume(r, on_text, on_thinking, cancel)
+            budget = 0 if overthink > 2 else self.think_budget_chars   # let the last attempt finish
+            res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
+            if res.finish_reason == "overthink":          # F4: reasoning ran away → retry with less
+                overthink += 1
+                level = _LOWER.get(level or "off", "off")  # high→medium→low→off (floor)
+                for k in _REASONING_KEYS:
+                    payload.pop(k, None)
+                if self.reasoning_supported:
+                    payload.update(_reasoning_payload(self.family, self.model, level))
+                continue
+            return res
         raise LLMError(f"request failed repeatedly: {last_err}")
 
-    def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None) -> ChatResult:
+    def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None,
+                 think_budget: int = 0) -> ChatResult:
         ctype = r.headers.get("Content-Type", "")
         if "application/json" in ctype and "text/event-stream" not in ctype:
             return self._consume_json(r, on_text, on_thinking)   # server ignored stream:true
         result = ChatResult()
         filt = _ThinkFilter()
+        produced = False               # F4: has any content/tool-call appeared yet? (disarms the watchdog)
         partial: dict[int, dict] = {}  # index -> accumulated native tool call
         noidx = -1                     # fallback slot cursor when a server omits tool_call 'index'
         idmap: dict[str, int] = {}     # tool-call id -> slot, so repeated ids don't split a call
@@ -419,7 +514,9 @@ class LLMClient:
                     on_thinking(reasoning)
             if delta.get("content"):
                 emit(filt.feed(delta["content"]))
+                produced = True
             for tc in delta.get("tool_calls") or []:
+                produced = True
                 if "index" in tc:
                     idx = tc["index"]
                 else:                          # server omitted index — infer slots from ids
@@ -440,6 +537,14 @@ class LLMClient:
                     slot["name"] += fn["name"]
                 if fn.get("arguments"):
                     slot["args"] += fn["arguments"]
+
+            if think_budget and not produced and len(result.thinking) > think_budget:
+                result.finish_reason = "overthink"     # F4: reasoning ran away before any output
+                try:
+                    r.close()
+                except Exception:
+                    pass
+                break
 
         stop_watch.set()               # stop the cancel watcher (all loop-exit paths pass here)
         emit(filt.flush())

@@ -1,4 +1,4 @@
-"""Per-project conversation persistence — the Claude Code / Codex `--continue` / `--resume` model.
+"""Per-project conversation persistence — the familiar `--continue` / `--resume` model.
 
 Every conversation is saved (after each turn) to ~/.dgc/sessions/<project-slug>/<timestamp>.json.
 `--continue` resumes the most recent session for the current directory; `--resume` lists and picks.

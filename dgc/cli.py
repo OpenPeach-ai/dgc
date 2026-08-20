@@ -272,7 +272,9 @@ HELP = """\
   /mode [MODE]         default | acceptEdits | plan | auto   (no arg: cycle)
   /plan                toggle plan mode
   /think [LEVEL]       off | low | medium | high   (keywords 'think', 'think hard',
-                       'ultrathink' in a prompt bump it for that turn)
+                       'ultrathink' in a prompt bump it for that turn; reasoning
+                       models — o-series, DeepSeek-R1, qwen-thinking — do best on
+                       hard tasks at 'high')
   /permissions         list rules;  /permissions allow|ask|deny Tool(pattern)
   /memory [show]       show memory files
   /memory add TEXT     add to project memory;  /memory add user TEXT → user memory
@@ -485,6 +487,10 @@ class CLI:
             else:
                 cfg.set("thinking", rest)   # persisted across restarts
                 self.ui.info(f"thinking → {rest}")
+                from .llm import is_reasoning_model
+                if rest == "off" and is_reasoning_model(cfg.get("model", "")):
+                    self.ui.info("  tip: this looks like a reasoning model — /think high often does "
+                                 "better on hard tasks")
         elif cmd == "permissions":
             self._permissions_cmd(rest)
         elif cmd == "memory":
@@ -1041,7 +1047,7 @@ def main(argv: list[str] | None = None) -> None:
 
     cli = CLI(config)
 
-    # session persistence (Claude Code / Codex style: transcripts resume)
+    # session persistence (transcripts resume across runs)
     if args.cont:
         p = sessions_mod.latest(config.project_root)
         if p:
