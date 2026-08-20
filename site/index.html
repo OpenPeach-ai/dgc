@@ -251,6 +251,41 @@
     .tui-logo{height:96px}
     footer .cols{grid-template-columns:1fr}
   }
+  /* ---- artifact showcase: an animated localhost browser with a live dropdown ---- */
+  .browser{max-width:900px;margin:44px auto 0;border:1px solid var(--border-strong);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:0 40px 90px -50px rgba(0,0,0,.85)}
+  .browser .chrome{display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f11;border-bottom:1px solid var(--border)}
+  .browser .lights{display:flex;gap:7px} .browser .lights i{width:11px;height:11px;border-radius:50%;background:#2a2a2e;display:inline-block}
+  .browser .url{flex:1;display:flex;align-items:center;gap:8px;background:var(--term);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font:400 12.5px/1 var(--mono);color:var(--muted);min-width:0}
+  .browser .url .lock{color:var(--faint)} .browser .url .host{color:var(--text)} .browser .url .q{color:var(--accent);transition:opacity .3s}
+  .abar{display:flex;align-items:center;gap:12px;padding:9px 14px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .abar .mk{font:800 14px/1 var(--mono);color:var(--accent);letter-spacing:.06em}
+  .adrop{position:relative;display:inline-flex;align-items:center;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;padding:7px 30px 7px 13px;font:600 13px/1 var(--sans);color:var(--text);min-width:170px;transition:border-color .2s}
+  .adrop.pulse{border-color:var(--accent)} .adrop::after{content:"\25BE";position:absolute;right:11px;color:var(--muted);font-size:11px}
+  .abar .acount{color:var(--faint);font:500 12px/1 var(--mono)} .abar .aspacer{flex:1}
+  .abtn{font:600 12px/1 var(--sans);border:1px solid var(--border-strong);border-radius:7px;padding:7px 12px;color:var(--muted);background:transparent}
+  .abtn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .astage{position:relative;height:308px;background:var(--bg);overflow:hidden}
+  .apane{position:absolute;inset:0;opacity:0;transform:translateY(10px);transition:opacity .55s ease,transform .55s ease;padding:26px;display:flex;flex-direction:column;justify-content:center}
+  .apane.on{opacity:1;transform:none}
+  .apane .amark{font:800 15px/1 var(--mono);color:var(--accent);letter-spacing:.08em;margin-bottom:14px}
+  .apane h4{font:800 26px/1.1 var(--sans);letter-spacing:-.02em;margin:0 0 4px;color:var(--text-strong)}
+  .apane .asub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .stat3 .s{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 14px}
+  .stat3 .s .k{font:600 10px/1 var(--mono);color:var(--muted);letter-spacing:.1em}
+  .stat3 .s .v{font:800 24px/1.1 var(--sans);margin-top:7px;color:var(--text-strong)}
+  .stat3 .s .v small{font-size:12px;color:var(--muted);font-weight:600}
+  .stat3 .s .bar{height:4px;border-radius:3px;background:var(--border);margin-top:10px;overflow:hidden}
+  .stat3 .s .bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+  .price{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .price .p{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
+  .price .p.hi{border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}
+  .price .p .t{font:700 12px/1 var(--sans);color:var(--muted)} .price .p .amt{font:800 28px/1 var(--sans);margin:10px 0;color:var(--text-strong)}
+  .price .p .amt small{font-size:12px;color:var(--muted);font-weight:600} .price .p .cta{margin-top:8px;font:600 11px/1 var(--sans);color:var(--accent)}
+  .todo .row{display:flex;align-items:center;gap:11px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:9px;font-size:14px;color:var(--text)}
+  .todo .box{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--border-strong);flex:none}
+  .todo .row.done .box{background:var(--accent);border-color:var(--accent)} .todo .row.done span{color:var(--faint);text-decoration:line-through}
+  @media(max-width:640px){.stat3,.price{grid-template-columns:1fr 1fr}.astage{height:340px}}
 </style>
 </head>
 <body>
@@ -322,7 +357,8 @@
     <div class="card"><div class="ic">Local-first</div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud endpoint. Code stays local unless <b>you</b> pick a cloud model.</p></div>
     <div class="card"><div class="ic">Agentic</div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. Permission modes decide how much rope it gets — <b>ask</b>, auto-edit, plan-first, or full-auto.</p></div>
     <div class="card"><div class="ic">In your editor</div><h3>Terminal or IDE</h3><p>A full-screen Python TUI, and a native <b>VS&nbsp;Code & Cursor</b> extension — same agent, same local models, a docked panel with inline diffs.</p></div>
-    <div class="card"><div class="ic">More than one loop</div><h3>Sub-agents & hooks</h3><p>Spawn <b>sub-agents</b> with <code>task</code> — each can run a <b>different model or host</b>. Plus background shells, <b>MCP servers</b>, checkpoints & rewind, and lifecycle hooks.</p></div>
+    <div class="card"><div class="ic">Run a fleet</div><h3>Many agents at once</h3><p><b>Ctrl+N</b> spawns another agent — even mid-turn. <b>Ctrl+\</b> opens the <b>dashboard</b>: every agent with its live state (<b>&#9679;</b> on screen &middot; <b>&#8942;</b> working &middot; <b>&#9670;</b> needs you &middot; &#9675; idle), where you attach, close, pin and rename. A background agent that finishes or needs a decision flags itself.</p></div>
+    <div class="card"><div class="ic">More than one loop</div><h3>Sub-agents & hooks</h3><p>The <code>task</code> tool delegates to a <b>sub-agent</b> — its own context, optionally a <b>different model or host</b>. Plus background shells, <b>MCP servers</b>, checkpoints & rewind, and lifecycle hooks.</p></div>
     <div class="card"><div class="ic">See what it builds</div><h3>Artifacts on localhost</h3><p>When the agent builds something to look at, the <code>artifact</code> tool serves it and DGC offers to open it. All artifacts share <b>one port</b> with a <b>dropdown to switch</b> between them, Claude-Code style — and the list survives a restart. Frontends follow the built-in <b>dgc-design</b> language.</p></div>
     <div class="card"><div class="ic">Plan first</div><h3>Plan mode that sticks</h3><p>Read-only research → an approved plan → execute. The plan is <b>saved to <code>plan.md</code></b> beside the session; reopen it any time with <code>/view-plan</code>.</p></div>
     <div class="card"><div class="ic">Polished TUI</div><h3>Built to be lived in</h3><p>A highlighted prompt band, collapsible thinking, a top-right context meter, a <code>/dashboard</code> overview, in-app <code>/docs</code>, and ghost-text suggestions — press <b>Tab</b> to accept.</p></div>
@@ -346,6 +382,62 @@
     <div class="scene" id="scene"></div>
   </div>
   <div class="dots" id="dots"></div>
+</div></section>
+
+<section id="artifacts"><div class="wrap">
+  <div class="center">
+    <p class="eyebrow">The part no local-model harness does</p>
+    <h2>Your model builds it. You open it.</h2>
+    <p class="lede">When the agent makes something to look at — a page, a dashboard, a chart — DGC serves it on a <b>local URL</b> and offers to open it in your browser. Every artifact lives on one port behind a dropdown, so you flip between them like tabs.</p>
+  </div>
+  <div class="browser" role="img" aria-label="A localhost browser previewing DGC artifacts with a dropdown to switch between them">
+    <div class="chrome">
+      <span class="lights"><i></i><i></i><i></i></span>
+      <span class="url"><span class="lock">&#9670;</span> <span class="host">127.0.0.1:45000</span><span class="q" id="aurl">/?a=a1</span></span>
+    </div>
+    <div class="abar">
+      <span class="mk">///</span>
+      <span class="adrop" id="adrop">weather dashboard</span>
+      <span class="acount" id="acount">3 artifacts</span>
+      <span class="aspacer"></span>
+      <span class="abtn primary">Open</span><span class="abtn">Stop</span>
+    </div>
+    <div class="astage" id="astage">
+      <div class="apane on">
+        <div class="amark">///</div>
+        <h4>Weather Dashboard</h4><div class="asub">San Francisco &middot; updated just now</div>
+        <div class="stat3">
+          <div class="s"><div class="k">TEMP</div><div class="v">21&deg;<small> C</small></div><div class="bar"><i style="width:55%"></i></div></div>
+          <div class="s"><div class="k">HUMIDITY</div><div class="v">64<small>%</small></div><div class="bar"><i style="width:64%"></i></div></div>
+          <div class="s"><div class="k">WIND</div><div class="v">12<small> km/h</small></div><div class="bar"><i style="width:30%"></i></div></div>
+        </div>
+      </div>
+      <div class="apane">
+        <div class="amark">///</div>
+        <h4>Pricing</h4><div class="asub">Simple, honest tiers</div>
+        <div class="price">
+          <div class="p"><div class="t">Starter</div><div class="amt">$0</div><div class="cta">Get started &rarr;</div></div>
+          <div class="p hi"><div class="t">Pro</div><div class="amt">$12<small>/mo</small></div><div class="cta">Choose Pro &rarr;</div></div>
+          <div class="p"><div class="t">Team</div><div class="amt">$29<small>/mo</small></div><div class="cta">Talk to us &rarr;</div></div>
+        </div>
+      </div>
+      <div class="apane">
+        <div class="amark">///</div>
+        <h4>Today</h4><div class="asub">3 of 4 done</div>
+        <div class="todo">
+          <div class="row done"><span class="box"></span><span>Wire up the auth route</span></div>
+          <div class="row done"><span class="box"></span><span>Write the token test</span></div>
+          <div class="row done"><span class="box"></span><span>Ship the migration</span></div>
+          <div class="row"><span class="box"></span><span>Review the PR</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid g3" style="margin-top:34px">
+    <div class="card"><div class="ic">One port</div><h3>localhost, with a dropdown</h3><p>All artifacts share <code>127.0.0.1:45000</code> behind a top-left switcher &mdash; open one, switch, or stop it. The list is saved, so it survives a restart. Bind it to your <b>LAN</b> to preview on your phone.</p></div>
+    <div class="card"><div class="ic">dgc-design</div><h3>Frontends that look intentional</h3><p>Artifacts are built with the bundled <b>dgc-design</b> skill &mdash; the same fonts, palette and spacing as this site. Off for normal coding; flip it on for your own builds to get a clean DGC-style frontend.</p></div>
+    <div class="card"><div class="ic">Plan mode</div><h3>Plans you can keep</h3><p>Plan mode is read-only research &rarr; an approved plan. DGC <b>saves the plan to <code>plan.md</code></b> next to the session and reopens it with <code>/view-plan</code> &mdash; not a message that scrolls away.</p></div>
+  </div>
 </div></section>
 
 <section id="extension"><div class="wrap">
@@ -560,6 +652,22 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
     }
   }
   render();
+})();
+/* ---- artifact showcase: cycle the dropdown + preview like switching tabs ---- */
+(function(){
+  var stage=document.getElementById('astage'); if(!stage) return;
+  var panes=stage.querySelectorAll('.apane'), drop=document.getElementById('adrop'),
+      url=document.getElementById('aurl'), names=['weather dashboard','pricing page','todo app'];
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var i=0;
+  setInterval(function(){
+    i=(i+1)%panes.length;
+    for(var j=0;j<panes.length;j++){ panes[j].classList.toggle('on', j===i); }
+    drop.textContent=names[i]; drop.classList.add('pulse');
+    url.style.opacity=.25;
+    setTimeout(function(){ url.textContent='/?a=a'+(i+1); url.style.opacity=1; }, 250);
+    setTimeout(function(){ drop.classList.remove('pulse'); }, 650);
+  }, 3400);
 })();
 </script>
 </body>
