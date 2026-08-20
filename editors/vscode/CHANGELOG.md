@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 — 2026-08-21
+
+- Rides the **v0.20.0 harness**: far more robust editing (a tiered matcher that forgives a local model's near-misses, plus a `multi_edit` batch tool), a **universal thinking switch** that actually turns reasoning off on any provider, an over-thinking watchdog, and loop guards. Same panel — pointed at a smarter backend. Run `dgc update` (or reinstall) to get it.
+- Docs polish.
+
 ## 0.8.0 — 2026-08-19
 
 - **Artifacts in the panel.** When the agent serves a localhost preview with the new `artifact` tool, DGC now shows an **"Artifact ready"** card with the URL and an **Open in browser** button (plus **Stop** to shut the preview down and free its port). Powered by the CLI's `artifact` tool + `dgc-design` skill, so previews look intentional by default.
