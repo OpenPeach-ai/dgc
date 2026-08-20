@@ -185,13 +185,24 @@ def unit_tests(tmp: Path):
     check("plan saved + reloads", _sess.load_plan(_sf) == "# Plan\n\n- step one\n- step two"
           and _sess.plan_path(_sf).name == "20260101-000000.plan.md")
 
-    # --- artifacts: serve a localhost preview on a free 5-digit port, list it, stop it (frees the port)
+    # --- artifacts: ONE shared server hosts every artifact; a shell page lists them in a dropdown
     import dgc.artifacts as _art
+    _art.STATE_FILE = tmp / "artifacts.json"        # isolate: never touch the real ~/.dgc state
+    _art._SRV.artifacts.clear(); _art._SRV.port = None; _art._SRV.counter = 0
     _ad = tmp / "site"; _ad.mkdir(); (_ad / "index.html").write_text("<h1>hi</h1>")
     _a = _art.serve("site", tmp, "demo")
     check("artifact serves + registers", _a.id in [x.id for x in _art.registry()]
-          and 45000 <= _a.port < 46000 and _a.entry == "" and _a.url == f"http://127.0.0.1:{_a.port}/")
-    check("artifact stop frees registry", _art.stop(_a.id) is True and not _art.registry())
+          and _art.running() and _a.entry == "" and _a.url == f"{_art.base_url()}/?a={_a.id}")
+    # single shared server: a 2nd artifact reuses the SAME port; the shell lists both with a dropdown
+    (tmp / "site2").mkdir(); (tmp / "site2" / "index.html").write_text("<h1>two</h1>")
+    _b = _art.serve("site2", tmp, "demo2")
+    import urllib.request as _u
+    _shell = _u.urlopen(_art.base_url() + "/", timeout=3).read().decode()
+    check("artifacts share one port + dropdown", _a.url.split("/?")[0] == _b.url.split("/?")[0]
+          and "<select" in _shell and "demo2" in _shell and "demo" in _shell)
+    check("artifact stop removes from list", _art.stop(_a.id) is True
+          and _a.id not in [x.id for x in _art.registry()] and _art.running())
+    _art.stop_all()
     check("dgc-design skill ships + off by default", "dgc-design" in discover_skills(tmp))
 
     # --- #8 micro-polish: sub-cell fractional context bar (eighth-block precision, exact width)

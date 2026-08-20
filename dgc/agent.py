@@ -573,16 +573,18 @@ class Agent:
                 return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
             from . import artifacts
             try:
-                art = artifacts.serve(str(args.get("path", "")), self.config.project_root,
-                                      str(args.get("name", "") or ""))
+                art = artifacts.add(str(args.get("path", "")), self.config.project_root,
+                                    str(args.get("name", "") or ""),
+                                    preferred_port=int(self.config.get("artifact_port", 45000)))
             except Exception as e:
                 return f"error: could not start the artifact preview: {type(e).__name__}: {e}"
             notify = getattr(self.ui, "artifact_ready", None)
             if notify:
                 notify(art)                          # the TUI proposes opening it in the terminal
-            return (f"Artifact '{art.name}' is live at {art.url} (serving {art.rel}). "
-                    f"Tell the user they can open that URL in a browser; '/artifact' lists and stops "
-                    f"running previews. Do NOT start another server for the same thing.")
+            return (f"Artifact '{art.name}' is live at {art.url} — all artifacts share ONE local server "
+                    f"({artifacts.base_url()}) with a dropdown to switch between them. Tell the user they "
+                    f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
+                    f"another server yourself.")
 
         perms = PermissionEngine(self.mode, self.config.permissions)  # fresh: mode may have just changed
         decision, reason = perms.decide(name, args)

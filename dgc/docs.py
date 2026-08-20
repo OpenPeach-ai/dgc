@@ -112,16 +112,21 @@ copy, ask the agent to write it to a markdown file.
 # Artifacts
 
 When the agent builds something you can look at — a web page, a small app, a
-chart — it can serve it as an **artifact** on a local URL and offer to open it.
+chart — it serves it as an **artifact** and offers to open it.
 
-- The agent picks a free high port on your machine and starts the preview there.
+- **One server, one port.** Every artifact shares a single local server
+  (`http://127.0.0.1:45000` by default). The page has a **dropdown, top-left**,
+  that lists all your artifacts — pick one to switch, like Claude Code.
 - DGC prints the URL in the terminal; open it in your browser.
-- Run **/artifact** to see everything running: open one, or **stop** it to free
-  its port.
+- Run **/artifact** to see them, open one, or **stop** one (removes it from the
+  list).
+- **It persists.** The list is saved, so after you restart `dgc` the server
+  comes back up on the same port with your artifacts intact (set the port with
+  `artifact_port`, turn off relaunch with `artifact_autostart`).
 
 Artifacts are built with DGC's own design language (the `dgc-design` skill) so
 the frontend looks polished by default. Nothing leaves your machine — the
-preview is served from localhost.
+preview is bound to localhost only.
 """.strip()),
 
     ("MCP servers", "connect external tools over MCP", """

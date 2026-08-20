@@ -1090,6 +1090,12 @@ def main(argv: list[str] | None = None) -> None:
             from .trust import confirm_trust
             if not confirm_trust(config, config.project_root):   # first-run trust gate
                 return
+            if config.get("artifact_autostart", True):   # bring saved artifact previews back up
+                try:
+                    from . import artifacts
+                    artifacts.autostart_if_pending(int(config.get("artifact_port", 45000)))
+                except Exception:
+                    pass
             if args.classic or not sys.stdout.isatty():
                 cli.repl()
             else:
