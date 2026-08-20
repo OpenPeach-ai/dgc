@@ -135,7 +135,7 @@ def render_diff(diff_text: str):
 
 
 def fmt_tokens(n: int) -> str:
-    # a reference TUI's fmt: 1 decimal only in the low band of each unit, integer above (500K, not 500.0K).
+    # token format: 1 decimal only in the low band of each unit, integer above (500K, not 500.0K).
     if n >= 10_000_000:
         return f"{n // 1_000_000}M"
     if n >= 1_000_000:

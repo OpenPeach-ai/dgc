@@ -1109,7 +1109,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _print_resume_hint(agent, config) -> None:
-    """modern-CLI-style epilogue printed to the normal screen after the full-screen app exits:
+    """epilogue printed to the normal screen after the full-screen app exits:
         Resume this session with:
           dgc --resume <id>
     Only when a real conversation happened, so a glance-and-quit leaves nothing behind."""

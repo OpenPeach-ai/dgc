@@ -7,7 +7,7 @@
 ## 0.7.3 — 2026-08-19
 
 - **Readable, wrapping option prompts.** When the agent asks you to choose, options now render as a stacked list of full-width rows that **wrap** (long options no longer overflow the card), each numbered, with the recommended one marked by an accent bar instead of an unreadable solid-purple fill.
-- **Grok-style task list.** Todos now use `□` pending · `▶` in-progress (gold, bold) · `✓` done (green, struck through) · `✗` cancelled (red), under a `Tasks n/N` header.
+- **Polished task list.** Todos now use `□` pending · `▶` in-progress (gold, bold) · `✓` done (green, struck through) · `✗` cancelled (red), under a `Tasks n/N` header.
 
 ## 0.7.2 — 2026-08-19
 

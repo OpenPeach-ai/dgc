@@ -383,7 +383,7 @@ class TUI:
             return ANSI("")
         W = min(max(46, self._width - 6), 108)
         inner = W - 4
-        lpad = max(2, (self._width - W) // 2)           # centered horizontally (Grok's modals are centered)
+        lpad = max(2, (self._width - W) // 2)           # centered horizontally 
         rows = self._overlay_rows()
         sel, cap = ov["sel"], self._OVERLAY_CAP
         scroll = ov.get("scroll", 0)
@@ -805,7 +805,7 @@ class TUI:
         self._open_overlay([], on_pick=lambda r: None, header=lines, footer="Esc close", accent=True, info=True)
 
     def _open_docs(self) -> None:
-        """a reference TUI's /docs — a picker over the in-app how-to library."""
+        """/docs — a picker over the in-app how-to library."""
         from . import docs as docs_mod
         rows = [{"label": t, "desc": d, "value": t} for t, d, _ in docs_mod.DOCS]
         self._open_overlay(rows, on_pick=lambda r: self._open_doc_reader(r["value"]),
@@ -832,7 +832,7 @@ class TUI:
         self._open_reader(entry[2], footer="↑↓ · PgUp/PgDn scroll · Esc back", back=self._open_docs)
 
     def _open_plan_view(self) -> None:
-        """a reference TUI's /view-plan — reopen the plan saved during the last plan-mode turn."""
+        """/view-plan — reopen the plan saved during the last plan-mode turn."""
         from . import sessions
         md = sessions.load_plan(self.agent.session_file) if self.agent.session_file else None
         if not md:
@@ -852,10 +852,9 @@ class TUI:
         return f"{secs // 86400}d"
 
     def _open_dashboard(self) -> None:
-        """An interactive session roster — DGC's take on Grok's agent dashboard. DGC runs ONE
-        agent per process, so instead of a live fleet this is a switcher over this project's
-        sessions: a status header, a `+ New session` action, and every session as a selectable
-        row (Enter opens · x deletes). The closest faithful adaptation of Grok's dashboard."""
+        """An interactive session roster. DGC runs ONE agent per process, so this is a switcher
+        over this project's sessions: a status header, a `+ New session` action, and every
+        session as a selectable row (Enter opens · x deletes)."""
         from rich.text import Text
         from . import sessions, artifacts
         th = style_mod.theme()
@@ -917,7 +916,7 @@ class TUI:
 
     _CHROME_BELOW = 5     # rows under the header at welcome: status(1) + composer box(3) + shortcut bar(1)
     _WIDE_MIN = 82       # below this terminal WIDTH the card stacks (logo on top)  feel
-    _CARD_W = 96         # FIXED card width (like a reference TUI's capped box): it never stretches — it stays this
+    _CARD_W = 96         # FIXED card width — a capped box that never stretches; it stays this
                           # size and centered no matter how large the terminal gets.
 
     def _card_body_rows(self, mode, upd) -> int:
@@ -1091,8 +1090,8 @@ class TUI:
             elif self._thinking:
                 act = "Thinking"
             else:
-                act = "Waiting"                 # Grok never shows a bare "Working" for an inference turn
-            # per-phase timer (Grok's `Thinking… 0.4s`): reset whenever the activity label changes.
+                act = "Waiting"                 #  never shows a bare "Working" for an inference turn
+            # per-phase timer : reset whenever the activity label changes.
             if getattr(self, "_phase_act", None) != act:
                 self._phase_act, self._phase_t0 = act, time.monotonic()
             pel = time.monotonic() - self._phase_t0
@@ -1107,7 +1106,7 @@ class TUI:
 
     def _pad_lr(self, left: str, right: str, indent: str = "  "):
         """One row with `left` markup at the start and `right` markup flush to the terminal edge —
-        a reference TUI's status layout (activity left; timer + tokens + [stop] right)."""
+        the status layout (activity left; timer + tokens + [stop] right)."""
         import re
         L, R = self._rich(left), self._rich(right)
         vis = lambda s: len(re.sub(r"\x1b\[[0-9;?]*m", "", s))   # visible width (ANSI stripped)
@@ -1216,7 +1215,7 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]{glyphs.CROSS} {name} denied[/] [{th.faint}]{reason}[/]"))
 
-    # modern-CLI-style task list: icon glyph + icon colour + text style, per status.
+    # task list: icon glyph + icon colour + text style, per status.
     _TODO_STYLE = {
         "pending":     ("SQUARE", "text",  "{text}"),
         "in_progress": ("PLAY",   "warn",  "bold {text}"),
@@ -2353,9 +2352,9 @@ class TUI:
         indent under the arrow, and the whole thing sits on a subtle raised background."""
         from rich.text import Text
         th = style_mod.theme()
-        W = max(30, self._width)                      # full-width band (Grok fills the block edge-to-edge)
+        W = max(30, self._width)                      # full-width band 
         t = Text()
-        t.append(" " * W + "\n")                      # vpad: a blank tinted line above (Grok's vpad:true)
+        t.append(" " * W + "\n")                      # vpad: a blank tinted line above 
         lines = (text.rstrip("\n") or "").split("\n")
         for i, ln in enumerate(lines):
             pre = f"{glyphs.ARROW} " if i == 0 else "  "
@@ -2395,7 +2394,7 @@ class TUI:
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
-                # modern-CLI-style: auto-derive a title for an unnamed session from the first prompt
+                # auto-derive a title for an unnamed session from the first prompt
                 if (not self.agent.session_name and not self._autotitled
                         and not self._cancel.is_set()):
                     self._autotitled = True
