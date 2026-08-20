@@ -286,6 +286,13 @@
   .todo .box{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--border-strong);flex:none}
   .todo .row.done .box{background:var(--accent);border-color:var(--accent)} .todo .row.done span{color:var(--faint);text-decoration:line-through}
   @media(max-width:640px){.stat3,.price{grid-template-columns:1fr 1fr}.astage{height:340px}}
+  /* ---- IDE panel: play the interaction (thinking -> stream -> diff -> test -> done) ---- */
+  .eb-think{display:none;align-items:center;gap:8px;font:400 12px/1.5 var(--mono);color:var(--muted);padding:2px 0 6px}
+  .eb-think .tsp{color:var(--accent)}
+  .eb-pbody.playing > *:not(.eb-think){opacity:0;transform:translateY(6px)}
+  .eb-reveal{opacity:1 !important;transform:none !important;transition:opacity .42s ease,transform .42s ease}
+  .eb-editor .ln.hl{transition:background .5s ease}
+  .eb-editor .ln.hl.flash{background:var(--accent-soft)}
 </style>
 </head>
 <body>
@@ -668,6 +675,44 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
     setTimeout(function(){ url.textContent='/?a=a'+(i+1); url.style.opacity=1; }, 250);
     setTimeout(function(){ drop.classList.remove('pulse'); }, 650);
   }, 3400);
+})();
+/* ---- IDE panel: replay the DGC interaction so the editor feels live ---- */
+(function(){
+  var panel=document.querySelector('#extension .eb-pbody'); if(!panel) return;
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var items=[].slice.call(panel.children);
+  var hl=[].slice.call(document.querySelectorAll('#extension .eb-editor .ln.hl'));
+  var GL=["⣋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+  var think=document.createElement('div'); think.className='eb-think';
+  var timers=[]; function clr(){timers.forEach(clearTimeout);timers=[];}
+  function play(){
+    clr(); panel.classList.add('playing');
+    items.forEach(function(el){el.classList.remove('eb-reveal');});
+    hl.forEach(function(l){l.classList.remove('flash');});
+    if(think.parentNode!==panel) panel.insertBefore(think, panel.firstChild);
+    think.style.display='flex';
+    var gi=0, t0=Date.now();
+    (function spin(){
+      var el=Date.now()-t0;
+      think.innerHTML='<span class="tsp">'+GL[gi=(gi+1)%GL.length]+'</span> working… ('+Math.floor(el/1000)+'s)';
+      if(el<1500){ timers.push(setTimeout(spin,120)); } else { think.style.display='none'; reveal(0); }
+    })();
+    function reveal(i){
+      if(i>=items.length){ return; }   // settle on the full panel (no blank loop)
+      items[i].classList.add('eb-reveal');
+      if(items[i].querySelector && items[i].querySelector('.eb-diff') && hl.length){   // the edit lands -> flash the code
+        hl.forEach(function(l){l.classList.add('flash');});
+        timers.push(setTimeout(function(){hl.forEach(function(l){l.classList.remove('flash');});}, 1400));
+      }
+      var isCard = items[i].classList && items[i].classList.contains('eb-toolcard');
+      timers.push(setTimeout(function(){reveal(i+1);}, isCard?950:650));
+    }
+  }
+  /* start when it scrolls into view (and replay each time) */
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){es.forEach(function(e){ if(e.isIntersecting) play(); else clr(); });},{threshold:.35});
+    io.observe(panel);
+  } else { play(); }
 })();
 </script>
 </body>
