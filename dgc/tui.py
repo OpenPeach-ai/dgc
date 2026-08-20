@@ -1803,12 +1803,18 @@ class TUI:
 
     def _model_flow(self, subagent: bool = False) -> None:
         base = self.config.get("subagent_base_url") or self.config.base_url if subagent else None
+        ep = base or self.config.base_url
         try:
             models = self._list_models(base, self.config.get("subagent_api_key") if subagent else None)
         except Exception as e:
-            self._flash(f"couldn't list models: {type(e).__name__}"); return
+            if "conn" in type(e).__name__.lower() or "connect" in str(e).lower():
+                self._flash(f"can't reach {ep} — server down, or not reachable from this device? "
+                            f"/connect a reachable host (e.g. the machine's LAN IP)")
+            else:
+                self._flash(f"couldn't list models from {ep}: {type(e).__name__}")
+            return
         if not models:
-            self._flash("no models offered by the endpoint"); return
+            self._flash(f"no models offered by {ep}"); return
         self._show_picker(f"{'Sub-agent model' if subagent else 'Model'} @ {base or self.config.base_url}",
                           models, lambda i: self._set_model_tui(models[i], subagent=subagent))
 
