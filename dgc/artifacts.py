@@ -220,6 +220,106 @@ class _Server:
 
 _SRV = _Server()
 
+# ---- render a plan (markdown) as a fancy dgc-design page served on localhost --------
+def _md_inline(t: str) -> str:
+    import re, html
+    t = html.escape(t, quote=False)
+    t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", t)
+    t = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", t)
+    return t
+
+
+def _md_to_html(md: str) -> str:
+    """A small, dependency-free markdown → HTML pass covering what a plan.md uses:
+    headings, ordered/unordered lists, fenced code, and inline code/bold/italic."""
+    out, i, lines = [], 0, md.replace("\r\n", "\n").split("\n")
+    import html as _html
+    while i < len(lines):
+        ln = lines[i]
+        if ln.strip().startswith("```"):                       # fenced code
+            i += 1; buf = []
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                buf.append(_html.escape(lines[i])); i += 1
+            i += 1
+            out.append("<pre><code>" + "\n".join(buf) + "</code></pre>"); continue
+        m_h = len(ln) - len(ln.lstrip("#"))
+        if 1 <= m_h <= 4 and ln[m_h:m_h + 1] == " ":            # heading
+            out.append(f"<h{m_h}>{_md_inline(ln[m_h + 1:].strip())}</h{m_h}>"); i += 1; continue
+        import re
+        if re.match(r"^\s*\d+\.\s+", ln):                        # ordered list
+            items = []
+            while i < len(lines) and re.match(r"^\s*\d+\.\s+", lines[i]):
+                items.append("<li>" + _md_inline(re.sub(r"^\s*\d+\.\s+", "", lines[i])) + "</li>"); i += 1
+            out.append("<ol>" + "".join(items) + "</ol>"); continue
+        if re.match(r"^\s*[-*]\s+", ln):                        # unordered list
+            items = []
+            while i < len(lines) and re.match(r"^\s*[-*]\s+", lines[i]):
+                items.append("<li>" + _md_inline(re.sub(r"^\s*[-*]\s+", "", lines[i])) + "</li>"); i += 1
+            out.append("<ul>" + "".join(items) + "</ul>"); continue
+        if not ln.strip():                                      # blank
+            i += 1; continue
+        para = [ln]                                             # paragraph (gather until blank)
+        i += 1
+        while i < len(lines) and lines[i].strip() and not lines[i].strip().startswith(("#", "```", "- ", "* ")) \
+                and not re.match(r"^\s*\d+\.\s+", lines[i]):
+            para.append(lines[i]); i += 1
+        out.append("<p>" + _md_inline(" ".join(para)) + "</p>")
+    return "\n".join(out)
+
+
+def render_plan_html(md: str, title: str = "Plan") -> str:
+    """The plan as a clean, dgc-design page (the same look as vibedgc.com)."""
+    body = _md_to_html(md)
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>{_esc(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{{--bg:#0B0B0C;--surface:#141416;--surface2:#1A1A1D;--code:#0E0E10;--border:#232326;--border-strong:#303034;
+    --text:#F5F5F5;--text-strong:#FFFFFF;--muted:#9A9A9E;--faint:#6A6A6E;--accent:#7C5CFF;--lav:#A78BFA;
+    --ui:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;--mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,monospace;}}
+  *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:var(--ui);line-height:1.65;
+    -webkit-font-smoothing:antialiased}}
+  .wrap{{max-width:760px;margin:0 auto;padding:64px 28px 96px}}
+  .mark{{font:800 15px/1 var(--mono);letter-spacing:.1em;color:var(--accent)}}
+  .eyebrow{{font:600 12px/1 var(--mono);letter-spacing:.16em;color:var(--faint);margin:22px 0 6px}}
+  h1{{font:800 34px/1.15 var(--ui);letter-spacing:-.02em;color:var(--text-strong);margin:0 0 10px}}
+  h2{{font:800 21px/1.2 var(--ui);letter-spacing:-.01em;color:var(--text-strong);margin:34px 0 10px}}
+  h3{{font:700 16px/1.3 var(--ui);color:var(--text);margin:26px 0 8px}}
+  h4{{font:700 14px/1.3 var(--ui);color:var(--muted);margin:22px 0 6px}}
+  p{{color:var(--text);margin:12px 0}}
+  ol,ul{{margin:12px 0;padding-left:0;list-style:none;counter-reset:step}}
+  ol>li{{counter-increment:step;position:relative;padding:11px 14px 11px 46px;margin:8px 0;background:var(--surface);
+    border:1px solid var(--border);border-radius:10px}}
+  ol>li::before{{content:counter(step);position:absolute;left:12px;top:11px;width:22px;height:22px;border-radius:7px;
+    background:var(--accent);color:#fff;font:700 12px/22px var(--mono);text-align:center}}
+  ul>li{{position:relative;padding:6px 0 6px 22px;margin:2px 0}}
+  ul>li::before{{content:"›";position:absolute;left:4px;color:var(--accent);font-weight:700}}
+  code{{font-family:var(--mono);font-size:.86em;background:var(--surface2);color:var(--lav);padding:.12em .4em;border-radius:5px}}
+  pre{{background:var(--code);border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow-x:auto;margin:14px 0}}
+  pre code{{background:none;color:var(--text);padding:0;font-size:13px;line-height:1.6}}
+  strong{{color:var(--text-strong)}} em{{color:var(--muted)}}
+  .foot{{margin-top:44px;padding-top:18px;border-top:1px solid var(--border);color:var(--faint);font:400 13px/1.5 var(--ui)}}
+</style></head>
+<body><div class="wrap">
+  <div class="mark">///</div>
+  <div class="eyebrow">PROPOSED PLAN</div>
+  {body}
+  <div class="foot">Proposed by DGC. Approve it in your terminal, or keep planning.</div>
+</div></body></html>"""
+
+
+def serve_plan(md: str, project_root, name: str = "Plan", preferred_port: int | None = None,
+               lan: bool = False) -> Artifact:
+    """Render `md` as a dgc-design page and serve it as an artifact on localhost."""
+    import tempfile
+    d = Path(tempfile.mkdtemp(prefix="dgc-plan-"))
+    (d / "index.html").write_text(render_plan_html(md, name), encoding="utf-8")
+    return _SRV.add("index.html", d, name, preferred_port, lan)
+
+
+
 
 # ---- public API (kept stable for callers) --------------------------------
 def add(path: str, project_root, name: str = "", preferred_port: int | None = None,

@@ -293,6 +293,13 @@
   .eb-reveal{opacity:1 !important;transform:none !important;transition:opacity .42s ease,transform .42s ease}
   .eb-editor .ln.hl{transition:background .5s ease}
   .eb-editor .ln.hl.flash{background:var(--accent-soft)}
+  #artifacts h2 code{font-family:var(--mono);font-size:.82em;color:var(--accent);background:none}
+  .mplan{width:100%;max-width:560px} .mptag{font:600 10px/1 var(--mono);letter-spacing:.16em;color:var(--faint);margin-bottom:9px}
+  .mpt{font:800 22px/1.15 var(--sans);color:var(--text-strong);letter-spacing:-.02em;margin-bottom:6px}
+  .mpsum{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.5}
+  .mpstep{display:flex;gap:11px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 13px;margin-bottom:8px;font-size:13.5px;color:var(--text);line-height:1.45}
+  .mpstep .n{flex:none;width:20px;height:20px;border-radius:6px;background:var(--accent);color:#fff;font:700 11px/20px var(--mono);text-align:center}
+  .mplan code{font-family:var(--mono);font-size:.85em;background:var(--surface2);color:var(--lav);padding:.1em .4em;border-radius:5px}
 </style>
 </head>
 <body>
@@ -394,8 +401,8 @@
 <section id="artifacts"><div class="wrap">
   <div class="center">
     <p class="eyebrow">The part no local-model harness does</p>
-    <h2>Your model builds it. You open it.</h2>
-    <p class="lede">When the agent makes something to look at — a page, a dashboard, a chart — DGC serves it on a <b>local URL</b> and offers to open it in your browser. Every artifact lives on one port behind a dropdown, so you flip between them like tabs.</p>
+    <h2>Your <code>plan.md</code> &mdash; made to look at.</h2>
+    <p class="lede">When the agent proposes a plan, DGC renders it as a clean page at a <b>localhost URL</b> &mdash; the steps, the files it&rsquo;ll touch, the approach &mdash; the way Claude Code shows an artifact, not raw markdown scrolling past the terminal. The CLI offers to open it; you approve in the terminal, or keep planning. Every proposal shares one port behind a dropdown.</p>
   </div>
   <div class="browser" role="img" aria-label="A localhost browser previewing DGC artifacts with a dropdown to switch between them">
     <div class="chrome">
@@ -404,46 +411,48 @@
     </div>
     <div class="abar">
       <span class="mk">///</span>
-      <span class="adrop" id="adrop">weather dashboard</span>
-      <span class="acount" id="acount">3 artifacts</span>
+      <span class="adrop" id="adrop">refactor auth plan</span>
+      <span class="acount" id="acount">3 proposals</span>
       <span class="aspacer"></span>
       <span class="abtn primary">Open</span><span class="abtn">Stop</span>
     </div>
     <div class="astage" id="astage">
       <div class="apane on">
-        <div class="amark">///</div>
-        <h4>Weather Dashboard</h4><div class="asub">San Francisco &middot; updated just now</div>
-        <div class="stat3">
-          <div class="s"><div class="k">TEMP</div><div class="v">21&deg;<small> C</small></div><div class="bar"><i style="width:55%"></i></div></div>
-          <div class="s"><div class="k">HUMIDITY</div><div class="v">64<small>%</small></div><div class="bar"><i style="width:64%"></i></div></div>
-          <div class="s"><div class="k">WIND</div><div class="v">12<small> km/h</small></div><div class="bar"><i style="width:30%"></i></div></div>
+        <div class="mplan">
+          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="mpt">Refactor auth into its own package</div>
+          <div class="mpsum">Move the token + verify helpers into an <code>auth/</code> package and re-export them, so the app imports from one place.</div>
+          <div class="mpstep"><span class="n">1</span><span>Create the <code>auth/</code> package; move <code>token.py</code> and <code>verify.py</code> in.</span></div>
+          <div class="mpstep"><span class="n">2</span><span>Re-export both from <code>auth/__init__.py</code>.</span></div>
+          <div class="mpstep"><span class="n">3</span><span>Update the 7 imports, then run the suite.</span></div>
         </div>
       </div>
       <div class="apane">
-        <div class="amark">///</div>
-        <h4>Pricing</h4><div class="asub">Simple, honest tiers</div>
-        <div class="price">
-          <div class="p"><div class="t">Starter</div><div class="amt">$0</div><div class="cta">Get started &rarr;</div></div>
-          <div class="p hi"><div class="t">Pro</div><div class="amt">$12<small>/mo</small></div><div class="cta">Choose Pro &rarr;</div></div>
-          <div class="p"><div class="t">Team</div><div class="amt">$29<small>/mo</small></div><div class="cta">Talk to us &rarr;</div></div>
+        <div class="mplan">
+          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="mpt">Add an <code>iat</code> claim to the JWT</div>
+          <div class="mpsum">Stamp tokens with an issued-at time and cover it with a test &mdash; a two-line change.</div>
+          <div class="mpstep"><span class="n">1</span><span>In <code>sign()</code>, add <code>iat: now()</code> to the payload.</span></div>
+          <div class="mpstep"><span class="n">2</span><span>Add a test asserting the claim is present + valid.</span></div>
+          <div class="mpstep"><span class="n">3</span><span>Run <code>pytest -q</code> to confirm both pass.</span></div>
         </div>
       </div>
       <div class="apane">
-        <div class="amark">///</div>
-        <h4>Today</h4><div class="asub">3 of 4 done</div>
-        <div class="todo">
-          <div class="row done"><span class="box"></span><span>Wire up the auth route</span></div>
-          <div class="row done"><span class="box"></span><span>Write the token test</span></div>
-          <div class="row done"><span class="box"></span><span>Ship the migration</span></div>
-          <div class="row"><span class="box"></span><span>Review the PR</span></div>
+        <div class="mplan">
+          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="mpt">Cache the <code>/profile</code> route</div>
+          <div class="mpsum">Add a small in-memory TTL cache so repeat profile reads skip the DB.</div>
+          <div class="mpstep"><span class="n">1</span><span>Wrap the handler with a 60s TTL cache keyed by user id.</span></div>
+          <div class="mpstep"><span class="n">2</span><span>Invalidate on profile update.</span></div>
+          <div class="mpstep"><span class="n">3</span><span>Add a test for hit / miss / invalidation.</span></div>
         </div>
       </div>
     </div>
   </div>
   <div class="grid g3" style="margin-top:34px">
-    <div class="card"><div class="ic">One port</div><h3>localhost, with a dropdown</h3><p>All artifacts share <code>127.0.0.1:45000</code> behind a top-left switcher &mdash; open one, switch, or stop it. The list is saved, so it survives a restart. Bind it to your <b>LAN</b> to preview on your phone.</p></div>
-    <div class="card"><div class="ic">dgc-design</div><h3>Frontends that look intentional</h3><p>Artifacts are built with the bundled <b>dgc-design</b> skill &mdash; the same fonts, palette and spacing as this site. Off for normal coding; flip it on for your own builds to get a clean DGC-style frontend.</p></div>
-    <div class="card"><div class="ic">Plan mode</div><h3>Plans you can keep</h3><p>Plan mode is read-only research &rarr; an approved plan. DGC <b>saves the plan to <code>plan.md</code></b> next to the session and reopens it with <code>/view-plan</code> &mdash; not a message that scrolls away.</p></div>
+    <div class="card"><div class="ic">One port</div><h3>localhost, with a dropdown</h3><p>Every proposal shares <code>127.0.0.1:45000</code> behind a top-left switcher &mdash; open one, switch, or stop it. The list is saved, so it survives a restart. Bind it to your <b>LAN</b> to read a plan on your phone.</p></div>
+    <div class="card"><div class="ic">A separate skill</div><h3>dgc-design, for your own frontends</h3><p>Turn on the <b>dgc-design</b> skill and DGC builds <i>your</i> frontends in its own design language &mdash; the fonts, palette and spacing of this site. It&rsquo;s a standalone skill, off by default; artifacts just switch it on automatically, so every preview looks right.</p></div>
+    <div class="card"><div class="ic">Still just markdown</div><h3>It&rsquo;s your <code>plan.md</code></h3><p>The page is a render of the real <b><code>plan.md</code></b> DGC saves beside the session &mdash; reopen it with <code>/view-plan</code>, and approve or keep planning right in the terminal. Fancy to look at, plain to keep.</p></div>
   </div>
 </div></section>
 
@@ -664,7 +673,7 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
 (function(){
   var stage=document.getElementById('astage'); if(!stage) return;
   var panes=stage.querySelectorAll('.apane'), drop=document.getElementById('adrop'),
-      url=document.getElementById('aurl'), names=['weather dashboard','pricing page','todo app'];
+      url=document.getElementById('aurl'), names=['refactor auth plan','add iat claim','cache /profile'];
   if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   var i=0;
   setInterval(function(){

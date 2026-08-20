@@ -111,8 +111,11 @@ copy, ask the agent to write it to a markdown file.
     ("Artifacts", "preview what the agent builds on a localhost URL", """
 # Artifacts
 
-When the agent builds something you can look at — a web page, a small app, a
-chart — it serves it as an **artifact** and offers to open it.
+An artifact is how the agent **proposes something visual** on a local URL — most
+often a **plan**. In plan mode, DGC renders the plan (`plan.md`) as a clean page
+and serves it, the way Claude Code shows an artifact — so you read the steps,
+files and approach in your browser instead of raw markdown scrolling past. The
+agent can also serve any page/app/chart it builds the same way.
 
 - **One server, one port.** Every artifact shares a single local server
   (`http://127.0.0.1:45000` by default). The page has a **dropdown, top-left**,

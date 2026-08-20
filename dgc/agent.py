@@ -548,6 +548,19 @@ class Agent:
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
                 sessions.save_plan(self.session_file, plan)
+            if plan:                                    # ALSO render it as a fancy page on a localhost URL
+                try:
+                    from . import artifacts
+                    title = next((ln.lstrip("# ").strip() for ln in plan.splitlines()
+                                  if ln.strip().startswith("# ")), "Plan")
+                    art = artifacts.serve_plan(plan, self.config.project_root, name=title,
+                                               preferred_port=int(self.config.get("artifact_port", 45000)),
+                                               lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"))
+                    notify = getattr(self.ui, "artifact_ready", None)
+                    if notify:
+                        notify(art)                     # the CLI proposes opening the plan in the browser
+                except Exception:
+                    pass
             choice = self.ui.present_plan(plan)
             if choice is None:
                 return "Plan NOT approved — the user wants to keep planning. Address their feedback and revise."
