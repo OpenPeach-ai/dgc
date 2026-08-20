@@ -938,7 +938,7 @@ class TUI:
         margin = 4 if w < 62 else 6
         W = max(30, min(w - margin, self._CARD_W))         # capped → fixed size on big terminals
         cw_area = W - 10                                   # inside border(2) + padding(2*4)
-        avail = h - self._CHROME_BELOW
+        avail = h - self._chrome_below()
         wide_h = self._card_body_rows("wide", upd) + 6     # + border(2) + padding(2*2)
         stack_h = self._card_body_rows("stacked", upd) + 6
         if w >= self._WIDE_MIN and avail >= wide_h + 2:
@@ -973,7 +973,7 @@ class TUI:
 
         # centre the fixed-size card on screen (like ): top-pad within the filled header height,
         # left-margin within the terminal width.
-        avail = self._height - self._CHROME_BELOW
+        avail = self._height - self._chrome_below()
         top_pad = max(1, (avail - card_h) // 2)
         left_margin = max(0, (self._width - W) // 2)
         base = top_pad + 3                                 # top-pad + top border(1) + panel v-pad(2)
@@ -1468,16 +1468,24 @@ class TUI:
             return 1
         # Fill the space above the tip/status/composer so the card can float centered vertically
         # inside it (_welcome_card's top-pad does the centering).
-        return max(card_h, self._height - self._CHROME_BELOW)
+        return max(card_h, self._height - self._chrome_below())
 
     def _composer_height(self) -> int:
-        # Grow with WRAPPED lines, not just explicit newlines: the composer wraps (wrap_lines=True),
-        # so a long line that runs past the terminal width needs extra rows or its tail is hidden.
+        # Grow vertically with WRAPPED lines, not just explicit newlines: the composer wraps
+        # (wrap_lines=True), so a long line past the terminal width needs extra rows or its tail hides.
         w = max(8, self._width - 5)                     # inside the │ borders, minus the `❯ ` prefix
         rows = 0
         for ln in self.input_buf.text.split("\n"):
             rows += max(1, -(-len(ln) // w))            # ceil(len / width) visual rows per logical line
-        return min(max(1, rows), 10)
+        # CAP it to the terminal: always leave >=2 rows for the transcript/header + the fixed
+        # chrome (status 1 + box borders 2 + shortcut 1) so a long prompt on a SMALL phone screen
+        # grows + scrolls INSIDE the box instead of overflowing the layout ("window too small").
+        cap = max(1, self._height - 6)
+        return min(max(1, rows), cap, 14)
+
+    def _chrome_below(self) -> int:
+        # the actual rows under the header: status(1) + composer box(composer+2) + shortcut(1).
+        return self._composer_height() + 4
 
     def _line_prefix(self, line_no, wrap_count):
         th = style_mod.theme()
