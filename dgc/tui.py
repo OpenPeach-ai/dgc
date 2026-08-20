@@ -108,47 +108,126 @@ class _NextSuggest(AutoSuggest):
         return None
 
 
+class AgentSession:
+    """One conversation running concurrently with the others: its own agent, transcript,
+    streaming + turn state, worker, and any pending blocking request. The TUI holds a list of
+    these and renders the ACTIVE one; background sessions keep running on their own threads and
+    flag when they finish or need input."""
+    _counter = 0
+
+    def __init__(self, config, ui, agent=None):
+        AgentSession._counter += 1
+        self.id = f"s{AgentSession._counter}"
+        self.agent = agent or Agent(config, ui)
+        self.blocks: list = []             # rendered ANSI blocks (this session's transcript)
+        self._buf = ""                     # streaming assistant text
+        self._think = ""                   # streaming reasoning
+        self._streaming = False
+        self._thinking = False
+        self._cur_tool: str | None = None
+        self._think_t0: float | None = None
+        self._tool_count = 0
+        self._turn = threading.Event()     # set while this session's turn runs
+        self._cancel = self.agent.cancelled
+        self._queue: list[str] = []
+        self._turn_t0 = 0.0
+        self._phase_act: str | None = None
+        self._phase_t0 = 0.0
+        self._autotitled = False
+        self._turn_marks: list[tuple[int, str]] = []
+        self._suggestion: str | None = None
+        self._todos: list = []
+        self._scroll_off = 0
+        # a per-session cross-thread blocking request (approve / plan / options)
+        self._req: dict | None = None
+        self._req_answer = None
+        self._req_event = threading.Event()
+        self.pinned = False
+        self.created = time.monotonic()
+        self.last_activity = time.monotonic()
+
+    @property
+    def name(self) -> str | None:
+        return self.agent.session_name
+
+    @property
+    def state(self) -> str:
+        if self._req is not None:
+            return "needs_input"
+        if self._turn.is_set():
+            return "running"
+        return "idle"
+
+
+def _active_prop(field: str):
+    """A TUI property that reads/writes the ACTIVE session's field — so the ~150 existing
+    `self.<field>` references keep working while the state lives per-session. When there is no
+    fleet yet (a bare `object.__new__(TUI)` in unit tests), it falls back to instance storage."""
+    def get(self):
+        s = getattr(self, "_sessions", None)
+        return getattr(s[self._active_idx], field) if s else self.__dict__.get("_fb_" + field)
+
+    def set(self, v):
+        s = getattr(self, "_sessions", None)
+        if s:
+            setattr(s[self._active_idx], field, v)
+        else:
+            self.__dict__["_fb_" + field] = v
+    return property(get, set)
+
+
 class TUI:
     """A full-screen app that also *is* the AgentUI the agent calls back into."""
+
+    # per-session state → delegated to the active AgentSession (multi-agent fleet)
+    agent = _active_prop("agent")
+    blocks = _active_prop("blocks")
+    _buf = _active_prop("_buf")
+    _think = _active_prop("_think")
+    _streaming = _active_prop("_streaming")
+    _thinking = _active_prop("_thinking")
+    _cur_tool = _active_prop("_cur_tool")
+    _think_t0 = _active_prop("_think_t0")
+    _tool_count = _active_prop("_tool_count")
+    _turn = _active_prop("_turn")
+    _cancel = _active_prop("_cancel")
+    _queue = _active_prop("_queue")
+    _turn_t0 = _active_prop("_turn_t0")
+    _phase_act = _active_prop("_phase_act")
+    _phase_t0 = _active_prop("_phase_t0")
+    _autotitled = _active_prop("_autotitled")
+    _turn_marks = _active_prop("_turn_marks")
+    _suggestion = _active_prop("_suggestion")
+    _todos = _active_prop("_todos")
+    _scroll_off = _active_prop("_scroll_off")
+    _req = _active_prop("_req")
+    _req_answer = _active_prop("_req_answer")
+    _req_event = _active_prop("_req_event")
+
+    @property
+    def active(self) -> "AgentSession":
+        return self._sessions[self._active_idx]
 
     def __init__(self, config, agent=None):
         self.config = config
         style_mod.set_theme(config.get("theme", "dark"))
-        self.agent = agent or Agent(config, self)
+        # the fleet: one active AgentSession now; /dashboard spawns + switches more. Every
+        # per-conversation field (agent, blocks, _buf, _turn, _todos, _req, …) is an _active_prop
+        # that reads/writes the ACTIVE session, so the rest of the TUI is untouched.
+        self._sessions: list[AgentSession] = [AgentSession(config, self, agent=agent)]
+        self._active_idx = 0
         self.agent.ui = self               # the agent calls back into this TUI
 
-        self.blocks: list[str] = []        # rendered ANSI blocks (the transcript)
-        self._buf = ""                     # current streaming assistant text
-        self._think = ""                   # current streaming reasoning (shown muted)
-        self._streaming = False
-        self._thinking = False
-        self._cur_tool: str | None = None   # activity label while a tool runs ("Run npm test")
-        self._think_t0: float | None = None  # when the current reasoning block started
-        self._tool_count = 0
         self._start = time.monotonic()
-
-        self._turn = threading.Event()     # set while a turn is running
-        self._cancel = self.agent.cancelled
-        self._queue: list[str] = []
-
-        # a cross-thread blocking request (approve / plan / options)
-        self._req: dict | None = None
-        self._req_answer = None
-        self._req_event = threading.Event()
         self.deny_reason = ""              # set when the user denies a tool "with a reason"
-
         self.app: Application | None = None
         import shutil
         _sz = shutil.get_terminal_size((100, 30))
         self._width, self._height = _sz.columns, _sz.lines   # os.terminal_size uses .lines
-        self._scroll_off = 0               # transcript scroll: 0 = follow the bottom, >0 = lines paged up
         self._flash_msg = ""               # transient confirmation (clicks / mode switch)
         self._flash_until = 0.0
         self._naming = False               # inline "name this new session" prompt is active
-        self._autotitled = False           # a title has been auto-derived for this session (once)
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
-        self._turn_marks: list[tuple[int, str]] = []   # (block index, preview) per turn, for /jump
-        self._suggestion: str | None = None    # predicted next prompt (ghost text)
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -156,7 +235,6 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
-        self._todos: list = []             # live task list (pinned pane above the composer)
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
