@@ -60,7 +60,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("artifact", "open / stop localhost artifact previews"),
     ("compact", "summarise the older turns now"),
     ("status", "model · host · mode · context"),
-    ("dashboard", "one-glance overview of this session"),
+    ("dashboard", "session roster — open, switch, start, or delete sessions"),
     ("name", "name this session"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
@@ -852,61 +852,64 @@ class TUI:
         return f"{secs // 86400}d"
 
     def _open_dashboard(self) -> None:
-        """A one-glance overview , sized to DGC: this session, the model,
-        context, running artifacts, and recent sessions."""
+        """An interactive session roster — DGC's take on Grok's agent dashboard. DGC runs ONE
+        agent per process, so instead of a live fleet this is a switcher over this project's
+        sessions: a status header, a `+ New session` action, and every session as a selectable
+        row (Enter opens · x deletes). The closest faithful adaptation of Grok's dashboard."""
         from rich.text import Text
         from . import sessions, artifacts
         th = style_mod.theme()
         used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
         pct = used * 100 / size if size else 0.0
         col = self._ctx_color(pct, th)
-        full, part, empty = render_mod.frac_bar(pct, 28)
-        turns = sum(1 for m in self.agent.messages if m.get("role") == "user")
-        lines: list = []
-
-        def head(s):
-            lines.append(Text(s.upper(), style=f"bold {th.accent_bright}"))
-
-        def row(k, v, vstyle=None):
-            t = Text("  "); t.append(f"{k:<12}", style=th.muted)
-            t.append(str(v), style=vstyle or th.text); lines.append(t)
-
-        head("Session")
-        row("name", self.agent.session_name or "(unnamed)")
-        row("activity", f"{turns} turns · {self._tool_count} tool calls")
-        lines.append(Text(""))
-        head("Model")
-        row("model", self.config.model)
-        row("host", self.config.base_url, th.faint)
-        row("mode", f"{self.agent.mode} · think {self.config.get('thinking', 'off')}")
-        if self.config.get("subagent_model"):
-            row("sub-agent", self.config.get("subagent_model"), th.faint)
-        lines.append(Text(""))
-        head("Context")
-        t = Text("  "); t.append(f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}  ", style=th.text)
-        t.append("█" * full + part, style=col); t.append("░" * empty, style=th.border_strong)
-        t.append(f"  {pct:.1f}%", style=col); lines.append(t)
-        lines.append(Text(""))
+        full, part, empty = render_mod.frac_bar(pct, 22)
         arts = artifacts.registry()
-        head(f"Artifacts · {len(arts)} running")
-        if arts:
-            for a in arts[:5]:
-                row(a.name[:10], f"{a.url}  · up {a.uptime}", th.faint)
-        else:
-            lines.append(Text("  none — the agent serves one with the artifact tool", style=th.faint))
-        lines.append(Text(""))
+
+        # header: a compact status band (model · mode · context · artifacts) above the roster
+        h1 = Text("  "); h1.append(self.config.model, style=f"bold {th.text_strong}")
+        h1.append(f"   {self.agent.mode} · think {self.config.get('thinking', 'off')}", style=th.muted)
+        h2 = Text("  "); h2.append(f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}  ", style=th.faint)
+        h2.append("█" * full + part, style=col); h2.append("░" * empty, style=th.border_strong)
+        h2.append(f"  {pct:.0f}%", style=col)
+        h2.append(f"    ◈ {len(arts)} artifact" + ("" if len(arts) == 1 else "s"),
+                  style=(th.warn if arts else th.faint))
+        header = [h1, h2]
+
+        # rows: a "+ New session" action, then every saved session (current one marked)
         recent = sessions.listing(self.config.project_root)
-        head(f"Recent sessions · {len(recent)}")
         now = time.time()
-        for p, ts, preview, n, name in recent[:6]:
-            line = Text("  ")
-            line.append(f"{(name or preview)[:36]:<36}", style=th.text)
-            line.append(f"  {self._reltime(now - ts):>4}  {n} msgs", style=th.faint)
-            lines.append(line)
-        if not recent:
-            lines.append(Text("  no past sessions yet", style=th.faint))
-        self._open_overlay([], on_pick=lambda r: None, header=lines,
-                           footer="/resume to reopen · Esc close", accent=True, info=True)
+        cur = self.agent.session_file
+        rows = [{"label": "+ New session", "desc": "start a fresh conversation",
+                 "value": ("new", None), "action": False}]
+        for p, ts, preview, n, name in recent[:40]:
+            is_cur = cur is not None and str(p) == str(cur)
+            mark = "● " if is_cur else "○ "
+            title = (name or preview or "(empty)")[:40]
+            tail = f"{self._reltime(now - ts):>4} · {n} msg" + ("" if n == 1 else "s")
+            rows.append({"label": mark + title,
+                         "desc": tail + ("  · current" if is_cur else ""),
+                         "value": ("open", p), "action": not is_cur})
+
+        def on_pick(r):
+            kind, p = r["value"]
+            if kind == "new":
+                self._new_session()
+            else:
+                n = self.agent.load_session(p)
+                self.blocks.clear(); self._buf = ""; self._think = ""
+                self._render_history()
+                self._flash(f"resumed ({n} messages)"
+                            + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
+
+        def on_action(key, r):
+            if key in ("x", "space") and r and r["value"][0] == "open" and r.get("action"):
+                sessions.delete(r["value"][1])
+                self._flash("session deleted")
+                self._open_dashboard()          # re-show the updated roster
+
+        self._open_overlay(rows, on_pick=on_pick, on_action=on_action, header=header,
+                           title="Sessions", accent=True,
+                           footer="Enter open · x delete · Esc close")
 
     # rows the right column needs: title(1) blank(1) [msg+cta(2)|tagline(1)] blank(1) newsession(1) blank(1) menu(4)
     def _right_rows(self, upd) -> int:

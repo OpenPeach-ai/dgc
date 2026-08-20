@@ -85,7 +85,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ## What's in the box
 
-- **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a top-right context-window meter (click it for a usage breakdown), and a `/dashboard` overview of the session.
+- **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a per-phase status timer (`Thinking… 0.4s`), a top-right context-window meter (click it for a usage breakdown), centered dialogs, and a `/dashboard` session roster (open · switch · start · delete).
 - **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode). The plan is **saved to a `plan.md` beside the session**; reopen it any time with `/view-plan`.
 - **Artifacts** — when the agent builds something to *look at* (a web page, an app, a chart), the `artifact` tool serves it and DGC offers to open it in your browser. Every artifact shares **one local server on one port** (`127.0.0.1:45000` by default) with a **dropdown, top-left**, to switch between them — like Claude Code. The list is **saved**, so it survives a `dgc` restart (`artifact_port` / `artifact_autostart` to tune). `/artifact` lists them; frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
 - **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
@@ -121,7 +121,7 @@ Tab / →              accept the ghost-text next-prompt suggestion
 /docs                in-app how-to guides
 /artifact            open / stop localhost artifact previews
 /view-plan           reopen the plan saved in plan mode
-/dashboard           one-glance overview of this session
+/dashboard           session roster — open, switch, start, or delete sessions
 ```
 
 ## Commands

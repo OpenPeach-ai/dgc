@@ -212,17 +212,19 @@ def unit_tests(tmp: Path):
     check("frac_bar keeps exact width", _fb_ok)
     check("frac_bar sub-cell partial", frac_bar(6.2, 12)[1] in "▏▎▍▌▋▊▉" and frac_bar(100, 10) == (10, "", 0))
 
-    # --- #9 /dashboard: a one-glance overview overlay builds from live state without raising
+    # --- /dashboard: an INTERACTIVE session roster (status header + "+ New session" + session rows)
     check("dashboard reltime", TUI._reltime(30) == "30s" and TUI._reltime(3700) == "1h" and TUI._reltime(90000) == "1d")
     ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
     ui._tool_count = 3
-    ui.agent = type("A", (), {"session_name": "demo", "mode": "default",
+    ui.agent = type("A", (), {"session_name": "demo", "mode": "default", "session_file": None,
                               "messages": [{"role": "user", "content": "x"}],
                               "estimate_tokens": lambda self: 1200})()
     ui.config = type("C", (), {"model": "m", "base_url": "u", "project_root": tmp,
                                "get": lambda self, k, d=None: {"context_size": 32768}.get(k, d)})()
     ui._open_dashboard()
-    check("dashboard builds header", ui._overlay.get("info") and len(ui._overlay["header"]) > 8)
+    _dov = ui._overlay
+    check("dashboard is interactive roster", not _dov.get("info") and _dov.get("on_action") is not None
+          and _dov["rows"][0]["value"][0] == "new" and len(_dov["header"]) == 2)
     ui._render_overlay()
 
     # --- headless: a failing turn (unreachable model) surfaces error+turn_end, not a silent hang
