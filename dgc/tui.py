@@ -160,19 +160,27 @@ class AgentSession:
 
 
 def _active_prop(field: str):
-    """A TUI property that reads/writes the ACTIVE session's field — so the ~150 existing
-    `self.<field>` references keep working while the state lives per-session. When there is no
-    fleet yet (a bare `object.__new__(TUI)` in unit tests), it falls back to instance storage."""
+    """A THREAD-AWARE TUI property so the ~150 existing `self.<field>` references keep working
+    while the state lives per-session. On a worker thread it targets THAT thread's session (a
+    background agent writes to its own transcript); on the main/UI thread it targets the ACTIVE
+    session (what's on screen). A bare `object.__new__(TUI)` (unit tests) falls back to instance
+    storage."""
     def get(self):
         s = getattr(self, "_sessions", None)
-        return getattr(s[self._active_idx], field) if s else self.__dict__.get("_fb_" + field)
+        if not s:
+            return self.__dict__.get("_fb_" + field)
+        tls = getattr(self, "_tls", None)
+        cur = getattr(tls, "session", None) if tls else None
+        return getattr(cur or s[self._active_idx], field)
 
     def set(self, v):
         s = getattr(self, "_sessions", None)
-        if s:
-            setattr(s[self._active_idx], field, v)
-        else:
+        if not s:
             self.__dict__["_fb_" + field] = v
+            return
+        tls = getattr(self, "_tls", None)
+        cur = getattr(tls, "session", None) if tls else None
+        setattr(cur or s[self._active_idx], field, v)
     return property(get, set)
 
 
@@ -216,6 +224,7 @@ class TUI:
         # that reads/writes the ACTIVE session, so the rest of the TUI is untouched.
         self._sessions: list[AgentSession] = [AgentSession(config, self, agent=agent)]
         self._active_idx = 0
+        self._tls = threading.local()      # per-thread: which session a worker thread's turn belongs to
         self.agent.ui = self               # the agent calls back into this TUI
 
         self._start = time.monotonic()
@@ -2462,7 +2471,13 @@ class TUI:
         t.stylize(f"on {th.band}")                    # a clearly-visible raised background band
         return self._rich(t)
 
+    def _cur_session(self) -> "AgentSession":
+        """The session the CURRENT thread is acting for: a worker thread's own session, else active."""
+        tls = getattr(self, "_tls", None)
+        return (getattr(tls, "session", None) if tls else None) or self.active
+
     def _submit(self, text: str) -> None:
+        sess = self._cur_session()                    # this turn belongs to THIS session
         self._cancel.clear()
         self._tool_count = 0
         self._suggestion = None                       # a new prompt supersedes the ghost text
@@ -2475,6 +2490,7 @@ class TUI:
         self._turn_t0 = time.monotonic()
 
         def work():
+            self._tls.session = sess        # route this worker thread's agent callbacks to `sess`
             try:
                 self.agent.run_turn(text)
             except Exception as e:
