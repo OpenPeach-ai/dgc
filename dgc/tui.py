@@ -2477,9 +2477,9 @@ class TUI:
         def _(ev):
             self._prompt_new_session()
 
-        # cycle the active agent (Ctrl+] → next, wraps) — /dashboard for the full fleet. NOT Ctrl+[:
-        # that's the same byte as Esc in a terminal, so binding it would break Escape.
-        @kb.add("c-]", filter=Condition(lambda: self._overlay is None and len(self._sessions) > 1))
+        # cycle the active agent (Ctrl+O → next, wraps) — /dashboard for the full fleet. NOT Ctrl+] or
+        # Ctrl+[: prompt_toolkit uses those (char-search prefix / Esc), and they swallow the next key.
+        @kb.add("c-o", filter=Condition(lambda: self._overlay is None and len(self._sessions) > 1))
         def _(ev):
             self._switch_to((self._active_idx + 1) % len(self._sessions))
 

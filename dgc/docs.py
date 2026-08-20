@@ -171,12 +171,12 @@ conversation. Kick off a long task on one, spawn another, and keep going.
 
 - **Ctrl+N** — spawn a new agent (even while one is running). The old one keeps
   working in the background; the new one is a clean slate.
-- **Ctrl+]** — cycle to the next agent. **Ctrl+\\** — open the **dashboard**.
+- **Ctrl+O** — cycle to the next agent. **Ctrl+\\** — open the **dashboard**.
 - **Dashboard** — every agent with its live state: **●** on screen · **⋮**
   working · **◆** needs you · **○** idle. `Enter` attaches · `x` closes · `p`
   pins · `r` renames. `+ New agent` spawns one; saved sessions are listed to reopen.
 - When a **background** agent finishes or needs a decision, the bottom bar shows
-  **⧉ N · ◆ need you** — switch to it (Ctrl+] or the dashboard) to answer.
+  **⧉ N · ◆ need you** — switch to it (Ctrl+O or the dashboard) to answer.
 
 New agents use your current model by default; point one at a different model or
 a cloud key with `/model` / `/connect` for true parallelism.
