@@ -630,6 +630,10 @@ class TUI:
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "think":
                 add(self._think_frags(blk))
+            elif isinstance(blk, dict) and blk.get("kind") == "user":
+                # re-rendered every frame at the CURRENT width so the full-width band reflows on
+                # resize instead of keeping stale padding (the "box dismantles on resize" bug).
+                add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))))
             elif blk:
                 add(list(to_formatted_text(ANSI(blk))))
         if self._think:                     # the in-flight reasoning (muted, live) — same label as the status
@@ -825,6 +829,8 @@ class TUI:
     def _block_lines(self, blk) -> int:
         if isinstance(blk, dict) and blk.get("kind") == "think":
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
+        if isinstance(blk, dict) and blk.get("kind") == "user":
+            return 2 + len((blk.get("text", "").rstrip("\n") or "").split("\n"))  # top+bottom vpad + text lines
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
     def _jump_to_block(self, i: int) -> None:
@@ -2444,7 +2450,7 @@ class TUI:
                 # inject into the RUNNING turn (the model reads it mid-turn), not a later turn.
                 # Show it in the same highlighted band as a normal prompt, tagged as a follow-up.
                 self.agent.steer(text)
-                self.blocks.append(self._user_band(text, tag="follow-up · steering this turn"))
+                self.blocks.append({"kind": "user", "text": text, "tag": "follow-up · steering this turn"})
                 self._scroll_off = 0
                 self._follow = True
                 self._invalidate()
@@ -2615,7 +2621,7 @@ class TUI:
         self._suggestion = None                       # a new prompt supersedes the ghost text
         if text.strip():
             self._prompt_history.append(text)         # for /history (Ctrl+R) recall
-        self.blocks.append(self._user_band(text))
+        self.blocks.append({"kind": "user", "text": text})   # re-rendered at current width (reflows on resize)
         self._turn_marks.append((len(self.blocks) - 1, text.replace("\n", " ")[:70]))   # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
