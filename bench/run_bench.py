@@ -53,7 +53,7 @@ def _run_capture(argv, cwd, env, timeout, merge=False):
 
 REPO = Path(__file__).resolve().parent
 DATA = REPO / "data" / "polyglot-benchmark"
-TOOLS = Path("/home/fungigb10/bench-tools")
+TOOLS = Path(os.environ.get("BENCH_TOOLS", "/home/fungigb10/bench-tools"))
 DGC = os.environ.get("DGC_BIN", "/home/fungigb10/.local/bin/dgc")
 
 GO_BIN   = TOOLS / "go" / "bin"
