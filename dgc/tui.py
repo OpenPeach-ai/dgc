@@ -52,6 +52,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("view-plan", "reopen the plan saved in plan mode"),
     ("think", "how hard the model reasons: off · low · medium · high"),
     ("thoughts", "show or hide the model's thinking in the transcript"),
+    ("expand", "expand the last collapsed tool output (/expandall for all)"),
     ("copy", "select & copy text — releases the mouse to your terminal"),
     ("worktree", "isolate edits in a git worktree"),
     ("sandbox", "confine bash to the project + /tmp"),
@@ -630,6 +631,8 @@ class TUI:
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "think":
                 add(self._think_frags(blk))
+            elif isinstance(blk, dict) and blk.get("kind") == "tool":
+                add(self._tool_frags(blk))
             elif isinstance(blk, dict) and blk.get("kind") == "user":
                 # re-rendered every frame at the CURRENT width so the full-width band reflows on
                 # resize instead of keeping stale padding (the "box dismantles on resize" bug).
@@ -666,6 +669,34 @@ class TUI:
             for ln in b.get("text", "").strip().split("\n"):
                 frags.append(("", "\n"))
                 frags.append((f"fg:{th.faint} italic", f"  {glyphs.RAIL} {ln}"))
+        return frags
+
+    _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
+
+    def _tool_frags(self, b: dict):
+        """A tool result: the first `_TOOL_HEAD` lines, then — if longer — a clickable
+        '▸ N more lines' that expands the rest in place (mirrors the reasoning block)."""
+        from prompt_toolkit.mouse_events import MouseEventType
+        th = style_mod.theme()
+        lines = b.get("out", "").splitlines()
+        exp = bool(b.get("exp"))
+
+        def toggle(mouse_event):
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                b["exp"] = not b.get("exp")
+                self._invalidate()
+
+        frags = []
+        for i, ln in enumerate(lines if exp else lines[:self._TOOL_HEAD]):
+            if i:
+                frags.append(("", "\n"))
+            frags.append((f"fg:{th.faint}", "  " + ln))
+        if len(lines) > self._TOOL_HEAD:
+            if lines:
+                frags.append(("", "\n"))
+            caret = "▾" if exp else "▸"
+            label = "show less" if exp else f"{len(lines) - self._TOOL_HEAD} more lines — click /  expand"
+            frags.append((f"fg:{th.accent_dim}", f"  {caret} {label}", toggle))
         return frags
 
     def _cursor_ft(self, text: str):
@@ -831,6 +862,9 @@ class TUI:
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "user":
             return 2 + len((blk.get("text", "").rstrip("\n") or "").split("\n"))  # top+bottom vpad + text lines
+        if isinstance(blk, dict) and blk.get("kind") == "tool":
+            n = len(blk.get("out", "").splitlines())
+            return (n if blk.get("exp") else min(n, self._TOOL_HEAD)) + (1 if n > self._TOOL_HEAD else 0)
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
     def _jump_to_block(self, i: int) -> None:
@@ -1360,12 +1394,12 @@ class TUI:
             if len(diff) < 8000:
                 self._append(self._rich(render_mod.render_diff(diff)))
                 return
-        th = style_mod.theme()
-        lines = out.splitlines()
-        shown = "\n".join("  " + ln for ln in lines[:10])
-        if len(lines) > 10:
-            shown += f"\n  {glyphs.ELLIPSIS_V} {len(lines) - 10} more lines"
-        self._append(self._rich(f"[{th.faint}]{_esc(shown)}[/]"))
+        # keep the FULL output in a collapsible block so the user can expand past the preview
+        # (click the "N more" line, or /expand) — not a dead "91 more lines" with no way to see them.
+        self.blocks.append({"kind": "tool", "name": name, "out": out, "exp": False})
+        if self._follow:
+            self._scroll_off = 0
+        self._invalidate()
 
     def tool_denied(self, name: str, args: dict, reason: str) -> None:
         th = style_mod.theme()
@@ -1829,6 +1863,16 @@ class TUI:
             self._invalidate()
             self._flash("mouse ON — wheel scrolls, /copy to select text" if self._mouse_on
                         else "select mode — drag to select & copy in your terminal · /copy to exit")
+        elif cmd in ("expand", "expandall"):
+            hits = [b for b in self.blocks if isinstance(b, dict) and b.get("kind") == "tool"
+                    and len(b.get("out", "").splitlines()) > self._TOOL_HEAD]
+            if not hits:
+                self._flash("no collapsed tool output to expand")
+            else:
+                for b in (hits if cmd == "expandall" else hits[-1:]):
+                    b["exp"] = True
+                self._invalidate()
+                self._flash("expanded all tool output" if cmd == "expandall" else "expanded the last tool output")
         elif cmd in ("dashboard", "dash", "home"):
             self._open_dashboard()
         elif cmd == "jump":
