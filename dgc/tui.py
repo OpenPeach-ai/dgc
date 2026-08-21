@@ -578,7 +578,7 @@ class TUI:
             pass
 
     def _console(self) -> Console:
-        return Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
+        return Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                        width=max(20, self._width - 2), highlight=False,
                        theme=render_mod.markdown_theme())
 
@@ -915,7 +915,7 @@ class TUI:
         """Render markdown into a scrollable reader overlay (shared by /docs and /view-plan)."""
         from rich.text import Text
         w = min(max(46, self._width - 6), 108) - 6           # ~= the panel's inner text width
-        c = Console(file=io.StringIO(), force_terminal=True, color_system="truecolor",
+        c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                     width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
         c.print(render_mod.render_markdown(md))
         ansi = c.file.getvalue().rstrip("\n")

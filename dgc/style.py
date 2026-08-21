@@ -148,6 +148,20 @@ def detect_color_depth():
     return ColorDepth.DEPTH_8_BIT
 
 
+def rich_color_system() -> str:
+    """rich's `color_system` string matching the terminal's REAL depth (same source of truth
+    as detect_color_depth). Forcing rich to "truecolor" makes it emit 24-bit codes that a
+    non-truecolor terminal downsamples to a blue/cyan mush with black code-block bands — the
+    readability bug. Instead let rich downsample hex → 256/16 cleanly for the actual terminal."""
+    from prompt_toolkit.output import ColorDepth
+    d = detect_color_depth()
+    if d == ColorDepth.DEPTH_24_BIT:
+        return "truecolor"
+    if d == ColorDepth.DEPTH_4_BIT:
+        return "standard"
+    return "256"
+
+
 def section(console, title: str, note: str | None = None) -> None:
     """A list header: blank line, bold-white title, optional dim '— note'."""
     console.print(f"\n  [bold]{title}[/bold]" + (f"  [{theme().faint}]— {note}[/]" if note else ""),
