@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/dgc-wordmark.png" alt="DGC" width="300">
+<img src="docs/dgc-logo.png" alt="DGC" width="380">
 
 # Vibe DGC
 
@@ -19,9 +19,9 @@ DGC is an interactive coding agent that lives in your terminal, pointed at **you
 
 Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Your code and your prompts never leave your machine unless the model you pick is a cloud one.
 
-![Vibe DGC — vibedgc.com](docs/screenshot.png)
+![DGC docked in your editor — VS Code and Cursor](docs/screenshot.png)
 
-<sub>The landing page at [vibedgc.com](https://vibedgc.com).</sub>
+<sub>The same agent and local models inside a native editor side panel — streaming tool cards, inline diffs, session resume. Installs alongside the CLI ([VS Code · Cursor](https://vibedgc.com)).</sub>
 
 ## Install
 

@@ -23,11 +23,6 @@ _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn th
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
 _FAIL_SOFT = 4          # consecutive failing bash runs (no success) before we nudge a rethink
 _FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn (grind guard)
-# a passing command matching one of these = the work is likely verified → nudge the model to finish
-# instead of re-running / refactoring working code (the "solved but kept going" waste)
-_VERIFY_KWS = ("pytest", "go test", "cargo test", "npm test", "npm run test", "npx jest", "jest",
-               "vitest", "gradlew test", "gradle test", "ctest", "make test", "unittest",
-               "python -m pytest", "mocha", "rspec", "tox", "cmake --build", "cargo build")
 _MAX_CONTINUE = 3       # length-truncation auto-continues per turn
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
@@ -444,8 +439,6 @@ class Agent:
         verify_runs = 0             # E: verify_before_done attempts this turn (bounded)
         last_fail_fp = None         # fingerprint of the last failing bash output
         same_fail = 0               # consecutive failures with the SAME fingerprint (stuck signal)
-        verified = False            # a test/build passed AND no edit since — finish-when-verified nudge
-        verify_nudged = False
         continues = 0               # length-truncation auto-continues used this turn
         mutating_total = 0          # edits/bash this turn — drives the TodoGate nudge
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
@@ -538,7 +531,6 @@ class Agent:
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
-            batch_verified = False          # did a test/build command pass in THIS batch?
             for call in result.tool_calls:
                 if self.cancelled.is_set():     # honour a mid-batch cancel between tool calls
                     self.ui.info("turn cancelled")
@@ -560,9 +552,6 @@ class Agent:
                     head, _, body = out.partition("\n")
                     if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
                         fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
-                        cmdstr = str(call.arguments.get("command", ""))
-                        if any(k in cmdstr for k in _VERIFY_KWS):            # a test/build just passed
-                            batch_verified = True
                     else:
                         fail_streak += 1
                         fp = "".join(c for c in body if not c.isdigit())[:400]  # ignore line #s / timings
@@ -590,17 +579,6 @@ class Agent:
                 reminders.append(f"The last {fail_streak} commands all failed with no success. Stop "
                                  "retrying variations — re-read the failing output carefully, reconsider "
                                  "the approach from scratch, or state plainly what is blocking you.")
-            # finish-when-verified: a test/build passed and the model kept tooling without editing → nudge
-            made_edit = any(c.name in ("write_file", "edit_file", "multi_edit") for c in result.tool_calls)
-            if verified and not made_edit and not verify_nudged:
-                verify_nudged = True
-                reminders.append("A test/build command passed and you haven't changed the code since. If "
-                                 "the task is complete, give a brief final summary and stop — don't re-run "
-                                 "or refactor code that already works.")
-            if made_edit:                       # new code invalidates the pass → must re-verify
-                verified, verify_nudged = False, False
-            if batch_verified:
-                verified = True
             if mutating_total >= 3 and not self.ctx.todos and not todo_nudged:
                 todo_nudged = True
                 reminders.append("You've made several edits without a plan. For a multi-step task, "

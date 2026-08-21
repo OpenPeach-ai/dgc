@@ -828,18 +828,6 @@ class MockHandler(BaseHTTPRequestHandler):
             # call guard won't fire) but the SAME failure output — the grind guard must stop it.
             n = sum(1 for m in messages if m.get("role") == "tool")
             payload = tool_delta("bash", [json.dumps({"command": f"echo 'still failing'  # {n}\nexit 1"})])
-        elif self.scenario == "verify":
-            # edit → a passing `go test` → then a NON-edit tool call: the finish-when-verified
-            # nudge must fire (the model kept working after its tests passed).
-            MockHandler.vcount = getattr(MockHandler, "vcount", 0) + 1
-            if MockHandler.vcount == 1:
-                payload = tool_delta("write_file", [json.dumps({"path": "m.py", "content": "x = 1\n"})])
-            elif MockHandler.vcount == 2:
-                payload = tool_delta("bash", [json.dumps({"command": "echo ok  # go test ./..."})])
-            elif MockHandler.vcount == 3:
-                payload = tool_delta("read_file", [json.dumps({"path": "m.py"})])
-            else:
-                payload = sse_chunk({"content": "Done."}) + sse_chunk({}, finish="stop") + "data: [DONE]\n\n"
         elif self.scenario == "overthink":
             # a model that streams a huge reasoning block with NO output — the F4 watchdog must
             # abort + retry; after two aborts we return a real tool call so DGC recovers.
@@ -1055,32 +1043,6 @@ def test_multi_edit():
           f.read_text() == "x = 100\ny = 2\n" and "applied 1/2" in r and "FAILED" in r, detail=repr(r))
 
 
-def e2e_verify(port: int, tmp: Path) -> bool:
-    """finish-when-verified: after a test passes and the model keeps tooling without editing,
-    the nudge to wrap up must appear in the conversation."""
-    import glob
-    MockHandler.native_tools = True
-    MockHandler.scenario = "verify"
-    MockHandler.vcount = 0
-    home = tmp / "home_verify"; work = tmp / "work_verify"
-    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
-    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
-    try:
-        subprocess.run([sys.executable, "-m", "dgc", "-p", "make the tests pass",
-                        "--mode", "auto", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
-                       cwd=str(work), env=env, capture_output=True, text=True, timeout=60)
-    except subprocess.TimeoutExpired:
-        return False
-    sess = sorted(glob.glob(str(home / ".dgc" / "sessions" / "**" / "*.json"), recursive=True),
-                  key=os.path.getmtime)
-    if not sess:
-        return False
-    msgs = json.loads(Path(sess[-1]).read_text())
-    if isinstance(msgs, dict):
-        msgs = msgs.get("messages", [])
-    return any("haven't changed the code since" in str(m.get("content", "")) for m in msgs)
-
-
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -1114,7 +1076,6 @@ def main():
             check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
-            check("e2e finish-when-verified nudges after tests pass", e2e_verify(port, tmp))
         finally:
             server.shutdown()
 
