@@ -9,7 +9,7 @@ Binaries resolve from env (see /root/harness/roster.env on the bench box):
   AIDER, GOOSE, CODEX, OPENCODE.  DGC uses run_bench's own dgc_run.
 """
 from __future__ import annotations
-import os, time
+import json, os, time
 from pathlib import Path
 
 AIDER    = os.environ.get("AIDER", "aider")
@@ -82,8 +82,16 @@ def goose_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
 # ---------------------------------------------------------------- OpenCode ----
 def opencode_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     """sst OpenCode headless (`opencode run`). Model as provider/model."""
-    e = dict(env, HOME=str(home),
-             OPENAI_API_BASE=a.base_url, OPENAI_API_KEY=(a.api_key or "ollama"))
+    # seed an ollama provider config (OpenAI-compatible) into the run's HOME
+    cfgdir = Path(home) / ".config" / "opencode"
+    cfgdir.mkdir(parents=True, exist_ok=True)
+    (cfgdir / "opencode.json").write_text(json.dumps({
+        "$schema": "https://opencode.ai/config.json",
+        "provider": {"ollama": {
+            "npm": "@ai-sdk/openai-compatible", "name": "Ollama",
+            "options": {"baseURL": a.base_url},
+            "models": {a.model: {"name": a.model}}}}}))
+    e = dict(env, HOME=str(home))
     args = [OPENCODE, "run", "-m", f"ollama/{a.model}", prompt]
     t0 = time.time()
     rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
