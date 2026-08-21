@@ -1,17 +1,6 @@
 <div align="center">
 
-```
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣠⣴⠇
-⠀⠀⠀⢀⣠⡆⠀⠀⢰⣿⣿⣿⠀⠀⠀⠀⠀⣠⣴
-⠀⠀⣾⣿⣿⡇⠀⠀⢸⣿⣿⡿⠀⠀⠀⣰⣿⣿⡏
-⠀⢠⣿⣿⣿⠀⠀⠀⣾⣿⣿⡇⠀⠀⠀⣿⣿⣿⠇
-⠀⢸⣿⣿⡿⠀⠀⠀⣿⣿⣿⡇⠀⠀⢰⣿⣿⣿
-⠀⣾⣿⣿⡇⠀⠀⢰⣿⣿⣿⠀⠀⠀⢸⣿⣿⡏
-⠀⣿⣿⣿⠇⠀⠀⢸⣿⣿⣿⠀⠀⠀⣿⣿⣿⡇
-⢰⣿⣿⣿⠀⠀⠀⣼⣿⣿⡇⠀⠀⢠⣿⣿⣿
-⢸⣿⣿⡟⠀⠀⠀⣿⣿⣿⡇⠀⠀⠸⠟⠋
-⡿⠟⠋⠀⠀⠀⢠⡿⠟⠉
-```
+<img src="docs/dgc-wordmark.png" alt="DGC" width="300">
 
 # Vibe DGC
 
@@ -24,9 +13,15 @@ Built by Mohit Kalra.
 
 DGC is an interactive coding agent that lives in your terminal, pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
 
-![DGC landing — vibedgc.com](docs/screenshot.png)
+![Vibe DGC — the CLI welcome screen](docs/welcome.png)
+
+<sub>The welcome screen, pointed at your own local model — the `///` mark, the session menu, and the **mode · model** status line.</sub>
 
 Pure Python 3.10+, three dependencies (`rich`, `prompt_toolkit`, `requests`). Your code and your prompts never leave your machine unless the model you pick is a cloud one.
+
+![Vibe DGC — vibedgc.com](docs/screenshot.png)
+
+<sub>The landing page at [vibedgc.com](https://vibedgc.com).</sub>
 
 ## Install
 
