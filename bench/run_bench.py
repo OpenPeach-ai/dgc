@@ -255,10 +255,10 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict) -> dict:
     engine = ENGINES[a.engine]
     for r in range(1, a.rounds + 1):
         if r == 1:
-            run = engine(prompt, work, sol, a, home, False, env)
+            run = engine(prompt, work, sol, tcmd, a, home, False, env)
         else:
             fp = FIX_PROMPT.format(testcmd=tcmd, output=last_out[-3500:], sol=", ".join(sol))
-            run = engine(fp, work, sol, a, home, True, env)
+            run = engine(fp, work, sol, tcmd, a, home, True, env)
         ok, out, ttime = run_tests(lang, ex, work, env, a.test_timeout)
         last_out = out
         # session_stats only applies to DGC's own session dir; other engines have none.

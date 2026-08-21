@@ -29,13 +29,13 @@ def _result(t0, rc, out, timed_out) -> dict:
 
 
 # ---------------------------------------------------------------- DGC ---------
-def dgc_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
+def dgc_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     from run_bench import dgc_run
     return dgc_run(prompt, workdir, a.model, a.base_url, a.api_key, home, cont, a.dgc_timeout, env)
 
 
 # ---------------------------------------------------------------- Aider -------
-def aider_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
+def aider_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     """Aider, driven headless. Talks to the local ollama via its OpenAI-compatible
     endpoint. The solution files are added to the chat; --message runs one non-interactive pass."""
     e = dict(env, HOME=str(home),
@@ -43,7 +43,11 @@ def aider_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
              AIDER_ANALYTICS="false")
     args = [AIDER, "--model", f"openai/{a.model}",
             "--yes-always", "--no-git", "--no-auto-commits", "--no-check-update",
-            "--no-show-model-warnings", "--no-stream", "--map-tokens", "0"]
+            "--no-show-model-warnings", "--no-stream", "--map-tokens", "0",
+            # match DGC/Codex/goose (agentic): let Aider RUN the tests and self-correct in a loop,
+            # which is also how Aider's own polyglot benchmark drives it. Without this Aider is
+            # one-shot and unfairly handicapped vs agentic harnesses.
+            "--auto-test", "--test-cmd", tcmd]
     args += [str(s) for s in sol]                 # files Aider may edit
     args += ["--message", prompt]
     t0 = time.time()
@@ -52,7 +56,7 @@ def aider_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
 
 
 # ---------------------------------------------------------------- Codex -------
-def codex_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
+def codex_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     """OpenAI Codex CLI headless (`codex exec`) with `--oss` pointing at the local ollama."""
     e = dict(env, HOME=str(home), OLLAMA_BASE_URL=a.base_url.rstrip("/").removesuffix("/v1"))
     args = [CODEX, "exec", "--oss", "--local-provider", "ollama", "-m", a.model,
@@ -64,7 +68,7 @@ def codex_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
 
 
 # ---------------------------------------------------------------- goose -------
-def goose_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
+def goose_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     """Block goose headless (`goose run -t`). Provider/model via env (ollama)."""
     host = a.base_url.rstrip("/").removesuffix("/v1")
     e = dict(env, HOME=str(home), GOOSE_PROVIDER="ollama", GOOSE_MODEL=a.model,
@@ -76,7 +80,7 @@ def goose_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
 
 
 # ---------------------------------------------------------------- OpenCode ----
-def opencode_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
+def opencode_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     """sst OpenCode headless (`opencode run`). Model as provider/model."""
     e = dict(env, HOME=str(home),
              OPENAI_API_BASE=a.base_url, OPENAI_API_KEY=(a.api_key or "ollama"))
