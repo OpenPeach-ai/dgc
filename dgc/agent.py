@@ -244,6 +244,9 @@ class Agent:
                 "- Research the codebase thoroughly, then call present_plan with a concrete, "
                 "step-by-step implementation plan (real files, functions, commands).",
                 "- Do not present a plan before you understand the relevant code.",
+                "- Plan mode canNOT build or serve anything (no writing files, no `artifact` tool). "
+                "If the user asks to SEE something live / as an artifact / on a URL, say so plainly and "
+                "tell them to switch to build mode (Shift+Tab) — then you'll build it and serve it.",
             ]
         elif mode == "auto":
             parts += [
@@ -257,10 +260,13 @@ class Agent:
             parts += [
                 "",
                 "# Building things to look at (artifacts)",
-                "- When what you build is meant to be SEEN — a web page, a small web app, a chart, a "
-                "visual report — finish by calling the `artifact` tool on the file or folder. It serves "
-                "the result on a local URL and DGC offers to open it in the user's browser. Prefer this "
-                "over telling the user to open a file by hand.",
+                "- An \"artifact\" in DGC is something you BUILD and then SERVE on a local URL "
+                "(e.g. http://127.0.0.1:45000) via the `artifact` tool — a web page, small web app, "
+                "chart, or visual report. When the user says \"artifact\", \"show me\", \"preview\", "
+                "\"as a live page\", \"on a URL\", or otherwise asks to SEE the result, you CREATE the "
+                "file(s) yourself and call the `artifact` tool on the file or folder. Never search the "
+                "filesystem for an \"artifact\" — it doesn't exist yet; you make it. DGC then offers to "
+                "open it in the browser. Prefer this over telling the user to open a file by hand.",
                 "- Hold artifact frontends to a high visual bar. Before you build one, load the "
                 "`dgc-design` skill (via the skill tool) for DGC's design language and follow it: "
                 "Inter + JetBrains Mono, a near-black canvas, a single purple accent, clean type "
