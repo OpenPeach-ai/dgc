@@ -210,7 +210,10 @@ class UI:
         target = {0: "auto", 1: "acceptEdits", 2: "default"}.get(idx)
         if target:
             return target
-        feedback = input("  feedback for the plan (optional): ").strip()
+        try:
+            feedback = input("  feedback for the plan (optional): ").strip()
+        except EOFError:
+            return None
         if feedback:
             self.console.print(f"  [{DIM}]feedback noted — the agent will see your denial[/]")
         return None

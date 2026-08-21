@@ -20,8 +20,36 @@ Usage:
   python3 run_bench.py --model qwen122b-code:latest --base-url http://localhost:11434/v1 --out results/
 """
 from __future__ import annotations
-import argparse, json, os, re, shutil, subprocess, sys, tempfile, time
+import argparse, json, os, re, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path
+
+
+def _dec(x):        # subprocess bytes → str (TimeoutExpired.stdout is bytes even under text=True)
+    return x.decode("utf-8", "replace") if isinstance(x, (bytes, bytearray)) else (x or "")
+
+
+def _run_capture(argv, cwd, env, timeout, merge=False):
+    """Run a command in its OWN process group and, on timeout, SIGKILL the whole tree — so a
+    hung cmake/compiler (or a dgc-spawned build) can't survive as a CPU-eating orphan.
+    Returns (returncode_or_None, stdout_str, stderr_str, timed_out)."""
+    proc = subprocess.Popen(
+        argv, cwd=cwd, env=env, text=True, start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=(subprocess.STDOUT if merge else subprocess.PIPE))
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        return proc.returncode, _dec(out), _dec(err), False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            try: proc.kill()
+            except Exception: pass
+        try:
+            out, err = proc.communicate(timeout=10)
+        except Exception:
+            out, err = "", ""
+        return None, _dec(out), _dec(err), True
 
 REPO = Path(__file__).resolve().parent
 DATA = REPO / "data" / "polyglot-benchmark"
@@ -135,14 +163,11 @@ def test_cmd_str(lang: str, ex: str) -> str:
 def run_tests(lang: str, ex: str, workdir: Path, env: dict, timeout: int):
     cmd = test_cmd_str(lang, ex)
     t0 = time.time()
-    try:
-        p = subprocess.run(["bash", "-lc", cmd], cwd=workdir, env=env,
-                           capture_output=True, text=True, timeout=timeout)
-        ok = (p.returncode == 0)
-        out = (p.stdout or "") + "\n" + (p.stderr or "")
-    except subprocess.TimeoutExpired as e:
-        ok = False
-        out = f"[TEST TIMEOUT after {timeout}s]\n" + (e.stdout or "") + (e.stderr or "")
+    rc, out, _err, timed_out = _run_capture(["bash", "-lc", cmd], workdir, env, timeout, merge=True)
+    if timed_out:
+        ok, out = False, f"[TEST TIMEOUT after {timeout}s]\n{out}"
+    else:
+        ok = (rc == 0)
     return ok, out[-6000:].strip(), round(time.time() - t0, 1)
 
 
@@ -169,13 +194,12 @@ def dgc_run(prompt: str, workdir: Path, model: str, base_url: str, api_key: str,
     e = dict(env)
     e["HOME"] = str(home)          # <-- isolation: DGC reads/writes this ~/.dgc only
     t0 = time.time()
-    try:
-        p = subprocess.run(args, cwd=workdir, env=e, capture_output=True,
-                           text=True, timeout=timeout)
-        return {"rc": p.returncode, "time": round(time.time() - t0, 1), "timeout": False,
-                "stderr_tail": (p.stderr or "")[-1200:]}
-    except subprocess.TimeoutExpired:
-        return {"rc": None, "time": timeout, "timeout": True, "stderr_tail": "[DGC TIMEOUT]"}
+    rc, _out, err, timed_out = _run_capture(args, workdir, e, timeout, merge=False)
+    if timed_out:                  # SIGKILLs dgc AND every build it spawned (no orphans)
+        return {"rc": None, "time": round(time.time() - t0, 1), "timeout": True,
+                "stderr_tail": "[DGC TIMEOUT]"}
+    return {"rc": rc, "time": round(time.time() - t0, 1), "timeout": False,
+            "stderr_tail": err[-1200:]}
 
 
 def session_stats(home: Path) -> dict:
@@ -361,7 +385,13 @@ def main() -> None:
         for ex in exs:
             if (lang, ex) in done:
                 continue
-            rec = run_one(lang, ex, a, home, env)
+            try:
+                rec = run_one(lang, ex, a, home, env)
+            except Exception as e:                       # never let one exercise kill the whole run
+                import traceback
+                rec = {"lang": lang, "ex": ex, "model": a.model, "solved": False, "rounds": [],
+                       "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-1500:]}
+                print(f"‼ {lang}/{ex} errored: {e}", flush=True)
             jf.write(json.dumps(rec) + "\n"); jf.flush()
             print(summary_line(rec), flush=True)
     jf.close()
