@@ -138,6 +138,7 @@ class AgentSession:
         self._suggestion: str | None = None
         self._todos: list = []
         self._scroll_off = 0
+        self._follow = True                # True = pin to the live bottom; a manual scroll-up drops it
         # a per-session cross-thread blocking request (approve / plan / options)
         self._req: dict | None = None
         self._req_answer = None
@@ -210,6 +211,7 @@ class TUI:
     _suggestion = _active_prop("_suggestion")
     _todos = _active_prop("_todos")
     _scroll_off = _active_prop("_scroll_off")
+    _follow = _active_prop("_follow")
     _req = _active_prop("_req")
     _req_answer = _active_prop("_req_answer")
     _req_event = _active_prop("_req_event")
@@ -589,7 +591,8 @@ class TUI:
 
     def _append(self, ansi: str) -> None:
         self.blocks.append(ansi)
-        self._scroll_off = 0               # new output snaps the view back to the bottom
+        if self._follow:                   # only snap to bottom while following; a scroll-up holds position
+            self._scroll_off = 0
         self._invalidate()
 
     def _invalidate(self) -> None:
@@ -598,6 +601,17 @@ class TUI:
                 self.app.invalidate()
             except Exception:
                 pass
+
+    def _wheel(self, delta: int) -> None:
+        """Mouse-wheel scroll of the transcript. delta>0 scrolls up into history (drops follow so
+        streaming no longer yanks the view down); delta<0 scrolls toward the live bottom, re-following there."""
+        if delta > 0:
+            self._scroll_off += delta
+            self._follow = False
+        else:
+            self._scroll_off = max(0, self._scroll_off + delta)
+            self._follow = self._scroll_off == 0
+        self._invalidate()
 
     # ---- the transcript control ----
     def _transcript(self):
@@ -1560,7 +1574,7 @@ class TUI:
 
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
-        transcript = Window(FormattedTextControl(self._transcript), wrap_lines=True,
+        transcript = Window(_ClickControl(self._transcript, on_scroll=self._wheel), wrap_lines=True,
                             height=Dimension(weight=1))   # scroll is driven by the cursor marker (_cursor_ft)
         self._transcript_win = transcript
         status = Window(FormattedTextControl(self._status), height=1, style="class:status")
@@ -2419,6 +2433,7 @@ class TUI:
                 self.agent.steer(text)
                 self.blocks.append(self._user_band(text, tag="follow-up · steering this turn"))
                 self._scroll_off = 0
+                self._follow = True
                 self._invalidate()
                 return
             if text.startswith("/") and self._handle_slash(text):
@@ -2501,6 +2516,7 @@ class TUI:
             if self._overlay is not None and self._overlay.get("reader"):
                 self._overlay_move(-(self._OVERLAY_CAP - 1)); return   # page the doc reader
             self._scroll_off += 10          # page up: keep an earlier line visible
+            self._follow = False            # grab the transcript — new output no longer yanks us down
             self._invalidate()
 
         @kb.add("pagedown")
@@ -2508,11 +2524,13 @@ class TUI:
             if self._overlay is not None and self._overlay.get("reader"):
                 self._overlay_move(self._OVERLAY_CAP - 1); return
             self._scroll_off = max(0, self._scroll_off - 10)
+            self._follow = self._scroll_off == 0   # re-follow the live bottom once we reach it
             self._invalidate()
 
         @kb.add("end")
         def _(ev):
             self._scroll_off = 0            # jump back to the live bottom
+            self._follow = True
             self._invalidate()
 
         @kb.add("c-r", filter=Condition(lambda: self._overlay is None and self._req is None
@@ -2587,6 +2605,7 @@ class TUI:
         self.blocks.append(self._user_band(text))
         self._turn_marks.append((len(self.blocks) - 1, text.replace("\n", " ")[:70]))   # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
+        self._follow = True
         self._turn.set()
         self._turn_t0 = time.monotonic()
 
@@ -2689,19 +2708,26 @@ def _tui_help() -> str:
 
 class _ClickControl(FormattedTextControl):
     """A FormattedTextControl that also dispatches whole-control clicks to `on_click`
-    (so the welcome card's menu rows are mouse-clickable, )."""
+    (so the welcome card's menu rows are mouse-clickable), and mouse-wheel scroll to
+    `on_scroll(delta)` (+ = up into history)."""
 
-    def __init__(self, text, on_click, on_move=None):
+    def __init__(self, text, on_click=None, on_move=None, on_scroll=None):
         super().__init__(text)
         self._on_click = on_click
         self._on_move = on_move
+        self._on_scroll = on_scroll
 
     def mouse_handler(self, mouse_event):
         from prompt_toolkit.mouse_events import MouseEventType
-        if mouse_event.event_type == MouseEventType.MOUSE_MOVE and self._on_move:
+        et = mouse_event.event_type
+        if self._on_scroll and et == MouseEventType.SCROLL_UP:
+            self._on_scroll(3); return None
+        if self._on_scroll and et == MouseEventType.SCROLL_DOWN:
+            self._on_scroll(-3); return None
+        if et == MouseEventType.MOUSE_MOVE and self._on_move:
             self._on_move(mouse_event.position)
             return None
-        if mouse_event.event_type == MouseEventType.MOUSE_UP and self._on_click(mouse_event.position):
+        if et == MouseEventType.MOUSE_UP and self._on_click and self._on_click(mouse_event.position):
             return None
         return super().mouse_handler(mouse_event)
 
