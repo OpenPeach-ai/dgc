@@ -55,8 +55,9 @@ def aider_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
 def codex_engine(prompt, workdir, sol, a, home, cont, env) -> dict:
     """OpenAI Codex CLI headless (`codex exec`) with `--oss` pointing at the local ollama."""
     e = dict(env, HOME=str(home), OLLAMA_BASE_URL=a.base_url.rstrip("/").removesuffix("/v1"))
-    args = [CODEX, "exec", "--oss", "-m", a.model, "--skip-git-repo-check",
-            "-C", str(workdir), "--dangerously-bypass-approvals-and-sandbox", prompt]
+    args = [CODEX, "exec", "--oss", "--local-provider", "ollama", "-m", a.model,
+            "--skip-git-repo-check", "-C", str(workdir),
+            "--dangerously-bypass-approvals-and-sandbox", prompt]
     t0 = time.time()
     rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
     return _result(t0, rc, out, to)
