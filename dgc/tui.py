@@ -708,7 +708,7 @@ class TUI:
         elif self._overlay is not None:
             chips = [("↑↓", "move"), ("Enter", "select"), ("Esc", "close")]
         elif self._turn.is_set():
-            chips = [("Esc", "stop"), ("Enter", "queue")]
+            chips = [("Esc", "stop"), ("Enter", "follow up")]
         else:
             chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
                      ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
@@ -2414,10 +2414,12 @@ class TUI:
             if not text:
                 return
             if self._turn.is_set():
-                # inject into the RUNNING turn (the model reads it mid-turn), not a later turn
+                # inject into the RUNNING turn (the model reads it mid-turn), not a later turn.
+                # Show it in the same highlighted band as a normal prompt, tagged as a follow-up.
                 self.agent.steer(text)
-                self._append(self._rich(f"[{style_mod.theme().accent}]{glyphs.ARROW} steering:[/] "
-                                        f"[{style_mod.theme().faint}]{_esc(text[:70])}[/]"))
+                self.blocks.append(self._user_band(text, tag="follow-up · steering this turn"))
+                self._scroll_off = 0
+                self._invalidate()
                 return
             if text.startswith("/") and self._handle_slash(text):
                 return
@@ -2543,21 +2545,25 @@ class TUI:
                     self.input_buf.insert_text(str(n))
         return kb
 
-    def _user_band(self, text: str):
+    def _user_band(self, text: str, tag: str = ""):
         """The user's prompt as a bg-tinted band with a ❯ prefix  — a highlighted
         block that reads distinctly from the assistant text. No border/rail; continuation lines
-        indent under the arrow, and the whole thing sits on a subtle raised background."""
+        indent under the arrow, and the whole thing sits on a subtle raised background.
+        `tag` renders a faint marker on the first row (e.g. "follow-up" for a mid-turn prompt)."""
         from rich.text import Text
         th = style_mod.theme()
-        W = max(30, self._width)                      # full-width band 
+        W = max(30, self._width)                      # full-width band
         t = Text()
-        t.append(" " * W + "\n")                      # vpad: a blank tinted line above 
+        t.append(" " * W + "\n")                      # vpad: a blank tinted line above
         lines = (text.rstrip("\n") or "").split("\n")
         for i, ln in enumerate(lines):
             pre = f"{glyphs.ARROW} " if i == 0 else "  "
+            suffix = f"   {tag}" if (i == 0 and tag) else ""
             t.append(pre, style=f"bold {th.accent}")
             t.append(ln, style=th.text_strong)
-            pad = W - len(pre) - len(ln)
+            if suffix:
+                t.append(suffix, style=th.faint)
+            pad = W - len(pre) - len(ln) - len(suffix)
             if pad > 0:
                 t.append(" " * pad)                 # fill the row so the band spans the full width
             t.append("\n")
