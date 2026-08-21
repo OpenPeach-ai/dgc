@@ -251,15 +251,19 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict) -> dict:
     prep_workdir(exdir, work)
     solved = False
     last_out = ""
+    from engines import ENGINES
+    engine = ENGINES[a.engine]
     for r in range(1, a.rounds + 1):
         if r == 1:
-            run = dgc_run(prompt, work, a.model, a.base_url, a.api_key, home, False, a.dgc_timeout, env)
+            run = engine(prompt, work, sol, a, home, False, env)
         else:
             fp = FIX_PROMPT.format(testcmd=tcmd, output=last_out[-3500:], sol=", ".join(sol))
-            run = dgc_run(fp, work, a.model, a.base_url, a.api_key, home, True, a.dgc_timeout, env)
+            run = engine(fp, work, sol, a, home, True, env)
         ok, out, ttime = run_tests(lang, ex, work, env, a.test_timeout)
         last_out = out
-        rec["rounds"].append({"round": r, "dgc": run, "stats": session_stats(home),
+        # session_stats only applies to DGC's own session dir; other engines have none.
+        stats = session_stats(home) if a.engine == "dgc" else {}
+        rec["rounds"].append({"round": r, "dgc": run, "stats": stats,
                               "test_pass": ok, "test_time": ttime, "test_tail": out[-1200:]})
         if ok:
             solved = True
@@ -335,6 +339,9 @@ def summary_line(rec: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
+    ap.add_argument("--engine", default="dgc",
+                    choices=["dgc", "aider", "codex", "goose", "opencode"],
+                    help="which coding harness to drive (all on the same model + tasks + scoring)")
     ap.add_argument("--base-url", default="http://localhost:11434/v1")
     ap.add_argument("--api-key", default="ollama")
     ap.add_argument("--langs", default="all", help="'all' or comma list of: " + ",".join(LANGS))
