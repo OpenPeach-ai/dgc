@@ -52,6 +52,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("view-plan", "reopen the plan saved in plan mode"),
     ("think", "how hard the model reasons: off · low · medium · high"),
     ("thoughts", "show or hide the model's thinking in the transcript"),
+    ("copy", "select & copy text — releases the mouse to your terminal"),
     ("worktree", "isolate edits in a git worktree"),
     ("sandbox", "confine bash to the project + /tmp"),
     ("bg", "terminal background: auto · dark · inherit"),
@@ -239,6 +240,8 @@ class TUI:
         self._width, self._height = _sz.columns, _sz.lines   # os.terminal_size uses .lines
         self._flash_msg = ""               # transient confirmation (clicks / mode switch)
         self._flash_until = 0.0
+        self._mouse_on = True              # mouse capture (wheel-scroll/clicks); /copy toggles it OFF
+                                           # so the terminal's own text selection + copy work
         self._naming = False               # inline "name this new session" prompt is active
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
@@ -717,6 +720,8 @@ class TUI:
         armed = (time.monotonic() - self._quit_armed) < 2.0
         if armed and not self._turn.is_set() and self._overlay is None and self._req is None:
             chips = [("Ctrl+C", "press again to quit")]
+        elif not self._mouse_on:
+            chips = [("select mode", "drag to select & copy"), ("/copy", "back to scroll")]
         elif self._req is not None or self._input is not None or self._naming:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
@@ -1611,7 +1616,8 @@ class TUI:
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
         # terminal's scrollback (which would show pre-DGC output). Copy text with Option/Shift-drag.
         self.app = Application(layout=Layout(root, focused_element=composer),
-                               key_bindings=self._keys(), full_screen=True, mouse_support=True,
+                               key_bindings=self._keys(), full_screen=True,
+                               mouse_support=Condition(lambda: self._mouse_on),
                                style=self._pt_style(), refresh_interval=0.08,
                                # NOT erase_when_done: full-screen uses the alternate screen, which the
                                # terminal restores on exit. erase_when_done ALSO erases on top of that
@@ -1810,6 +1816,13 @@ class TUI:
             self._open_plan_view()
         elif cmd in ("artifact", "artifacts"):
             self._open_artifacts()
+        elif cmd in ("copy", "select", "selection"):
+            # toggle mouse capture: OFF hands selection back to the terminal so the user can
+            # drag-select and copy model responses; ON restores wheel-scroll + clickable menus.
+            self._mouse_on = not self._mouse_on
+            self._invalidate()
+            self._flash("mouse ON — wheel scrolls, /copy to select text" if self._mouse_on
+                        else "select mode — drag to select & copy in your terminal · /copy to exit")
         elif cmd in ("dashboard", "dash", "home"):
             self._open_dashboard()
         elif cmd == "jump":
