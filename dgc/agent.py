@@ -127,6 +127,15 @@ class _SubUI:
     def _live(self):
         return getattr(self._parent, "_live", None)
 
+    def __getattr__(self, name):
+        # Forward anything not explicitly wrapped to the parent UI — so a sub-agent's deny reasons
+        # (deny_reason), artifact cards (artifact_ready) and status flags behave like the main agent's,
+        # instead of silently reading "" / None. (Only fires when normal lookup misses; the guard
+        # below stops the instance's own attrs from recursing during partial init.)
+        if name in ("_parent", "_label", "_buf", "_last"):
+            raise AttributeError(name)
+        return getattr(self._parent, name)
+
     def result(self) -> str:
         return (self._last or "".join(self._buf)).strip()
 
@@ -769,6 +778,8 @@ class Agent:
         sub_ui = _SubUI(self.ui, description)
         sub = Agent(self.config, sub_ui, mcp=self.mcp)   # fresh context, shared config + MCP servers
         sub.depth = self.depth + 1
+        sub.cancelled = self.cancelled                    # parent Esc/cancel reaches the sub-agent too
+        #                                                   (else a long sub-task was uninterruptible)
         override = self._subagent_client(adef)
         if override is not None:
             sub.client = override                         # its own model/host

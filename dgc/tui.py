@@ -1879,9 +1879,11 @@ class TUI:
         the point). A title is auto-derived from the first prompt; /name overrides it."""
         self._new_session()
 
-    def _autotitle(self, prompt: str) -> None:
-        """Background: derive a session title from the first prompt  and apply it,
-        unless the user already named it. Silent on failure."""
+    def _autotitle(self, sess, prompt: str) -> None:
+        """Background: derive a session title from the first prompt and apply it, unless the user
+        already named it. Silent on failure."""
+        self._tls.session = sess        # route _active_prop reads/writes to the session that FINISHED,
+        #                                 not whatever is on screen now (fleet: user may have switched)
         try:
             title = self.agent.generate_title(prompt)
         except Exception:
@@ -1890,8 +1892,10 @@ class TUI:
             self.agent.name_session(title)
             self._invalidate()
 
-    def _compute_suggestion(self, prompt: str, resp: str) -> None:
+    def _compute_suggestion(self, sess, prompt: str, resp: str) -> None:
         """Background: predict the next prompt (ghost text)."""
+        self._tls.session = sess        # bind to the finishing session (see _autotitle) so a fleet
+        #                                 switch during this ~1s window can't ghost-text the wrong session
         try:
             s = self.agent.suggest_next(prompt, resp)
         except Exception:
@@ -2859,12 +2863,12 @@ class TUI:
                 if (not self.agent.session_name and not self._autotitled
                         and not self._cancel.is_set()):
                     self._autotitled = True
-                    threading.Thread(target=self._autotitle, args=(text,), daemon=True).start()
+                    threading.Thread(target=self._autotitle, args=(sess, text), daemon=True).start()
                 if self.config.get("suggest", True) and not self._cancel.is_set():
                     resp = next((m.get("content", "") for m in reversed(self.agent.messages)
                                  if m.get("role") == "assistant"), "")
                     threading.Thread(target=self._compute_suggestion,
-                                     args=(text, str(resp)), daemon=True).start()
+                                     args=(sess, text, str(resp)), daemon=True).start()
                 self._invalidate()
                 if self._queue:
                     self._submit(self._queue.pop(0))

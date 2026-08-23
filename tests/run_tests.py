@@ -337,6 +337,36 @@ def unit_tests(tmp: Path):
     ot._settle_running_tools()   # idempotent when nothing is running
     check("settle leaves a finished block finished", not ot.blocks[0].get("running"))
 
+    # --- sub-agent UI forwards unknown attrs to the parent (deny reasons + artifact cards), so a
+    #     sub-agent's denied tool sees the user's guidance and its artifacts still surface a card.
+    import types as _types, threading as _threading
+    from dgc.agent import _SubUI as _SUI
+    class _ParentUI:
+        deny_reason = "use edit_file instead"
+        def artifact_ready(self, a): return ("card", a)
+    _su = _SUI(_ParentUI(), "sub")
+    check("sub-agent UI forwards deny_reason to the parent", _su.deny_reason == "use edit_file instead")
+    check("sub-agent UI forwards artifact_ready to the parent", _su.artifact_ready("x") == ("card", "x"))
+    check("sub-agent UI keeps its own explicit methods", _su.result() == "")
+
+    # --- fleet routing: a finished session's background autotitle/suggestion threads must target THAT
+    #     session, not whatever is on screen now (else a switch mid-window titles the wrong session).
+    rt = object.__new__(TUI); rt._invalidate = lambda: None; rt._tls = _threading.local()
+    def _mk(n):
+        ag = _types.SimpleNamespace(session_name=None)
+        ag.generate_title = lambda p, n=n: f"title-{n}"
+        ag.name_session = lambda t, ag=ag: setattr(ag, "session_name", t)
+        ag.suggest_next = lambda p, r, n=n: f"sug-{n}"
+        return _types.SimpleNamespace(agent=ag, _suggestion=None)
+    _sA, _sB = _mk("A"), _mk("B")
+    rt._sessions = [_sA, _sB]; rt._active_idx = 0        # A is on screen; B just finished
+    rt._autotitle(_sB, "hi")
+    check("autotitle targets the finishing session, not the active one",
+          _sB.agent.session_name == "title-B" and _sA.agent.session_name is None)
+    rt._compute_suggestion(_sB, "hi", "yo")
+    check("ghost-text suggestion targets the finishing session",
+          _sB._suggestion == "sug-B" and _sA._suggestion is None)
+
     # --- /jump: scrolls the transcript to a chosen turn
     jt = object.__new__(TUI); jt._width = 80; jt._scroll_off = 0; jt._invalidate = lambda: None
     jt.blocks = ["a\nb\nc", "d", "e\nf"]
