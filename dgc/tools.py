@@ -516,13 +516,44 @@ def edit_file(args: dict, ctx) -> str:
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p))}"
 
 
+def _coerce_edits(args: dict):
+    """Normalize the shapes weak models send `edits` in (pi's prepareArguments): a JSON string instead
+    of a list, a single {old,new} object instead of a list, or legacy/alt key names — into a list of
+    {old_string,new_string,replace_all?}. Best-effort; returns non-list input unchanged for the caller
+    to reject with a clear error."""
+    import json as _json
+    edits = args.get("edits")
+    if isinstance(edits, str):                      # a JSON string instead of an array
+        try:
+            edits = _json.loads(edits)
+        except ValueError:
+            return edits
+    if isinstance(edits, dict):                     # a single edit object instead of a list
+        edits = [edits]
+    if edits is None and any(args.get(k) is not None for k in ("old_string", "oldText", "old")):
+        edits = [args]                              # legacy top-level old/new → one edit
+    if not isinstance(edits, list):
+        return edits
+    out = []
+    for e in edits:
+        if not isinstance(e, dict):
+            out.append(e); continue
+        o = next((e[k] for k in ("old_string", "oldText", "old", "search") if k in e), "")
+        n = next((e[k] for k in ("new_string", "newText", "new", "replace") if k in e), "")
+        d = {"old_string": o, "new_string": n}
+        if e.get("replace_all"):
+            d["replace_all"] = True
+        out.append(d)
+    return out
+
+
 def multi_edit(args: dict, ctx) -> str:
     """B4: apply an ordered list of edits to ONE file against the evolving buffer. Non-atomic —
     edits that apply are kept even if a later one fails, with per-edit failure accounting."""
     p = _resolve(str(args.get("path", "")), ctx.project_root)
     if not p.exists():
         return f"error: no such file: {p} (use write_file to create it)"
-    edits = args.get("edits")
+    edits = _coerce_edits(args)                     # accept the many shapes a weak model sends edits in
     if not isinstance(edits, list) or not edits:
         return "error: 'edits' must be a non-empty list of {old_string, new_string, replace_all?}"
     try:

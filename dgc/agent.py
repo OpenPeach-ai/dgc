@@ -183,6 +183,7 @@ class Agent:
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         self.session_name = None  # optional user-given name for the current session
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
+        self._session_started = False       # SessionStart hook fires once per session
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
@@ -421,11 +422,17 @@ class Agent:
         if self.depth == 0:                 # only a fresh top-level turn clears the cancel flag — a
             self.cancelled.clear()          #   sub-agent SHARES the parent's Event, so clearing it here
             #                                   would wipe a cancel that arrived during sub construction.
+            if not self._session_started:   # SessionStart lifecycle hook (fires once per session)
+                self._session_started = True
+                run_hooks("SessionStart", {"project": str(self.config.project_root)},
+                          self.config, self.config.project_root)
         self.steer_queue.clear()            # drop any stale interjections from a prior turn
         try:
             self._run_turn(user_text)
         finally:
             self._persist()
+            if self.depth == 0:             # Stop lifecycle hook (turn finished)
+                run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
 
     def _persist(self) -> None:
         if self.session_file:
@@ -957,14 +964,32 @@ class Agent:
             if m.get("tool_calls"):
                 calls = " [tools: " + ", ".join(c["function"]["name"] for c in m["tool_calls"]) + "]"
             transcript_lines.append(f"{role}{calls}: {content}")
-        prompt = ("Summarize this coding-session transcript into a compact brief for the agent to "
-                  "continue working: what was asked, what was done (files touched, commands run), "
-                  "key decisions, and what remains. Be terse, use bullets.\n\n" + "\n\n".join(transcript_lines))
+        # PreCompact lifecycle hook — a user hook can snapshot state before context is summarized.
+        run_hooks("PreCompact", {"messages": len(self.messages)}, self.config, self.config.project_root)
+        # Structured + MERGED summary (pi): a fixed schema, and fold the PREVIOUS brief in rather than
+        # restart — so facts established before an earlier compaction aren't lost on the next one.
+        prior = ""
+        m1 = self.messages[1] if len(self.messages) > 1 else {}
+        if isinstance(m1.get("content"), str) and m1["content"].startswith("[Earlier conversation compacted"):
+            prior = m1["content"].split("\n", 1)[-1]
+        prompt = (
+            "You are compacting a coding session so the agent can continue with less context. Produce a "
+            "compact brief under EXACTLY these headings (omit one only if truly empty):\n"
+            "## Goal — what the user ultimately wants\n"
+            "## Constraints — rules/preferences to keep honoring\n"
+            "## Progress — what's been done (files created/edited, commands run + outcomes)\n"
+            "## Decisions — choices made and why\n"
+            "## Next — what remains / the immediate next step\n"
+            "## Critical — exact names, signatures, paths, values that must not be lost\n"
+            "Be terse; use bullets. MERGE the earlier brief below with the new transcript: keep "
+            "everything from it that's still true, update what changed, drop nothing established.\n\n"
+            + (f"### Earlier brief (merge this in)\n{prior}\n\n" if prior else "")
+            + "### New transcript since then\n" + "\n\n".join(transcript_lines))
         try:
             result = self.client.chat([{"role": "user", "content": prompt}])
-            summary = result.content or "(summary unavailable)"
+            summary = result.content or prior or "(summary unavailable)"
         except LLMError:
-            summary = "(compaction failed; earlier context dropped)"
+            summary = prior or "(compaction failed; earlier context dropped)"   # keep the old brief
         self.messages = (
             [self.messages[0],
              {"role": "user", "content": f"[Earlier conversation compacted to this summary]\n{summary}"},
