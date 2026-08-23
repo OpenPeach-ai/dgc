@@ -65,6 +65,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("dashboard", "session roster — open, switch, start, or delete sessions"),
     ("name", "name this session"),
     ("goal", "set a standing objective the agent keeps working toward · /goal clear"),
+    ("set", "tune a setting live: /set temperature 0.7 · top_p · top_k · min_p · max_tokens"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
     ("skills", "installed skills"),
@@ -2080,6 +2081,38 @@ class TUI:
                 g = getattr(self.agent, "goal", "")
                 self._flash((f"goal: {g[:70]}  · /goal clear to remove") if g
                             else "no goal set — /goal <objective> to set one")
+        elif cmd == "set":
+            from .config import DEFAULTS
+            tunable = ("temperature", "top_p", "top_k", "min_p", "max_tokens", "context_size",
+                       "bash_timeout", "request_timeout", "artifact_hostname")
+            sp = rest.split(maxsplit=1)
+            if not sp:
+                cur = " · ".join(f"{k}={self.config.get(k, '') or '(default)'}" for k in tunable)
+                self._flash(f"/set <key> <value> — {cur}")
+            else:
+                key = sp[0]
+                val = sp[1].strip() if len(sp) > 1 else ""
+                if key not in DEFAULTS:
+                    self._flash(f"unknown setting '{key}' — /set to list the tunable ones")
+                else:
+                    dflt = DEFAULTS[key]
+                    try:
+                        if val in ("", "default", "none"):
+                            parsed = "" if isinstance(dflt, str) else dflt
+                        elif isinstance(dflt, bool):
+                            parsed = val.lower() in ("1", "true", "on", "yes")
+                        elif isinstance(dflt, int) and not isinstance(dflt, bool):
+                            parsed = int(val)
+                        elif isinstance(dflt, float):
+                            parsed = float(val)
+                        else:
+                            parsed = val
+                    except ValueError:
+                        self._flash(f"'{val}' isn't a valid value for {key}"); return True
+                    self.config.set(key, parsed)
+                    self.agent.refresh_client()   # pick up sampling / max_tokens / timeout changes now
+                    self._flash(f"{key} = {parsed}" if parsed not in ("", dflt)
+                                else f"{key} reset to the default")
         elif cmd == "resume":
             self._resume_flow()
         elif cmd in ("model", "models"):
