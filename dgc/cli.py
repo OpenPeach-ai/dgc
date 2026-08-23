@@ -1118,10 +1118,10 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _print_resume_hint(agent, config) -> None:
-    """epilogue printed to the normal screen after the full-screen app exits:
-        Resume this session with:
-          dgc --resume <id>
-    Only when a real conversation happened, so a glance-and-quit leaves nothing behind."""
+    """The single epilogue printed to the normal screen after the full-screen app exits — ONE block
+    offering both ways to come back (the quick `--continue` and the exact `--resume <id>`), so there
+    aren't two separate 'Resume this session' notices. Only when a real conversation happened, so a
+    glance-and-quit leaves nothing behind."""
     sf = getattr(agent, "session_file", None)
     if not sf or len([m for m in getattr(agent, "messages", []) if m.get("role") != "system"]) < 2:
         return
@@ -1130,8 +1130,14 @@ def _print_resume_hint(agent, config) -> None:
         name = sessions_mod.name_of(sf)
     except Exception:
         pass
-    sys.stdout.write("\nResume this session with:\n")
-    sys.stdout.write(f"  dgc --resume {sf.stem}" + (f"   ({name})" if name else "") + "\n")
+    tty = sys.stdout.isatty()
+    dim, bold, rst = ("\x1b[2m", "\x1b[1m", "\x1b[0m") if tty else ("", "", "")
+    cont, res = "dgc --continue", f"dgc --resume {sf.stem}"
+    w = max(len(cont), len(res)) + 4                       # align the descriptions past the longer command
+    nm = f" {dim}({name}){rst}" if name else ""
+    sys.stdout.write(f"\n  Resume this session{nm}:\n")
+    sys.stdout.write(f"    {bold}{cont}{rst}{' ' * (w - len(cont))}{dim}the most recent in this folder{rst}\n")
+    sys.stdout.write(f"    {bold}{res}{rst}{' ' * (w - len(res))}{dim}this exact session{rst}\n\n")
     sys.stdout.flush()
 
 

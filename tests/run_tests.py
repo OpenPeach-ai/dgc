@@ -459,8 +459,10 @@ def unit_tests(tmp: Path):
     _C._print_resume_hint(_Ag(_sp, [{"role": "system", "content": "x"}]), None)   # no real turn → nothing
     sys.stdout = _o
     _hint = _b.getvalue()
-    check("resume hint prints for a real session", "Resume this session with" in _hint and _sid in _hint)
-    check("resume hint silent on an empty session", _hint.count("Resume this session with") == 1)
+    check("resume hint prints for a real session",
+          "Resume this session" in _hint and _sid in _hint
+          and "dgc --continue" in _hint and "dgc --resume" in _hint)   # ONE block, both ways to return
+    check("resume hint silent on an empty session", _hint.count("Resume this session") == 1)
 
     # --- memory
     p = add_memory("always run pytest", tmp)

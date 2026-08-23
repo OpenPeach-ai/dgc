@@ -776,10 +776,11 @@ class TUI:
         def add(frags, kind):
             nonlocal prev
             if prev is not None:
-                # spacing rhythm: a blank line above assistant prose + reasoning (breathing room);
-                # pack everything else together — adjacent tool calls, and bands that already carry
-                # their own vertical padding.
-                ft.append(("", "\n\n" if kind in ("text", "think") else "\n"))
+                # spacing rhythm — a 1-row inter-entry gap: one untinted blank row around assistant
+                # prose, reasoning, AND the user band — so each breathes on both sides. Only adjacent
+                # tool rows pack together. The band's own tinted vpad sits INSIDE this untinted gap.
+                spaced = kind in ("text", "think", "user") or prev in ("text", "think", "user")
+                ft.append(("", "\n\n" if spaced else "\n"))
             ft.extend(frags)
             prev = kind
         for blk in self.blocks:
@@ -3023,28 +3024,39 @@ class TUI:
         return kb
 
     def _user_band(self, text: str, tag: str = ""):
-        """The user's prompt as a bg-tinted band with a ❯ prefix  — a highlighted
-        block that reads distinctly from the assistant text. No border/rail; continuation lines
-        indent under the arrow, and the whole thing sits on a subtle raised background.
-        `tag` renders a faint marker on the first row (e.g. "follow-up" for a mid-turn prompt)."""
+        """The user's prompt as a full-width, bg-tinted band with a ❯ prefix — a highlighted block
+        that reads distinctly from the assistant text. Every visual row is padded to the exact band
+        width so the tint spans edge-to-edge at ANY terminal size: a short or wrapped line never
+        leaves a ragged/partial tint (the small-terminal "box breaks" bug). Long lines word-wrap to
+        the content width with continuation rows indented under the arrow; `tag` marks the first row
+        (e.g. "follow-up" for a mid-turn prompt). One tinted blank row pads above and below the text;
+        the untinted breathing room around the band is the transcript's inter-block gap."""
+        import textwrap
         from rich.text import Text
         th = style_mod.theme()
-        W = max(30, self._width)                      # full-width band
+        W = max(8, self._width - 2)                   # the transcript content width — NOT floored at 30
+        arrow, indent = f"{glyphs.ARROW} ", "  "      # prefix is 2 cols; continuation rows indent to match
+        prefix_w = len(arrow)
+        tag_s = f"   {tag}" if tag else ""
+        cw = max(1, W - prefix_w)                     # text width after the prefix, floored so wrap progresses
+        visual: list[tuple[str, str, bool]] = []      # (prefix, segment, is_first_row)
+        for li, ln in enumerate((text.rstrip("\n") or "").split("\n")):
+            avail = max(1, cw - (len(tag_s) if li == 0 else 0))    # reserve room for the tag on row 0
+            for j, seg in enumerate(textwrap.wrap(ln, avail, break_long_words=True,
+                                                  break_on_hyphens=False) or [""]):
+                visual.append((arrow if (li == 0 and j == 0) else indent, seg, li == 0 and j == 0))
         t = Text()
-        t.append(" " * W + "\n")                      # vpad: a blank tinted line above
-        lines = (text.rstrip("\n") or "").split("\n")
-        for i, ln in enumerate(lines):
-            pre = f"{glyphs.ARROW} " if i == 0 else "  "
-            suffix = f"   {tag}" if (i == 0 and tag) else ""
+        t.append(" " * W + "\n")                      # tinted vpad — top
+        for pre, seg, is_first in visual:
             t.append(pre, style=f"bold {th.accent}")
-            t.append(ln, style=th.text_strong)
-            if suffix:
-                t.append(suffix, style=th.faint)
-            pad = W - len(pre) - len(ln) - len(suffix)
-            if pad > 0:
-                t.append(" " * pad)                 # fill the row so the band spans the full width
+            t.append(seg, style=th.text_strong)
+            used = len(pre) + len(seg)
+            if is_first and tag_s:
+                t.append(tag_s, style=th.faint); used += len(tag_s)
+            if used < W:
+                t.append(" " * (W - used))            # pad the row so the tint reaches the right edge
             t.append("\n")
-        t.append(" " * W)                             # vpad: a blank tinted line below
+        t.append(" " * W)                             # tinted vpad — bottom
         t.stylize(f"on {th.band}")                    # a clearly-visible raised background band
         return self._rich(t)
 
@@ -3123,14 +3135,9 @@ class TUI:
             from .update import run_update
             run_update()
             return
-        if len(self.agent.messages) > 1 and self.agent.session_file:   # resume hint on exit
-            import sys
-            nm = f" ({self.agent.session_name})" if self.agent.session_name else ""
-            # printed to the RAW terminal (outside the TUI's colour handling), so use 16-colour-safe
-            # dim/bold — truecolor purple would downsample to cyan on a non-truecolor terminal.
-            dim, bold, rst = "\x1b[2m", "\x1b[1m", "\x1b[0m"
-            sys.stdout.write(f"\n  {dim}Resume this session{nm} with:{rst}\n"
-                             f"    {bold}dgc --continue{rst}\n\n")
+        # NOTE: the resume hint on exit is printed ONCE by the CLI (cli._print_resume_hint), which
+        # offers BOTH `dgc --continue` and `dgc --resume <id>` in a single block. Don't print a second
+        # one here or the user sees two separate "Resume this session" notices.
 
 
 # ---------------------------------------------------------------- helpers ---
