@@ -1376,6 +1376,8 @@ class TUI:
             self._invalidate()
         self._think = ""
         self._think_t0 = None
+        self._thinking = False        # reasoning is done → clear the "Thinking…" latch (a reasoning-only
+        #                               turn never calls on_text, so this is the only reset it gets)
 
     def end_stream(self) -> None:
         self._flush_think()
@@ -2100,7 +2102,8 @@ class TUI:
                 if body.startswith("<user-interjection>"):
                     body = body.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
                 if body:
-                    self.blocks.append(self._rich(f"[bold]{glyphs.ARROW}[/] {_esc(body[:6000])}"))
+                    self.blocks.append({"kind": "user", "text": body[:6000]})   # tinted band, same as live submit
+                    self._turn_marks.append((len(self.blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
             elif role == "assistant":
                 if body:
                     self.blocks.append(self._rich(self._md(body)))   # _md → renderable; blocks need ANSI str

@@ -512,12 +512,16 @@ class Agent:
                         "todo genuinely can't be done, say why. Do not stop with silent open todos.\n"
                         "</system-reminder>"})
                     continue
-                if did_tools and not (result.content or "").strip() and not summary_nudged:
-                    summary_nudged = True   # did real work but gave no closing message → ask for one
+                if not (result.content or "").strip() and not summary_nudged:
+                    summary_nudged = True   # empty final reply (worked-but-silent, OR reasoning-only) → ask once
+                    detail = ("You did work this turn but ended without any message to the user."
+                              if did_tools else
+                              "Your last response was empty — you produced only reasoning, with no reply "
+                              "and no tool call.")
                     self.messages.append({"role": "user", "content":
-                        "<system-reminder>\nYou did work this turn but ended without any message to the "
-                        "user. Give a brief final summary now — what you changed, the outcome, and any "
-                        "next step — as a normal reply, not in the thinking channel.\n</system-reminder>"})
+                        "<system-reminder>\n" + detail + " Respond now in the normal channel — give a "
+                        "brief final summary (what you did / the answer), or take the next action with a "
+                        "tool. Do not answer only in the thinking channel.\n</system-reminder>"})
                     continue
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
                     continue
