@@ -27,6 +27,26 @@ DEFAULT_PORT = 45000
 PORT_SPAN = 100          # scan DEFAULT_PORT .. DEFAULT_PORT+SPAN for a free one
 
 
+def _clean_name(s) -> str:
+    """Repair a name that was UTF-8 wrongly decoded as latin-1 (em-dash '—' shows as 'â\x80\x94',
+    arrow '→' as a double-mangle) — up to two rounds — then drop any residual control/non-printable
+    chars that garble the display AND break the overlay's width math. Idempotent on clean text.
+    Names created before the SSE-decoding fix carry this corruption on disk; this heals them on load."""
+    if not isinstance(s, str):
+        return ""
+    for _ in range(2):
+        if not any(0x80 <= ord(c) <= 0x9f for c in s):    # C1 controls = the latin-1-decoded UTF-8 tail
+            break
+        try:
+            fixed = s.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            break
+        if fixed == s:
+            break
+        s = fixed
+    return "".join(c for c in s if c == " " or c.isprintable())
+
+
 @dataclass
 class Artifact:
     id: str
@@ -162,7 +182,7 @@ class _Server:
             try:
                 if Path(a["directory"]).exists():          # drop artifacts whose files are gone
                     self.artifacts[a["id"]] = Artifact(
-                        id=a["id"], name=a["name"], directory=a["directory"],
+                        id=a["id"], name=_clean_name(a["name"]), directory=a["directory"],
                         entry=a.get("entry", ""), created=float(a.get("created", time.time())))
             except (KeyError, TypeError, ValueError):
                 continue
@@ -229,7 +249,7 @@ class _Server:
         with self.lock:
             self.counter += 1
             aid = f"a{self.counter}"
-            art = Artifact(id=aid, name=(name.strip() or target.stem or f"artifact {self.counter}"),
+            art = Artifact(id=aid, name=(_clean_name(name) or target.stem or f"artifact {self.counter}"),
                            directory=str(directory), entry=entry)
             self.artifacts[aid] = art
             self._save()

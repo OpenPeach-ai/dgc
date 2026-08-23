@@ -343,6 +343,11 @@ class Agent:
                 "- Before building a frontend, load the `dgc-design` skill (skill tool) and follow it: "
                 "Inter + JetBrains Mono, near-black canvas, one purple accent, clean hierarchy, generous "
                 "spacing, no clutter.",
+                "- Make it RESPONSIVE — it will be opened on phones and laptops. Include "
+                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">; the page must "
+                "NEVER scroll sideways: use max-width and relative units (%, rem, min(), clamp()), "
+                "box-sizing: border-box, flex/grid that wraps, img/svg/table/pre at max-width:100% (wide "
+                "content scrolls inside its own container, not the page), and a mobile breakpoint.",
             ]
 
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")

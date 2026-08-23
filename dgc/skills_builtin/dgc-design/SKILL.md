@@ -96,8 +96,13 @@ first paint. No bounce, no parallax, no autoplaying motion. Respect
 - **Self-contained:** inline all CSS and JS in the single HTML file (or a tiny
   local `styles.css`/`app.js` beside it). No build step, no framework CDN, no
   runtime npm. It must open straight from disk / the artifact URL.
-- **Responsive:** fluid widths, `max-width:100%` media, a sensible single-column
-  stack under ~720px. Never let the page scroll sideways.
+- **Responsive:** it will be opened on phones AND laptops, so start the `<head>`
+  with `<meta name="viewport" content="width=device-width, initial-scale=1">`.
+  Use fluid widths and relative units (`%`, `rem`, `min()`, `clamp()`) — never a
+  fixed pixel width wider than the screen; `max-width:100%` on img/svg/video, and
+  wide content (tables, `pre`, charts) scrolls inside its OWN `overflow-x:auto`
+  box, not the page. Stack to one column under ~720px with a media query. The
+  page must NEVER scroll sideways — test at 375px wide.
 - **Accessible:** real contrast (the tokens are tuned for it), semantic HTML,
   labelled controls, keyboard focus visible.
 - **Ship light-on-dark by default.** Only build a light theme if asked; if you

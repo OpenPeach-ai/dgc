@@ -34,7 +34,9 @@ class Theme:
 DARK = Theme(
     name="dark",
     bg="#0B0B0C", surface="#141416", surface2="#1A1A1D", code="#17171B",
-    band="#241C39",                 # purple-tinted, clearly visible off #0B0B0C 
+    band="#332A45",                 # purple-tinted band. NOT darker/bluer than this: a lower red makes
+    #                                 256-color terminals downsample it to navy (#241C39 → #00005f). This
+    #                                 has enough red to stay purple at every depth (256 → #5f005f).
     border="#232326", border_strong="#303034",
     text="#F5F5F5", text_strong="#FFFFFF", muted="#9A9A9E", faint="#6A6A6E",
     accent="#7C5CFF", accent_dim="#6A4BF0", accent_bright="#A78BFA",

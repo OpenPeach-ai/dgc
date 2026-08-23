@@ -662,7 +662,10 @@ class TUI:
             hot = (scroll + i == sel)
             line = Text()
             line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
-            line.append(r.get("label", "").ljust(labw), style="bold" if hot else th.text)
+            lbl = r.get("label", "")
+            if len(lbl) > labw:                          # keep the label in its column so the desc
+                lbl = lbl[:labw - 1] + "…"               #   (e.g. a long artifact URL) stays visible
+            line.append(lbl.ljust(labw), style="bold" if hot else th.text)
             if r.get("desc"):
                 line.append("  " + r["desc"], style=th.muted)   # readable (not dim faint) either way
             line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
@@ -1692,25 +1695,30 @@ class TUI:
         arts = artifacts.registry()
         lan = str(self.config.get("artifact_bind", "localhost")).lower() == "lan"
         plan_on = bool(self.config.get("artifact_in_plan", False))
-        reach = "LAN (network)" if lan else "localhost only"
-        title = f"Artifacts · reach: {reach} · plan-artifact: {'on' if plan_on else 'off'}"
-        foot = ("Enter open · x remove · " + ("b → localhost" if lan else "b → share on LAN")
+        title = f"Artifacts · {'shared on LAN' if lan else 'private (this machine)'} · plan-artifact: {'on' if plan_on else 'off'}"
+        foot = ("Enter open · x remove · " + ("b → make private" if lan else "b → share on LAN")
                 + " · p plan-artifact · Esc close")
         if arts:
             rows = [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id} for a in arts]
         else:
             rows = [{"label": "(no previews yet)",
                      "desc": "the agent serves one with the artifact tool", "value": ""}]
-        header = None
-        if lan:                                          # show EVERY way to open it: LAN + Tailscale + host
-            from rich.text import Text
-            th = style_mod.theme()
-            urls = artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
-                                            str(self.config.get("artifact_hostname", "")))
-            header = [Text.from_markup(f"[{th.muted}]reachable at (no password on your network):[/]")]
-            for label, url in urls:
+        # A plain-language reach explainer, ALWAYS shown, so LAN sharing isn't a mystery.
+        from rich.text import Text
+        th = style_mod.theme()
+        if lan:
+            header = [Text.from_markup(f"[{th.ok}]● Shared on your network[/][{th.faint}] — no password; "
+                                       f"anyone on your Wi-Fi/LAN can open these.[/]"),
+                      Text.from_markup(f"[{th.faint}]Press [/][{th.text}]b[/][{th.faint}] to make private "
+                                       f"again. Open on another device at:[/]")]
+            for label, url in artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
+                                                       str(self.config.get("artifact_hostname", ""))):
                 header.append(Text.from_markup(
-                    f"  [{th.faint}]{label:>11}[/]  [{th.accent_bright}]{_esc(url)}[/]"))
+                    f"    [{th.faint}]{label:>11}[/]  [{th.accent_bright}]{_esc(url)}[/]"))
+        else:
+            header = [Text.from_markup(f"[{th.muted}]○ Private — only this machine can open these.[/]"),
+                      Text.from_markup(f"[{th.faint}]To view on your phone or another device, press [/]"
+                                       f"[{th.text}]b[/][{th.faint}] to share it on your LAN.[/]")]
         self._open_overlay(rows, on_pick=lambda r: self._artifact_open(r["value"]),
                            on_action=self._artifact_action, title=title, footer=foot,
                            header=header, accent=True)
@@ -1740,8 +1748,25 @@ class TUI:
             self._open_artifacts()
             return
         if row and row.get("value") and key in ("x", "space"):
-            artifacts.stop(row["value"])
-            self._open_artifacts()                       # refresh (closes if none remain)
+            self._confirm_remove_artifact(row["value"], row.get("label", "this artifact"))
+
+    def _confirm_remove_artifact(self, aid: str, name: str) -> None:
+        """Ask before removing an artifact — a stop is easy to hit by accident on the wrong row."""
+        from rich.text import Text
+        from . import artifacts
+        th = style_mod.theme()
+        def _do(r):
+            if r["value"] == "yes":
+                artifacts.stop(aid)
+                self._flash(f"removed {name[:40]}")
+            self._open_artifacts()                       # back to the list either way (refreshed)
+        header = [Text.from_markup(f"[bold]Remove this preview?[/]  [{th.muted}]{_esc(name[:60])}[/]"),
+                  Text.from_markup(f"[{th.faint}]Stops serving it and drops it from the list. The .html "
+                                   f"file on disk is untouched.[/]")]
+        rows = [{"label": f"{glyphs.CROSS}  Remove", "value": "yes"},
+                {"label": f"{glyphs.CHECK}  Keep it", "value": "no"}]
+        self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
+                           on_pick=_do)
 
     def _confirm_lan_share(self) -> None:
         """Confirm before binding 0.0.0.0 — a no-auth network exposure — and show the shareable URL."""
