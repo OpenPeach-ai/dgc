@@ -484,10 +484,10 @@ class Agent:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
         loaded = [m for m in sessions.load(path) if m.get("role") != "system"]
-        self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
         self.session_file = path
         self.session_name = sessions.name_of(path)
-        self.goal = sessions.goal_of(path)              # restore the standing /goal on resume
+        self.goal = sessions.goal_of(path)              # restore BEFORE building the prompt so the
+        self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded  # # Goal is in it
         return len(loaded)
 
     def set_goal(self, text: str) -> None:
@@ -632,11 +632,16 @@ class Agent:
                         self.ui.info(f"verify skipped: {e}")
                 return
 
-            if result.finish_reason == "length" and continues < _MAX_CONTINUE:
+            if result.finish_reason == "length" and result.tool_calls:
                 # the message hit the OUTPUT-token cap while emitting tool calls → their arguments may be
                 # silently truncated (a partial write_file/edit_file corrupts a file, or dies as opaque
-                # JSON). Don't run ANY of them; answer each open call so the transcript stays valid and
-                # ask for a complete re-issue (a large file → one full write_file). (pi does the same.)
+                # JSON). NEVER run them — including the special-cased tools that skip the JSON-parse net.
+                if continues >= _MAX_CONTINUE:      # kept hitting the cap → stop rather than run garbage
+                    self.ui.error("stopped — the model keeps hitting the output-token limit mid tool "
+                                  "call; raise max_tokens or ask for a smaller change")
+                    return
+                # answer each open call so the transcript stays valid + ask for a complete re-issue
+                # (a large file → one full write_file). (pi does the same.)
                 continues += 1
                 self.ui.info("↳ response truncated at the token limit — asked the model to re-issue")
                 reissue = ("error: your response was cut off at the output-token limit, so this tool "
@@ -687,6 +692,8 @@ class Agent:
                         edit_fail_streak += 1
                     else:
                         edit_fail_streak = 0
+                elif call.name == "write_file" and not out.lstrip().lower().startswith("error"):
+                    edit_fail_streak, edit_grind_nudged = 0, False   # the recommended recovery landed
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:

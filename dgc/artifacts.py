@@ -80,18 +80,27 @@ def _lan_ip() -> str:
         s.close()
 
 
+_TS_IP_CACHE: str | None = None
+
+
 def _tailscale_ip() -> str:
-    """This machine's Tailscale IP (100.64.0.0/10), best-effort — empty if Tailscale isn't up."""
+    """This machine's Tailscale IP (100.64.0.0/10), best-effort — empty if Tailscale isn't up.
+    Cached after the first lookup so opening /artifact doesn't shell out (3s timeout) every time."""
+    global _TS_IP_CACHE
+    if _TS_IP_CACHE is not None:
+        return _TS_IP_CACHE
+    _TS_IP_CACHE = ""
     import subprocess
     try:
         out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3).stdout
         for ln in out.splitlines():
             ip = ln.strip()
             if ip.startswith("100."):       # CGNAT range Tailscale assigns
-                return ip
+                _TS_IP_CACHE = ip
+                break
     except Exception:
         pass
-    return ""
+    return _TS_IP_CACHE
 
 
 def reachable_urls(port: int, hostname: str = "") -> list[tuple[str, str]]:
@@ -107,6 +116,8 @@ def reachable_urls(port: int, hostname: str = "") -> list[tuple[str, str]]:
             return ""
         if "://" in host:                   # a full URL configured as the hostname → use verbatim
             return host.rstrip("/")
+        if ":" in host:                     # already host:port → don't append a second port
+            return f"http://{host}"
         return f"http://{host}:{port}"
     rows: list[tuple[str, str]] = [("this machine", f"http://127.0.0.1:{port}")]
     lan = _lan_ip()

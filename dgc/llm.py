@@ -224,6 +224,7 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
 # "200s think, never edits" symptom.
 _REASONING_OFF = {None, "", "off", "none"}
 _REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking")
+_SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p")
 
 
 def _provider_family(base_url: str) -> str:
@@ -386,6 +387,14 @@ class LLMClient:
                 if (r.status_code == 400 and "max_tokens" in payload
                         and re.search(r"max_tokens|max_completion|max.{0,8}output", low)):
                     payload.pop("max_tokens", None)         # F3: server rejects our cap → drop it, retry
+                    continue
+                if (r.status_code == 400 and self.sampling
+                        and any(k in payload for k in _SAMPLING_KEYS)
+                        and re.search(r"unrecognized|unsupported|unexpected|unknown|invalid|"
+                                      r"top_k|top_p|min_p|temperature|sampl", low)):
+                    for k in _SAMPLING_KEYS:                # server rejects a sampling knob → drop ALL of
+                        payload.pop(k, None)                #   them (respect its defaults) and don't re-add,
+                    self.sampling = {}                      #   so a strict endpoint can't brick the session
                     continue
                 if re.search(r"context|token|too long|max.{0,8}length|length.{0,8}exceed", low):
                     raise LLMError("the conversation exceeds this model's context window — start a "

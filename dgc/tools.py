@@ -612,7 +612,14 @@ def bash(args: dict, ctx) -> str:
         # to a temp file and tell the model to grep it, keeping head+tail inline. (pi does this.)
         path = None
         try:
-            import tempfile
+            import tempfile, glob as _glob, time as _time
+            tmpd = tempfile.gettempdir()
+            for old in _glob.glob(os.path.join(tmpd, "dgc-bash-*.log")):   # reap our stale logs (>1h)
+                try:
+                    if _time.time() - os.path.getmtime(old) > 3600:
+                        os.unlink(old)
+                except OSError:
+                    pass
             fd, path = tempfile.mkstemp(prefix="dgc-bash-", suffix=".log")
             with os.fdopen(fd, "w") as f:
                 f.write(out)
