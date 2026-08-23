@@ -31,6 +31,22 @@ class LLMError(Exception):
     pass
 
 
+class ContextOverflowError(LLMError):
+    """The request exceeded the model's context window. Recoverable: the agent compacts + retries once."""
+
+
+# Overflow error strings across providers/local servers (adapted from pi's overflow classifier) — so a
+# real window smaller than the configured context_size is RECOVERED (compact+retry) instead of killing
+# the turn. Local servers (llama.cpp/Ollama/LM Studio/vLLM/DS4) each phrase it differently.
+_OVERFLOW_RE = re.compile(
+    r"prompt is too long|request_too_large|exceeds the context window|maximum context length"
+    r"|input token count.*exceeds|maximum prompt length is \d+|reduce the length of the messages"
+    r"|exceeds the available context size|greater than the context length|context window exceeds limit"
+    r"|exceeded model token limit|too large for model with \d+ maximum|but the configured context size"
+    r"|prompt too long|range of input length should be|context[_ ]length[_ ]exceeded|too many tokens"
+    r"|context.{0,12}(?:window|size|length).{0,20}(?:exceed|too|limit)", re.I)
+
+
 @dataclass
 class ToolCall:
     id: str
@@ -343,6 +359,13 @@ class LLMClient:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
                                   stream=True, timeout=(15, self.read_timeout))
             except requests.ConnectionError as e:
+                # transient network drops (connection reset / broken pipe / socket hang-up) recover on
+                # a retry; a persistent refusal (server down) exhausts the budget and raises the hint.
+                last_err = f"connection: {e}"
+                transient += 1
+                if transient < 4:
+                    time.sleep(0.5 * transient)
+                    continue
                 raise LLMError(
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
                     f"(/connect <url> to change it)\n{e}") from e
@@ -396,9 +419,9 @@ class LLMClient:
                         payload.pop(k, None)                #   them (respect its defaults) and don't re-add,
                     self.sampling = {}                      #   so a strict endpoint can't brick the session
                     continue
-                if re.search(r"context|token|too long|max.{0,8}length|length.{0,8}exceed", low):
-                    raise LLMError("the conversation exceeds this model's context window — start a "
-                                   "new session (Ctrl+N) or lower context_size")
+                if _OVERFLOW_RE.search(low):
+                    # recoverable: the agent compacts and retries once (real window < configured size)
+                    raise ContextOverflowError("context window exceeded: " + body[:200])
                 # unclear 400 with tools present: fall back to the text protocol (still robust)
                 if r.status_code == 400 and self.tools_supported and "tools" in payload:
                     self.tools_supported = False

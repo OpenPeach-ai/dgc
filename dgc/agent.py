@@ -12,7 +12,7 @@ from pathlib import Path
 from .checkpoints import CheckpointManager
 from .config import Config
 from .hooks import run_hooks
-from .llm import LLMClient, LLMError, ToolCall
+from .llm import ContextOverflowError, LLMClient, LLMError, ToolCall
 from .memory import load_memories
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
@@ -536,6 +536,7 @@ class Agent:
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
+        overflow_retried = False    # context-overflow → compact-and-retry fires at most once
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
@@ -546,6 +547,22 @@ class Agent:
             tools = self._tool_schemas() if self.client.tools_supported else None
             try:
                 result = self._chat(tools, effort)
+            except ContextOverflowError as e:
+                # the real window is smaller than configured → compact hard and retry ONCE, instead of
+                # killing the turn (pi does this). If it overflows again, fall through as a normal error.
+                if not overflow_retried:
+                    overflow_retried = True
+                    self.ui.end_stream()
+                    self.ui.info("↻ context overflowed — compacting and retrying")
+                    self.maybe_compact(force=True)
+                    if self.messages and self.messages[-1].get("role") == "assistant" \
+                            and not (self.messages[-1].get("content") or "").strip():
+                        self.messages.pop()          # drop the empty assistant stub from the failed call
+                    continue
+                self.ui.end_stream()
+                self.ui.error("context window exceeded even after compaction — start a new session "
+                              "(Ctrl+N) or lower context_size")
+                return
             except LLMError as e:
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
