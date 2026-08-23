@@ -351,7 +351,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--engine", default="dgc",
-                    choices=["dgc", "aider", "codex", "goose", "opencode"],
+                    choices=["dgc", "aider", "codex", "goose", "opencode", "pi"],
                     help="which coding harness to drive (all on the same model + tasks + scoring)")
     ap.add_argument("--base-url", default="http://localhost:11434/v1")
     ap.add_argument("--api-key", default="ollama")
