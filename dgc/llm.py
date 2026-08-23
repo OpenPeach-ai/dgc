@@ -283,7 +283,8 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
 
 class LLMClient:
     def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
-                 think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = ""):
+                 think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = "",
+                 sampling: dict | None = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -292,6 +293,7 @@ class LLMClient:
         self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
         self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
+        self.sampling = dict(sampling or {})            # optional temperature/top_p/top_k/min_p overrides
         self.tools_supported = True      # flips off on first 400 about tools
         self.reasoning_supported = True  # flips off if server rejects the param
 
@@ -324,6 +326,8 @@ class LLMClient:
             payload.update(_reasoning_payload(self.family, self.model, reasoning_effort))
         if self.max_tokens:                 # F3: output-token backstop (dropped on a 400 if unwanted)
             payload["max_tokens"] = self.max_tokens
+        if self.sampling:                   # optional temperature/top_p/top_k/min_p (user override)
+            payload.update(self.sampling)
         if self.family == "ollama" and self.keep_alive:   # D2: model residency (Ollama honours it on /v1)
             payload["keep_alive"] = self.keep_alive
 

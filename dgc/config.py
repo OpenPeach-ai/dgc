@@ -23,6 +23,12 @@ DEFAULTS: dict = {
                                                 #   model reasons past this many tokens with no output (0=off)
     "max_tokens": 16384,                        # output-token backstop per request; length-truncation
                                                 #   auto-continues (0=don't send, respect the server)
+    # sampling knobs — "" = respect the server default. Set these to tame a LOCAL model that loops or
+    # repeats (raw llama.cpp/Ollama defaults often do). Qwen likes temperature 0.7 / top_p 0.8 / top_k 20.
+    "temperature": "",                          # 0.0–2.0; lower = more deterministic
+    "top_p": "",                                # nucleus sampling, 0.0–1.0
+    "top_k": "",                                # only the top-K tokens (Ollama/llama.cpp/vLLM/SGLang)
+    "min_p": "",                                # min-probability floor (llama.cpp/vLLM/SGLang)
     "context_size": 32768,
     "max_turns": 80,                            # max tool-use iterations per user turn (the grind +
                                                 #   doom-loop guards catch thrash, so this is a backstop)

@@ -367,6 +367,29 @@ def unit_tests(tmp: Path):
     check("ghost-text suggestion targets the finishing session",
           _sB._suggestion == "sug-B" and _sA._suggestion is None)
 
+    # --- a sub-agent shares the parent's cancel Event but must NOT clear it on run_turn entry (only a
+    #     top-level turn clears), else a cancel arriving during sub construction is silently swallowed.
+    from dgc.agent import Agent as _Ag, _sampling as _samp
+    from dgc.config import Config as _Cfg
+    class _AgUI:
+        def __getattr__(self, n): return lambda *a, **k: None
+    _p = _Ag(_Cfg(), _AgUI()); _sub = _Ag(_Cfg(), _AgUI())
+    _sub.depth = _p.depth + 1; _sub.cancelled = _p.cancelled
+    _p.cancelled.set()
+    if _sub.depth == 0: _sub.cancelled.clear()          # mirrors run_turn's guarded clear
+    check("sub-agent does not clear a shared parent cancel", _p.cancelled.is_set())
+    _p.cancelled.set()
+    if _p.depth == 0: _p.cancelled.clear()
+    check("top-level turn still clears its own stale cancel", not _p.cancelled.is_set())
+
+    # --- sampling params: unset → nothing sent (respect server default); set → parsed (top_k int)
+    check("sampling unset sends nothing", _samp(_Cfg()) == {})
+    class _SCfg(_Cfg):
+        def get(self, k, d=None): return {"temperature":"0.7","top_k":"20"}.get(k, super().get(k, d))
+    _sv = _samp(_SCfg())
+    check("sampling set is parsed (top_k int, temp float)",
+          _sv.get("temperature") == 0.7 and _sv.get("top_k") == 20 and isinstance(_sv["top_k"], int))
+
     # --- /jump: scrolls the transcript to a chosen turn
     jt = object.__new__(TUI); jt._width = 80; jt._scroll_off = 0; jt._invalidate = lambda: None
     jt.blocks = ["a\nb\nc", "d", "e\nf"]

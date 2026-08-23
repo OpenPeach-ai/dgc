@@ -33,6 +33,21 @@ _MAX_TODO_GATE = 2      # times we push the model to finish open todos before le
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 
 
+def _sampling(cfg) -> dict:
+    """Optional sampling knobs from config — only the ones the user actually set (else respect the
+    server default). Lets a user tame a local model that loops/repeats. top_k is an int; the rest float."""
+    out: dict = {}
+    for k in ("temperature", "top_p", "top_k", "min_p"):
+        v = cfg.get(k, "")
+        if v == "" or v is None:
+            continue
+        try:
+            out[k] = int(v) if k == "top_k" else float(v)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def _clamp(s: str, limit: int = _MAX_TOOL_OUT) -> str:
     """Head+tail truncation so a single huge tool result can't blow the context window."""
     if len(s) <= limit:
@@ -148,7 +163,8 @@ class Agent:
                                 read_timeout=int(config.get("request_timeout", 1800)),
                                 think_budget_tokens=int(config.get("think_budget_tokens", 8000)),
                                 max_tokens=int(config.get("max_tokens", 16384)),
-                                ollama_keep_alive=str(config.get("ollama_keep_alive", "30m")))
+                                ollama_keep_alive=str(config.get("ollama_keep_alive", "30m")),
+                                sampling=_sampling(config))
         self.skills = discover_skills(config.project_root)
         if mcp is not None:                       # subagents share the parent's MCP servers
             self.mcp = mcp
@@ -179,7 +195,8 @@ class Agent:
                                 read_timeout=int(self.config.get("request_timeout", 1800)),
                                 think_budget_tokens=int(self.config.get("think_budget_tokens", 8000)),
                                 max_tokens=int(self.config.get("max_tokens", 16384)),
-                                ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")))
+                                ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")),
+                                sampling=_sampling(self.config))
 
     def _tool_schemas(self) -> list[dict]:
         """Built-in tools plus any tools from connected MCP servers."""
@@ -384,7 +401,9 @@ class Agent:
 
     # ------------------------------------------------------------- main loop ---
     def run_turn(self, user_text: str) -> None:
-        self.cancelled.clear()
+        if self.depth == 0:                 # only a fresh top-level turn clears the cancel flag — a
+            self.cancelled.clear()          #   sub-agent SHARES the parent's Event, so clearing it here
+            #                                   would wipe a cancel that arrived during sub construction.
         self.steer_queue.clear()            # drop any stale interjections from a prior turn
         try:
             self._run_turn(user_text)
@@ -505,7 +524,7 @@ class Agent:
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self.ui.info(f"⤳ primary model failed; falling back to {fb}")
                     self.client = LLMClient(self.config.get("fallback_base_url") or self.config.base_url,
-                                            self.config.api_key, fb)
+                                            self.config.api_key, fb, sampling=_sampling(self.config))
                     try:
                         result = self._chat(tools, effort)
                     except LLMError as e2:
@@ -777,7 +796,7 @@ class Agent:
         base = base.rstrip("/")
         if (base, key, model) == (cfg.base_url, cfg.api_key, cfg.model):
             return None
-        return LLMClient(base, key, model)
+        return LLMClient(base, key, model, sampling=_sampling(cfg))
 
     def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
         adef = self.agent_defs.get(agent_name) if agent_name else None
@@ -794,6 +813,8 @@ class Agent:
         if adef and adef.effort:
             sub._effort_override = adef.effort
         task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
+        if self.cancelled.is_set():                       # cancel arrived during sub construction → bail
+            return f"Sub-task '{description}' cancelled before it started."
         try:
             sub.run_turn(task_prompt)
         except Exception as e:
