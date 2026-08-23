@@ -476,9 +476,10 @@ class TUI:
         ov = self._overlay
         if not ov:
             return ANSI("")
-        W = min(max(46, self._width - 6), 108)
+        avail = max(20, self._width - 2)                # the width _console()/_rich actually render into
+        W = min(max(46, self._width - 6), 108, avail - 4)   # panel never wider than the console → no wrap
         inner = W - 4
-        lpad = max(2, (self._width - W) // 2)           # centered horizontally 
+        lpad = max(0, (avail - W) // 2)                  # center within the ACTUAL console width
         rows = self._overlay_rows()
         sel, cap = ov["sel"], self._OVERLAY_CAP
         scroll = ov.get("scroll", 0)
@@ -1482,21 +1483,27 @@ class TUI:
             return False
 
     def _open_artifacts(self) -> None:
-        """`/artifact` — the roster of artifacts: Enter opens one, x removes it, b toggles bind."""
+        """`/artifact` — previews + reach/plan settings. Always opens (even with none) so the LAN
+        and plan-mode toggles are reachable before the agent has served anything."""
         from . import artifacts
         arts = artifacts.registry()
-        mode = "LAN (network)" if str(self.config.get("artifact_bind", "localhost")).lower() == "lan" else "localhost only"
-        if not arts:
-            self._flash(f"no artifacts yet · reach: {mode} · the agent serves one with the artifact tool")
-            return
-        rows = [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id} for a in arts]
+        lan = str(self.config.get("artifact_bind", "localhost")).lower() == "lan"
+        plan_on = bool(self.config.get("artifact_in_plan", False))
+        reach = "LAN (network)" if lan else "localhost only"
+        title = f"Artifacts · reach: {reach} · plan-artifact: {'on' if plan_on else 'off'}"
+        foot = ("Enter open · x remove · " + ("b → localhost" if lan else "b → share on LAN")
+                + " · p plan-artifact · Esc close")
+        if arts:
+            rows = [{"label": a.name, "desc": f"{a.url}  ·  up {a.uptime}", "value": a.id} for a in arts]
+        else:
+            rows = [{"label": "(no previews yet)",
+                     "desc": "the agent serves one with the artifact tool", "value": ""}]
         self._open_overlay(rows, on_pick=lambda r: self._artifact_open(r["value"]),
-                           on_action=self._artifact_action, title=f"Artifacts · {mode}",
-                           footer="Enter open · x remove · b localhost/LAN · Esc close", accent=True)
+                           on_action=self._artifact_action, title=title, footer=foot, accent=True)
 
     def _artifact_open(self, aid: str) -> None:
         from . import artifacts
-        art = artifacts.get(aid)
+        art = artifacts.get(aid) if aid else None
         if not art:
             return
         opened = self._open_url(art.url)
@@ -1504,17 +1511,56 @@ class TUI:
 
     def _artifact_action(self, key: str, row) -> None:
         from . import artifacts
-        if key == "b":                                   # toggle localhost <-> LAN reach + restart
-            lan = str(self.config.get("artifact_bind", "localhost")).lower() != "lan"
-            self.config.set("artifact_bind", "lan" if lan else "localhost")
-            artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
-            self._flash("artifacts reachable on your LAN — anyone on the network can view"
-                        if lan else "artifacts now localhost-only")
+        if key == "b":                                   # toggle localhost <-> LAN reach
+            if str(self.config.get("artifact_bind", "localhost")).lower() == "lan":
+                self._set_artifact_bind(False)           # LAN → localhost needs no confirm
+            else:
+                self._confirm_lan_share()                # network exposure (no auth) → confirm first
+            return
+        if key == "p":                                   # toggle plan-mode artifacts (item: plan settings)
+            on = not bool(self.config.get("artifact_in_plan", False))
+            self.config.set("artifact_in_plan", on)
+            self.agent._refresh_system()                 # re-emit the system prompt with the new plan rules
+            self._flash("plan mode can now serve artifacts (plan page + existing .html files)"
+                        if on else "plan mode is read-only again — no artifacts")
             self._open_artifacts()
             return
-        if row and key in ("x", "space"):
+        if row and row.get("value") and key in ("x", "space"):
             artifacts.stop(row["value"])
             self._open_artifacts()                       # refresh (closes if none remain)
+
+    def _confirm_lan_share(self) -> None:
+        """Confirm before binding 0.0.0.0 — a no-auth network exposure — and show the shareable URL."""
+        from rich.text import Text
+        from . import artifacts
+        th = style_mod.theme()
+        ip = artifacts._lan_ip()
+        port = int(self.config.get("artifact_port", 45000))
+        where = f"http://{ip}:{port}" if ip != "127.0.0.1" else "(no LAN IP found — are you on a network?)"
+        header = [Text.from_markup("[bold]Share artifacts on your LAN?[/]"),
+                  Text.from_markup(f"[{th.warn}]Anyone on this network can open your artifacts — "
+                                   f"there is no password.[/]"),
+                  Text.from_markup(f"[{th.muted}]They'll reach it at [/][{th.accent_bright}]{_esc(where)}[/]"
+                                   f"[{th.muted}]  · the localhost URL keeps working too.[/]")]
+        rows = [{"label": f"{glyphs.CHECK}  Share on LAN", "value": "yes"},
+                {"label": f"{glyphs.CROSS}  Cancel", "value": "no"}]
+        self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
+                           on_pick=lambda r: self._set_artifact_bind(True) if r["value"] == "yes" else None)
+
+    def _set_artifact_bind(self, lan: bool) -> None:
+        from . import artifacts
+        self.config.set("artifact_bind", "lan" if lan else "localhost")
+        artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
+        if lan:
+            ip, port = artifacts._lan_ip(), int(self.config.get("artifact_port", 45000))
+            if ip != "127.0.0.1":                        # surface the shareable URL (selectable via /copy)
+                self.info(f"artifacts shared on your LAN → http://{ip}:{port} "
+                          f"— anyone on this network can open them (no password)")
+            else:
+                self._flash("LAN mode on, but no LAN IP was found — are you on a network?")
+        else:
+            self._flash("artifacts now localhost-only (this machine)")
+        self._open_artifacts()
 
     def error(self, msg: str) -> None:
         th = style_mod.theme()
@@ -2455,7 +2501,7 @@ class TUI:
             rows = self._overlay_rows()
             ov["on_action"](key, rows[ov["sel"]] if rows else None)
 
-        for _ch in ("a", "x", "r", "p"):
+        for _ch in ("a", "x", "r", "p", "b"):
             @kb.add(_ch, filter=has_actions)
             def _(ev, _ch=_ch):
                 _ov_action(_ch)

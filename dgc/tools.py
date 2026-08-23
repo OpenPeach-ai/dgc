@@ -105,10 +105,13 @@ TOOL_SCHEMAS = [
          "options": {"type": "array", "items": {"type": "string"},
                      "description": "The choices, most-recommended first"}},
         ["question", "options"]),
-    _fn("artifact", "Serve something visual you built — a web page, a small app, a chart, a report — "
-        "on a local URL and offer to open it in the user's browser. Pass a directory (served as a site) "
-        "or a single .html file. Runs on 127.0.0.1 only; '/artifact' lets the user open or stop it. "
-        "Use this instead of just telling the user to open a file whenever the result is meant to be LOOKED AT.",
+    _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
+        "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
+        "describing the page is not. First write a self-contained .html file, then call this with its "
+        "path. Do NOT narrate that you built or served something and do NOT type a 127.0.0.1 URL yourself "
+        "— nothing is served until this tool RETURNS the URL to you. Pass a directory (served as a site) "
+        "or a single .html file. 127.0.0.1 only; '/artifact' opens or stops previews. Call it whenever a "
+        "result is meant to be looked at.",
         {"path": {"type": "string", "description": "Directory or .html file to preview (relative to the project)"},
          "name": {"type": "string", "description": "A short label for the preview (e.g. 'weather dashboard')"}},
         ["path"]),

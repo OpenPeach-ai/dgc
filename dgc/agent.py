@@ -244,9 +244,13 @@ class Agent:
                 "- Research the codebase thoroughly, then call present_plan with a concrete, "
                 "step-by-step implementation plan (real files, functions, commands).",
                 "- Do not present a plan before you understand the relevant code.",
-                "- Plan mode canNOT build or serve anything (no writing files, no `artifact` tool). "
-                "If the user asks to SEE something live / as an artifact / on a URL, say so plainly and "
-                "tell them to switch to build mode (Shift+Tab) — then you'll build it and serve it.",
+                ("- You may also SERVE a visual: your approved plan is shown as a live page automatically, "
+                 "and you can call the `artifact` tool on an EXISTING .html file in the repo to preview it. "
+                 "You still cannot write or edit project files — describe anything new in the plan itself."
+                 if self.config.get("artifact_in_plan", False) else
+                 "- Plan mode canNOT build or serve anything (no writing files, no `artifact` tool). "
+                 "If the user asks to SEE something live / as an artifact / on a URL, say so plainly and "
+                 "tell them to switch to build mode (Shift+Tab) — then you'll build it and serve it."),
             ]
         elif mode == "auto":
             parts += [
@@ -256,23 +260,34 @@ class Agent:
                 "questions you can answer yourself with tools.",
             ]
 
-        if mode != "plan":
+        if mode != "plan" or self.config.get("artifact_in_plan", False):
             parts += [
                 "",
-                "# Building things to look at (artifacts)",
-                "- An \"artifact\" in DGC is something you BUILD and then SERVE on a local URL "
-                "(e.g. http://127.0.0.1:45000) via the `artifact` tool — a web page, small web app, "
-                "chart, or visual report. When the user says \"artifact\", \"show me\", \"preview\", "
-                "\"as a live page\", \"on a URL\", or otherwise asks to SEE the result, you CREATE the "
-                "file(s) yourself and call the `artifact` tool on the file or folder. Never search the "
-                "filesystem for an \"artifact\" — it doesn't exist yet; you make it. DGC then offers to "
-                "open it in the browser. Prefer this over telling the user to open a file by hand.",
-                "- Hold artifact frontends to a high visual bar. Before you build one, load the "
-                "`dgc-design` skill (via the skill tool) for DGC's design language and follow it: "
-                "Inter + JetBrains Mono, a near-black canvas, a single purple accent, clean type "
-                "hierarchy, generous spacing, no clutter.",
-                "- Make artifacts self-contained — inline the CSS/JS, no build step, no CDN needed — "
-                "so they run straight from disk.",
+                "# Artifacts — how to SHOW the user a page (READ THIS CAREFULLY)",
+                "An \"artifact\" is a live local web page that becomes real ONLY when you call the "
+                "`artifact` tool. It does not exist on disk yet — there is nothing to search for. YOU make it.",
+                "Trigger: the user says \"artifact\", \"show me\", \"preview\", \"dashboard\", \"page\", "
+                "\"chart\", \"report\", \"live\", \"on a URL\", \"in the browser\", or otherwise asks to SEE "
+                "a result. When that happens, do EXACTLY these steps, in order, using tools — do not just talk:",
+                "  1. write_file — create a single self-contained index.html (inline ALL css and js; no "
+                "build step, no CDN, no external files).",
+                "  2. artifact — call the `artifact` tool with the path to that file. This call is the ONLY "
+                "thing that serves the page. Example: artifact(path=\"index.html\", name=\"weather dashboard\").",
+                "  3. Only AFTER the tool returns, tell the user the URL it gave back.",
+                "HARD RULES (small models break these — obey them literally):",
+                "- Describing the page is NOT building it. Writing \"I'm building a live weather dashboard "
+                "served on http://127.0.0.1:...\" serves NOTHING. The page is live only after the `artifact` "
+                "tool returns a URL.",
+                "- You do not run a web server and you do not know the URL. NEVER type a 127.0.0.1 address "
+                "yourself. If you are about to mention a localhost URL, STOP — that means you must call the "
+                "`artifact` tool instead; the tool invents the real URL and hands it to you.",
+                "- Never end your turn having only talked about the artifact. If you said you'd show "
+                "something, the write_file + artifact tool calls MUST appear in the same turn.",
+                "- Do not tell the user to open a file by hand, and do not start your own server with bash — "
+                "DGC runs one shared server via the `artifact` tool and offers to open it.",
+                "- Before building a frontend, load the `dgc-design` skill (skill tool) and follow it: "
+                "Inter + JetBrains Mono, near-black canvas, one purple accent, clean hierarchy, generous "
+                "spacing, no clutter.",
             ]
 
         think = THINK_INSTRUCTIONS.get(self._effective_thinking(""), "")
@@ -635,7 +650,7 @@ class Agent:
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
                 sessions.save_plan(self.session_file, plan)
-            if plan:                                    # ALSO render it as a fancy page on a localhost URL
+            if plan and self.config.get("artifact_in_plan", False):   # opt-in: render the plan as a page too
                 try:
                     from . import artifacts
                     title = next((ln.lstrip("# ").strip() for ln in plan.splitlines()
@@ -669,7 +684,7 @@ class Agent:
                                       str(args.get("agent", "")))
 
         if name == "artifact":
-            if self.mode == "plan":
+            if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
                 return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
             from . import artifacts
             try:

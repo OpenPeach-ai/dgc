@@ -48,6 +48,8 @@ DEFAULTS: dict = {
     "artifact_port": 45000,                     # the single fixed port the artifact server binds
     "artifact_autostart": True,                 # bring the artifact server up on launch if any are saved
     "artifact_bind": "localhost",               # localhost (127.0.0.1 only) | lan (0.0.0.0 — your local network)
+    "artifact_in_plan": False,                  # plan mode may also serve a visual (the plan page + existing
+    #                                             .html files) — off by default so plan mode stays read-only
     "background": "inherit",                    # inherit (never repaint — respect the terminal) | auto | dark
     "sandbox": False,                           # confine bash to project dir + /tmp (bwrap/sandbox-exec)
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
