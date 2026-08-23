@@ -658,6 +658,15 @@ class TUI:
             col = style_mod.lerp_rgb(th.bg, th.accent, 0.30 + 0.70 * bright)
         return (f"fg:{col}", f"{glyphs.RAIL} ")
 
+    def _wrap_tail(self, text: str, width: int, n: int) -> list[str]:
+        """The last `n` display lines of `text` wrapped to `width` — so LIVE reasoning shows a calm
+        rolling tail instead of one ever-growing line (Grok's truncated thinking view)."""
+        import textwrap
+        out: list[str] = []
+        for para in text.split("\n"):
+            out.extend(textwrap.wrap(para, width) if para.strip() else [""])
+        return out[-n:] if out else []
+
     # ---- the transcript control ----
     def _transcript(self):
         from prompt_toolkit.formatted_text import to_formatted_text
@@ -684,10 +693,14 @@ class TUI:
                 add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))), "user")
             elif blk:
                 add(list(to_formatted_text(ANSI(blk))), "text")
-        if self._think:                     # in-flight reasoning (muted, live) — animated marker
-            m = self._live_marker()
-            add(list(to_formatted_text(ANSI(self._rich(
-                f"[bold {th.accent}]{m}[/] [{th.faint} italic]Thinking… {_esc(self._think)}[/]")))), "think")
+        if self._think:                     # in-flight reasoning: a header + a rolling last-N tail (Grok),
+            m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
+            frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
+            for i, ln in enumerate(self._wrap_tail(self._think, max(20, self._width - 4), 5)):
+                frags.append(("", "\n"))
+                frags.append(self._rail_frag(True, i))
+                frags.append((f"fg:{th.faint} italic", ln))
+            add(frags, "think")
         if self._buf:                       # in-flight assistant text — animated marker on the live line
             m = self._live_marker()
             frags = [(f"bold fg:{th.accent}", m + " ")]
