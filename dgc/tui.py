@@ -623,6 +623,19 @@ class TUI:
         chat itself shows the model actively working right there — not only the bottom status bar."""
         return glyphs.SPINNER[int(time.monotonic() * 8) % len(glyphs.SPINNER)]
 
+    def _rail_frag(self, running: bool, row: int, error: bool = False):
+        """A left accent-bar fragment (Grok's block rail), grouping a tool/reasoning block off the
+        page. While it runs the bar is an animated downward traveling wave in the accent; on finish
+        it settles to a static faint rail (red on error). refresh_interval=0.08 animates it for free."""
+        import math
+        th = style_mod.theme()
+        if not running:
+            col = th.err if error else th.border_strong
+        else:                                     # sin² wave: bright band travels down the rows
+            bright = math.sin(time.monotonic() * 3.0 + row * (2 * math.pi / 8)) ** 2
+            col = style_mod.lerp_rgb(th.bg, th.accent, 0.30 + 0.70 * bright)
+        return (f"fg:{col}", f"{glyphs.RAIL} ")
+
     # ---- the transcript control ----
     def _transcript(self):
         from prompt_toolkit.formatted_text import to_formatted_text
@@ -688,29 +701,51 @@ class TUI:
     _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
 
     def _tool_frags(self, b: dict):
-        """A tool result: the first `_TOOL_HEAD` lines, then — if longer — a clickable
-        '▸ N more lines' that expands the rest in place (mirrors the reasoning block)."""
+        """One tool step (Grok): a rail-prefixed header (tense-aware verb + summary) then its output
+        or diff, every row wearing the accent rail — an animated wave while running, static when done.
+        Long output collapses to a clickable '▸ N more lines' that expands in place."""
+        from prompt_toolkit.formatted_text import to_formatted_text
         from prompt_toolkit.mouse_events import MouseEventType
         th = style_mod.theme()
-        lines = b.get("out", "").splitlines()
-        exp = bool(b.get("exp"))
+        running, error = bool(b.get("running")), bool(b.get("error"))
+        name, summary, exp = b.get("name", ""), b.get("summary", ""), bool(b.get("exp"))
+        verb = (self._TOOL_ING if running else self._TOOL_ED).get(name) or self._TOOL_VERB.get(name, name)
+
+        row = [0]
+        def rail():
+            f = self._rail_frag(running, row[0], error)
+            row[0] += 1
+            return f
 
         def toggle(mouse_event):
             if mouse_event.event_type == MouseEventType.MOUSE_UP:
                 b["exp"] = not b.get("exp")
                 self._invalidate()
 
-        frags = []
-        for i, ln in enumerate(lines if exp else lines[:self._TOOL_HEAD]):
-            if i:
+        frags = [rail(), (f"bold fg:{th.accent}", f"{glyphs.tool_icon(name)} {verb}")]
+        if summary:
+            frags.append((f"fg:{th.faint}", f" {summary}"))
+        if running:                                     # a live marker on the header while it works
+            frags.append((f"fg:{th.accent}", f"  {self._live_marker()}"))
+
+        diff = b.get("diff")
+        if diff:                                        # pre-rendered (coloured) diff — rail each line
+            for ln in diff.split("\n"):
                 frags.append(("", "\n"))
-            frags.append((f"fg:{th.faint}", "  " + ln))
-        if len(lines) > self._TOOL_HEAD:
-            if lines:
+                frags.append(rail())
+                frags.extend(to_formatted_text(ANSI(ln)))
+        else:
+            lines = (b.get("out") or "").splitlines()
+            for ln in (lines if exp else lines[:self._TOOL_HEAD]):
                 frags.append(("", "\n"))
-            caret = "▾" if exp else "▸"
-            label = "show less" if exp else f"{len(lines) - self._TOOL_HEAD} more lines — click /  expand"
-            frags.append((f"fg:{th.accent_dim}", f"  {caret} {label}", toggle))
+                frags.append(rail())
+                frags.append((f"fg:{th.faint}", ln))
+            if len(lines) > self._TOOL_HEAD:
+                frags.append(("", "\n"))
+                frags.append(rail())
+                caret = "▾" if exp else "▸"
+                label = "show less" if exp else f"{len(lines) - self._TOOL_HEAD} more lines — click /  expand"
+                frags.append((f"fg:{th.accent_dim}", f"{caret} {label}", toggle))
         return frags
 
     def _cursor_ft(self, text: str):
@@ -877,8 +912,11 @@ class TUI:
         if isinstance(blk, dict) and blk.get("kind") == "user":
             return 2 + len((blk.get("text", "").rstrip("\n") or "").split("\n"))  # top+bottom vpad + text lines
         if isinstance(blk, dict) and blk.get("kind") == "tool":
-            n = len(blk.get("out", "").splitlines())
-            return (n if blk.get("exp") else min(n, self._TOOL_HEAD)) + (1 if n > self._TOOL_HEAD else 0)
+            if blk.get("diff"):
+                return 1 + blk["diff"].count("\n") + 1          # header + rendered diff lines
+            n = len((blk.get("out") or "").splitlines())
+            body = (n if blk.get("exp") else min(n, self._TOOL_HEAD)) + (1 if n > self._TOOL_HEAD else 0)
+            return 1 + body                                     # header line + output body
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
     def _jump_to_block(self, i: int) -> None:
@@ -1393,29 +1431,62 @@ class TUI:
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
                   "add_skill": "Install skill", "save_memory": "Remember"}
 
+    # tense-aware verbs (Grok): present-progressive while running → past when done.
+    _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
+                 "write_file": "Writing", "edit_file": "Editing", "grep": "Searching", "glob": "Finding",
+                 "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
+                 "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering"}
+    _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
+                "edit_file": "Edited", "grep": "Searched", "glob": "Found", "web_search": "Searched",
+                "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
+                "add_skill": "Installed skill", "save_memory": "Remembered"}
+
     def tool_call(self, name: str, args: dict) -> None:
         self._flush_text()
         self._tool_count += 1
-        th = style_mod.theme()
         summary = _arg_summary(args)
-        verb = self._TOOL_VERB.get(name, name)          # status now reads "Run npm test", "Read x.py"
+        verb = self._TOOL_VERB.get(name, name)          # bottom status reads "Run npm test", "Read x.py"
         self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
-        self._append(self._rich(f"[bold {th.accent}]{glyphs.tool_icon(name)} {name}[/] "
-                                f"[{th.faint}]{summary}[/]"))
-
-    def tool_result(self, name: str, out: str) -> None:
-        self._cur_tool = None
-        if "\n--- " in out or out.startswith("---"):
-            diff = out[out.find("---"):]
-            if len(diff) < 8000:
-                self._append(self._rich(render_mod.render_diff(diff)))
-                return
-        # keep the FULL output in a collapsible block so the user can expand past the preview
-        # (click the "N more" line, or /expand) — not a dead "91 more lines" with no way to see them.
-        self.blocks.append({"kind": "tool", "name": name, "out": out, "exp": False})
+        # ONE stateful block for the whole step (Grok): header + result together, live accent rail while
+        # it runs. tool_result fills it in. `running` drives the wave; `out`/`diff` are attached on finish.
+        self.blocks.append({"kind": "tool", "name": name, "summary": summary, "running": True,
+                            "error": False, "out": None, "diff": None, "exp": False})
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
+
+    def _live_tool_block(self, name: str):
+        """The most recent still-running tool block for `name` (this session's transcript)."""
+        for blk in reversed(self.blocks):
+            if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running") and blk.get("name") == name:
+                return blk
+        return None
+
+    def tool_result(self, name: str, out: str) -> None:
+        self._cur_tool = None
+        blk = self._live_tool_block(name)
+        if blk is None:                                 # defensive: no matching open block → start one
+            blk = {"kind": "tool", "name": name, "summary": "", "exp": False}
+            self.blocks.append(blk)
+        blk["running"] = False
+        if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
+            diff = out[out.find("---"):]
+            if len(diff) < 8000:
+                blk["diff"] = self._rich(render_mod.render_diff(diff))
+                blk["out"] = None
+            else:
+                blk["out"] = out
+        else:
+            blk["out"] = out                            # full output kept; collapses past the preview
+        if self._follow:
+            self._scroll_off = 0
+        self._invalidate()
+
+    def _settle_running_tools(self) -> None:
+        """Turn end / cancel: stop any tool block still marked running so its rail doesn't animate forever."""
+        for blk in self.blocks:
+            if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running"):
+                blk["running"] = False
 
     def tool_denied(self, name: str, args: dict, reason: str) -> None:
         th = style_mod.theme()
@@ -2743,6 +2814,7 @@ class TUI:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
                 self._flush_text()
+                self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._turn.clear()
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0

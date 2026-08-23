@@ -319,6 +319,24 @@ def unit_tests(tmp: Path):
     tb["exp"] = True
     check("thinking expands to show the reasoning", "reason one" in _fltt(tt._transcript()))
 
+    # --- merged tool block (Grok rail): tool_call + tool_result share ONE stateful block; the header
+    #     wears a tense-aware verb (present while running → past when done) and every row a rail glyph.
+    ot = object.__new__(TUI); ot._width = 80; ot._scroll_off = 0; ot._follow = True
+    ot._invalidate = lambda: None; ot._buf = ""; ot._think = ""; ot._tool_count = 0; ot._cur_tool = None
+    ot.blocks = []
+    ot.tool_call("bash", {"cmd": "npm test"})
+    check("tool_call opens ONE running tool block", len(ot.blocks) == 1 and ot.blocks[0].get("running"))
+    _live = _fltt(ot._transcript())
+    check("running tool shows present-tense verb + rail", "Running" in _live and "┃" in _live)
+    ot.tool_result("bash", "\n".join(f"out{i}" for i in range(15)))
+    check("tool_result fills the SAME block (no second block)", len(ot.blocks) == 1 and not ot.blocks[0].get("running"))
+    _done = _fltt(ot._transcript())
+    check("finished tool shows past-tense verb", "Ran" in _done and "Running" not in _done)
+    check("long tool output collapses to a 'more lines' hint", "more lines" in _done)
+    check("tool _block_lines counts header + preview + hint", ot._block_lines(ot.blocks[0]) == 12)
+    ot._settle_running_tools()   # idempotent when nothing is running
+    check("settle leaves a finished block finished", not ot.blocks[0].get("running"))
+
     # --- /jump: scrolls the transcript to a chosen turn
     jt = object.__new__(TUI); jt._width = 80; jt._scroll_off = 0; jt._invalidate = lambda: None
     jt.blocks = ["a\nb\nc", "d", "e\nf"]

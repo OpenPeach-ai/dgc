@@ -33,7 +33,7 @@ class Theme:
 
 DARK = Theme(
     name="dark",
-    bg="#0B0B0C", surface="#141416", surface2="#1A1A1D", code="#0E0E10",
+    bg="#0B0B0C", surface="#141416", surface2="#1A1A1D", code="#17171B",
     band="#241C39",                 # purple-tinted, clearly visible off #0B0B0C 
     border="#232326", border_strong="#303034",
     text="#F5F5F5", text_strong="#FFFFFF", muted="#9A9A9E", faint="#6A6A6E",
