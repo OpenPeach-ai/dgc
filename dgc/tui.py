@@ -64,6 +64,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("status", "model · host · mode · context"),
     ("dashboard", "session roster — open, switch, start, or delete sessions"),
     ("name", "name this session"),
+    ("goal", "set a standing objective the agent keeps working toward · /goal clear"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
     ("skills", "installed skills"),
@@ -2069,6 +2070,16 @@ class TUI:
                 self.agent.name_session(rest); self._flash(f"session named: {rest}")
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
+        elif cmd == "goal":
+            if rest.lower() in ("clear", "off", "none", "remove"):
+                self.agent.set_goal(""); self._flash("standing goal cleared")
+            elif rest:
+                self.agent.set_goal(rest)
+                self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}")
+            else:
+                g = getattr(self.agent, "goal", "")
+                self._flash((f"goal: {g[:70]}  · /goal clear to remove") if g
+                            else "no goal set — /goal <objective> to set one")
         elif cmd == "resume":
             self._resume_flow()
         elif cmd in ("model", "models"):

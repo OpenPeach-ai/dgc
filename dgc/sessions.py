@@ -32,12 +32,15 @@ def new_path(project_root) -> Path:
     return project_dir(project_root) / (datetime.now().strftime("%Y%m%d-%H%M%S") + ".json")
 
 
-def save(path: Path, messages: list, project_root, name: str | None = None) -> None:
+def save(path: Path, messages: list, project_root, name: str | None = None,
+         goal: str | None = None) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {"project": str(project_root), "updated": time.time(), "messages": messages}
         if name:
             data["name"] = name
+        if goal:
+            data["goal"] = goal          # the standing /goal objective, restored on resume
         path.write_text(json.dumps(data, default=str))
     except OSError:
         pass  # never let a failed save crash the turn
@@ -76,6 +79,13 @@ def delete(path) -> bool:
         return True
     except OSError:
         return False
+
+
+def goal_of(path) -> str:
+    try:
+        return json.loads(Path(path).read_text()).get("goal") or ""
+    except (OSError, ValueError):
+        return ""
 
 
 def name_of(path) -> str | None:

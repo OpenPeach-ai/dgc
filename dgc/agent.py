@@ -23,6 +23,9 @@ _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn th
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
 _FAIL_SOFT = 4          # consecutive failing bash runs (no success) before we nudge a rethink
 _FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn (grind guard)
+_EDIT_FAIL_SOFT = 3     # consecutive failing edit_file/multi_edit calls before we push write_file
+_EDIT_FAIL_HARD = 6     # consecutive failing edits before we abort — a varied-arg edit grind that
+#                         dodges the identical-call loop guard is DGC's #1 benchmark-timeout driver
 # a passing command matching one of these = the work is likely verified → nudge the model to finish
 # instead of re-running / refactoring working code (the "solved but kept going" waste)
 _VERIFY_KWS = ("pytest", "go test", "cargo test", "npm test", "npm run test", "npx jest", "jest",
@@ -179,6 +182,7 @@ class Agent:
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         self.session_name = None  # optional user-given name for the current session
+        self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.cancelled = threading.Event()  # a headless front-end sets this to interrupt the turn
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
@@ -224,6 +228,7 @@ class Agent:
         return target
 
     def reset(self) -> None:
+        self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
         self.session_name = None
@@ -261,6 +266,18 @@ class Agent:
             "a short summary of what you did, the outcome, files you changed, and anything the user "
             "should know or do next. Never end a turn with only tool calls and no closing message.",
         ]
+
+        goal = getattr(self, "goal", "")
+        if goal:                              # a standing /goal — keep it in view every turn until met
+            parts += [
+                "",
+                "# Standing goal",
+                f"The user has set an overarching goal for this session:\n\n    {goal}\n",
+                "Keep this goal in view and keep making progress toward it every turn. Don't stop while "
+                "it's clearly unmet — take the next concrete step. When you believe it is fully met, say "
+                "so plainly and summarize how it was achieved. If it's genuinely blocked, say what's "
+                "blocking it rather than stopping silently.",
+            ]
 
         mode = self.mode
         parts += ["", f"# Permission mode: {mode}", MODE_DESCRIPTIONS[mode]]
@@ -414,7 +431,7 @@ class Agent:
         if self.session_file:
             from . import sessions
             sessions.save(self.session_file, self.messages, self.config.project_root,
-                          name=self.session_name)
+                          name=self.session_name, goal=self.goal)
 
     def name_session(self, name: str) -> None:
         """Give the current session a human name (shown in --resume / the session picker)."""
@@ -470,7 +487,14 @@ class Agent:
         self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
         self.session_file = path
         self.session_name = sessions.name_of(path)
+        self.goal = sessions.goal_of(path)              # restore the standing /goal on resume
         return len(loaded)
+
+    def set_goal(self, text: str) -> None:
+        """Set (or clear, with '') the standing objective. Kept in context every turn until met/cleared."""
+        self.goal = text.strip()
+        self._refresh_system()                          # re-emit the system prompt with the # Goal section
+        self._persist()
 
     def _run_turn(self, user_text: str) -> None:
         self._refresh_system()
@@ -501,6 +525,8 @@ class Agent:
         verify_runs = 0             # E: verify_before_done attempts this turn (bounded)
         last_fail_fp = None         # fingerprint of the last failing bash output
         same_fail = 0               # consecutive failures with the SAME fingerprint (stuck signal)
+        edit_fail_streak = 0        # consecutive failing edit_file/multi_edit calls (write_file steer)
+        edit_grind_nudged = False   # so the "just write the whole file" nudge fires at most once
         verified = False            # a test/build passed AND no edit since — finish-when-verified nudge
         verify_nudged = False
         continues = 0               # length-truncation auto-continues used this turn
@@ -509,6 +535,7 @@ class Agent:
         todo_gate = 0               # times we've refused to end the turn with open todos
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
+        goal_nudged = False         # standing-goal check fires at most once per turn before stopping
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
@@ -576,6 +603,14 @@ class Agent:
                     continue
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
                     continue
+                if getattr(self, "goal", "") and not goal_nudged and did_tools:  # standing /goal gate:
+                    goal_nudged = True       #   don't stop with the goal unmet if we actually did work
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nStanding goal for this session:\n" + self.goal +
+                        "\nBefore you stop: is that goal now FULLY met? If yes, say so and summarize how. "
+                        "If not, take the next concrete step toward it now — don't stop with it unmet.\n"
+                        "</system-reminder>"})
+                    continue
                 if (verify_runs < 2 and mutating_total > 0                       # E: verify-before-done gate
                         and self.config.get("verify_before_done") and self.config.get("verify_command")):
                     verify_runs += 1
@@ -596,6 +631,24 @@ class Agent:
                     except Exception as e:
                         self.ui.info(f"verify skipped: {e}")
                 return
+
+            if result.finish_reason == "length" and continues < _MAX_CONTINUE:
+                # the message hit the OUTPUT-token cap while emitting tool calls → their arguments may be
+                # silently truncated (a partial write_file/edit_file corrupts a file, or dies as opaque
+                # JSON). Don't run ANY of them; answer each open call so the transcript stays valid and
+                # ask for a complete re-issue (a large file → one full write_file). (pi does the same.)
+                continues += 1
+                self.ui.info("↳ response truncated at the token limit — asked the model to re-issue")
+                reissue = ("error: your response was cut off at the output-token limit, so this tool "
+                           "call's arguments are incomplete and were NOT run. Re-issue it with complete "
+                           "arguments — for a large file, write the whole thing in one write_file call.")
+                if native:
+                    for call in result.tool_calls:      # every tool_call needs a matching result
+                        self.messages.append({"role": "tool", "tool_call_id": call.id, "content": reissue})
+                else:
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\n" + reissue + "\n</system-reminder>"})
+                continue
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
@@ -629,6 +682,11 @@ class Agent:
                         fp = "".join(c for c in body if not c.isdigit())[:400]  # ignore line #s / timings
                         same_fail = same_fail + 1 if fp == last_fail_fp else 1
                         last_fail_fp = fp
+                if call.name in ("edit_file", "multi_edit"):     # F3: varied-arg edit grind (dodges the
+                    if out.lstrip().lower().startswith("error"):  # identical-call loop guard) → count it
+                        edit_fail_streak += 1
+                    else:
+                        edit_fail_streak = 0
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -639,6 +697,10 @@ class Agent:
 
             if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
                 self.ui.error(f"stopped — the same command failure repeated {same_fail}× with no progress")
+                return
+            if edit_fail_streak >= _EDIT_FAIL_HARD:     # F3: an edit grind that never lands → abort
+                self.ui.error(f"stopped — {edit_fail_streak} edits in a row failed to match; "
+                              "rewrite the file with write_file and try again")
                 return
 
             # keep flaky local models on track: nudge a todo list on multi-step work, and
@@ -651,6 +713,11 @@ class Agent:
                 reminders.append(f"The last {fail_streak} commands all failed with no success. Stop "
                                  "retrying variations — re-read the failing output carefully, reconsider "
                                  "the approach from scratch, or state plainly what is blocking you.")
+            if edit_fail_streak >= _EDIT_FAIL_SOFT and not edit_grind_nudged:   # F3: steer to write_file
+                edit_grind_nudged = True
+                reminders.append(f"Your last {edit_fail_streak} edit_file calls failed to match the file. "
+                                 "STOP editing — read the file once, then write the ENTIRE corrected file "
+                                 "in ONE write_file call (it always succeeds). Don't keep tweaking old_string.")
             # finish-when-verified: a test/build passed and the model kept tooling without editing → nudge
             made_edit = any(c.name in ("write_file", "edit_file", "multi_edit") for c in result.tool_calls)
             if verified and not made_edit and not verify_nudged:

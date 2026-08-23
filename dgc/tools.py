@@ -608,8 +608,21 @@ def bash(args: dict, ctx) -> str:
         return f"error: command timed out after {timeout}s"
     out = (out or "") + (err or "")
     if len(out) > MAX_BASH_OUT:
+        # DON'T throw the middle away — a compiler/test error is often mid-stream. Save the FULL output
+        # to a temp file and tell the model to grep it, keeping head+tail inline. (pi does this.)
+        path = None
+        try:
+            import tempfile
+            fd, path = tempfile.mkstemp(prefix="dgc-bash-", suffix=".log")
+            with os.fdopen(fd, "w") as f:
+                f.write(out)
+        except OSError:
+            path = None
         half = MAX_BASH_OUT // 2
-        out = out[:half] + f"\n… output truncated ({len(out)} chars total) …\n" + out[-half:]
+        note = f"\n… {len(out)} chars total — middle elided …\n"
+        tail = (f"\n[full output saved to {path} — if the error you need isn't shown above, grep it: "
+                f"grep -nE '<pattern>' {path}]") if path else ""
+        out = out[:half] + note + out[-half:] + tail
     return f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}"
 
 

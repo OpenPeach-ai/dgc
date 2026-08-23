@@ -382,6 +382,18 @@ def unit_tests(tmp: Path):
     if _p.depth == 0: _p.cancelled.clear()
     check("top-level turn still clears its own stale cancel", not _p.cancelled.is_set())
 
+    # --- /goal: set → # Standing goal in the prompt; persists to the session + restores on resume
+    _g1 = _Ag(_Cfg(), _AgUI())
+    check("no goal → no goal section", "# Standing goal" not in _g1.system_prompt())
+    _g1.set_goal("ship the release")
+    check("goal set → in the system prompt", "# Standing goal" in _g1.system_prompt() and "ship the release" in _g1.system_prompt())
+    import dgc.sessions as _Sg
+    _gp = _Sg.new_path(tempfile.mkdtemp()); _g1.session_file = _gp; _g1.messages = [{"role":"user","content":"x"}]; _g1._persist()
+    check("goal persisted to the session file", _Sg.goal_of(_gp) == "ship the release")
+    _g2 = _Ag(_Cfg(), _AgUI()); _g2.load_session(_gp)
+    check("goal restored on resume", _g2.goal == "ship the release")
+    _g1.set_goal(""); check("goal cleared → section gone", "# Standing goal" not in _g1.system_prompt())
+
     # --- sampling params: unset → nothing sent (respect server default); set → parsed (top_k int)
     check("sampling unset sends nothing", _samp(_Cfg()) == {})
     class _SCfg(_Cfg):
