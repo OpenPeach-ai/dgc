@@ -41,7 +41,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("keys", "keyboard shortcuts cheatsheet"),
     ("docs", "in-app how-to guides"),
     ("new", "start a new session"),
-    ("resume", "reopen a past session · dN deletes one"),
+    ("resume", "reopen a past session · ^D deletes one"),
     ("history", "search & recall a past prompt"),
     ("jump", "jump the transcript to a past turn"),
     ("rewind", "restore code + conversation to a past turn"),
@@ -370,6 +370,7 @@ class TUI:
 
     def _overlay_move(self, d: int) -> None:
         ov = self._overlay
+        ov["armed_del"] = None                          # moving off a row disarms a pending delete
         if ov.get("reader"):                            # a doc reader — arrows scroll, no selection
             ov["scroll"] = max(0, ov.get("scroll", 0) + d)
             self._invalidate()
@@ -378,6 +379,27 @@ class TUI:
         if n:
             ov["sel"] = (ov["sel"] + d) % n             # wrap-around
         self._invalidate()
+
+    def _overlay_delete_armed(self) -> None:
+        """Delete the selected row of a picker that declares on_delete, with a one-keystroke arm→confirm
+        (first ^D/^X arms + flashes; a second on the SAME row commits). Shared by Ctrl+D and Ctrl+X so the
+        advertised '^D delete' actually deletes instead of closing the menu."""
+        ov = self._overlay
+        if not (ov and ov.get("on_delete")):
+            return
+        rows = self._overlay_rows()
+        if not rows:
+            return
+        sel = ov["sel"]
+        row = rows[sel]
+        if ov.get("armed_del") == sel:                  # confirmed → delete (cb re-opens with fresh rows)
+            ov["armed_del"] = None
+            ov["on_delete"](row)
+        else:                                           # arm + tell the user how to confirm/cancel
+            ov["armed_del"] = sel
+            label = (row.get("label", "") if isinstance(row, dict) else str(row))[:40]
+            self._flash(f"delete “{label}”? press ^D again to confirm · move/Esc cancels")
+            self._invalidate()
 
     def _overlay_row_at(self, y: int):
         """Map a mouse y (within the overlay window) to a filtered-row index, or None.
@@ -2558,9 +2580,7 @@ class TUI:
 
         @kb.add("c-x", filter=Condition(lambda: self._overlay is not None and self._overlay.get("on_delete")))
         def _(ev):
-            rows = self._overlay_rows()
-            if rows:
-                self._overlay["on_delete"](rows[self._overlay["sel"]])   # cb re-opens with fresh rows
+            self._overlay_delete_armed()             # arm→confirm; cb re-opens with fresh rows
 
         # tabbed-modal action keys (a/x/r/space) — only when the overlay declares on_action
         has_actions = Condition(lambda: self._overlay is not None and self._overlay.get("on_action"))
@@ -2665,10 +2685,7 @@ class TUI:
             else:
                 self.input_buf.reset()
 
-        @kb.add("c-c")
-        @kb.add("c-d")
-        @kb.add("c-q")
-        def _(ev):
+        def cancel_gesture(ev):
             if self._req is not None:            # blocking prompt → cancel/deny (don't deadlock the worker)
                 self._req_answer = None; self._req_event.set(); return
             if self._input is not None:
@@ -2687,6 +2704,19 @@ class TUI:
             else:
                 self._quit_armed = now
                 self._flash("press Ctrl+C again to quit")
+
+        @kb.add("c-c")
+        @kb.add("c-q")
+        def _(ev):
+            cancel_gesture(ev)
+
+        @kb.add("c-d")
+        def _(ev):
+            # Ctrl+D inside a picker that supports delete → delete the selected row (arm→confirm),
+            # NOT close the menu — otherwise the advertised "^D delete" was a lie that closed the picker.
+            if self._overlay is not None and self._overlay.get("on_delete"):
+                self._overlay_delete_armed(); return
+            cancel_gesture(ev)
 
         @kb.add("c-n")
         def _(ev):
