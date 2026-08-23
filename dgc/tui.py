@@ -196,6 +196,11 @@ def _active_prop(field: str):
 class TUI:
     """A full-screen app that also *is* the AgentUI the agent calls back into."""
 
+    # At/below this terminal HEIGHT the user band auto-compacts (drops its tinted vpad + arrow) so a
+    # short window isn't dominated by prompt padding. Derived per-frame from the live height, never
+    # persisted — growing the window restores the full band. (Copied from a polished CLI's model.)
+    _AUTO_COMPACT_ROWS = 20
+
     # per-session state → delegated to the active AgentSession (multi-agent fleet)
     agent = _active_prop("agent")
     blocks = _active_prop("blocks")
@@ -3029,13 +3034,17 @@ class TUI:
         width so the tint spans edge-to-edge at ANY terminal size: a short or wrapped line never
         leaves a ragged/partial tint (the small-terminal "box breaks" bug). Long lines word-wrap to
         the content width with continuation rows indented under the arrow; `tag` marks the first row
-        (e.g. "follow-up" for a mid-turn prompt). One tinted blank row pads above and below the text;
-        the untinted breathing room around the band is the transcript's inter-block gap."""
+        (e.g. "follow-up" for a mid-turn prompt). Normally one tinted blank row pads above and below
+        the text (the untinted breathing room around it is the transcript's inter-block gap). On a
+        SHORT terminal (height ≤ _AUTO_COMPACT_ROWS) the band auto-compacts: it drops those tinted
+        vpad rows AND the ❯ prefix, keeping only the tint — so a small window isn't eaten by padding."""
         import textwrap
         from rich.text import Text
         th = style_mod.theme()
         W = max(8, self._width - 2)                   # the transcript content width — NOT floored at 30
-        arrow, indent = f"{glyphs.ARROW} ", "  "      # prefix is 2 cols; continuation rows indent to match
+        compact = 0 < getattr(self, "_height", 0) <= self._AUTO_COMPACT_ROWS   # short window → tight band
+        arrow = "" if compact else f"{glyphs.ARROW} "  # compact drops the arrow (tint alone marks the turn)
+        indent = "" if compact else "  "              # continuation rows line up under the arrow (none if compact)
         prefix_w = len(arrow)
         tag_s = f"   {tag}" if tag else ""
         cw = max(1, W - prefix_w)                     # text width after the prefix, floored so wrap progresses
@@ -3046,7 +3055,8 @@ class TUI:
                                                   break_on_hyphens=False) or [""]):
                 visual.append((arrow if (li == 0 and j == 0) else indent, seg, li == 0 and j == 0))
         t = Text()
-        t.append(" " * W + "\n")                      # tinted vpad — top
+        if not compact:
+            t.append(" " * W + "\n")                  # tinted vpad — top (skipped when compact)
         for pre, seg, is_first in visual:
             t.append(pre, style=f"bold {th.accent}")
             t.append(seg, style=th.text_strong)
@@ -3056,7 +3066,9 @@ class TUI:
             if used < W:
                 t.append(" " * (W - used))            # pad the row so the tint reaches the right edge
             t.append("\n")
-        t.append(" " * W)                             # tinted vpad — bottom
+        if not compact:
+            t.append(" " * W)                         # tinted vpad — bottom (skipped when compact)
+        # compact ends on the last text row; _rich() strips the trailing newline, so no blank tinted row.
         t.stylize(f"on {th.band}")                    # a clearly-visible raised background band
         return self._rich(t)
 
