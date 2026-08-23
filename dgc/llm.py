@@ -393,6 +393,10 @@ class LLMClient:
                 body = r.text[:600]
                 last_err = body
                 low = body.lower()
+                # Classify OVERFLOW first — some overflow bodies contain words like "invalid" that would
+                # otherwise be misread as a sampling/tool rejection and permanently strip a capability.
+                if _OVERFLOW_RE.search(low):
+                    raise ContextOverflowError("context window exceeded: " + body[:200])
                 # only disable a capability when the server actually blames THAT capability —
                 # a 400 about something else must not permanently strip tools/reasoning.
                 if (r.status_code == 400 and self.tools_supported and "tools" in payload
@@ -419,9 +423,6 @@ class LLMClient:
                         payload.pop(k, None)                #   them (respect its defaults) and don't re-add,
                     self.sampling = {}                      #   so a strict endpoint can't brick the session
                     continue
-                if _OVERFLOW_RE.search(low):
-                    # recoverable: the agent compacts and retries once (real window < configured size)
-                    raise ContextOverflowError("context window exceeded: " + body[:200])
                 # unclear 400 with tools present: fall back to the text protocol (still robust)
                 if r.status_code == 400 and self.tools_supported and "tools" in payload:
                     self.tools_supported = False

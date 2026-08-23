@@ -122,7 +122,9 @@ class MCPManager:
         self.servers: dict[str, MCPServer] = {}
 
     def connect_all(self, config_servers: dict | None) -> None:
-        for name, spec in (config_servers or {}).items():
+        if not isinstance(config_servers, dict):        # a corrupted mcp_servers value must not crash launch
+            return
+        for name, spec in config_servers.items():
             cmd = (spec or {}).get("command")
             if not cmd:
                 continue

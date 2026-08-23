@@ -37,6 +37,7 @@ DEFAULTS: dict = {
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
     "verify_command": "",                       #   feed failures back once. e.g. "npm test" / "pytest -q"
     "bash_timeout": 120,
+    "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily

@@ -233,6 +233,7 @@ class Agent:
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
         self.session_name = None
+        self._session_started = False                    # re-arm the SessionStart hook for the new session
 
     def _refresh_system(self) -> None:
         if self.messages and self.messages[0]["role"] == "system":
@@ -600,10 +601,7 @@ class Agent:
                     overflow_retried = True
                     self.ui.end_stream()
                     self.ui.info("↻ context overflowed — compacting and retrying")
-                    self.maybe_compact(force=True)
-                    if self.messages and self.messages[-1].get("role") == "assistant" \
-                            and not (self.messages[-1].get("content") or "").strip():
-                        self.messages.pop()          # drop the empty assistant stub from the failed call
+                    self.maybe_compact(force=True)   # aggressive: guarantees the retry is smaller
                     continue
                 self.ui.end_stream()
                 self.ui.error("context window exceeded even after compaction — start a new session "
@@ -963,13 +961,14 @@ class Agent:
     def estimate_tokens(self) -> int:
         return sum(len(json.dumps(m, default=str)) for m in self.messages) // 4
 
-    def _mechanical_prune(self) -> bool:
+    def _mechanical_prune(self, aggressive: bool = False) -> bool:
         """Tier-1 context relief (no LLM): cap stale tool-result bodies so a few huge outputs
         can't dominate the window. Protects the system message and the most-recent quarter of
-        the transcript (always at least KEEP_RECENT messages), and never touches assistant text."""
+        the transcript (always at least KEEP_RECENT messages), and never touches assistant text.
+        `aggressive` (used for overflow recovery) protects only the last 2 messages and caps harder."""
         n = len(self.messages)
-        protect_from = max(1, n - max(KEEP_RECENT, n // 4))
-        cap = 2000
+        protect_from = max(1, n - (2 if aggressive else max(KEEP_RECENT, n // 4)))
+        cap = 500 if aggressive else 2000
         changed = False
         for i in range(1, protect_from):
             m = self.messages[i]
@@ -989,12 +988,18 @@ class Agent:
         if not force and self.estimate_tokens() < budget:
             return
         # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
-        if self._mechanical_prune() and not force and self.estimate_tokens() < budget:
+        if self._mechanical_prune(aggressive=force) and not force and self.estimate_tokens() < budget:
             self.ui.info("context pruned")
             return
-        if len(self.messages) < KEEP_RECENT + 3:
+        keep = 2 if force else KEEP_RECENT          # under force (overflow), summarize almost everything
+        if len(self.messages) < keep + 3:
+            if force:                               # too few messages to summarize → hard-truncate the big ones
+                for m in self.messages[1:]:
+                    c = m.get("content")
+                    if isinstance(c, str) and len(c) > 1200:
+                        m["content"] = c[:1200] + "\n… [truncated to fit context]"
             return
-        middle = self.messages[1:-KEEP_RECENT]
+        middle = self.messages[1:-keep]
         transcript_lines = []
         for m in middle:
             role = m.get("role", "?")
@@ -1033,5 +1038,5 @@ class Agent:
             [self.messages[0],
              {"role": "user", "content": f"[Earlier conversation compacted to this summary]\n{summary}"},
              {"role": "assistant", "content": "Understood — I have the context summary and will continue from it."}]
-            + self.messages[-KEEP_RECENT:])
+            + self.messages[-keep:])              # `keep` (not KEEP_RECENT) so force mode stays aggressive
         self.ui.info("context compacted")

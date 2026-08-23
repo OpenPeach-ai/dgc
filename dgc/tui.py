@@ -422,7 +422,7 @@ class TUI:
             if typ == "bool":
                 val = raw == "on" if isinstance(raw, str) else bool(raw)
             elif str(raw).strip() in ("", "default", "none") and typ != "enum":
-                val = "" if isinstance(DEFAULTS.get(key), str) else DEFAULTS.get(key)
+                val = DEFAULTS.get(key)         # the REAL default ("" for sampling, "qwen3:8b" for model)
             elif typ == "int":
                 val = int(str(raw).strip())
             elif typ == "float":
@@ -2213,13 +2213,20 @@ class TUI:
             else:
                 key = sp[0]
                 val = sp[1].strip() if len(sp) > 1 else ""
-                if key not in DEFAULTS:
-                    self._flash(f"unknown setting '{key}' — /set to list the tunable ones")
+                if key not in DEFAULTS or isinstance(DEFAULTS[key], (dict, list)):
+                    self._flash(f"can't set '{key}' here — /set is for scalar settings (try /settings)")
+                elif key == "mode":                          # route through the mode validator
+                    if val in ("default", "acceptEdits", "plan", "auto"):
+                        self.agent.set_mode(val); self._flash(f"mode = {val}")
+                    else:
+                        self._flash("mode must be one of: default · acceptEdits · plan · auto")
+                elif key == "theme":                         # route through /theme (repaints)
+                    self._handle_slash(f"/theme {val}")
                 else:
                     dflt = DEFAULTS[key]
                     try:
                         if val in ("", "default", "none"):
-                            parsed = "" if isinstance(dflt, str) else dflt
+                            parsed = dflt                    # the REAL default, not ""
                         elif isinstance(dflt, bool):
                             parsed = val.lower() in ("1", "true", "on", "yes")
                         elif isinstance(dflt, int) and not isinstance(dflt, bool):
@@ -2231,9 +2238,9 @@ class TUI:
                     except ValueError:
                         self._flash(f"'{val}' isn't a valid value for {key}"); return True
                     self.config.set(key, parsed)
-                    self.agent.refresh_client()   # pick up sampling / max_tokens / timeout changes now
-                    self._flash(f"{key} = {parsed}" if parsed not in ("", dflt)
-                                else f"{key} reset to the default")
+                    if key in self._CLIENT_KEYS:
+                        self.agent.refresh_client()   # sampling / max_tokens / timeout take effect now
+                    self._flash(f"{key} = {parsed}" if parsed != dflt else f"{key} reset to the default")
         elif cmd in ("settings", "config", "prefs", "preferences"):
             self._open_settings()
         elif cmd in ("handoff", "handover"):

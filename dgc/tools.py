@@ -538,9 +538,14 @@ def _coerce_edits(args: dict):
     for e in edits:
         if not isinstance(e, dict):
             out.append(e); continue
-        o = next((e[k] for k in ("old_string", "oldText", "old", "search") if k in e), "")
-        n = next((e[k] for k in ("new_string", "newText", "new", "replace") if k in e), "")
-        d = {"old_string": o, "new_string": n}
+        OLD = ("old_string", "oldText", "old", "search")
+        NEW = ("new_string", "newText", "new_text", "new", "replace", "replacement", "replaceWith")
+        o = next((e[k] for k in OLD if k in e), "")
+        n_key = next((k for k in NEW if k in e), None)
+        if n_key is None:                       # a variant replacement key the model invented → catch it
+            n_key = next((k for k in e if k not in OLD and k != "replace_all"
+                          and re.search(r"new|repl", k, re.I)), None)
+        d = {"old_string": o, "new_string": e[n_key] if n_key else ""}
         if e.get("replace_all"):
             d["replace_all"] = True
         out.append(d)
