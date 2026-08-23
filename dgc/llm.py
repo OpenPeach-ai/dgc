@@ -475,6 +475,9 @@ class LLMClient:
                             pass
                         return
             threading.Thread(target=_watch, daemon=True).start()
+        # SSE streams are UTF-8, but requests defaults to latin-1 when the Content-Type carries no
+        # charset — which mangles every multibyte char (→ becomes "â\x86\x92", ° becomes "Â°"). Pin it.
+        r.encoding = "utf-8"
         _lines = r.iter_lines(decode_unicode=True)
         while True:
             try:

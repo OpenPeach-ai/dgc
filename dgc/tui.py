@@ -2384,10 +2384,11 @@ class TUI:
         @kb.add("/")
         def _(ev):
             b = self.input_buf
-            if (self._overlay is None and not b.text and not self._turn.is_set()
+            if (self._overlay is None and not b.text
                     and self._req is None and not self._naming and self._input is None):
                 b.insert_text("/")
                 self._open_command_palette()            # `/` on an empty composer → command palette
+                # (works mid-turn too — many commands like /copy, /expand, /thoughts are useful then)
             else:
                 b.insert_text("/")
 
