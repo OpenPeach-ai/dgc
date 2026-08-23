@@ -394,6 +394,25 @@ def unit_tests(tmp: Path):
     check("goal restored on resume", _g2.goal == "ship the release")
     _g1.set_goal(""); check("goal cleared → section gone", "# Standing goal" not in _g1.system_prompt())
 
+    # --- pi adopt: context-overflow classifier matches local-server strings, not other 400s
+    from dgc.llm import _OVERFLOW_RE, ContextOverflowError, LLMError as _LLME
+    check("overflow classifier matches llama.cpp/Ollama/DS4 strings",
+          all(_OVERFLOW_RE.search(s) for s in [
+              "the request exceeds the available context size",
+              "prompt has 40000 tokens, but the configured context size is 32768 tokens",
+              "requested token count exceeds the model's maximum context length of 131072 tokens"]))
+    check("overflow classifier ignores tool/sampling 400s",
+          not _OVERFLOW_RE.search("unrecognized request argument supplied: top_k")
+          and not _OVERFLOW_RE.search("invalid tool schema"))
+    check("ContextOverflowError is a recoverable LLMError", issubclass(ContextOverflowError, _LLME))
+
+    # --- pi adopt: multi_edit coerces the shapes weak models send 'edits' in
+    from dgc.tools import _coerce_edits
+    check("coerce edits: JSON string → list", _coerce_edits({"edits": '[{"old_string":"a","new_string":"b"}]'}) == [{"old_string":"a","new_string":"b"}])
+    check("coerce edits: single object → list", _coerce_edits({"edits": {"old_string":"x","new_string":"y"}}) == [{"old_string":"x","new_string":"y"}])
+    check("coerce edits: pi oldText/newText keys", _coerce_edits({"edits":[{"oldText":"p","newText":"q"}]}) == [{"old_string":"p","new_string":"q"}])
+    check("coerce edits: legacy top-level old/new", _coerce_edits({"old_string":"t","new_string":"u"}) == [{"old_string":"t","new_string":"u"}])
+
     # --- sampling params: unset → nothing sent (respect server default); set → parsed (top_k int)
     check("sampling unset sends nothing", _samp(_Cfg()) == {})
     class _SCfg(_Cfg):
