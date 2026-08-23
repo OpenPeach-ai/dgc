@@ -87,12 +87,15 @@ def opencode_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     cfgdir.mkdir(parents=True, exist_ok=True)
     (cfgdir / "opencode.json").write_text(json.dumps({
         "$schema": "https://opencode.ai/config.json",
+        # auto-approve so headless runs aren't blocked by opencode's own permission prompts
+        "permission": {"edit": "allow", "bash": "allow", "webfetch": "allow"},
         "provider": {"ollama": {
             "npm": "@ai-sdk/openai-compatible", "name": "Ollama",
             "options": {"baseURL": a.base_url},
             "models": {a.model: {"name": a.model}}}}}))
     e = dict(env, HOME=str(home))
-    args = [OPENCODE, "run", "-m", f"ollama/{a.model}", prompt]
+    # --dir pins opencode to the EXERCISE workdir (else it walks up and edits the wrong files)
+    args = [OPENCODE, "run", "--dir", str(workdir), "-m", f"ollama/{a.model}", prompt]
     t0 = time.time()
     rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
     return _result(t0, rc, out, to)
