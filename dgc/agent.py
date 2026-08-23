@@ -556,7 +556,7 @@ class Agent:
                 result = self._chat(tools, effort)
             except ContextOverflowError as e:
                 # the real window is smaller than configured → compact hard and retry ONCE, instead of
-                # killing the turn (pi does this). If it overflows again, fall through as a normal error.
+                # killing the turn (as a reference agent does). If it overflows again, fall through as a normal error.
                 if not overflow_retried:
                     overflow_retried = True
                     self.ui.end_stream()
@@ -665,7 +665,7 @@ class Agent:
                                   "call; raise max_tokens or ask for a smaller change")
                     return
                 # answer each open call so the transcript stays valid + ask for a complete re-issue
-                # (a large file → one full write_file). (pi does the same.)
+                # (a large file → one full write_file).
                 continues += 1
                 self.ui.info("↳ response truncated at the token limit — asked the model to re-issue")
                 reissue = ("error: your response was cut off at the output-token limit, so this tool "

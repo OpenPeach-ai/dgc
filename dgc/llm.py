@@ -35,7 +35,7 @@ class ContextOverflowError(LLMError):
     """The request exceeded the model's context window. Recoverable: the agent compacts + retries once."""
 
 
-# Overflow error strings across providers/local servers (adapted from pi's overflow classifier) — so a
+# Overflow error strings across providers/local servers (adapted from a reference agent's overflow classifier) — so a
 # real window smaller than the configured context_size is RECOVERED (compact+retry) instead of killing
 # the turn. Local servers (llama.cpp/Ollama/LM Studio/vLLM/DS4) each phrase it differently.
 _OVERFLOW_RE = re.compile(

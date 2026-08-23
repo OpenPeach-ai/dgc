@@ -517,7 +517,7 @@ def edit_file(args: dict, ctx) -> str:
 
 
 def _coerce_edits(args: dict):
-    """Normalize the shapes weak models send `edits` in (pi's prepareArguments): a JSON string instead
+    """Normalize the shapes weak models send `edits` in (argument-repair): a JSON string instead
     of a list, a single {old,new} object instead of a list, or legacy/alt key names — into a list of
     {old_string,new_string,replace_all?}. Best-effort; returns non-list input unchanged for the caller
     to reject with a clear error."""
@@ -640,7 +640,7 @@ def bash(args: dict, ctx) -> str:
     out = (out or "") + (err or "")
     if len(out) > MAX_BASH_OUT:
         # DON'T throw the middle away — a compiler/test error is often mid-stream. Save the FULL output
-        # to a temp file and tell the model to grep it, keeping head+tail inline. (pi does this.)
+        # to a temp file and tell the model to grep it, keeping head+tail inline. (as modern coding CLIs do.)
         path = None
         try:
             import tempfile, glob as _glob, time as _time
