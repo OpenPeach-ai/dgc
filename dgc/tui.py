@@ -617,34 +617,47 @@ class TUI:
             self._follow = self._scroll_off == 0
         self._invalidate()
 
+    def _live_marker(self) -> str:
+        """An animated braille spinner for the LIVE (in-transcript) thinking/response lines, so the
+        chat itself shows the model actively working right there — not only the bottom status bar."""
+        return glyphs.SPINNER[int(time.monotonic() * 8) % len(glyphs.SPINNER)]
+
     # ---- the transcript control ----
     def _transcript(self):
         from prompt_toolkit.formatted_text import to_formatted_text
         th = style_mod.theme()
-        ft, first = [], True
-        def add(frags):
-            nonlocal first
-            if not first:
-                ft.append(("", "\n"))
+        ft = []
+        prev = None                             # kind of the previous block (None = first)
+        def add(frags, kind):
+            nonlocal prev
+            if prev is not None:
+                # Grok's rhythm: a blank line above assistant prose + reasoning (breathing room);
+                # pack everything else together — adjacent tool calls, and bands that already carry
+                # their own vertical padding.
+                ft.append(("", "\n\n" if kind in ("text", "think") else "\n"))
             ft.extend(frags)
-            first = False
+            prev = kind
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "think":
-                add(self._think_frags(blk))
+                add(self._think_frags(blk), "think")
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
-                add(self._tool_frags(blk))
+                add(self._tool_frags(blk), "tool")
             elif isinstance(blk, dict) and blk.get("kind") == "user":
                 # re-rendered every frame at the CURRENT width so the full-width band reflows on
                 # resize instead of keeping stale padding (the "box dismantles on resize" bug).
-                add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))))
+                add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))), "user")
             elif blk:
-                add(list(to_formatted_text(ANSI(blk))))
-        if self._think:                     # the in-flight reasoning (muted, live) — same label as the status
+                add(list(to_formatted_text(ANSI(blk))), "text")
+        if self._think:                     # in-flight reasoning (muted, live) — animated marker
+            m = self._live_marker()
             add(list(to_formatted_text(ANSI(self._rich(
-                f"[{th.faint} italic]{glyphs.RAIL} Thinking… {_esc(self._think)}[/]")))))
-        if self._buf:                       # the in-flight assistant text
-            add(list(to_formatted_text(ANSI(self._rich(self._md(self._buf))))))
-        if first:
+                f"[bold {th.accent}]{m}[/] [{th.faint} italic]Thinking… {_esc(self._think)}[/]")))), "think")
+        if self._buf:                       # in-flight assistant text — animated marker on the live line
+            m = self._live_marker()
+            frags = [(f"bold fg:{th.accent}", m + " ")]
+            frags += list(to_formatted_text(ANSI(self._rich(self._md(self._buf)))))
+            add(frags, "text")
+        if prev is None:
             self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
         ft.append(("", "\n"))
