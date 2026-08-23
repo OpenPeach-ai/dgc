@@ -34,9 +34,11 @@ class Theme:
 DARK = Theme(
     name="dark",
     bg="#0B0B0C", surface="#141416", surface2="#1A1A1D", code="#17171B",
-    band="#332A45",                 # purple-tinted band. NOT darker/bluer than this: a lower red makes
-    #                                 256-color terminals downsample it to navy (#241C39 → #00005f). This
-    #                                 has enough red to stay purple at every depth (256 → #5f005f).
+    band="#242424",                 # a NEUTRAL dark grey band (Rgb 36,36,36) — the colour polished terminal
+    #                                 CLIs use behind a submitted prompt. Neutral ON PURPOSE: any blue/purple
+    #                                 tint collapses to navy/magenta when a 256-colour terminal downsamples it.
+    #                                 Grey has no colour channel to collapse, so it stays a subtle grey lift at
+    #                                 every depth (256 → idx 235 = rgb(38,38,38)). Don't add a hue here.
     border="#232326", border_strong="#303034",
     text="#F5F5F5", text_strong="#FFFFFF", muted="#9A9A9E", faint="#6A6A6E",
     accent="#7C5CFF", accent_dim="#6A4BF0", accent_bright="#A78BFA",
@@ -47,7 +49,7 @@ DARK = Theme(
 LIGHT = Theme(
     name="light",
     bg="#FFFFFF", surface="#F6F6F7", surface2="#EFEFF1", code="#F2F2F4",
-    band="#ECE7FB",                 # light lavender band
+    band="#DEDEDE",                 # neutral light-grey band (Rgb 222,222,222), one step lifted off the canvas
     border="#E6E6E8", border_strong="#D2D2D6",
     text="#141416", text_strong="#000000", muted="#5E5E64", faint="#8A8A90",
     accent="#5B3FE0", accent_dim="#4A31C8", accent_bright="#7C5CFF",
