@@ -16,7 +16,7 @@ This is a convergence rail, not a verification. Its whole job is to reach a done
 
 5. Branch on the result:
    - BETTER but not done → commit this step as the new good checkpoint, then go to 3.
-   - WORSE than the last checkpoint → REVERT immediately: `/rewind` to the last good checkpoint, or `git reset --hard <good-commit>` / `git checkout -- <files>` via bash. Then try a DIFFERENT approach. Never patch a broken tree — a regressed step is discarded, not repaired.
+   - WORSE than the last checkpoint → REVERT immediately with git via bash: `git checkout -- <files>` for uncommitted work, or `git reset --hard <good-commit>` to a checkpoint commit. (The user can also undo interactively with `/rewind`.) Then try a DIFFERENT approach. Never patch a broken tree — a regressed step is discarded, not repaired.
 
 6. Terminate explicitly:
    - DONE → the check passes. Run it one final time and report the passing output as evidence.

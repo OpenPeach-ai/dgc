@@ -10,7 +10,7 @@ A plan written before reading is a guess. Ground every step in a file you have a
 
 2. Read the REAL files first. Use `grep` to find where the behavior lives (symbols, call sites, config keys), then `read_file` each target in full — the files you will edit AND the ones that call them. Do not plan around a file you have not opened.
 
-3. Enter plan mode (Shift+Tab). Write the plan as ≤6 numbered steps. Each step must name the exact file it touches and a one-line done-check (a test that passes, a value that prints, a symbol that now exists). Order the steps so each builds on the last.
+3. Write the plan as ≤6 numbered steps — do NOT edit any file yet. Each step must name the exact file it touches and a one-line done-check (a test that passes, a value that prints, a symbol that now exists). Order the steps so each builds on the last. (If the user has switched you into plan mode with Shift+Tab, you are already read-only until the plan is approved — good; if not, just hold off on edits until step 6.)
 
 4. Add an explicit "NOT doing" list — the scope guard. Name the tempting nearby changes (refactors, renames, unrelated bugs, extra files) that this task will NOT include. This list is as important as the steps.
 

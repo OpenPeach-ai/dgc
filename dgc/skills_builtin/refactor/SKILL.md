@@ -12,7 +12,7 @@ Refactoring means the code does the SAME thing after as before. Behavior change 
 
 3. Do ONE transform. Apply exactly one move with edit_file. When you rename or move a symbol, grep for EVERY call site and update all of them in the same step — a missed reference is a break.
 
-4. Re-verify immediately. Run the tests, the type-check, and the linter with bash. Read the output. Green → commit this step with git via bash and move to the next todo. RED → you broke behavior: undo THIS step with /rewind (or `git checkout`/`git stash`), do not stack fixes on a broken tree. Return to a green state before trying again.
+4. Re-verify immediately. Run the tests, the type-check, and the linter with bash. Read the output. Green → commit this step with git via bash and move to the next todo. RED → you broke behavior: undo THIS step with git via bash (`git checkout -- <files>` or `git stash`), do not stack fixes on a broken tree. Return to a green state before trying again.
 
 5. Repeat step 3–4 for each planned transform, one at a time. Small verified steps only.
 
@@ -23,5 +23,5 @@ Refactoring means the code does the SAME thing after as before. Behavior change 
 Rules:
 - NEVER refactor on red. No green suite → write characterization tests first (`write-tests` skill).
 - One transform per step, re-verify after each. No behavior changes — if you need one, stop and flag it.
-- On a failure, /rewind that single step. Do not pile fixes onto a broken tree.
+- On a failure, revert that single step with git (`git checkout`/`git stash`). Do not pile fixes onto a broken tree.
 - Update every call site in the same step as the rename/move. A stale reference is a bug.
