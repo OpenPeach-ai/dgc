@@ -232,7 +232,10 @@ class Agent:
             "",
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
-            "- Read a file before editing it. Make minimal, focused changes.",
+            "- Read a file before editing it. Make minimal, focused changes to EXISTING content.",
+            "- Implementing a stub or writing a new/near-empty file? Write the whole file with "
+            "write_file in one call — don't edit_file into an almost-empty file (that fails to match). "
+            "Reserve edit_file for changing content that's already there.",
             "- For multi-step work, keep a todo list with the todo tool.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
             "- Keep the running commentary between tool calls short — the user sees your tool calls "
@@ -269,7 +272,12 @@ class Agent:
                 "questions you can answer yourself with tools.",
             ]
 
-        if mode != "plan" or self.config.get("artifact_in_plan", False):
+        # Only carry the (heavy ~450-tok) artifact instructions when the artifact surface is actually
+        # live — i.e. the shared server is set to autostart. A headless/scripted run with artifacts off
+        # (e.g. the benchmark) never reaches them, so this reclaims per-turn prefill instead of re-sending
+        # instructions that can't fire. Plan-mode opt-in still shows them when enabled.
+        artifacts_live = bool(self.config.get("artifact_autostart", True))
+        if (mode != "plan" and artifacts_live) or self.config.get("artifact_in_plan", False):
             parts += [
                 "",
                 "# Artifacts — how to SHOW the user a page (READ THIS CAREFULLY)",

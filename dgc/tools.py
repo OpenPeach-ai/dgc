@@ -580,18 +580,33 @@ def bash(args: dict, ctx) -> str:
         return _bash_background(command, ctx)
     timeout = int(args.get("timeout") or ctx.config.get("bash_timeout", 120))
     from . import sandbox
+    import signal
     argv = sandbox.wrap(command, ctx.project_root) if sandbox.active(ctx.config) else None
+    # Run in its OWN session/process group so a timeout kills the WHOLE tree — a build's grandchildren
+    # (cargo / go test / gradlew / cmake) would otherwise orphan on the box and keep stealing CPU,
+    # slowing every later command. (subprocess.run's timeout only kills the direct child.)
+    popen_kw = dict(cwd=str(ctx.project_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, start_new_session=True)
     try:
         if argv:                                   # confined: writable project dir + /tmp only
-            proc = subprocess.run(argv, capture_output=True, text=True,
-                                  timeout=timeout, cwd=str(ctx.project_root))
+            proc = subprocess.Popen(argv, **popen_kw)
         else:
-            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                  timeout=timeout, cwd=str(ctx.project_root),
-                                  executable="/bin/bash")
+            proc = subprocess.Popen(command, shell=True, executable="/bin/bash", **popen_kw)
+    except OSError as e:
+        return f"error: {e}"
+    try:
+        out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # reap the whole group, not just the shell
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            proc.communicate(timeout=5)            # drain the pipes so the process fully reaps
+        except Exception:
+            pass
         return f"error: command timed out after {timeout}s"
-    out = (proc.stdout or "") + (proc.stderr or "")
+    out = (out or "") + (err or "")
     if len(out) > MAX_BASH_OUT:
         half = MAX_BASH_OUT // 2
         out = out[:half] + f"\n… output truncated ({len(out)} chars total) …\n" + out[-half:]
