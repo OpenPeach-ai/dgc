@@ -66,6 +66,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("name", "name this session"),
     ("goal", "set a standing objective the agent keeps working toward · /goal clear"),
     ("set", "tune a setting live: /set temperature 0.7 · top_p · top_k · min_p · max_tokens"),
+    ("settings", "browse & edit all settings in a menu (model, sampling, display, artifacts)"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
     ("skills", "installed skills"),
@@ -346,6 +347,99 @@ class TUI:
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
                            title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back",
                            back=self._palette_back)   # Esc → back to the `/` palette
+
+    # ---- /settings — a full, editable settings browser (categories → keys → inline edit) ----
+    # (key, label, type[, choices]); type ∈ str|int|float|bool|enum. Values live in config.
+    _SETTINGS = {
+        "Model & sampling": [
+            ("model", "Model", "str"), ("base_url", "Endpoint URL", "str"),
+            ("thinking", "Thinking effort", "enum", ["off", "low", "medium", "high"]),
+            ("temperature", "Temperature", "float"), ("top_p", "Top-p", "float"),
+            ("top_k", "Top-k", "int"), ("min_p", "Min-p", "float"),
+            ("max_tokens", "Max output tokens", "int"), ("context_size", "Context window", "int"),
+        ],
+        "Behaviour": [
+            ("mode", "Permission mode", "enum", ["default", "acceptEdits", "plan", "auto"]),
+            ("max_turns", "Max tool iterations", "int"), ("bash_timeout", "Bash timeout (s)", "int"),
+            ("verify_before_done", "Verify before finishing", "bool"),
+            ("verify_command", "Verify command", "str"), ("suggest", "Ghost-text suggestions", "bool"),
+            ("sandbox", "Confine bash (sandbox)", "bool"),
+        ],
+        "Display": [
+            ("theme", "Theme", "enum", ["auto", "dark", "light"]),
+            ("background", "Background", "enum", ["auto", "dark", "inherit"]),
+            ("show_reasoning", "Show reasoning", "bool"), ("logo_animation", "Animate logo", "bool"),
+        ],
+        "Artifacts": [
+            ("artifact_bind", "Reach", "enum", ["localhost", "lan"]),
+            ("artifact_port", "Port", "int"), ("artifact_autostart", "Autostart server", "bool"),
+            ("artifact_hostname", "Public hostname", "str"),
+            ("artifact_in_plan", "Allow in plan mode", "bool"),
+        ],
+    }
+    _CLIENT_KEYS = {"model", "base_url", "api_key", "temperature", "top_p", "top_k", "min_p",
+                    "max_tokens", "context_size", "thinking", "request_timeout", "ollama_keep_alive"}
+
+    def _open_settings(self) -> None:
+        rows = [{"label": cat, "desc": f"{len(items)} settings", "value": cat}
+                for cat, items in self._SETTINGS.items()]
+        self._open_overlay(rows, on_pick=lambda r: self._open_settings_cat(r["value"]),
+                           title="Settings", footer="↑↓ move · Enter open · Esc close",
+                           accent=True, back=self._palette_back)
+
+    def _fmt_setting(self, key: str, typ: str):
+        v = self.config.get(key, "")
+        if typ == "bool":
+            return "on" if v else "off"
+        return str(v) if v != "" else "(default)"
+
+    def _open_settings_cat(self, cat: str) -> None:
+        items = self._SETTINGS.get(cat, [])
+        rows = [{"label": lbl, "desc": self._fmt_setting(key, typ), "value": (key, typ, spec)}
+                for (key, lbl, typ, *spec) in items]
+        self._open_overlay(rows, on_pick=lambda r: self._edit_setting(cat, *r["value"]),
+                           title=f"Settings · {cat}", footer="↑↓ move · Enter edit · Esc back",
+                           accent=True, back=self._open_settings)
+
+    def _edit_setting(self, cat: str, key: str, typ: str, spec) -> None:
+        if typ in ("bool", "enum"):
+            choices = (["on", "off"] if typ == "bool" else spec[0])
+            cur = self._fmt_setting(key, typ) if typ == "bool" else str(self.config.get(key, ""))
+            rows = [{"label": ("● " if c == cur else "○ ") + c, "value": c} for c in choices]
+            self._open_overlay(rows, on_pick=lambda r: self._apply_setting(cat, key, r["value"], typ),
+                               title=key, footer="↑↓ move · Enter select · Esc back",
+                               accent=True, back=lambda: self._open_settings_cat(cat))
+        else:                                   # str/int/float → free-text input
+            cur = self.config.get(key, "")
+            self._ask_input(f"{key} = {cur!r}  · type a new value (blank = default) ",
+                            lambda text: self._apply_setting(cat, key, text, typ))
+
+    def _apply_setting(self, cat: str, key: str, raw, typ: str) -> None:
+        # parse to the right type; blank/"default" clears back to the DEFAULTS value
+        from .config import DEFAULTS
+        try:
+            if typ == "bool":
+                val = raw == "on" if isinstance(raw, str) else bool(raw)
+            elif str(raw).strip() in ("", "default", "none") and typ != "enum":
+                val = "" if isinstance(DEFAULTS.get(key), str) else DEFAULTS.get(key)
+            elif typ == "int":
+                val = int(str(raw).strip())
+            elif typ == "float":
+                val = float(str(raw).strip())
+            else:                               # str / enum
+                val = str(raw).strip()
+        except ValueError:
+            self._flash(f"'{raw}' isn't a valid value for {key}"); self._open_settings_cat(cat); return
+        if key == "mode":
+            self.agent.set_mode(str(val))
+        elif key == "theme":
+            self._handle_slash(f"/theme {val}")
+        else:
+            self.config.set(key, val)
+            if key in self._CLIENT_KEYS:
+                self.agent.refresh_client()     # sampling / model / timeouts take effect immediately
+        self._flash(f"{key} = {val}" if val not in ("",) else f"{key} reset to default")
+        self._open_settings_cat(cat)            # back to the category page (values refreshed)
 
     def _close_overlay(self) -> None:
         self._overlay = None
@@ -2113,6 +2207,8 @@ class TUI:
                     self.agent.refresh_client()   # pick up sampling / max_tokens / timeout changes now
                     self._flash(f"{key} = {parsed}" if parsed not in ("", dflt)
                                 else f"{key} reset to the default")
+        elif cmd in ("settings", "config", "prefs", "preferences"):
+            self._open_settings()
         elif cmd == "resume":
             self._resume_flow()
         elif cmd in ("model", "models"):
