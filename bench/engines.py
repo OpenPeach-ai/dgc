@@ -16,6 +16,7 @@ AIDER    = os.environ.get("AIDER", "aider")
 GOOSE    = os.environ.get("GOOSE", "goose")
 CODEX    = os.environ.get("CODEX", "codex")
 OPENCODE = os.environ.get("OPENCODE", "opencode")
+PI       = os.environ.get("PI", "pi")
 
 
 def _cap(args, workdir, env, timeout):
@@ -101,7 +102,30 @@ def opencode_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
     return _result(t0, rc, out, to)
 
 
+# ---------------------------------------------------------------- pi ----------
+def pi_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
+    """Pi coding agent (earendil-works/pi) headless (`pi -p`). Ollama via a models.json provider.
+    Fully agentic (its own shell tool runs the tests), like codex/goose — no --auto-test needed."""
+    cfgdir = Path(home) / ".pi" / "agent"
+    cfgdir.mkdir(parents=True, exist_ok=True)
+    # register the local OpenAI-compatible endpoint as an 'ollama' provider (docs/models.md)
+    (cfgdir / "models.json").write_text(json.dumps({
+        "providers": {"ollama": {
+            "baseUrl": a.base_url, "api": "openai-completions", "apiKey": (a.api_key or "ollama"),
+            # many OpenAI-compatible local servers reject the `developer` role / reasoning_effort
+            "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False},
+            "models": [{"id": a.model}]}}}))
+    # trust the project for this run (-a) so pi doesn't skip project resources; non-interactive
+    # print mode runs tools with no per-call approval (pi has no sandbox by design).
+    e = dict(env, HOME=str(home))
+    args = [PI, "-p", "-a", "--no-session", "--provider", "ollama", "--model", a.model,
+            "--api-key", (a.api_key or "ollama"), "--thinking", "off", prompt]
+    t0 = time.time()
+    rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
+    return _result(t0, rc, out, to)
+
+
 ENGINES = {
     "dgc": dgc_engine, "aider": aider_engine, "codex": codex_engine,
-    "goose": goose_engine, "opencode": opencode_engine,
+    "goose": goose_engine, "opencode": opencode_engine, "pi": pi_engine,
 }

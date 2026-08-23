@@ -180,6 +180,9 @@ def seed_home(home: Path, model: str, base_url: str, api_key: str, max_turns: in
         "thinking": "off", "suggest": False, "logo_animation": False,
         "artifact_autostart": False, "background": "inherit",
         "show_reasoning": False, "max_turns": max_turns, "context_size": 32768,
+        # a single stalled stream shouldn't eat the whole 600s budget: the default read timeout is
+        # 1800s (3× the wall). Fail a stall fast instead. (The happy path never nears 300s.)
+        "request_timeout": 300,
     }
     (d / "config.json").write_text(json.dumps(cfg, indent=2))
 
@@ -202,12 +205,20 @@ def dgc_run(prompt: str, workdir: Path, model: str, base_url: str, api_key: str,
             "stderr_tail": err[-1200:]}
 
 
-def session_stats(home: Path) -> dict:
-    """Parse the newest DGC session under the throwaway HOME for turn / tool /
-    edit-failure counts. Best-effort — never raises."""
+def session_stats(home: Path, work: Path | None = None) -> dict:
+    """Parse the newest DGC session for THIS exercise (scoped to its project slug) for turn / tool /
+    edit-failure counts. Best-effort — never raises.
+
+    The HOME is shared across every exercise, and a TIMED-OUT run is SIGKILLed before DGC persists
+    its session — so an unscoped `rglob` over the whole tree returns the newest *other* exercise's
+    counts (the misattribution bug: identical stats bled across unrelated exercises). Scoping to the
+    exercise's own sessions/<slug>/ dir returns {} for a timeout (honest 'unknown') instead."""
     try:
         sess_root = home / ".dgc" / "sessions"
-        files = list(sess_root.rglob("*.json"))
+        if work is not None:                        # scope to this exercise's project slug (matches
+            slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(work)).strip("-").lower()[-70:] or "root"
+            sess_root = sess_root / slug            #   dgc/sessions.py:_slug)
+        files = list(sess_root.rglob("*.json")) if sess_root.exists() else []
         if not files:
             return {}
         newest = max(files, key=lambda p: p.stat().st_mtime)
@@ -262,7 +273,7 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict) -> dict:
         ok, out, ttime = run_tests(lang, ex, work, env, a.test_timeout)
         last_out = out
         # session_stats only applies to DGC's own session dir; other engines have none.
-        stats = session_stats(home) if a.engine == "dgc" else {}
+        stats = session_stats(home, work) if a.engine == "dgc" else {}
         rec["rounds"].append({"round": r, "dgc": run, "stats": stats,
                               "test_pass": ok, "test_time": ttime, "test_tail": out[-1200:]})
         if ok:
