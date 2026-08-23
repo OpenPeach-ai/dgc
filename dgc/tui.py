@@ -67,6 +67,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("goal", "set a standing objective the agent keeps working toward · /goal clear"),
     ("set", "tune a setting live: /set temperature 0.7 · top_p · top_k · min_p · max_tokens"),
     ("settings", "browse & edit all settings in a menu (model, sampling, display, artifacts)"),
+    ("handoff", "write a full handoff doc (objective, done, next steps) to give another agent"),
     ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
     ("agents", "sub-agent configuration"),
     ("skills", "installed skills"),
@@ -2013,6 +2014,32 @@ class TUI:
             self.agent.name_session(title)
             self._invalidate()
 
+    def _do_handoff(self, sess) -> None:
+        """Background: generate a HANDOFF document from the whole session, save it to a file the user
+        can hand to another agent, and show it in the transcript (selectable via /copy)."""
+        self._tls.session = sess        # route the transcript output to the session /handoff was run in
+        try:
+            md = self.agent.generate_handoff()
+        except Exception as e:
+            self.error(f"handoff failed: {type(e).__name__}: {e}")
+            return
+        import time as _t
+        name = f"HANDOFF-{_t.strftime('%Y%m%d-%H%M%S')}.md"
+        saved = ""
+        try:
+            path = self.config.project_root / name
+            path.write_text(md)
+            saved = str(path)
+        except OSError:
+            pass
+        self._append(self._rich(self._md(md)))          # show the handoff in the chat
+        th = style_mod.theme()
+        if saved:
+            self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} handoff saved to [/]"
+                                    f"[{th.accent_bright}]{_esc(saved)}[/]"
+                                    f"[{th.faint}] — hand this file (or the text above) to another agent[/]"))
+        self._flash(f"handoff saved → {name}" if saved else "handoff ready above (couldn't write a file)")
+
     def _compute_suggestion(self, sess, prompt: str, resp: str) -> None:
         """Background: predict the next prompt (ghost text)."""
         self._tls.session = sess        # bind to the finishing session (see _autotitle) so a fleet
@@ -2209,6 +2236,10 @@ class TUI:
                                 else f"{key} reset to the default")
         elif cmd in ("settings", "config", "prefs", "preferences"):
             self._open_settings()
+        elif cmd in ("handoff", "handover"):
+            sess = self.active
+            self._flash("generating a handoff document…")
+            threading.Thread(target=self._do_handoff, args=(sess,), daemon=True).start()
         elif cmd == "resume":
             self._resume_flow()
         elif cmd in ("model", "models"):

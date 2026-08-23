@@ -487,6 +487,45 @@ class Agent:
         s = _re.sub(r"\s+", " ", s)[:120]
         return s or None
 
+    def generate_handoff(self) -> str:
+        """A self-contained HANDOFF document from the WHOLE session, so a different agent (or a fresh
+        session) can pick the work up cold. Best-effort model call, no tools/thinking."""
+        lines = []
+        for m in self.messages:
+            role = m.get("role")
+            if role == "system":
+                continue
+            content = str(m.get("content", ""))[:2000]
+            calls = ""
+            if m.get("tool_calls"):
+                calls = " [tools: " + ", ".join(c.get("function", {}).get("name", "?")
+                                                for c in m["tool_calls"]) + "]"
+            lines.append(f"{role}{calls}: {content}")
+        if not lines:
+            return "# Handoff\n\n(Nothing has happened in this session yet.)"
+        sysmsg = (
+            "You are writing a HANDOFF document so a DIFFERENT agent (or a fresh session) can continue "
+            "this coding work with zero prior context. Read the whole session below and write a clear, "
+            "self-contained Markdown handoff with EXACTLY these sections:\n"
+            "# Handoff\n"
+            "## Objective — what the user ultimately wants\n"
+            "## Done — what's been implemented: files created/edited, commands run + their outcomes, "
+            "commits made\n"
+            "## Current state — what works and is verified, what's broken or uncertain\n"
+            "## Key decisions — choices made and why\n"
+            "## Next steps — the immediate next actions, in order\n"
+            "## How to continue — exact commands, file paths, and names to resume (repro steps, the "
+            "verify command, files to open)\n"
+            "Be specific with REAL names/paths from the session; do not invent. Terse bullets. Output "
+            "nothing outside these sections.")
+        try:
+            res = self.client.chat([{"role": "system", "content": sysmsg},
+                                    {"role": "user", "content": "\n\n".join(lines)[:40000]}],
+                                   tools=None, reasoning_effort="off")
+            return (getattr(res, "content", "") or "").strip() or "# Handoff\n\n(generation returned nothing)"
+        except LLMError as e:
+            return f"# Handoff\n\n(generation failed: {e})"
+
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions

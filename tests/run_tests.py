@@ -394,6 +394,21 @@ def unit_tests(tmp: Path):
     check("goal restored on resume", _g2.goal == "ship the release")
     _g1.set_goal(""); check("goal cleared → section gone", "# Standing goal" not in _g1.system_prompt())
 
+    # --- /handoff: generate_handoff builds a sectioned doc from the whole session (for another agent)
+    _h = _Ag(_Cfg(), _AgUI())
+    class _HR: content = "# Handoff\n## Objective\n- x\n## Next steps\n- y"
+    _hcap = {}
+    _h.client.chat = lambda msgs, **kw: (_hcap.update(sys=msgs[0]["content"], body=msgs[1]["content"]) or _HR())
+    _h.messages = [{"role":"system","content":"s"}, {"role":"user","content":"do the thing"},
+                   {"role":"assistant","content":"did it","tool_calls":[{"function":{"name":"write_file"}}]}]
+    _hd = _h.generate_handoff()
+    check("handoff prompt requests the handoff sections",
+          all(s in _hcap["sys"] for s in ("Objective", "Done", "Next steps", "How to continue")))
+    check("handoff includes the session content", "do the thing" in _hcap["body"] and "write_file" in _hcap["body"])
+    check("handoff returns a document", _hd.startswith("# Handoff"))
+    check("handoff on an empty session is graceful",
+          "Nothing has happened" in _Ag(_Cfg(), _AgUI()).generate_handoff())
+
     # --- pi adopt: context-overflow classifier matches local-server strings, not other 400s
     from dgc.llm import _OVERFLOW_RE, ContextOverflowError, LLMError as _LLME
     check("overflow classifier matches llama.cpp/Ollama/DS4 strings",
