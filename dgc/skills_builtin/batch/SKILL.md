@@ -1,6 +1,6 @@
 ---
 name: batch
-description: Decompose a large repetitive change into independent units and fan them out across `task` sub-agents to run autonomously — then collect and verify. Serialize what isn't safely parallel.
+description: Decompose a large repetitive change into independent units, fan them out across `task` sub-agents, then collect and verify.
 ---
 Batch out this repetitive change: $ARGUMENTS
 

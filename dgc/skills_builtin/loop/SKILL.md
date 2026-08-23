@@ -1,25 +1,30 @@
 ---
 name: loop
-description: Iterate a task to completion — define the done-condition up front, work in small verifiable steps, run the check after each, and keep going until it holds or you're genuinely blocked.
+description: Drive a multi-step task to a checkable done-condition without thrashing — anchor a known-good checkpoint, take one small step at a time, and REVERT any step that regresses instead of stacking fixes on a broken tree.
 ---
-Drive this task to completion: $ARGUMENTS
+Converge on the goal: $ARGUMENTS
 
-DGC has no background scheduler — this is disciplined manual iteration WITHIN the turn. You keep looping yourself until the goal is objectively met.
+This is a convergence rail, not a verification. Its whole job is to reach a done-condition through small steps while never letting the tree get worse than the last good point. DGC has no scheduler — you loop yourself, within the turn, one checked step at a time.
 
-1. Define the done-condition FIRST, and make it checkable. State precisely what "finished" means as something you can test with bash or observe: "`npm test` exits 0", "the endpoint returns 200 with the expected body", "grep finds zero remaining occurrences", "all N items processed". A vague goal ("make it better") can't terminate a loop — sharpen it until it's a concrete pass/fail check. Use the `todo` tool to record the goal and the sub-steps.
+1. State the done-condition as a CHECK. Write down exactly what "finished" means as a single command or observation that passes or fails: "`npm test` exits 0", "`curl :3000/health` returns 200", "grep finds zero matches". If the goal is vague, sharpen it until it is one pass/fail check. Record the goal and sub-steps with the `todo` tool.
 
-2. Establish the baseline. Run the check once now to see the current state and how far you are from done.
+2. Anchor a known-good checkpoint BEFORE you change anything. Make sure the tree is committed (`git add -A && git commit` via bash) or note the current commit with `git rev-parse HEAD`. This is your revert target. Run the check once to record the starting state.
 
-3. Iterate in small steps. Each cycle:
-   - make ONE focused change with edit_file/write_file,
-   - run the done-condition check with bash,
-   - read the result and compare to the goal.
-   Keep steps small enough that when the check moves, you know exactly which change moved it. Update the `todo` list as items complete.
+3. Take ONE small step. Make a single focused change with edit_file/write_file — the smallest edit that could move the check. Do not batch several changes into one step; if you can't tell which edit moved the needle, the step was too big.
 
-4. Use the feedback. If the check improved but isn't met, continue. If it regressed, revert that step (or use /rewind to a good checkpoint) and try a different approach — don't stack changes on a broken state.
+4. Re-run the check — hand the actual verification to the `verify` skill (invoke it via the skill tool) or run the done-condition command with bash directly. Read the real output, don't assume.
 
-5. Terminate correctly:
-   - DONE: the condition holds. Run the full check one final time to confirm, and report the passing output.
-   - BLOCKED: you've stopped making progress or hit something you can't resolve (missing credential, external outage, ambiguous requirement, needs a human decision). Stop looping — do not thrash. Report precisely what's blocking, what you tried, and the smallest thing needed to unblock.
+5. Branch on the result:
+   - BETTER but not done → commit this step as the new good checkpoint, then go to 3.
+   - WORSE than the last checkpoint → REVERT immediately: `/rewind` to the last good checkpoint, or `git reset --hard <good-commit>` / `git checkout -- <files>` via bash. Then try a DIFFERENT approach. Never patch a broken tree — a regressed step is discarded, not repaired.
 
-Avoid two failure modes: declaring victory without running the final check, and looping forever making cosmetic changes that never move the condition. Every iteration must be justified by the check.
+6. Terminate explicitly:
+   - DONE → the check passes. Run it one final time and report the passing output as evidence.
+   - BLOCKED → you stopped making progress or hit something you can't resolve (missing credential, outage, ambiguous requirement, needs a human). Stop looping. Say precisely what is blocking and the smallest thing needed to unblock.
+
+Rules:
+- ALWAYS anchor a good checkpoint before the first change — you cannot revert to a point you never marked.
+- On regression, REVERT to the last checkpoint. Do not stack fixes on a broken tree.
+- Never refactor, patch, or add features while the check is red — get back to green first.
+- One small step per cycle, re-check every cycle. No blind multi-edit bursts.
+- Never declare DONE without running the final check and quoting its output.

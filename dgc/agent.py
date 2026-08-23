@@ -257,6 +257,8 @@ class Agent:
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
             "- Read a file before editing it. Make minimal, focused changes to EXISTING content.",
+            "- Do exactly what was asked — no more. Don't add unrequested features, options, "
+            "abstractions, or defensive scaffolding; the simplest change that satisfies the request wins.",
             "- Implementing a stub or writing a new/near-empty file? Write the whole file with "
             "write_file in one call — don't edit_file into an almost-empty file (that fails to match). "
             "Reserve edit_file for changing content that's already there.",

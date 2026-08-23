@@ -1,6 +1,6 @@
 ---
 name: dgc-design
-description: DGC's frontend design language — the exact fonts, colors, spacing and component recipes behind vibedgc.com. Load this before building any web UI or artifact so it looks intentional, dark, and polished instead of default. Off by default for normal coding; the artifact tool uses it.
+description: The DGC house style for any web UI or artifact — fonts, colors, spacing, and component recipes — so a frontend looks intentional and polished instead of default. Load before building one.
 ---
 Build the frontend to DGC's house style: a calm, near-black canvas, one confident
 purple accent, precise typography, and lots of breathing room. The goal is that
