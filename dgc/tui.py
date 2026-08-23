@@ -646,7 +646,7 @@ class TUI:
         return glyphs.SPINNER[int(time.monotonic() * 8) % len(glyphs.SPINNER)]
 
     def _rail_frag(self, running: bool, row: int, error: bool = False):
-        """A left accent-bar fragment (Grok's block rail), grouping a tool/reasoning block off the
+        """A left accent-bar fragment (a block rail), grouping a tool/reasoning block off the
         page. While it runs the bar is an animated downward traveling wave in the accent; on finish
         it settles to a static faint rail (red on error). refresh_interval=0.08 animates it for free."""
         import math
@@ -660,7 +660,7 @@ class TUI:
 
     def _wrap_tail(self, text: str, width: int, n: int) -> list[str]:
         """The last `n` display lines of `text` wrapped to `width` — so LIVE reasoning shows a calm
-        rolling tail instead of one ever-growing line (Grok's truncated thinking view)."""
+        rolling tail instead of one ever-growing line (a rolling truncated view)."""
         import textwrap
         out: list[str] = []
         for para in text.split("\n"):
@@ -676,7 +676,7 @@ class TUI:
         def add(frags, kind):
             nonlocal prev
             if prev is not None:
-                # Grok's rhythm: a blank line above assistant prose + reasoning (breathing room);
+                # spacing rhythm: a blank line above assistant prose + reasoning (breathing room);
                 # pack everything else together — adjacent tool calls, and bands that already carry
                 # their own vertical padding.
                 ft.append(("", "\n\n" if kind in ("text", "think") else "\n"))
@@ -693,7 +693,7 @@ class TUI:
                 add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))), "user")
             elif blk:
                 add(list(to_formatted_text(ANSI(blk))), "text")
-        if self._think:                     # in-flight reasoning: a header + a rolling last-N tail (Grok),
+        if self._think:                     # in-flight reasoning: a header + a rolling last-N tail,
             m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
             frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
             for i, ln in enumerate(self._wrap_tail(self._think, max(20, self._width - 4), 5)):
@@ -736,7 +736,7 @@ class TUI:
     _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
 
     def _tool_frags(self, b: dict):
-        """One tool step (Grok): a rail-prefixed header (tense-aware verb + summary) then its output
+        """One tool step: a rail-prefixed header (tense-aware verb + summary) then its output
         or diff, every row wearing the accent rail — an animated wave while running, static when done.
         Long output collapses to a clickable '▸ N more lines' that expands in place."""
         from prompt_toolkit.formatted_text import to_formatted_text
@@ -1466,7 +1466,7 @@ class TUI:
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
                   "add_skill": "Install skill", "save_memory": "Remember"}
 
-    # tense-aware verbs (Grok): present-progressive while running → past when done.
+    # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
                  "write_file": "Writing", "edit_file": "Editing", "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
@@ -1482,7 +1482,7 @@ class TUI:
         summary = _arg_summary(args)
         verb = self._TOOL_VERB.get(name, name)          # bottom status reads "Run npm test", "Read x.py"
         self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
-        # ONE stateful block for the whole step (Grok): header + result together, live accent rail while
+        # ONE stateful block for the whole step: header + result together, live accent rail while
         # it runs. tool_result fills it in. `running` drives the wave; `out`/`diff` are attached on finish.
         self.blocks.append({"kind": "tool", "name": name, "summary": summary, "running": True,
                             "error": False, "out": None, "diff": None, "exp": False})

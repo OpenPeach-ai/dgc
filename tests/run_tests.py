@@ -319,7 +319,7 @@ def unit_tests(tmp: Path):
     tb["exp"] = True
     check("thinking expands to show the reasoning", "reason one" in _fltt(tt._transcript()))
 
-    # --- merged tool block (Grok rail): tool_call + tool_result share ONE stateful block; the header
+    # --- merged tool block (accent rail): tool_call + tool_result share ONE stateful block; the header
     #     wears a tense-aware verb (present while running → past when done) and every row a rail glyph.
     ot = object.__new__(TUI); ot._width = 80; ot._scroll_off = 0; ot._follow = True
     ot._invalidate = lambda: None; ot._buf = ""; ot._think = ""; ot._tool_count = 0; ot._cur_tool = None
