@@ -115,10 +115,10 @@ def pi_engine(prompt, workdir, sol, tcmd, a, home, cont, env) -> dict:
             # many OpenAI-compatible local servers reject the `developer` role / reasoning_effort
             "compat": {"supportsDeveloperRole": False, "supportsReasoningEffort": False},
             "models": [{"id": a.model}]}}}))
-    # trust the project for this run (-a) so pi doesn't skip project resources; non-interactive
-    # print mode runs tools with no per-call approval (pi has no sandbox by design).
+    # non-interactive print mode runs tools with no per-call approval (pi has no sandbox by design) and
+    # shows no trust prompt, so no approve flag is needed (older pi has no -a/--approve).
     e = dict(env, HOME=str(home))
-    args = [PI, "-p", "-a", "--no-session", "--provider", "ollama", "--model", a.model,
+    args = [PI, "-p", "--no-session", "--provider", "ollama", "--model", a.model,
             "--api-key", (a.api_key or "ollama"), "--thinking", "off", prompt]
     t0 = time.time()
     rc, out, _err, to = _cap(args, workdir, e, a.dgc_timeout)
