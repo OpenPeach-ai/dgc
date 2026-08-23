@@ -80,6 +80,51 @@ def _lan_ip() -> str:
         s.close()
 
 
+def _tailscale_ip() -> str:
+    """This machine's Tailscale IP (100.64.0.0/10), best-effort — empty if Tailscale isn't up."""
+    import subprocess
+    try:
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3).stdout
+        for ln in out.splitlines():
+            ip = ln.strip()
+            if ip.startswith("100."):       # CGNAT range Tailscale assigns
+                return ip
+    except Exception:
+        pass
+    return ""
+
+
+def reachable_urls(port: int, hostname: str = "") -> list[tuple[str, str]]:
+    """Every base URL this artifact server is reachable at while bound to 0.0.0.0 (LAN mode): the
+    localhost loopback, the primary LAN IP, the Tailscale IP if up, and a configured public hostname.
+    Returns [(label, url)] with duplicates/blanks removed — so /artifact can show ALL the ways to open it
+    (on another device via LAN, over Tailscale from anywhere, or through a reverse proxy / your domain)."""
+    if not port:
+        return []
+    def _u(host: str) -> str:
+        host = host.strip()
+        if not host:
+            return ""
+        if "://" in host:                   # a full URL configured as the hostname → use verbatim
+            return host.rstrip("/")
+        return f"http://{host}:{port}"
+    rows: list[tuple[str, str]] = [("this machine", f"http://127.0.0.1:{port}")]
+    lan = _lan_ip()
+    if lan and lan != "127.0.0.1":
+        rows.append(("LAN", f"http://{lan}:{port}"))
+    ts = _tailscale_ip()
+    if ts:
+        rows.append(("Tailscale", f"http://{ts}:{port}"))
+    if hostname:
+        rows.append(("hostname", _u(hostname)))
+    seen, out = set(), []
+    for label, url in rows:
+        if url and url not in seen:
+            seen.add(url)
+            out.append((label, url))
+    return out
+
+
 class _Server:
     """The single shared artifact server + registry (module singleton)."""
 

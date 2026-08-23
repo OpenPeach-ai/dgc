@@ -1604,8 +1604,19 @@ class TUI:
         else:
             rows = [{"label": "(no previews yet)",
                      "desc": "the agent serves one with the artifact tool", "value": ""}]
+        header = None
+        if lan:                                          # show EVERY way to open it: LAN + Tailscale + host
+            from rich.text import Text
+            th = style_mod.theme()
+            urls = artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
+                                            str(self.config.get("artifact_hostname", "")))
+            header = [Text.from_markup(f"[{th.muted}]reachable at (no password on your network):[/]")]
+            for label, url in urls:
+                header.append(Text.from_markup(
+                    f"  [{th.faint}]{label:>11}[/]  [{th.accent_bright}]{_esc(url)}[/]"))
         self._open_overlay(rows, on_pick=lambda r: self._artifact_open(r["value"]),
-                           on_action=self._artifact_action, title=title, footer=foot, accent=True)
+                           on_action=self._artifact_action, title=title, footer=foot,
+                           header=header, accent=True)
 
     def _artifact_open(self, aid: str) -> None:
         from . import artifacts
@@ -1658,12 +1669,13 @@ class TUI:
         self.config.set("artifact_bind", "lan" if lan else "localhost")
         artifacts.set_bind(lan, int(self.config.get("artifact_port", 45000)))
         if lan:
-            ip, port = artifacts._lan_ip(), int(self.config.get("artifact_port", 45000))
-            if ip != "127.0.0.1":                        # surface the shareable URL (selectable via /copy)
-                self.info(f"artifacts shared on your LAN → http://{ip}:{port} "
-                          f"— anyone on this network can open them (no password)")
+            urls = artifacts.reachable_urls(int(self.config.get("artifact_port", 45000)),
+                                            str(self.config.get("artifact_hostname", "")))
+            share = [f"{lbl}: {u}" for lbl, u in urls if lbl != "this machine"]
+            if share:                                    # surface EVERY address (selectable via /copy)
+                self.info("artifacts shared (no password) — reachable at:  " + "   ".join(share))
             else:
-                self._flash("LAN mode on, but no LAN IP was found — are you on a network?")
+                self._flash("LAN mode on, but no LAN/Tailscale address was found — are you on a network?")
         else:
             self._flash("artifacts now localhost-only (this machine)")
         self._open_artifacts()
