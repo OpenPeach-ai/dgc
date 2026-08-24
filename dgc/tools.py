@@ -637,11 +637,21 @@ def bash(args: dict, ctx) -> str:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # reap the whole group, not just the shell
         except (ProcessLookupError, PermissionError, OSError):
             pass
+        partial = ""
         try:
-            proc.communicate(timeout=5)            # drain the pipes so the process fully reaps
+            po, pe = proc.communicate(timeout=5)   # drain the pipes so the process fully reaps
+            partial = ((po or "") + (pe or ""))[-2000:]
         except Exception:
             pass
-        return f"error: command timed out after {timeout}s"
+        # A killed command DIDN'T terminate — steer the model to fix the non-termination, not re-run it.
+        # (This is what breaks interpreter/parser exercises like Forth: an infinite eval loop hangs the
+        # test binary, gets SIGKILLed, and a raw "timed out" reads like a normal failure so it's never fixed.)
+        hint = (f"error: the command did NOT finish within {timeout}s and was killed — it is stuck, this is "
+                "NOT a normal test failure. If you ran the tests, your code most likely has an INFINITE LOOP "
+                "or a call that never returns (a frequent bug in parsers, interpreters, and recursion). Find "
+                "the non-terminating path and add a terminating condition or bound the iteration, THEN re-run. "
+                "Do not just run the same command again.")
+        return hint + (f"\n--- last output before it was killed ---\n{partial}" if partial.strip() else "")
     out = (out or "") + (err or "")
     if len(out) > MAX_BASH_OUT:
         # DON'T throw the middle away — a compiler/test error is often mid-stream. Save the FULL output
