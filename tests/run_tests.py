@@ -382,6 +382,25 @@ def unit_tests(tmp: Path):
     if _p.depth == 0: _p.cancelled.clear()
     check("top-level turn still clears its own stale cancel", not _p.cancelled.is_set())
 
+    # --- time-triage (turn_budget_s): OFF by default (slow-model users get no pressure); when set, the
+    #     grind cap tightens near the deadline and a last-good snapshot is restored on disk.
+    from dgc.agent import _grind_cap
+    import tempfile as _tf, time as _tm
+    check("turn_budget_s defaults OFF (0)", int(_Cfg().get("turn_budget_s", -1)) == 0)
+    check("grind cap is off with no budget", _grind_cap(0, 0) == 999)
+    _now = _tm.monotonic()
+    check("grind cap lenient early in budget", _grind_cap(600, _now + 600) == 5)   # ~100% remains
+    check("grind cap tightens near the deadline", _grind_cap(600, _now + 60) == 3)  # ~10% remains
+    _d = _tf.mkdtemp(); _f = Path(_d) / "sol.py"
+    _f.write_text("BROKEN")                                    # current on-disk = a broken later edit
+    _p._restore_snapshot({str(_f): "GOOD"})                    # snapshot from the last green run
+    check("snapshot restore rewrites changed file", _f.read_text() == "GOOD")
+    _mt = _f.stat().st_mtime
+    _p._restore_snapshot({str(_f): "GOOD"})                    # already matches → must NOT rewrite
+    check("snapshot restore skips unchanged file", _f.stat().st_mtime == _mt)
+    _p._restore_snapshot({"/no/such/path/x": "y"})             # bad path → must not raise
+    check("snapshot restore ignores missing paths", True)
+
     # --- /goal: set → # Standing goal in the prompt; persists to the session + restores on resume
     _g1 = _Ag(_Cfg(), _AgUI())
     check("no goal → no goal section", "# Standing goal" not in _g1.system_prompt())

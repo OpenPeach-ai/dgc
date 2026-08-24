@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import platform
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,16 @@ def _clamp(s: str, limit: int = _MAX_TOOL_OUT) -> str:
         return s
     head, tail = limit * 2 // 3, limit // 3
     return f"{s[:head]}\n… [output clamped: {len(s) - limit} chars omitted] …\n{s[-tail:]}"
+
+
+def _grind_cap(budget: float, deadline: float) -> int:
+    """How many consecutive failing commands (ANY error) before a BUDGETED turn aborts the grind — tighter
+    as the deadline nears, so a varied-error grind (which dodges the identical-fingerprint guard) can't
+    run out the clock. 999 (effectively off) when no budget is set."""
+    if budget <= 0:
+        return 999
+    rem = max(0.0, (deadline - time.monotonic()) / budget)
+    return 3 if rem < 0.2 else 5
 from .tools import TOOL_SCHEMAS, execute
 
 THINK_LEVELS = ("off", "low", "medium", "high")
@@ -308,6 +319,12 @@ class Agent:
                 "FULL-AUTO MODE: your tool calls are auto-approved. Work autonomously and keep "
                 "going until the task is completely done and verified. Do not stop early to ask "
                 "questions you can answer yourself with tools.",
+                "Work efficiently — a slow local model makes every round-trip and every compile costly:",
+                "- Read what you need in as few calls as possible; don't re-read a file you already have.",
+                "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
+                "more. Make ALL your edits first, then run the test ONCE — never edit-one-line-then-test in a loop.",
+                "- If an edit_file fails to match, don't retry variations — write the whole corrected file "
+                "in one write_file call and move on.",
             ]
 
         # Only carry the (heavy ~450-tok) artifact instructions when the artifact surface is actually
@@ -550,6 +567,16 @@ class Agent:
         self._refresh_system()                          # re-emit the system prompt with the # Goal section
         self._persist()
 
+    def _restore_snapshot(self, snap: dict) -> None:
+        """Write back the last test-passing file contents (captured on a green run) — only for paths we
+        actually read, and only when the current on-disk content differs. Best-effort, never raises."""
+        for p, content in snap.items():
+            try:
+                if Path(p).read_text() != content:
+                    Path(p).write_text(content)
+            except OSError:
+                pass
+
     def _run_turn(self, user_text: str) -> None:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
@@ -591,10 +618,28 @@ class Agent:
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
         overflow_retried = False    # context-overflow → compact-and-retry fires at most once
+        # Time-triage (all OFF when turn_budget_s == 0, i.e. for real slow-model users — no pressure):
+        try:
+            budget = float(self.config.get("turn_budget_s", 0) or 0)
+        except (TypeError, ValueError):
+            budget = 0.0
+        deadline = (time.monotonic() + budget) if budget > 0 else None
+        edited_paths: set = set()   # abs paths DGC wrote/edited this turn (for last-good snapshots)
+        good_snapshot: dict | None = None   # {abs_path: content} at the last test/build PASS — restored if time runs out
+        budget_nudged: set = set()  # which deadline reminders (70/85%) already fired
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
                 self.ui.info("turn cancelled")
+                return
+            if deadline is not None and (deadline - time.monotonic()) <= 0.06 * budget:
+                # ~94% of the budget spent → stop before the external kill; restore the last version that
+                # passed so the on-disk files are self-consistent (a mid-grind kill would leave 0 credit).
+                if good_snapshot:
+                    self._restore_snapshot(good_snapshot)
+                    self.ui.info("⏱ out of time — restored the last test-passing version of the files")
+                else:
+                    self.ui.info("⏱ out of time — stopping")
                 return
             self._drain_steer()             # inject anything the user typed mid-turn
             self.maybe_compact()
@@ -762,6 +807,17 @@ class Agent:
                         edit_fail_streak = 0
                 elif call.name == "write_file" and not out.lstrip().lower().startswith("error"):
                     edit_fail_streak, edit_grind_nudged = 0, False   # the recommended recovery landed
+                if deadline is not None and call.name in ("write_file", "edit_file", "multi_edit") \
+                        and not out.lstrip().lower().startswith("error"):
+                    pth = call.arguments.get("path") or call.arguments.get("file_path")
+                    if pth:                                          # remember it so we can snapshot on a green run
+                        ap = Path(pth)
+                        if not ap.is_absolute():
+                            ap = self.config.project_root / ap
+                        try:
+                            edited_paths.add(str(ap.resolve()))
+                        except OSError:
+                            pass
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -770,10 +826,33 @@ class Agent:
                 self.messages.append({"role": "user",
                                       "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>"})
 
+            if deadline is not None and batch_verified and edited_paths:
+                # a test/build just passed → snapshot the edited files so we can restore this known-good
+                # state if the model later breaks it and time runs out (converts a 0-credit timeout to a pass).
+                snap = {}
+                for p in edited_paths:
+                    try:
+                        snap[p] = Path(p).read_text()
+                    except OSError:
+                        pass
+                if snap:
+                    good_snapshot = snap
             if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
+                if good_snapshot:
+                    self._restore_snapshot(good_snapshot)
                 self.ui.error(f"stopped — the same command failure repeated {same_fail}× with no progress")
                 return
+            if deadline is not None and fail_streak >= _grind_cap(budget, deadline):
+                # budgeted run only: a VARIED-error grind (dodges the same_fail identical-fingerprint guard,
+                # which needs 7 identical errors). Abort early — tighter as the deadline nears — and restore
+                # the last good state instead of grinding to max_turns and getting killed mid-edit.
+                if good_snapshot:
+                    self._restore_snapshot(good_snapshot)
+                self.ui.error(f"stopped — {fail_streak} commands failed in a row with no progress (time budget)")
+                return
             if edit_fail_streak >= _EDIT_FAIL_HARD:     # F3: an edit grind that never lands → abort
+                if good_snapshot:
+                    self._restore_snapshot(good_snapshot)
                 self.ui.error(f"stopped — {edit_fail_streak} edits in a row failed to match; "
                               "rewrite the file with write_file and try again")
                 return
@@ -812,6 +891,17 @@ class Agent:
             if pending and not any(c.name == "todo" for c in result.tool_calls):
                 reminders.append("Still pending: " + "; ".join(t["content"] for t in pending[:6])
                                  + " — advance these and mark each done with the `todo` tool.")
+            if deadline is not None:            # budgeted turn → nudge the model to triage as the clock runs down
+                used = 1.0 - max(0.0, (deadline - time.monotonic()) / budget)
+                if used >= 0.85 and 85 not in budget_nudged:
+                    budget_nudged.update((70, 85))
+                    reminders.append("You are almost out of time. Make ALL remaining edits NOW, then run the "
+                                     "test ONCE. Do not explore, re-read, or refactor — land the simplest change "
+                                     "that makes the tests pass and stop.")
+                elif used >= 0.70 and 70 not in budget_nudged:
+                    budget_nudged.add(70)
+                    reminders.append("Time is running short — stop exploring and commit to a fix. Apply it "
+                                     "(prefer one full write_file over many small edits) and verify it once.")
             if reminders:
                 note = "<system-reminder>\n" + "\n".join(reminders) + "\n</system-reminder>"
                 if self.messages and self.messages[-1]["role"] == "user":   # fold into <tool_results>

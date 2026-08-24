@@ -32,6 +32,11 @@ DEFAULTS: dict = {
     "context_size": 32768,
     "max_turns": 80,                            # max tool-use iterations per user turn (the grind +
                                                 #   doom-loop guards catch thrash, so this is a backstop)
+    "turn_budget_s": 0,                         # wall-clock seconds per turn before DGC triages to finish
+                                                #   (0 = OFF: no time pressure — for slow local models). When
+                                                #   >0 (e.g. a benchmark cap), DGC nudges itself to land+verify
+                                                #   the fix as the clock runs down and preserves the last
+                                                #   test-passing files if it runs out of time (no 0-credit).
     "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
                                                 #   only sent to the ollama provider; "" = don't send)
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
