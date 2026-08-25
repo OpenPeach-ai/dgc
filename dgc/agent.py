@@ -40,6 +40,7 @@ _VERIFY_KWS = ("pytest", "go test", "cargo test", "npm test", "npm run test", "n
 _MAX_CONTINUE = 3       # length-truncation auto-continues per turn
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
+_MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
                      "add_skill", "save_memory"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
@@ -118,6 +119,10 @@ def _tool_batch_preamble(calls: list[ToolCall], *, did_tools: bool = False,
     if "bash" in names:
         return ("The changes are in. I’m running the relevant verification now."
                 if edited_before else "I’m running the relevant command and checking its result now.")
+    if names == {"task"}:
+        return ("I’m delegating these independent workstreams, then I’ll reconcile and "
+                "verify their results." if len(calls) > 1 else
+                "I’m delegating this self-contained workstream, then I’ll review its result.")
     if names and names <= _PARALLEL_READS:
         return ("I’ve got the initial context. I’m checking the next relevant details."
                 if did_tools else "I’ll inspect the relevant code and current behavior first.")
@@ -318,85 +323,206 @@ class AgentContext:
     cancelled: threading.Event | None = None
 
 
-class _SubUI:
-    """Transparent UI wrapper for a sub-agent: forwards all I/O to the parent UI (so the
-    user sees the sub-agent's work and answers its prompts) while capturing the sub-agent's
-    final text as the task result."""
+@dataclass(frozen=True)
+class _TaskOutcome:
+    output: str
+    integrated: bool = False
 
-    def __init__(self, parent, label: str):
+
+class _SubUI:
+    """UI wrapper for a sub-agent.
+
+    The serial path forwards events immediately. Parallel children buffer their independent traces
+    for atomic parent-thread replay, while interactive questions remain live and serialized. Both
+    paths capture the child's final text as the task result.
+    """
+
+    def __init__(self, parent, label: str, *, buffered: bool = False,
+                 interaction_lock: threading.Lock | None = None,
+                 cancel: threading.Event | None = None):
         self._parent = parent
         self._label = label
         self._buf: list[str] = []
         self._last = ""
         self._failure = ""
         self._call_prefix = f"sub-{uuid.uuid4().hex[:12]}"
+        # Parallel children must not concurrently mutate one terminal/webview stream. Their UI
+        # events are collected independently and replayed by the parent worker as each child
+        # finishes. Blocking questions remain live but are serialized through one interaction lock.
+        self._buffered = bool(buffered)
+        self._events: list[tuple[str, tuple, dict]] = []
+        self._interaction_lock = interaction_lock
+        self._cancel = cancel
+        tls = getattr(parent, "_tls", None)
+        self._route_session = getattr(tls, "session", None) if tls is not None else None
+        self._deny_reason: str | None = None
+        self._plan_feedback: str | None = None
 
     def _call_id(self, call_id):
         return f"{self._call_prefix}:{call_id}" if call_id else call_id
 
+    def _direct(self, name: str, *args, **kwargs):
+        """Call the parent UI while preserving the originating TUI fleet-session route."""
+        callback = getattr(self._parent, name, None)
+        if not callback:
+            return None
+        tls = getattr(self._parent, "_tls", None)
+        sentinel = object()
+        previous = getattr(tls, "session", sentinel) if tls is not None else sentinel
+        if tls is not None and self._route_session is not None:
+            tls.session = self._route_session
+        try:
+            return callback(*args, **kwargs)
+        finally:
+            if tls is not None and self._route_session is not None:
+                if previous is sentinel:
+                    try:
+                        del tls.session
+                    except AttributeError:
+                        pass
+                else:
+                    tls.session = previous
+
+    def _emit(self, name: str, *args, **kwargs):
+        if self._buffered:
+            self._events.append((name, args, kwargs))
+            return None
+        return self._direct(name, *args, **kwargs)
+
+    def replay(self) -> list[str]:
+        """Replay one completed child's trace atomically on the parent worker thread."""
+        events, self._events = self._events, []
+        errors = []
+        for name, args, kwargs in events:
+            try:
+                self._direct(name, *args, **kwargs)
+            except Exception as exc:
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
+        return errors
+
     def on_text(self, chunk):
         self._buf.append(chunk)
-        self._parent.on_text(chunk)
+        self._emit("on_text", chunk)
 
     def on_thinking(self, chunk):
-        self._parent.on_thinking(chunk)
+        self._emit("on_thinking", chunk)
 
     def end_stream(self):
         if self._buf:
             self._last = "".join(self._buf)
             self._buf = []
-        self._parent.end_stream()
+        self._emit("end_stream")
 
     def tool_call(self, name, args, call_id=None):
-        self._parent.tool_call(name, args, self._call_id(call_id))
+        self._emit("tool_call", name, args, self._call_id(call_id))
 
     def tool_progress(self, name, message, *, progress=None, total=None, level="", call_id=None):
         callback = getattr(self._parent, "tool_progress", None)
         if callback:
-            callback(name, message, progress=progress, total=total, level=level,
-                     call_id=self._call_id(call_id))
+            self._emit("tool_progress", name, message, progress=progress, total=total, level=level,
+                       call_id=self._call_id(call_id))
 
     def tool_result(self, name, out, call_id=None):
-        self._parent.tool_result(name, out, self._call_id(call_id))
+        self._emit("tool_result", name, out, self._call_id(call_id))
 
     def tool_denied(self, name, args, reason, call_id=None):
-        self._parent.tool_denied(name, args, reason, self._call_id(call_id))
+        self._emit("tool_denied", name, args, reason, self._call_id(call_id))
+
+    def _interact(self, name: str, fallback, *args, feedback_attr: str = ""):
+        def invoke():
+            value = self._direct(name, *args)
+            if not feedback_attr:
+                return value
+            feedback = str(getattr(self._parent, feedback_attr, "") or "")
+            if hasattr(self._parent, feedback_attr):
+                setattr(self._parent, feedback_attr, "")
+            return value, feedback
+
+        cancelled = (fallback, "") if feedback_attr else fallback
+        lock = self._interaction_lock
+        if lock is None:
+            return invoke()
+        while not lock.acquire(timeout=0.1):
+            if self._cancel is not None and self._cancel.is_set():
+                self._failure = "turn cancelled while waiting for another delegated interaction"
+                return cancelled
+        try:
+            if self._cancel is not None and self._cancel.is_set():
+                self._failure = "turn cancelled before delegated interaction"
+                return cancelled
+            return invoke()
+        finally:
+            lock.release()
 
     def approve(self, name, args, call_id=None):
-        return self._parent.approve(name, args, self._call_id(call_id))
+        verdict, reason = self._interact(
+            "approve", "no", name, args, self._call_id(call_id), feedback_attr="deny_reason")
+        self.deny_reason = reason
+        return verdict
 
     def add_permission_rule(self, name, args):
-        self._parent.add_permission_rule(name, args)
+        self._interact("add_permission_rule", None, name, args)
 
     def present_plan(self, plan):
-        return self._parent.present_plan(plan)
+        choice, feedback = self._interact(
+            "present_plan", None, plan, feedback_attr="plan_feedback")
+        self.plan_feedback = feedback
+        return choice
 
     def propose_options(self, question, options):
-        return self._parent.propose_options(question, options)
+        return self._interact("propose_options", "", question, options)
 
     def on_todo(self, todos):
-        self._parent.on_todo(todos)
+        # A child todo list is useful inside its own prompt but must not replace the parent's plan.
+        if not self._buffered:
+            self._direct("on_todo", todos)
+
+    def artifact_ready(self, art):
+        return self._emit("artifact_ready", art)
+
+    def goal_changed(self, goal, status):
+        self._emit("goal_changed", goal, status)
 
     def info(self, msg):
         text = str(msg)
         if text == "turn cancelled" or text.startswith("⏱ out of time"):
             self._failure = text
-        self._parent.info(msg)
+        self._emit("info", msg)
 
     def error(self, msg):
         self._failure = str(msg)
-        self._parent.error(msg)
+        self._emit("error", msg)
 
     @property
     def _live(self):
         return getattr(self._parent, "_live", None)
+
+    @property
+    def deny_reason(self):
+        return (getattr(self._parent, "deny_reason", "")
+                if self._deny_reason is None else self._deny_reason)
+
+    @deny_reason.setter
+    def deny_reason(self, value):
+        self._deny_reason = str(value or "")
+
+    @property
+    def plan_feedback(self):
+        return (getattr(self._parent, "plan_feedback", "")
+                if self._plan_feedback is None else self._plan_feedback)
+
+    @plan_feedback.setter
+    def plan_feedback(self, value):
+        self._plan_feedback = str(value or "")
 
     def __getattr__(self, name):
         # Forward anything not explicitly wrapped to the parent UI — so a sub-agent's deny reasons
         # (deny_reason), artifact cards (artifact_ready) and status flags behave like the main agent's,
         # instead of silently reading "" / None. (Only fires when normal lookup misses; the guard
         # below stops the instance's own attrs from recursing during partial init.)
-        if name in ("_parent", "_label", "_buf", "_last", "_failure", "_call_prefix"):
+        if name in ("_parent", "_label", "_buf", "_last", "_failure", "_call_prefix",
+                    "_buffered", "_events", "_interaction_lock", "_cancel", "_route_session",
+                    "_deny_reason", "_plan_feedback"):
             raise AttributeError(name)
         return getattr(self._parent, name)
 
@@ -1273,15 +1399,21 @@ class Agent:
             batch_verify_index = -1         # an edit after the pass invalidates this batch's evidence
             batch_edit_index = -1
             batch_task_edit = False         # a delegated delta integrated into this checkout
-            parallel_outputs = self._parallel_read_outputs(result.tool_calls, sig_count)
+            parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
+            parallel_outputs = ({} if parallel_tasks else
+                                self._parallel_read_outputs(result.tool_calls, sig_count))
             for call_index, call in enumerate(result.tool_calls):
-                if self.cancelled.is_set():     # honour a mid-batch cancel between tool calls
+                # A parallel helper has already completed and rendered the whole batch. Preserve a
+                # valid assistant/tool group before stopping; sequential work still stops immediately
+                # between calls and lets transcript repair mark any unexecuted siblings explicitly.
+                if self.cancelled.is_set() and not (parallel_tasks or parallel_outputs):
                     self.ui.info("turn cancelled")
                     return
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
                 if call.name not in _LOOP_EXEMPT_CALLS:
                     seen = sig_count[sig] = sig_count.get(sig, 0) + 1
+                task_integrated = False
                 if seen > _LOOP_HARD:
                     self.ui.error("stopped — the model is stuck repeating the same tool call")
                     return
@@ -1292,8 +1424,16 @@ class Agent:
                            "the task is done, give your final answer.")
                     self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call")
                 else:
-                    out = (parallel_outputs[call_index] if call_index in parallel_outputs
-                           else self._handle_call(call))
+                    if call_index in parallel_tasks:
+                        task_outcome = parallel_tasks[call_index]
+                        out, task_integrated = task_outcome.output, task_outcome.integrated
+                    elif call_index in parallel_outputs:
+                        out = parallel_outputs[call_index]
+                    else:
+                        if call.name == "task":
+                            self._last_task_integrated = False
+                        out = self._handle_call(call)
+                        task_integrated = call.name == "task" and self._last_task_integrated
                 # Compaction may replace old tool messages, but it must never erase observable
                 # activity. Count model-issued calls in native and fenced text-tool modes alike;
                 # a file edit counts only after the tool reports that it landed.
@@ -1323,7 +1463,7 @@ class Agent:
                     edit_fail_streak, edit_grind_nudged = 0, False   # the recommended recovery landed
                 landed_file_edit = (call.name in _FILE_EDIT_CALLS
                                     and not out.lstrip().lower().startswith("error"))
-                landed_task_edit = call.name == "task" and self._last_task_integrated
+                landed_task_edit = call.name == "task" and task_integrated
                 if landed_file_edit or landed_task_edit:
                     batch_task_edit |= landed_task_edit
                     batch_edit_index = call_index
@@ -1719,57 +1859,23 @@ class Agent:
             return None
         return Agent._new_client(self, base, key, model, api_mode=api_mode)
 
-    def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
-        from .worktree import TaskWorkspace, repo_root
+    def _execute_prepared_subagent(self, description: str, prompt: str, agent_name: str,
+                                   workspace, sub_ui: _SubUI) -> tuple[str, str, str]:
+        """Run one child in an already-selected checkout.
 
-        self._last_task_integrated = False
+        Returns ``(failure, summary, start_error)``. It deliberately does not inspect, integrate,
+        retain, or clean the checkout: the parent coordinator performs those operations in stable
+        model-call order after every parallel child has stopped.
+        """
         adef = self.agent_defs.get(agent_name) if agent_name else None
-        tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
-        self.ui.info(f"⟳ sub-task: {description}{tag}")
-        sub_ui = _SubUI(self.ui, description)
         task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
-        if self.cancelled.is_set():
-            return f"Sub-task '{description}' cancelled before it started."
-
-        workspace = None
-        isolation_error = ""
-        lease = workspace_mutation_lock(self.config.project_root)
-        if not acquire_cancellable(lease, self.cancelled):
-            detail = lease.last_error or "cancelled while waiting for the workspace write lease"
-            return f"Sub-task '{description}' was not started: {detail}."
-        try:
-            try:
-                configured_root = str(self.config.get("subagent_worktree_root", "") or "").strip()
-                workspace, isolation_error = TaskWorkspace.prepare(
-                    self.config.project_root, description or "delegated-work",
-                    Path(configured_root) if configured_root else None)
-            except Exception as e:
-                isolation_error = f"{type(e).__name__}: {e}"
-        finally:
-            lease.release()
-
         isolated = workspace is not None
-        if not isolated and repo_root(self.config.project_root) is not None:
-            return (f"Sub-task '{description}' was not started because its isolated Git worktree "
-                    f"could not be created: {isolation_error or 'unknown error'}. The parent checkout "
-                    "was left unchanged.")
         child_root = workspace.project_root if isolated else self.config.project_root
         try:
             child_config = self.config.clone_for_root(child_root)
-        except Exception as e:
-            cleanup_error = ""
-            if workspace is not None:
-                cleanup_error = workspace.cleanup() or ""
-            cleanup = (f" Cleanup warning for {workspace.path} on {workspace.branch}: "
-                       f"{cleanup_error}." if workspace is not None and cleanup_error else "")
-            return (f"Sub-task '{description}' was not started because its isolated configuration "
-                    f"could not be created: {type(e).__name__}: {e}.{cleanup}")
-        if isolated:
-            self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
-        else:
-            self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
+        except Exception as exc:
+            return "", "", f"{type(exc).__name__}: {exc}"
 
-        sub = None
         isolated_mcp = None
         thrown = ""
         try:
@@ -1792,52 +1898,66 @@ class Agent:
                 thrown = "cancelled before the isolated run started"
             else:
                 sub.run_turn(task_prompt)
-        except Exception as e:
-            thrown = f"{type(e).__name__}: {e}"
+        except Exception as exc:
+            thrown = f"{type(exc).__name__}: {exc}"
         finally:
             if isolated_mcp is not None:
                 try:
                     isolated_mcp.stop_all()
-                except Exception as e:
+                except Exception as exc:
                     if not thrown:
-                        thrown = f"isolated MCP cleanup failed: {type(e).__name__}: {e}"
+                        thrown = f"isolated MCP cleanup failed: {type(exc).__name__}: {exc}"
 
         failure = thrown or sub_ui.failure()
         result = sub_ui.result()
         if not failure and not result:
             failure = "the sub-agent stopped without a final summary"
+        return failure, result, ""
 
-        def preserve_or_clean(reason: str) -> str:
-            if workspace is None:
-                return ""
-            try:
-                changed = workspace.changed_paths()
-            except Exception as e:
-                metadata_error = workspace.retain(f"{reason}; delta inspection failed: {e}", [])
-                warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
-                return (f" Its isolated worktree was preserved at {workspace.path} on branch "
-                        f"{workspace.branch} because the delta could not be inspected.{warning}")
-            if changed:
-                metadata_error = workspace.retain(reason, changed)
-                warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
-                return (f" Its unintegrated changes were preserved at {workspace.path} on branch "
-                        f"{workspace.branch}.{warning}")
-            cleanup_error = workspace.cleanup()
-            return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
-
-        if failure:
-            kept = preserve_or_clean(failure)
-            shared = " Partial changes may remain in the shared checkout." if not isolated else ""
-            return f"Sub-task '{description}' did not complete: {failure}.{kept}{shared}"
-
+    @staticmethod
+    def _preserve_task_workspace(workspace, reason: str) -> str:
         if workspace is None:
-            return f"Sub-task '{description}' completed in the shared checkout. Summary:\n{result}"
+            return ""
+        try:
+            changed = workspace.changed_paths()
+        except Exception as exc:
+            metadata_error = workspace.retain(f"{reason}; delta inspection failed: {exc}", [])
+            warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
+            return (f" Its isolated worktree was preserved at {workspace.path} on branch "
+                    f"{workspace.branch} because the delta could not be inspected.{warning}")
+        if changed:
+            metadata_error = workspace.retain(reason, changed)
+            warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
+            return (f" Its unintegrated changes were preserved at {workspace.path} on branch "
+                    f"{workspace.branch}.{warning}")
+        cleanup_error = workspace.cleanup()
+        return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
+
+    def _finalize_subagent(self, description: str, workspace, failure: str, result: str,
+                           start_error: str = "") -> _TaskOutcome:
+        """Integrate one stopped child, or retain it safely, and return structured convergence state."""
+        isolated = workspace is not None
+        if start_error:
+            cleanup_error = workspace.cleanup() if workspace is not None else None
+            cleanup = (f" Cleanup warning for {workspace.path} on {workspace.branch}: "
+                       f"{cleanup_error}." if workspace is not None and cleanup_error else "")
+            return _TaskOutcome(
+                f"Sub-task '{description}' was not started because its isolated configuration "
+                f"could not be created: {start_error}.{cleanup}")
+        if failure:
+            kept = self._preserve_task_workspace(workspace, failure)
+            shared = " Partial changes may remain in the shared checkout." if not isolated else ""
+            return _TaskOutcome(f"Sub-task '{description}' did not complete: {failure}.{kept}{shared}")
+        if workspace is None:
+            return _TaskOutcome(
+                f"Sub-task '{description}' completed in the shared checkout. Summary:\n{result}")
 
         lease = workspace_mutation_lock(self.config.project_root)
         if not acquire_cancellable(lease, self.cancelled):
             detail = lease.last_error or "cancelled while waiting to integrate"
-            kept = preserve_or_clean(detail)
-            return f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}"
+            kept = self._preserve_task_workspace(workspace, detail)
+            return _TaskOutcome(
+                f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}")
         try:
             integration = workspace.integrate(self.checkpoints)
         finally:
@@ -1845,18 +1965,209 @@ class Agent:
 
         warning = f" Cleanup warning: {integration.cleanup_error}." if integration.cleanup_error else ""
         if integration.status == "applied":
-            self._last_task_integrated = True
             paths = ", ".join(integration.paths[:20])
             extra = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
-            return (f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
-                    f"{paths}{extra}.{warning}\nSummary:\n{result}")
+            return _TaskOutcome(
+                f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
+                f"{paths}{extra}.{warning}\nSummary:\n{result}", True)
         if integration.status == "clean":
-            return f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}"
+            return _TaskOutcome(
+                f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}")
         conflicts = ", ".join(integration.conflicts[:20]) or "(delta inspection/integration error)"
-        return (f"Sub-task '{description}' completed but its changes were NOT integrated: "
-                f"{integration.error or integration.status}. Conflicts: {conflicts}. The isolated "
-                f"worktree is preserved at {workspace.path} on branch {workspace.branch}.\n"
-                f"Summary:\n{result}")
+        return _TaskOutcome(
+            f"Sub-task '{description}' completed but its changes were NOT integrated: "
+            f"{integration.error or integration.status}. Conflicts: {conflicts}. The isolated "
+            f"worktree is preserved at {workspace.path} on branch {workspace.branch}.\n"
+            f"Summary:\n{result}")
+
+    def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
+        """Run the normal one-task path; parallel batches use the same execution/finalization core."""
+        from .worktree import TaskWorkspace, repo_root
+
+        self._last_task_integrated = False
+        adef = self.agent_defs.get(agent_name) if agent_name else None
+        tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
+        self.ui.info(f"⟳ sub-task: {description}{tag}")
+        if self.cancelled.is_set():
+            return f"Sub-task '{description}' cancelled before it started."
+
+        workspace = None
+        isolation_error = ""
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            detail = lease.last_error or "cancelled while waiting for the workspace write lease"
+            return f"Sub-task '{description}' was not started: {detail}."
+        try:
+            try:
+                configured_root = str(self.config.get("subagent_worktree_root", "") or "").strip()
+                workspace, isolation_error = TaskWorkspace.prepare(
+                    self.config.project_root, description or "delegated-work",
+                    Path(configured_root) if configured_root else None)
+            except Exception as exc:
+                isolation_error = f"{type(exc).__name__}: {exc}"
+        finally:
+            lease.release()
+
+        if workspace is None and repo_root(self.config.project_root) is not None:
+            return (f"Sub-task '{description}' was not started because its isolated Git worktree "
+                    f"could not be created: {isolation_error or 'unknown error'}. The parent checkout "
+                    "was left unchanged.")
+        if workspace is not None:
+            self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
+        else:
+            self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
+
+        sub_ui = _SubUI(self.ui, description, cancel=self.cancelled)
+        execution = self._execute_prepared_subagent(
+            description, prompt, agent_name, workspace, sub_ui)
+        outcome = self._finalize_subagent(description, workspace, *execution)
+        self._last_task_integrated = outcome.integrated
+        return outcome.output
+
+    def _parallel_task_outputs(self, calls: list[ToolCall],
+                               prior_counts: dict | None = None) -> dict[int, _TaskOutcome]:
+        """Run an all-task batch in private worktrees and preserve model-call result order.
+
+        This path is intentionally narrower than normal delegation: every call must already be
+        auto-approved, hooks must be absent, the source must be Git-backed, and at least two worker
+        slots must be enabled. All worktrees are prepared under one source lease before any child
+        starts, so siblings observe one exact baseline. Children run concurrently; their buffered UI
+        traces replay atomically as they finish; integration remains deterministic and conflict-safe.
+        """
+        from .worktree import TaskWorkspace, repo_root
+
+        try:
+            limit = max(1, min(8, int(self.config.get("max_parallel_tasks", 4))))
+        except (TypeError, ValueError):
+            limit = 1
+        if (len(calls) < 2 or len(calls) > _MAX_PARALLEL_TASK_BATCH or limit < 2
+                or self.depth >= 3 or self.mode != "auto"
+                or self.config.get("hooks") or self.cancelled.is_set()
+                or any(call.name != "task" or "_unparsed" in call.arguments for call in calls)
+                or repo_root(self.config.project_root) is None):
+            return {}
+
+        counts = dict(prior_counts or {})
+        for call in calls:
+            sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+            counts[sig] = counts.get(sig, 0) + 1
+            if counts[sig] > _LOOP_SOFT:
+                return {}
+        permission_rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                     *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                            for action in ("allow", "ask", "deny")}
+        perms = PermissionEngine(self.mode, permission_rules, self.config.project_root)
+        if any(perms.external_paths(call.name, call.arguments)
+               or perms.decide(call.name, call.arguments)[0] != ALLOW for call in calls):
+            return {}
+
+        for call in calls:
+            self.ui.tool_call(call.name, call.arguments, call.id)
+        self.ui.info(f"↯ running {len(calls)} isolated sub-tasks in parallel (max {limit})")
+
+        prepared: dict[int, object] = {}
+        outcomes: dict[int, _TaskOutcome] = {}
+        configured_root = str(self.config.get("subagent_worktree_root", "") or "").strip()
+        storage_root = Path(configured_root) if configured_root else None
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            detail = lease.last_error or "cancelled while preparing parallel task worktrees"
+            outcomes = {i: _TaskOutcome(
+                f"Sub-task '{str(call.arguments.get('description', ''))}' was not started: {detail}.")
+                for i, call in enumerate(calls)}
+        else:
+            try:
+                for i, call in enumerate(calls):
+                    description = str(call.arguments.get("description", ""))
+                    if self.cancelled.is_set():
+                        outcomes[i] = _TaskOutcome(
+                            f"Sub-task '{description}' cancelled before its worktree was prepared.")
+                        continue
+                    try:
+                        workspace, error = TaskWorkspace.prepare(
+                            self.config.project_root, description or "delegated-work", storage_root)
+                    except Exception as exc:
+                        workspace, error = None, f"{type(exc).__name__}: {exc}"
+                    if workspace is None:
+                        outcomes[i] = _TaskOutcome(
+                            f"Sub-task '{description}' was not started because its isolated Git worktree "
+                            f"could not be created: {error or 'unknown error'}. The parent checkout was "
+                            "left unchanged.")
+                    else:
+                        prepared[i] = workspace
+            finally:
+                lease.release()
+
+        # A manual editor is not governed by DGC's lease. Refuse a mixed sibling baseline if it
+        # changed between worktree preparations, even though each individual snapshot was coherent.
+        baselines = list(prepared.values())
+        if baselines:
+            first = baselines[0]
+            same_baseline = all(
+                item.base_commit == first.base_commit
+                and item.initial_dirty == first.initial_dirty
+                and item.baseline == first.baseline for item in baselines[1:])
+            if not same_baseline:
+                detail = "the parent checkout changed while preparing the shared parallel baseline"
+                for i, workspace in prepared.items():
+                    cleanup = workspace.cleanup()
+                    warning = f" Cleanup warning: {cleanup}." if cleanup else ""
+                    outcomes[i] = _TaskOutcome(
+                        f"Sub-task '{str(calls[i].arguments.get('description', ''))}' was not started: "
+                        f"{detail}.{warning}")
+                prepared = {}
+
+        interaction_lock = threading.Lock()
+        executions: dict[int, tuple[str, str, str]] = {}
+        sub_uis = {i: _SubUI(
+            self.ui, str(calls[i].arguments.get("description", "")), buffered=True,
+            interaction_lock=interaction_lock, cancel=self.cancelled) for i in prepared}
+        replay_errors: list[str] = []
+        if prepared:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            try:
+                with ThreadPoolExecutor(max_workers=min(limit, len(prepared)),
+                                        thread_name_prefix="dgc-task") as pool:
+                    pending = {}
+                    for i, workspace in prepared.items():
+                        args = calls[i].arguments
+                        description = str(args.get("description", ""))
+                        agent_name = str(args.get("agent", ""))
+                        adef = self.agent_defs.get(agent_name) if agent_name else None
+                        tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
+                        self.ui.info(f"⟳ sub-task: {description}{tag}")
+                        self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
+                        future = pool.submit(
+                            self._execute_prepared_subagent, description, str(args.get("prompt", "")),
+                            agent_name, workspace, sub_uis[i])
+                        pending[future] = i
+                    for future in as_completed(pending):
+                        i = pending[future]
+                        try:
+                            executions[i] = future.result()
+                        except Exception as exc:
+                            executions[i] = (f"{type(exc).__name__}: {exc}", "", "")
+                        replay_errors.extend(sub_uis[i].replay())
+            except Exception as exc:
+                failure = f"parallel task scheduler failed: {type(exc).__name__}: {exc}"
+                for i in prepared:
+                    executions.setdefault(i, (failure, "", ""))
+                    replay_errors.extend(sub_uis[i].replay())
+        if replay_errors:
+            self.ui.info("parallel task UI replay warning: " + "; ".join(replay_errors[:4]))
+
+        # Children cannot observe sibling integrations: every run has stopped before this ordered
+        # phase begins. Disjoint deltas land; overlaps retain the later call for explicit /tasks use.
+        for i in sorted(prepared):
+            description = str(calls[i].arguments.get("description", ""))
+            execution = executions.get(i, ("parallel task worker did not return a result", "", ""))
+            outcomes[i] = self._finalize_subagent(description, prepared[i], *execution)
+        for i, call in enumerate(calls):
+            outcome = outcomes.get(i, _TaskOutcome("Sub-task failed without a result."))
+            outcome = _TaskOutcome(_clamp(outcome.output), outcome.integrated)
+            outcomes[i] = outcome
+            self.ui.tool_result(call.name, outcome.output, call.id)
+        return outcomes
 
     # ---------------------------------------------------------- compaction ---
     def estimate_tokens(self) -> int:

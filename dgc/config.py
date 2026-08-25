@@ -101,6 +101,7 @@ DEFAULTS: dict = {
     "subagent_api_key": "",                     # key for another sub-agent endpoint
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
     "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
+    "max_parallel_tasks": 4,                     # 1 disables; max 8 concurrent isolated task workers
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
     "suggest": True,                            # ghost-text: predict the next prompt after each turn

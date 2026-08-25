@@ -158,7 +158,9 @@ TOOL_SCHEMAS = [
     _fn("task", "Delegate a self-contained sub-task to a fresh sub-agent with its own context and "
         "tools. In a Git project it works in a private checkout, then integrates only its conflict-free "
         "delta; conflicting or incomplete work is preserved without overwriting the caller. Use for "
-        "large, independent chunks you want handled end-to-end without cluttering the main conversation.",
+        "large, independent chunks you want handled end-to-end without cluttering the main conversation. "
+        "In auto mode, emit multiple independent task calls in ONE response to run them concurrently; "
+        "never batch tasks that depend on or edit the same files.",
         {"description": {"type": "string", "description": "A short label for the sub-task"},
          "prompt": {"type": "string", "description": "Full, self-contained instructions for the sub-agent"},
          "agent": {"type": "string", "description": "Optional: name of a defined sub-agent "

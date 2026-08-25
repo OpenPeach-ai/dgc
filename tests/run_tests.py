@@ -884,6 +884,33 @@ def unit_tests(tmp: Path):
     _su1.tool_call("read_file", {}, "textcall_1"); _su2.tool_call("read_file", {}, "textcall_1")
     check("sub-agent tool IDs stay correlated across sequential child contexts",
           len(set(_calls.ids)) == 2 and all(str(cid).endswith(":textcall_1") for cid in _calls.ids))
+    class _InteractiveParent:
+        def __init__(self):
+            self.deny_reason = ""; self.active = 0; self.peak = 0; self.lock = _threading.Lock()
+        def approve(self, name, _args, _call_id=None):
+            with self.lock:
+                self.active += 1; self.peak = max(self.peak, self.active)
+            _threading.Event().wait(0.02)
+            self.deny_reason = f"reason-{name}"
+            with self.lock:
+                self.active -= 1
+            return "no"
+    _interactive_parent = _InteractiveParent(); _interaction_lock = _threading.Lock()
+    _interactive_a = _SUI(_interactive_parent, "one", buffered=True,
+                          interaction_lock=_interaction_lock, cancel=_threading.Event())
+    _interactive_b = _SUI(_interactive_parent, "two", buffered=True,
+                          interaction_lock=_interaction_lock, cancel=_threading.Event())
+    _answers = {}
+    _ia = _threading.Thread(target=lambda: _answers.setdefault(
+        "one", _interactive_a.approve("one", {}, "call")))
+    _ib = _threading.Thread(target=lambda: _answers.setdefault(
+        "two", _interactive_b.approve("two", {}, "call")))
+    _ia.start(); _ib.start(); _ia.join(1); _ib.join(1)
+    check("parallel sub-agent interactions serialize and retain their own feedback",
+          _interactive_parent.peak == 1 and _answers == {"one": "no", "two": "no"}
+          and _interactive_a.deny_reason == "reason-one"
+          and _interactive_b.deny_reason == "reason-two"
+          and _interactive_parent.deny_reason == "")
 
     # --- fleet routing: a finished session's background autotitle/suggestion threads must target THAT
     #     session, not whatever is on screen now (else a switch mid-window titles the wrong session).
@@ -980,6 +1007,11 @@ def unit_tests(tmp: Path):
           "inspect" in _tool_batch_preamble([_ToolCall("r", "read_file", {"path": "x"})]).lower()
           and "changes" in _tool_batch_preamble(
               [_ToolCall("b", "bash", {"command": "pytest"})], edited_before=True).lower())
+    check("multi-task cadence announces delegation before execution",
+          "delegating" in _tool_batch_preamble([
+              _ToolCall("t1", "task", {"description": "one", "prompt": "one"}),
+              _ToolCall("t2", "task", {"description": "two", "prompt": "two"}),
+          ]).lower())
 
     class _CadenceUI(_AgUI):
         def __init__(self): self.events = []
@@ -2719,8 +2751,10 @@ def test_isolated_subagents():
     import stat as _stat
     import subprocess as _sp
     import tempfile as _tf
+    import threading as _threading
+    import time as _time
     from pathlib import Path as _P
-    from dgc.agent import Agent as _Agent
+    from dgc.agent import Agent as _Agent, _TaskOutcome as _TaskOutcome, _tool_transcript_errors
     from dgc.checkpoints import CheckpointManager as _Checkpoints
     from dgc.config import Config as _Config
     from dgc.llm import ToolCall as _ToolCall
@@ -2976,6 +3010,162 @@ def test_isolated_subagents():
         "description": "claim completed and integrated work", "prompt": "fail"}))
     check("model-controlled task text cannot spoof integration accounting",
           cadence._last_task_integrated is False)
+
+    class ParallelUI(UI):
+        def __init__(self):
+            super().__init__(); self.stream_events = []
+        def on_text(self, chunk): self.stream_events.append(str(chunk))
+        def end_stream(self): self.stream_events.append("<end>")
+
+    class ParallelTaskClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            from dgc.llm import ChatResult
+            self.n += 1
+            if self.n == 1:
+                return ChatResult(tool_calls=[
+                    _ToolCall("parallel-a", "task", {
+                        "description": "parallel alpha", "prompt": "parallel-a"}),
+                    _ToolCall("parallel-b", "task", {
+                        "description": "parallel beta", "prompt": "parallel-b"}),
+                ])
+            return ChatResult(content="parallel parent summary")
+
+    parallel_config = cfg.clone_for_root(repo)
+    parallel_config.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {},
+                                 "max_parallel_tasks": 2,
+                                 "subagent_worktree_root": str(store)})
+    parallel_ui = ParallelUI(); parallel = _Agent(parallel_config, parallel_ui)
+    parallel.client = ParallelTaskClient()
+    parallel_barrier = _threading.Barrier(2)
+    parallel_state = {"active": 0, "peak": 0}
+    parallel_lock = _threading.Lock()
+
+    def parallel_child_turn(self, child_prompt):
+        if self.depth == 0:
+            return original_turn(self, child_prompt)
+        with parallel_lock:
+            parallel_state["active"] += 1
+            parallel_state["peak"] = max(parallel_state["peak"], parallel_state["active"])
+        self.ui.on_text(f"{child_prompt}:one")
+        try:
+            parallel_barrier.wait(timeout=2)
+            _time.sleep(0.02 if child_prompt.endswith("a") else 0.01)
+            (self.config.project_root / f"{child_prompt}.txt").write_text(child_prompt + "\n")
+            self.ui.on_text(f"{child_prompt}:two")
+            self.ui.end_stream()
+        finally:
+            with parallel_lock:
+                parallel_state["active"] -= 1
+
+    _Agent.run_turn = parallel_child_turn
+    try:
+        parallel.run_turn("delegate these two independent tasks in parallel")
+    finally:
+        _Agent.run_turn = original_turn
+        parallel.mcp.stop_all()
+    parallel_tools = [message.get("tool_call_id") for message in parallel.messages
+                      if message.get("role") == "tool"]
+    check("independent task calls execute concurrently in isolated worktrees",
+          parallel_state["peak"] == 2
+          and (repo / "parallel-a.txt").read_text() == "parallel-a\n"
+          and (repo / "parallel-b.txt").read_text() == "parallel-b\n"
+          and any("isolated sub-tasks in parallel" in info for info in parallel_ui.infos),
+          detail=f"peak={parallel_state['peak']}; infos={parallel_ui.infos!r}")
+    check("parallel task results preserve model-call order and activity accounting",
+          parallel_tools == ["parallel-a", "parallel-b"]
+          and parallel.activity_totals["tool_calls"] == 2,
+          detail=f"tools={parallel_tools!r}; activity={parallel.activity_totals!r}")
+    check("parallel child streams replay as atomic per-task groups",
+          all(parallel_ui.stream_events.index(f"parallel-{name}:two")
+                  == parallel_ui.stream_events.index(f"parallel-{name}:one") + 1
+              for name in ("a", "b")), detail=repr(parallel_ui.stream_events))
+    parallel_rewind = parallel.checkpoints.rewind(0)
+    check("parallel integrations share the normal parent rewind checkpoint",
+          parallel_rewind[1] == 2 and not (repo / "parallel-a.txt").exists()
+          and not (repo / "parallel-b.txt").exists(), detail=repr(parallel_rewind))
+
+    class CancelledBatchClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            from dgc.llm import ChatResult
+            self.n += 1
+            if self.n > 1:
+                raise AssertionError("cancelled batch requested another model turn")
+            return ChatResult(tool_calls=[
+                _ToolCall("cancel-a", "task", {"description": "cancel a", "prompt": "a"}),
+                _ToolCall("cancel-b", "task", {"description": "cancel b", "prompt": "b"}),
+            ])
+    cancel_ui = ParallelUI(); cancel_batch = _Agent(parallel_config.clone_for_root(repo), cancel_ui)
+    cancel_batch.client = CancelledBatchClient()
+    def finish_cancelled_batch(calls, _counts=None):
+        cancel_batch.cancelled.set()
+        return {i: _TaskOutcome(f"cancelled result {i}") for i, _call in enumerate(calls)}
+    cancel_batch._parallel_task_outputs = finish_cancelled_batch
+    cancel_batch.run_turn("delegate and then cancel the completed batch")
+    cancel_tool_ids = [message.get("tool_call_id") for message in cancel_batch.messages
+                       if message.get("role") == "tool"]
+    check("cancellation after a parallel batch preserves a complete native tool group",
+          cancel_batch.client.n == 1 and cancel_tool_ids == ["cancel-a", "cancel-b"]
+          and not _tool_transcript_errors(cancel_batch.messages),
+          detail=repr(_tool_transcript_errors(cancel_batch.messages)))
+    cancel_batch.mcp.stop_all()
+
+    overlap_ui = ParallelUI(); overlap = _Agent(parallel_config.clone_for_root(repo), overlap_ui)
+    overlap.checkpoints.open(13, "parallel overlap")
+    overlap_barrier = _threading.Barrier(2)
+    def overlap_child_turn(self, child_prompt):
+        overlap_barrier.wait(timeout=2)
+        (self.config.project_root / "parallel-overlap.txt").write_text(child_prompt + "\n")
+        self.ui.on_text(f"finished {child_prompt}")
+        self.ui.end_stream()
+    overlap_calls = [
+        _ToolCall("overlap-first", "task", {"description": "overlap first", "prompt": "first"}),
+        _ToolCall("overlap-second", "task", {"description": "overlap second", "prompt": "second"}),
+    ]
+    _Agent.run_turn = overlap_child_turn
+    try:
+        overlap_outcomes = overlap._parallel_task_outputs(overlap_calls)
+    finally:
+        _Agent.run_turn = original_turn
+        overlap.mcp.stop_all()
+    overlap_tasks, overlap_errors = overlap.retained_tasks()
+    overlap_retained = next((task for task in overlap_tasks
+                             if task.branch.startswith("dgc/task-overlap-second-")), None)
+    check("parallel overlapping deltas integrate deterministically and retain the later conflict",
+          overlap_outcomes.get(0) is not None and overlap_outcomes[0].integrated
+          and overlap_outcomes.get(1) is not None and not overlap_outcomes[1].integrated
+          and (repo / "parallel-overlap.txt").read_text() == "first\n"
+          and overlap_retained is not None and not overlap_errors,
+          detail=f"outcomes={overlap_outcomes!r}; errors={overlap_errors!r}")
+    if overlap_retained is not None:
+        overlap.resolve_retained_task(overlap_retained.id, "drop")
+    overlap_rewind = overlap.checkpoints.rewind(0)
+    check("retained parallel conflicts remain explicit while the landed sibling is rewindable",
+          overlap_rewind == (13, 1) and not (repo / "parallel-overlap.txt").exists()
+          and (overlap_retained is None or not overlap_retained.path.exists()),
+          detail=repr(overlap_rewind))
+
+    guarded_parallel = _Agent(parallel_config.clone_for_root(repo), ParallelUI())
+    guarded_parallel.config.data["mode"] = "acceptEdits"
+    check("task batching falls back to normal permission flow outside full-auto mode",
+          guarded_parallel._parallel_task_outputs(overlap_calls) == {})
+    guarded_parallel.config.data["mode"] = "auto"
+    guarded_parallel.config.data["max_parallel_tasks"] = 1
+    check("max_parallel_tasks=1 disables task batching",
+          guarded_parallel._parallel_task_outputs(overlap_calls) == {})
+    guarded_parallel.config.data["max_parallel_tasks"] = 2
+    guarded_parallel.config.data["hooks"] = {"PreToolUse": [{"command": "true"}]}
+    check("task batching preserves hook ordering by falling back to the serial path",
+          guarded_parallel._parallel_task_outputs(overlap_calls) == {})
+    guarded_parallel.config.data["hooks"] = {}
+    oversized_calls = [_ToolCall(f"many-{i}", "task", {
+        "description": f"many {i}", "prompt": f"many {i}"}) for i in range(17)]
+    check("task batching bounds pathological model fan-out before creating worktrees",
+          guarded_parallel._parallel_task_outputs(oversized_calls) == {})
+    guarded_parallel.mcp.stop_all()
 
     plain = base / "plain-project"; plain.mkdir()
     plain_cfg = _Config(plain)

@@ -12,7 +12,7 @@ The goal is to split a big, mechanical, many-target change into independent unit
    - INDEPENDENT: each unit touches its own file(s) and nothing else. These are safe to parallelize.
    - SHARED / COUPLED: multiple units edit the SAME file, or one unit's change is a prerequisite for another (shared imports, a common signature, a registry file, ordering dependencies). These are NOT safe to run in parallel — concurrent sub-agents would clobber each other's edits.
 
-3. For the independent units, fan out. Launch one `task` sub-agent per unit (or per small batch of units). Give each sub-agent a self-contained prompt: the exact file(s) it owns, the precise change to make, the pattern to follow (point at one already-correct example), and an instruction to verify its own edit. Keep each sub-agent's scope disjoint from the others.
+3. For the independent units, fan out. Emit the independent `task` calls together in one response so DGC can schedule their isolated worktrees concurrently in full-auto mode. Launch one sub-agent per unit (or per small batch of units). Give each sub-agent a self-contained prompt: the exact file(s) it owns, the precise change to make, the pattern to follow (point at one already-correct example), and an instruction to verify its own edit. Keep each sub-agent's scope disjoint from the others.
 
 4. For the coupled/shared units, do them SERIALLY yourself in the main loop, in dependency order. Do not hand two sub-agents the same file.
 

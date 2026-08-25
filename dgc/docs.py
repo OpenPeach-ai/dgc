@@ -311,6 +311,10 @@ Useful keys:
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
+- `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 8; set 1 to disable). In a
+  Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
+  from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive
+  permission modes, mixed tool batches, and non-Git projects keep the normal serial path.
 - `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP
   commands for richer definitions,
   references, symbols, and diagnostics. Keys may be a language (`python`) or extension (`.py`):

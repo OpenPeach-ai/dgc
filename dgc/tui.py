@@ -360,6 +360,7 @@ class TUI:
             ("subagent_base_url", "Sub-agent endpoint", "str"),
             ("subagent_api_mode", "Sub-agent transport", "enum",
              ["inherit", "auto", "ollama", "chat_completions", "responses"]),
+            ("max_parallel_tasks", "Parallel task workers (1–8)", "int"),
             ("fallback_model", "Fallback model", "str"),
             ("fallback_base_url", "Fallback endpoint", "str"),
             ("fallback_api_mode", "Fallback transport", "enum",
