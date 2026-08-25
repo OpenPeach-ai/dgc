@@ -117,6 +117,116 @@ test("backend gates startup, survives error events, and restarts on the next com
   backend.dispose();
 });
 
+test("backend correlates decision types, rejects stale replies, and never restarts for control frames", async () => {
+  const command = echoBackend("decision-backend");
+  const dormant = new DgcBackend(scratch, command);
+  const dormantEvents = [];
+  dormant.on("event", (event) => dormantEvents.push(event));
+  assert.equal(dormant.send({ type: "permission_response", id: "r1", decision: "once" }), false);
+  assert.equal(dormant.send({ type: "cancel" }), false);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(dormant.ready, false, "a stale decision must not launch a fresh backend generation");
+  assert.ok(dormantEvents.every((event) => event.type === "command_rejected"));
+
+  const activeCommand = executable("active-decision-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+send(ready);
+send({ type: "permission_request", id: "r1", name: "bash", args: { command: "npm test" },
+  command: "npm test", suggested_rule: "bash(npm test)", choices: ["once", "always", "deny"] });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  send({ type: "info", message: "echo:" + JSON.stringify(cmd) });
+});`);
+  const active = new DgcBackend(scratch, activeCommand);
+  active.on("ready", () => active.completeHandshake());
+  active.start();
+  await waitFor(active, "permission_request");
+  assert.equal(active.send({ type: "options_response", id: "r1", choice: 1 }), false,
+    "a response of the wrong lifecycle type must fail closed");
+  const echoed = waitFor(active, "info",
+    (event) => echoedCommand(event)?.type === "permission_response");
+  assert.equal(active.send({ type: "permission_response", id: "r1", decision: "once" }), true);
+  assert.equal(active.send({ type: "permission_response", id: "r1", decision: "once" }), false,
+    "the same decision must not be delivered twice");
+  assert.equal((await echoed).message.includes('"id":"r1"'), true);
+  active.dispose();
+});
+
+test("backend prioritizes correlated decisions over queued prompts under stdin backpressure", async () => {
+  const delayed = executable("decision-backpressure-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+send(ready);
+send({ type: "permission_request", id: "r-control", name: "bash", args: { command: "test" },
+  command: "test", suggested_rule: "bash(test)", choices: ["once", "always", "deny"] });
+process.stdin.pause();
+setTimeout(() => {
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    const cmd = JSON.parse(line);
+    if (cmd.type === "shutdown") process.exit(0);
+    send({ type: "info", message: cmd.type === "prompt"
+      ? "prompt:" + cmd.text.slice(0, cmd.text.indexOf(":")) : "control:" + cmd.type });
+  });
+}, 150);`);
+  const backend = new DgcBackend(scratch, delayed);
+  const order = [];
+  backend.on("ready", () => backend.completeHandshake());
+  backend.on("info", (event) => order.push(event.message));
+  backend.start();
+  await waitFor(backend, "permission_request");
+  const payload = "x".repeat(32 * 1024);
+  for (let sequence = 0; sequence < 180; sequence += 1) {
+    backend.send({ type: "prompt", text: `${sequence}:${payload}` });
+  }
+  assert.equal(backend.send({ type: "permission_response", id: "r-control", decision: "deny" }), true,
+    "a bounded full prompt queue must reserve delivery for its active decision");
+  await waitFor(backend, "info", (event) => event.message === "control:permission_response", 5000);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const controlIndex = order.indexOf("control:permission_response");
+  assert.ok(controlIndex >= 0 && order.slice(controlIndex + 1).some((value) => value.startsWith("prompt:")),
+    `expected queued prompts after priority control frame, got ${order.slice(0, 12).join(", ")}`);
+  backend.dispose();
+});
+
+test("backend drops a queued control frame when its originating turn ends", async () => {
+  const delayed = executable("expired-control-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+send(ready);
+send({ type: "turn_start", turn_id: "t1", prompt: "fixture" });
+send({ type: "permission_request", id: "r-expire", name: "bash", args: { command: "test" },
+  command: "test", suggested_rule: "bash(test)", choices: ["once", "always", "deny"] });
+process.stdin.pause();
+setTimeout(() => send({ type: "turn_end", turn_id: "t1", reason: "error", token_estimate: 0 }), 60);
+setTimeout(() => {
+  readline.createInterface({ input: process.stdin }).on("line", (line) => {
+    const cmd = JSON.parse(line);
+    if (cmd.type === "shutdown") process.exit(0);
+    send({ type: "info", message: "echo:" + cmd.type });
+  });
+}, 180);`);
+  const backend = new DgcBackend(scratch, delayed);
+  const echoed = [];
+  backend.on("ready", () => backend.completeHandshake());
+  backend.on("info", (event) => echoed.push(event.message));
+  backend.start();
+  await waitFor(backend, "permission_request");
+  const turnEnded = waitFor(backend, "turn_end");
+  const payload = "x".repeat(32 * 1024);
+  for (let sequence = 0; sequence < 180; sequence += 1) {
+    backend.send({ type: "prompt", text: `${sequence}:${payload}` });
+  }
+  assert.equal(backend.send({ type: "permission_response", id: "r-expire", decision: "deny" }), true);
+  await turnEnded;
+  await waitFor(backend, "info", (event) => event.message === "echo:prompt", 5000);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(echoed.includes("echo:permission_response"), false,
+    "a decision queued for an ended turn must never reach a later turn");
+  backend.dispose();
+});
+
 test("backend preserves FIFO under real stdin backpressure and bounds its queue", async () => {
   const delayed = executable("delayed-reader-backend", `
 const readline = require("node:readline");

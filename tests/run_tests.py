@@ -573,6 +573,39 @@ def unit_tests(tmp: Path):
           and any(e["type"] == "request_expired" for e in _expiry)
           and not _pending.resolve(_rid, {"decision": "once"}))
 
+    _decision_pending = PendingRequests()
+    _cancelled_id, _cancelled_event = _decision_pending.register()
+    _cancelled_ids = _decision_pending.cancel_all({"decision": "no"})
+    _late_allow = _decision_pending.resolve(_cancelled_id, {"decision": "once"})
+    _cancelled_value = _decision_pending.value(_cancelled_id)
+    _allowed_id, _allowed_event = _decision_pending.register()
+    _first_allow = _decision_pending.resolve(_allowed_id, {"decision": "once"})
+    _late_cancel_ids = _decision_pending.cancel_all({"decision": "no"})
+    _allowed_value = _decision_pending.value(_allowed_id)
+    check("headless decisions are first-writer-wins across approval/cancel races",
+          _cancelled_ids == [_cancelled_id] and _cancelled_event.is_set()
+          and not _late_allow and _cancelled_value == {"decision": "no"}
+          and _first_allow and _allowed_event.is_set() and _late_cancel_ids == []
+          and _allowed_value == {"decision": "once"})
+
+    _cancel_cap = type("CancelCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    _cancel_backend = object.__new__(Backend)
+    _cancel_backend.em = _cancel_cap
+    _cancel_backend.pending = PendingRequests()
+    _cancel_rid, _cancel_event = _cancel_backend.pending.register()
+    _cancel_backend.agent = type("CancelAgent", (), {"cancelled": _th.Event()})()
+    _cancel_backend._worker = None
+    _cancel_backend._queue = [("never run", None, None)]
+    _cancel_backend.dispatch({"type": "cancel"})
+    check("headless cancel expires correlated decisions and discards queued prompts atomically",
+          _cancel_backend.agent.cancelled.is_set() and _cancel_event.is_set()
+          and _cancel_backend._queue == []
+          and _cancel_cap.events == [{"type": "request_expired", "id": _cancel_rid}]
+          and not _cancel_backend.pending.resolve(_cancel_rid, {"decision": "once"}))
+
     class _MCPEmitter:
         def __init__(self): self.events, self.ready = [], _th.Event()
         def emit(self, typ, **fields):

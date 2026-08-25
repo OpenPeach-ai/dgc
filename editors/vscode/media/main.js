@@ -132,6 +132,7 @@
 
   // ---- turn lifecycle ----
   function startTurn() {
+    if (turn) endTurn();
     speak("DGC is working");
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
@@ -149,6 +150,11 @@
     clearInterval(turn.timer);
     turn.act.classList.add("done");
     turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
+    turn = null;
+  }
+  function discardTurn() {
+    if (turn) clearInterval(turn.timer);
+    expireOpenRequests();
     turn = null;
   }
   function ensureTurn() { if (!turn) startTurn(); }
@@ -191,7 +197,17 @@
     return wrap;
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
-  function resolveCard(c) { c.classList.add("resolved"); }
+  function requestCard(c, id) { c.dataset.requestId = String(id); return c; }
+  function resolveCard(c) {
+    if (!c || c.classList.contains("resolved")) return false;
+    c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
+    c.querySelectorAll(".btns button, .opts button, .feedback, .mcp-form input, .mcp-form select, .mcp-form textarea, .mcp-form button")
+      .forEach((control) => { control.disabled = true; });
+    return true;
+  }
+  function expireOpenRequests() {
+    document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
+  }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
 
   function onEvent(ev) {
@@ -221,7 +237,7 @@
       case "history": renderHistory(ev.items || []); break;
       case "session":
         if (ev.kind === "cleared" || ev.kind === "new") {
-          log.innerHTML = ""; turn = null; queuedCount = 0; renderQueued(); setSending(false);
+          discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
         break;
       case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
@@ -274,15 +290,22 @@
         ensureTurn();
         speak(`Permission required to run ${ev.name}`);
         const cmd = ev.command ? `<pre>$ ${esc(ev.command)}</pre>` : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request");
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d, rule: b.dataset.d === "always" ? ev.suggested_rule : undefined }); resolveCard(c); });
+        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          if (!resolveCard(c)) return;
+          vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d, rule: b.dataset.d === "always" ? ev.suggested_rule : undefined });
+        });
         break;
       }
       case "plan_proposal": {
         ensureTurn();
         speak("Plan ready for review");
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval");
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => { const feedback = c.querySelector(".feedback").value.trim(); vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback }); resolveCard(c); });
+        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval"), ev.id);
+        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          const feedback = c.querySelector(".feedback").value.trim();
+          if (!resolveCard(c)) return;
+          vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback });
+        });
         break;
       }
       case "options_request": {
@@ -293,8 +316,11 @@
         // solid-purple fill.
         const opts = ev.options.map((o, i) =>
           `<button type="button" class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
-        const c = decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`, "Choose an option");
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) }); resolveCard(c); });
+        const c = requestCard(decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`, "Choose an option"), ev.id);
+        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          if (!resolveCard(c)) return;
+          vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) });
+        });
         break;
       }
       case "mcp_input_request": {
@@ -307,10 +333,10 @@
             ? "Allow this server to ask your model?"
             : "Share this generated response with the server?";
           const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
-          c.dataset.requestId = String(ev.id);
+          requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+            if (!resolveCard(c)) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
-            resolveCard(c);
           });
           break;
         }
@@ -319,10 +345,10 @@
           const warning = p.suspicious_host
             ? `<div class="err">Punycode host — inspect carefully for lookalike characters.</div>` : "";
           const c = decisionCard(`<div class="q"><span class="codicon codicon-link-external" aria-hidden="true"></span> Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
-          c.dataset.requestId = String(ev.id);
+          requestCard(c, ev.id);
           c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+            if (!resolveCard(c)) return;
             vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
-            resolveCard(c);
           });
           break;
         }
@@ -360,7 +386,7 @@
           return `<div class="mcp-field"><label for="${esc(id)}">${esc(label)}${required.has(key) ? " *" : ""}</label>${desc}${control}</div>`;
         }).join("");
         const c = decisionCard(`<div class="q"><span class="codicon codicon-form" aria-hidden="true"></span> Information requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><form class="mcp-form">${controls}<div class="muted">Review and edit every value before submitting. Never enter passwords, API keys, access tokens, or payment credentials here.</div><div class="btns"><button type="submit" class="act primary">Submit</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div></form>`, title);
-        c.dataset.requestId = String(ev.id);
+        requestCard(c, ev.id);
         const form = c.querySelector("form");
         form.onsubmit = (e) => {
           e.preventDefault();
@@ -388,12 +414,12 @@
               f.type === "integer" ? Number.parseInt(control.value, 10)
               : f.type === "number" ? Number(control.value) : control.value;
           });
+          if (!resolveCard(c)) return;
           vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: "accept", content });
-          resolveCard(c);
         };
         c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
+          if (!resolveCard(c)) return;
           vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
-          resolveCard(c);
         });
         break;
       }
@@ -694,12 +720,12 @@
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
-    else if (msg.type === "cleared") { log.innerHTML = ""; turn = null; setSending(false); }
+    else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { setSending(false); }
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
       attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
     }
     else if (msg.type === "files") { files = msg.files || []; if (popMode === "@") onInput(); }
-    else if (msg.type === "backend_exit") { sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
 })();

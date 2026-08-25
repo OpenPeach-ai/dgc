@@ -61,14 +61,22 @@ class PendingRequests:
     def resolve(self, rid: str, value) -> bool:
         with self._lock:
             slot = self._slots.get(rid)
-            if not slot:
+            # A request has one terminal result. In particular, a late approval must never
+            # overwrite a deny/cancel that already released the waiting worker.
+            if not slot or slot[0].is_set():
                 return False
             slot[1] = value
             slot[0].set()
             return True
 
-    def cancel_all(self, value=None) -> None:
+    def cancel_all(self, value=None) -> list[str]:
+        """Resolve every still-pending request once and return the IDs this call cancelled."""
         with self._lock:
-            for slot in self._slots.values():
+            cancelled = []
+            for rid, slot in self._slots.items():
+                if slot[0].is_set():
+                    continue
                 slot[1] = value
                 slot[0].set()
+                cancelled.append(rid)
+            return cancelled

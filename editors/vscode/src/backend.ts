@@ -19,7 +19,19 @@ const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeLi
 interface PendingFrame {
   frame: string;
   bytes: number;
+  type: string;
+  requestId?: string;
 }
+
+const REQUEST_RESPONSES = new Map<string, string>([
+  ["permission_request", "permission_response"],
+  ["plan_proposal", "plan_response"],
+  ["options_request", "options_response"],
+  ["mcp_input_request", "mcp_input_response"],
+]);
+const RESPONSE_COMMANDS = new Set(REQUEST_RESPONSES.values());
+const CONTROL_COMMANDS = new Set([...RESPONSE_COMMANDS, "cancel", "interrupt"]);
+const QUEUED_TURN_COMMANDS = new Set(["prompt", "slash_command"]);
 
 /**
  * Owns the `dgc serve` child process: writes JSON commands to its stdin, parses
@@ -35,8 +47,11 @@ export class DgcBackend extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | undefined;
   private buf = "";
   private setupPending: PendingFrame[] = [];
+  private controlPending: PendingFrame[] = [];
   private pending: PendingFrame[] = [];
   private pendingBytes = 0;
+  private activeRequests = new Map<string, string>();
+  private respondedRequests = new Set<string>();
   private draining = false;
   private stopping = false;
   private released = false;
@@ -57,6 +72,8 @@ export class DgcBackend extends EventEmitter {
     this.released = false;
     this.lastSeq = -1;
     this.buf = "";
+    this.activeRequests.clear();
+    this.respondedRequests.clear();
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(this.command, ["serve"], {
@@ -103,6 +120,8 @@ export class DgcBackend extends EventEmitter {
       this.released = false;
       this.lastSeq = -1;
       this.buf = "";
+      this.activeRequests.clear();
+      this.respondedRequests.clear();
       this.rejectPending("the backend command stream failed before queued commands could run");
       this.emit("event", {
         type: "error",
@@ -126,6 +145,8 @@ export class DgcBackend extends EventEmitter {
       this.released = false;
       this.lastSeq = -1;
       this.buf = "";
+      this.activeRequests.clear();
+      this.respondedRequests.clear();
       this.rejectPending("the backend failed before queued commands could run");
       this.launchError(err);
     });
@@ -139,6 +160,8 @@ export class DgcBackend extends EventEmitter {
       this.released = false;
       this.lastSeq = -1;
       this.buf = "";
+      this.activeRequests.clear();
+      this.respondedRequests.clear();
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
       }
@@ -215,10 +238,14 @@ export class DgcBackend extends EventEmitter {
         // Notify the panel first. Its synchronous ready handler sends workspace roots and
         // begins loading SecretStorage-backed settings. User commands remain held until the
         // panel explicitly releases the handshake.
-        this.emitEvent(ev);
+        if (!this.emitEvent(ev)) {
+          return;
+        }
         continue;
       }
-      this.emitEvent(ev);
+      if (!this.emitEvent(ev)) {
+        return;
+      }
     }
     // Limit the unfinished frame, not the aggregate chunk: stdout may legitimately deliver
     // several individually valid events in one chunk whose combined size exceeds the cap.
@@ -227,13 +254,36 @@ export class DgcBackend extends EventEmitter {
     }
   }
 
-  private emitEvent(ev: DgcEvent): void {
+  private emitEvent(ev: DgcEvent): boolean {
+    const expectedResponse = REQUEST_RESPONSES.get(ev.type);
+    const requestId = "id" in ev ? String((ev as any).id ?? "") : "";
+    if (expectedResponse) {
+      if (!requestId || this.activeRequests.has(requestId)) {
+        this.protocolFailure("dgc backend reused an active approval request ID");
+        return false;
+      }
+      this.activeRequests.set(requestId, expectedResponse);
+    } else if (ev.type === "request_expired") {
+      this.activeRequests.delete(requestId);
+      this.respondedRequests.delete(requestId);
+      this.dropQueuedResponse(requestId);
+    } else if (ev.type === "turn_end") {
+      this.activeRequests.clear();
+      this.respondedRequests.clear();
+      // A response or Stop frame that never reached the just-ended turn must not spill into
+      // the next queued turn. Ordinary queued prompts retain their documented FIFO lifecycle.
+      for (const item of this.controlPending) {
+        this.pendingBytes -= item.bytes;
+      }
+      this.controlPending = [];
+    }
     this.emit("event", ev);
     // Backend output is an external protocol, so it must not reach EventEmitter's own lifecycle
     // channels. Every event still travels once through the universal "event" channel.
     if (!RESERVED_EVENT_NAMES.has(ev.type)) {
       this.emit(ev.type, ev);
     }
+    return true;
   }
 
   private reject(message: string, count = 1): void {
@@ -241,8 +291,9 @@ export class DgcBackend extends EventEmitter {
   }
 
   private rejectPending(message: string): void {
-    const count = this.setupPending.length + this.pending.length;
+    const count = this.setupPending.length + this.controlPending.length + this.pending.length;
     this.setupPending = [];
+    this.controlPending = [];
     this.pending = [];
     this.pendingBytes = 0;
     if (count) {
@@ -250,15 +301,62 @@ export class DgcBackend extends EventEmitter {
     }
   }
 
-  private enqueue(frame: string, bytes: number, setup = false): boolean {
-    if (this.setupPending.length + this.pending.length >= MAX_PENDING_COMMANDS
-        || this.pendingBytes + bytes > MAX_PENDING_BYTES) {
+  private enqueue(item: PendingFrame, setup = false, control = false): boolean {
+    if (control) {
+      // A saturated prompt queue must not starve a deny/cancel/approval response. Discard only
+      // unsent ordinary commands from the tail until the bounded control frame fits.
+      let dropped = 0;
+      while (this.pending.length && (
+          this.setupPending.length + this.controlPending.length + this.pending.length
+            >= MAX_PENDING_COMMANDS
+          || this.pendingBytes + item.bytes > MAX_PENDING_BYTES)) {
+        const removed = this.pending.pop()!;
+        this.pendingBytes -= removed.bytes;
+        dropped += 1;
+      }
+      if (dropped) {
+        this.reject(`DGC dropped ${dropped} queued command${dropped === 1 ? "" : "s"} to deliver a decision or cancellation`, dropped);
+      }
+    }
+    if (this.setupPending.length + this.controlPending.length + this.pending.length
+          >= MAX_PENDING_COMMANDS
+        || this.pendingBytes + item.bytes > MAX_PENDING_BYTES) {
       this.reject("DGC command queue is full; wait for the backend before retrying");
       return false;
     }
-    (setup ? this.setupPending : this.pending).push({ frame, bytes });
-    this.pendingBytes += bytes;
+    (setup ? this.setupPending : control ? this.controlPending : this.pending).push(item);
+    this.pendingBytes += item.bytes;
     return true;
+  }
+
+  private dropQueuedResponse(requestId: string): void {
+    if (!requestId) {
+      return;
+    }
+    const keep: PendingFrame[] = [];
+    for (const item of this.controlPending) {
+      if (item.requestId === requestId) {
+        this.pendingBytes -= item.bytes;
+      } else {
+        keep.push(item);
+      }
+    }
+    this.controlPending = keep;
+  }
+
+  private dropQueuedTurns(): number {
+    const keep: PendingFrame[] = [];
+    let dropped = 0;
+    for (const item of this.pending) {
+      if (QUEUED_TURN_COMMANDS.has(item.type)) {
+        this.pendingBytes -= item.bytes;
+        dropped += 1;
+      } else {
+        keep.push(item);
+      }
+    }
+    this.pending = keep;
+    return dropped;
   }
 
   private writeFrame(frame: string): boolean {
@@ -278,8 +376,10 @@ export class DgcBackend extends EventEmitter {
 
   private flushPending(): void {
     while (this.ready && !this.draining
-           && (this.setupPending.length || (this.released && this.pending.length))) {
-      const item = (this.setupPending.length ? this.setupPending : this.pending).shift()!;
+           && (this.setupPending.length
+             || (this.released && (this.controlPending.length || this.pending.length)))) {
+      const item = (this.setupPending.length ? this.setupPending
+        : this.controlPending.length ? this.controlPending : this.pending).shift()!;
       this.pendingBytes -= item.bytes;
       if (!this.writeFrame(item.frame)) {
         this.reject("DGC backend closed while writing a queued command");
@@ -307,7 +407,8 @@ export class DgcBackend extends EventEmitter {
       this.reject(`DGC command exceeded ${MAX_COMMAND_BYTES} bytes`);
       return undefined;
     }
-    return { frame, bytes };
+    return { frame, bytes, type: String(cmd.type),
+             requestId: "id" in cmd ? String((cmd as any).id ?? "") : undefined };
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */
@@ -316,19 +417,51 @@ export class DgcBackend extends EventEmitter {
     if (!item) {
       return false;
     }
+    const isResponse = RESPONSE_COMMANDS.has(item.type);
+    const isControl = CONTROL_COMMANDS.has(item.type);
+    if (isResponse) {
+      const expected = item.requestId ? this.activeRequests.get(item.requestId) : undefined;
+      if (expected !== item.type || this.respondedRequests.has(item.requestId || "")) {
+        this.reject("DGC ignored a stale, duplicate, or mismatched approval response");
+        return false;
+      }
+    }
+    if (item.type === "cancel" || item.type === "interrupt") {
+      this.activeRequests.clear();
+      this.respondedRequests.clear();
+      const dropped = this.dropQueuedTurns();
+      if (dropped) {
+        this.reject(`DGC cancelled ${dropped} queued prompt${dropped === 1 ? "" : "s"}`, dropped);
+      }
+    }
     if (!this.proc) {
+      if (isControl) {
+        this.reject("DGC ignored a stale decision or cancellation after the backend exited");
+        return false;
+      }
       this.start();
     }
     if (!this.proc) {
       this.reject("DGC backend is unavailable; retry after fixing its command path");
       return false;
     }
-    if (!this.ready || !this.released || this.draining || this.pending.length) {
-      return this.enqueue(item.frame, item.bytes);
+    if (!this.ready || !this.released || this.draining
+        || this.setupPending.length || this.controlPending.length || this.pending.length) {
+      const accepted = this.enqueue(item, false, isControl);
+      if (accepted && isResponse && item.requestId) {
+        this.respondedRequests.add(item.requestId);
+      }
+      if (accepted && this.ready && this.released && !this.draining) {
+        this.flushPending();
+      }
+      return accepted;
     }
     if (!this.writeFrame(item.frame)) {
       this.reject("DGC backend is unavailable; retry after it restarts");
       return false;
+    }
+    if (isResponse && item.requestId) {
+      this.respondedRequests.add(item.requestId);
     }
     return true;
   }
@@ -343,7 +476,7 @@ export class DgcBackend extends EventEmitter {
       return false;
     }
     if (this.draining || this.setupPending.length) {
-      return this.enqueue(item.frame, item.bytes, true);
+      return this.enqueue(item, true);
     }
     if (!this.writeFrame(item.frame)) {
       this.reject("DGC backend closed during handshake configuration");
@@ -367,8 +500,11 @@ export class DgcBackend extends EventEmitter {
     this.draining = false;
     this.released = false;
     this.setupPending = [];
+    this.controlPending = [];
     this.pending = [];
     this.pendingBytes = 0;
+    this.activeRequests.clear();
+    this.respondedRequests.clear();
     const p = this.proc;
     this.proc = undefined;
     if (!p) {

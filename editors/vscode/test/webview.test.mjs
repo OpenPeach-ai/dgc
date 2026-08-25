@@ -157,6 +157,45 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   dom.window.close();
 });
 
+test("decision cards expire by exact ID and cannot double-submit across cancel/exit races", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "permission_request", id: "permission-old",
+    name: "bash", command: "npm test", suggested_rule: "bash(npm test)",
+    args: { command: "npm test" } } });
+  send({ type: "event", event: { type: "options_request", id: "options-live",
+    question: "Which implementation?", options: ["Safe", "Fast"] } });
+  const expired = doc.querySelector('.card[data-request-id="permission-old"]');
+  const live = doc.querySelector('.card[data-request-id="options-live"]');
+  assert.ok(expired && live, "request cards must expose their exact correlation IDs");
+
+  send({ type: "event", event: { type: "request_expired", id: "permission-old" } });
+  assert.equal(expired.classList.contains("resolved"), true);
+  assert.equal(expired.getAttribute("aria-disabled"), "true");
+  assert.equal(expired.querySelector("button").disabled, true);
+  assert.equal(live.classList.contains("resolved"), false,
+    "expiring one request must not disable a different active decision");
+  expired.querySelector("button").click();
+  assert.equal(posted.some((message) => message.type === "permission_response"), false,
+    "an expired permission must not post a late approval");
+
+  const option = live.querySelector("button");
+  option.click(); option.click();
+  assert.equal(posted.filter((message) => message.type === "options_response").length, 1,
+    "one decision card must produce at most one response");
+
+  send({ type: "event", event: { type: "plan_proposal", id: "plan-exit",
+    plan: "1. Change the API" } });
+  const plan = doc.querySelector('.card[data-request-id="plan-exit"]');
+  send({ type: "backend_exit", code: 7 });
+  assert.equal(plan.classList.contains("resolved"), true);
+  plan.querySelector("button").click();
+  assert.equal(posted.some((message) => message.type === "plan_response"), false,
+    "backend exit must retire every outstanding decision before restart");
+  assert.deepEqual(errors, [], "decision expiry race flow raised JS errors");
+  dom.window.close();
+});
+
 test("MCP consent cards render bounded forms and return typed values without HTML injection", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });

@@ -487,7 +487,10 @@ class Backend:
 
         elif t in ("cancel", "interrupt"):
             self.agent.cancelled.set()
-            self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
+            expired = self.pending.cancel_all(
+                {"decision": "no", "choice": None, "action": "cancel"})
+            for rid in expired:
+                self.em.emit("request_expired", id=rid)
             self._queue.clear()
 
         elif t == "set_mode":

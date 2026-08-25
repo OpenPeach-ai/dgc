@@ -12,7 +12,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: an inline model picker, a mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
 - **In-panel Settings page** (gear icon) — edit provider / host / API key / model, sub-agent and fallback routes, permission mode, thinking level and context size, all live. Credentials stay in endpoint-scoped VS Code SecretStorage; non-secret route settings can also be set in Settings UI → **DGC**.
 - **Keyboard and assistive access** — semantic buttons, menus, live status, dialog focus trapping, reduced-motion behavior, and keyboard navigation cover the composer, tool/reasoning disclosures, approvals, attachments, and settings.
-- **Permission prompts** inline — allow once / always-allow (saves a rule) / deny.
+- **Permission prompts** inline — allow once / always-allow (saves a rule) / deny. Permission, plan, option, and MCP cards are request-correlated and single-use; Stop/expiry/backend exit disables them immediately, and decision traffic stays ahead of queued prompts under transport pressure.
 - **Session resume & rewind** — resuming renders the full transcript; rewind restores both your code and the conversation to an earlier turn.
 - **Your model, your machine** — the extension drives the local `dgc` CLI via `dgc serve` over stdio: same models, same config (`~/.dgc/config.json`), local-first. Nothing leaves your machine unless you point DGC at a cloud model.
 
