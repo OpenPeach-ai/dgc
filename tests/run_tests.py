@@ -1823,6 +1823,114 @@ def test_context_prune():
     check("randomized compaction never splits 500 tool groups", _split_ok)
     check("randomized interrupted transcripts repair to valid groups", _repair_ok)
 
+    # Model-assisted compaction is an optimization, never a single point of context loss. Its
+    # prompt/output/time are bounded and a deterministic head+tail brief survives any model failure.
+    from dgc.config import Config as _CompactConfig
+    from dgc.llm import ChatResult as _CompactResult, LLMError as _CompactError
+    import time as _compact_time
+    class _CompactUI:
+        def __init__(self): self.infos = []
+        def info(self, message): self.infos.append(message)
+        def __getattr__(self, _name): return lambda *args, **kwargs: None
+    history = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "ORIGINAL-COMPACTION-GOAL: preserve compatibility"},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "compact-read", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"src/alpha.py"}'},
+        }]},
+        {"role": "tool", "tool_call_id": "compact-read",
+         "content": "sha256 alpha-old-hash\n" + ("middle\n" * 400) + "TAIL-COMPACTION-ERROR"},
+        {"role": "user", "content": "Constraint: never rename the API"},
+        {"role": "assistant", "content": "Edited alpha.py and tests passed"},
+        {"role": "user", "content": "Continue with the second module"},
+        {"role": "assistant", "content": "Located beta.py"},
+        {"role": "user", "content": "RECENT-USER-CONTEXT"},
+        {"role": "assistant", "content": "RECENT-ASSISTANT-CONTEXT"},
+    ]
+    fallback_ui = _CompactUI()
+    fallback_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), fallback_ui)
+    fallback_agent.messages = [dict(message) for message in history]
+    class _FailingCompactor:
+        tools_supported = True
+        def chat(self, *args, **kwargs): raise _CompactError("summarizer unavailable")
+    fallback_agent.client = _FailingCompactor()
+    fallback_agent.maybe_compact(force=True)
+    fallback_summary = str(fallback_agent.messages[1].get("content", ""))
+    check("failed model compaction preserves exact bounded context mechanically",
+          "ORIGINAL-COMPACTION-GOAL" in fallback_summary
+          and "src/alpha.py" in fallback_summary
+          and "TAIL-COMPACTION-ERROR" in fallback_summary
+          and "Mechanical fallback" in fallback_summary
+          and [message.get("content") for message in fallback_agent.messages[-2:]] ==
+              ["RECENT-USER-CONTEXT", "RECENT-ASSISTANT-CONTEXT"]
+          and not _tool_transcript_errors(fallback_agent.messages),
+          detail=fallback_summary[:500])
+
+    bounded_ui = _CompactUI()
+    bounded_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), bounded_ui)
+    bounded_agent.config.data["context_size"] = 2048
+    bounded_agent.messages = ([{"role": "system", "content": "system"}] + [
+        {"role": "user" if i % 2 == 0 else "assistant",
+         "content": f"entry-{i}-" + ("x" * 1400)} for i in range(30)
+    ])
+    compact_calls = []
+    class _BoundedCompactor:
+        def chat(self, messages, **kwargs):
+            compact_calls.append((messages, kwargs))
+            return _CompactResult(content=(
+                "## Goal\nUNIQUE-PRIOR-BRIEF\n## Constraints\nkeep it\n"
+                "## Progress\ncondensed\n## Next\ncontinue\n## Critical\npaths"))
+    def _bounded_aux(**kwargs):
+        compact_calls.append(("aux", kwargs))
+        return _BoundedCompactor()
+    bounded_agent._aux_client = _bounded_aux
+    bounded_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() + 5)
+    aux_options = compact_calls[0][1]
+    compact_prompt, compact_kwargs = compact_calls[1]
+    check("compaction generation has bounded input, output, time, and reasoning",
+          aux_options.get("max_tokens") == 1024
+          and 1 <= aux_options.get("read_timeout", 0) <= 5
+          and len(compact_prompt[0]["content"]) < 6000
+          and compact_kwargs.get("tools") is None
+          and compact_kwargs.get("reasoning_effort") == "off"
+          and hasattr(compact_kwargs.get("cancel"), "deadline"),
+          detail=repr((aux_options, len(compact_prompt[0]["content"]), compact_kwargs)))
+
+    bounded_agent.messages.extend([
+        {"role": "user", "content": "new work one"},
+        {"role": "assistant", "content": "new result one"},
+        {"role": "user", "content": "new work two"},
+        {"role": "assistant", "content": "new result two"},
+    ])
+    compact_calls.clear()
+    bounded_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() + 5)
+    repeated_prompt = compact_calls[1][0][0]["content"]
+    check("repeated compaction merges the prior brief exactly once without synthetic wrappers",
+          repeated_prompt.count("UNIQUE-PRIOR-BRIEF") == 1
+          and "[Earlier conversation compacted" not in repeated_prompt
+          and "Understood — I have the context summary" not in repeated_prompt,
+          detail=repeated_prompt[:1000])
+
+    expired_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), _CompactUI())
+    expired_agent.messages = [dict(message) for message in history]
+    expired_calls = []
+    expired_agent._aux_client = lambda **kwargs: expired_calls.append(kwargs)
+    expired_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() - 1)
+    check("expired turn deadlines skip auxiliary generation without dropping old context",
+          not expired_calls and "ORIGINAL-COMPACTION-GOAL" in
+          str(expired_agent.messages[1].get("content", "")))
+
+    short_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), _CompactUI())
+    short_agent.messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "SHORT-HEAD" + ("z" * 5000) + "SHORT-TAIL"},
+    ]
+    short_agent.maybe_compact(force=True)
+    short_content = str(short_agent.messages[1].get("content", ""))
+    check("forced relief on a single oversized turn preserves both ends without a model call",
+          len(short_content) <= 1200 and "SHORT-HEAD" in short_content and "SHORT-TAIL" in short_content)
+
     from dgc.config import context_for_model
     check("catalog sizes a qwen model", context_for_model("qwen3.5:122b") == 32768)
     check("catalog sizes a gpt-oss model", context_for_model("gpt-oss:120b") == 131072)

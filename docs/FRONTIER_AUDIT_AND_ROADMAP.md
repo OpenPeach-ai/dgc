@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 599 / 599 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 604 / 604 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -472,7 +472,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 599/599 Python checks, 17/17 editor transport/webview checks, and
+The complete offline evidence is 604/604 Python checks, 17/17 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 8: verified-done is now an ordered, fail-closed state rather than a
@@ -685,7 +685,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-599/599 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+604/604 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
@@ -749,6 +749,12 @@ The provider-runtime slice is also implemented and contract-tested:
    an idle grace period, run sequentially, and are canceled at a foreground barrier before any real
    prompt starts. Queued prompts bypass auxiliary work; clear/close/rename/worktree lifecycle changes
    retire stale jobs. Tiny outputs and prefill stalls are independently capped.
+8. Local compaction is now deadline-aware and bounded to a 1,024-token, 120-second, reasoning-off
+   auxiliary request with context-sized head/tail input. Repeated compactions merge the prior brief
+   once instead of recursively summarizing DGC's wrapper messages. Tool arguments and both ends of
+   stale results remain visible. Empty, malformed, tool-calling, canceled, timed-out, or failed
+   summaries fall back to a deterministic 12,000-character evidence brief rather than dropping all
+   earlier context. Native server-side compaction remains future provider work.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

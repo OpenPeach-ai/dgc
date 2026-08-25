@@ -299,6 +299,11 @@ THINK_KEYWORDS = [
 
 COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
+_COMPACT_MAX_TOKENS = 1024
+_COMPACT_TIMEOUT_S = 120
+_COMPACT_SUMMARY_CHARS = 12_000
+_COMPACT_PREFIX = "[Earlier conversation compacted to this summary]"
+_COMPACT_ACK = "Understood — I have the context summary and will continue from it."
 
 
 def _tool_call_ids(message: dict) -> list[str]:
@@ -401,6 +406,46 @@ def _compaction_split_index(messages: list[dict], keep_messages: int) -> int:
         if count >= wanted:
             break
     return split
+
+
+def _bounded_head_tail(text: str, limit: int) -> str:
+    """Keep exact beginning/end evidence within a deterministic character budget."""
+    text = str(text or "")
+    limit = max(0, int(limit))
+    if len(text) <= limit:
+        return text
+    if limit < 160:
+        return text[:limit]
+    marker = f"\n… [{len(text) - limit} chars omitted during compaction] …\n"
+    available = max(0, limit - len(marker))
+    head = available * 2 // 5
+    return text[:head] + marker + text[-(available - head):]
+
+
+def _compaction_source(prior: str, transcript_lines: list[str], limit: int) -> str:
+    """Bound summarizer input while retaining the old brief and exact head/tail of new history."""
+    joined = "\n\n".join(transcript_lines)
+    limit = max(2_000, int(limit))
+    if not prior:
+        return "### New transcript since then\n" + _bounded_head_tail(joined, limit)
+    prior_budget = min(len(prior), max(512, limit // 3))
+    prior_text = _bounded_head_tail(prior, prior_budget)
+    remaining = max(512, limit - len(prior_text) - 80)
+    return ("### Earlier brief (merge this in)\n" + prior_text
+            + "\n\n### New transcript since then\n" + _bounded_head_tail(joined, remaining))
+
+
+def _mechanical_compaction_brief(prior: str, transcript_lines: list[str]) -> str:
+    """Loss-aware no-model fallback: preserve old brief plus exact bounded transcript evidence."""
+    source = _compaction_source(prior, transcript_lines, _COMPACT_SUMMARY_CHARS - 700)
+    return _bounded_head_tail(
+        "## Goal\n- Recover the user's goal from the earlier brief or earliest user entry below.\n"
+        "## Constraints\n- Preserve every explicit constraint in the retained evidence.\n"
+        "## Progress\n" + source + "\n"
+        "## Next\n- Continue from the recent verbatim messages that follow this brief.\n"
+        "## Critical\n- Mechanical fallback used because model compaction was unavailable or unsafe; "
+        "verify uncertain details against the workspace.\n",
+        _COMPACT_SUMMARY_CHARS)
 
 
 @dataclass
@@ -1398,7 +1443,8 @@ class Agent:
                     self.ui.info("⏱ out of time — stopping")
                 return
             self._drain_steer()             # inject anything the user typed mid-turn
-            self.maybe_compact()
+            compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
+            self.maybe_compact(deadline=compact_deadline)
             tools = (None if summary_only else
                      (self._tool_schemas() if self.client.tools_supported else None))
             chat_cancel = self.cancelled
@@ -1426,7 +1472,8 @@ class Agent:
                     overflow_retried = True
                     self.ui.end_stream()
                     self.ui.info("↻ context overflowed — compacting and retrying")
-                    self.maybe_compact(force=True)   # aggressive: guarantees the retry is smaller
+                    # Aggressive compaction guarantees the retry is smaller.
+                    self.maybe_compact(force=True, deadline=compact_deadline)
                     continue
                 self.ui.end_stream()
                 self.ui.error("context window exceeded even after compaction — start a new session "
@@ -2416,20 +2463,35 @@ class Agent:
             if not isinstance(content, str) or len(content) <= cap:
                 continue
             if m.get("role") == "tool":
-                m["content"] = content[:cap] + f"\n… [older tool output pruned: {len(content) - cap} chars]"
+                m["content"] = (_bounded_head_tail(content, max(120, cap - 60))
+                                + "\n… [older tool output pruned] …")
                 changed = True
             elif m.get("role") == "user" and content.startswith("<tool_results>"):
-                m["content"] = content[:cap] + "\n… [older tool output pruned] …\n</tool_results>"
+                prefix, suffix = "<tool_results>\n", "\n</tool_results>"
+                body = content[len(prefix):]
+                if body.endswith(suffix):
+                    body = body[:-len(suffix)]
+                body_cap = max(120, cap - len(prefix) - len(suffix) - 45)
+                m["content"] = (prefix + _bounded_head_tail(body, body_cap)
+                                + "\n… [older tool output pruned] …" + suffix)
                 changed = True
         return changed
 
-    def maybe_compact(self, force: bool = False) -> None:
+    def maybe_compact(self, force: bool = False, *, deadline: float | None = None) -> None:
         # A legacy/interrupted session may already contain an orphan. Repair before choosing groups so
         # the compaction boundary and the next provider request are always valid.
         self.messages, repaired = _repair_tool_transcript(self.messages)
         if repaired:
             self.ui.info("repaired an interrupted tool-call transcript")
-        budget = int(self.config.get("context_size", 32768)) * float(self.config.get("compact_threshold", COMPACT_THRESHOLD))
+        try:
+            context_size = max(2_048, int(self.config.get("context_size", 32768)))
+        except (TypeError, ValueError):
+            context_size = 32_768
+        try:
+            threshold = float(self.config.get("compact_threshold", COMPACT_THRESHOLD))
+        except (TypeError, ValueError):
+            threshold = COMPACT_THRESHOLD
+        budget = context_size * threshold
         if not force and self.estimate_tokens() < budget:
             return
         # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
@@ -2443,25 +2505,45 @@ class Agent:
                 for m in self.messages[1:]:
                     c = m.get("content")
                     if isinstance(c, str) and len(c) > 1200:
-                        m["content"] = c[:1200] + "\n… [truncated to fit context]"
+                        m["content"] = _bounded_head_tail(c, 1200)
             return
-        middle = self.messages[1:split]
+        # A prior compaction injects two synthetic messages. Merge its brief once, but never feed
+        # the wrapper and acknowledgement back as "new transcript" on every later compaction.
+        prior = ""
+        middle_start = 1
+        m1 = self.messages[1] if len(self.messages) > 1 else {}
+        if isinstance(m1.get("content"), str) and m1["content"].startswith(_COMPACT_PREFIX):
+            prior = m1["content"].split("\n", 1)[-1]
+            middle_start = 2
+            if (len(self.messages) > 2 and self.messages[2].get("role") == "assistant"
+                    and self.messages[2].get("content") == _COMPACT_ACK):
+                middle_start = 3
+        middle = self.messages[middle_start:split]
         transcript_lines = []
         for m in middle:
             role = m.get("role", "?")
-            content = str(m.get("content", ""))[:1500]
+            content = _bounded_head_tail(str(m.get("content", "")), 1500)
             calls = ""
             if m.get("tool_calls"):
-                calls = " [tools: " + ", ".join(c["function"]["name"] for c in m["tool_calls"]) + "]"
+                rendered_calls = []
+                for call in m["tool_calls"]:
+                    if not isinstance(call, dict):
+                        continue
+                    fn = call.get("function") or {}
+                    name = str(fn.get("name") or "tool")
+                    arguments = fn.get("arguments", "{}")
+                    if not isinstance(arguments, str):
+                        arguments = json.dumps(arguments, sort_keys=True, default=str)
+                    rendered_calls.append(f"{name}({_bounded_head_tail(arguments, 500)})")
+                rendered = _bounded_head_tail("; ".join(rendered_calls), 1200)
+                calls = f" [tools: {rendered}]" if rendered else ""
             transcript_lines.append(f"{role}{calls}: {content}")
         # PreCompact lifecycle hook — a user hook can snapshot state before context is summarized.
         run_hooks("PreCompact", {"messages": len(self.messages)}, self.config, self.config.project_root)
         # Structured + MERGED summary (pi): a fixed schema, and fold the PREVIOUS brief in rather than
         # restart — so facts established before an earlier compaction aren't lost on the next one.
-        prior = ""
-        m1 = self.messages[1] if len(self.messages) > 1 else {}
-        if isinstance(m1.get("content"), str) and m1["content"].startswith("[Earlier conversation compacted"):
-            prior = m1["content"].split("\n", 1)[-1]
+        source_limit = max(4_000, min(60_000, context_size * 2))
+        source = _compaction_source(prior, transcript_lines, source_limit)
         prompt = (
             "You are compacting a coding session so the agent can continue with less context. Produce a "
             "compact brief under EXACTLY these headings (omit one only if truly empty):\n"
@@ -2473,19 +2555,37 @@ class Agent:
             "## Critical — exact names, signatures, paths, values that must not be lost\n"
             "Be terse; use bullets. MERGE the earlier brief below with the new transcript: keep "
             "everything from it that's still true, update what changed, drop nothing established.\n\n"
-            + (f"### Earlier brief (merge this in)\n{prior}\n\n" if prior else "")
-            + "### New transcript since then\n" + "\n\n".join(transcript_lines))
-        try:
-            result = self._aux_client().chat([{"role": "user", "content": prompt}],
-                                             cancel=self.cancelled)
-            self._record_usage(getattr(result, "usage", None))
-            summary = result.content or prior or "(summary unavailable)"
-        except LLMError:
-            summary = prior or "(compaction failed; earlier context dropped)"   # keep the old brief
+            + source)
+        fallback = _mechanical_compaction_brief(prior, transcript_lines)
+        now = time.monotonic()
+        compact_deadline = min(deadline, now + _COMPACT_TIMEOUT_S) if deadline is not None \
+            else now + _COMPACT_TIMEOUT_S
+        summary = ""
+        used_model = False
+        if not self.cancelled.is_set() and compact_deadline - now >= 1:
+            compact_cancel = _DeadlineCancel(self.cancelled, compact_deadline)
+            read_timeout = max(1, min(_COMPACT_TIMEOUT_S, int(compact_deadline - now)))
+            try:
+                result = self._aux_client(
+                    max_tokens=_COMPACT_MAX_TOKENS, read_timeout=read_timeout).chat(
+                        [{"role": "user", "content": prompt}], tools=None,
+                        reasoning_effort="off", cancel=compact_cancel)
+                self._record_usage(getattr(result, "usage", None))
+                candidate = str(getattr(result, "content", "") or "").strip()
+                required = ("## Goal", "## Progress", "## Next")
+                if (candidate and not compact_cancel.is_set()
+                        and not getattr(result, "tool_calls", None)
+                        and all(heading in candidate for heading in required)):
+                    summary = _bounded_head_tail(candidate, _COMPACT_SUMMARY_CHARS)
+                    used_model = True
+            except Exception:
+                pass
+        if not summary:
+            summary = fallback
         self.messages = (
             [self.messages[0],
-             {"role": "user", "content": f"[Earlier conversation compacted to this summary]\n{summary}"},
-             {"role": "assistant", "content": "Understood — I have the context summary and will continue from it."}]
+             {"role": "user", "content": f"{_COMPACT_PREFIX}\n{summary}"},
+             {"role": "assistant", "content": _COMPACT_ACK}]
             + self.messages[split:])              # group-aware: never orphan a native tool call/result
         self.messages, _ = _repair_tool_transcript(self.messages)
-        self.ui.info("context compacted")
+        self.ui.info("context compacted" if used_model else "context compacted (mechanical fallback)")
