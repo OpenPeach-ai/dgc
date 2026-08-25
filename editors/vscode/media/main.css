@@ -120,6 +120,13 @@ body {
 .card .feedback { box-sizing: border-box; width: 100%; margin: 0 0 10px; padding: 7px 9px;
   resize: vertical; color: var(--text); background: var(--input-background); border: 1px solid var(--border-strong);
   border-radius: 6px; font: 12px/1.4 var(--sans); }
+.card .mcp-form { display: grid; gap: 10px; }
+.card .mcp-field { display: grid; gap: 4px; }
+.card .mcp-field label { color: var(--text-strong); font: 500 12px/1.35 var(--sans); }
+.card .mcp-field input:not([type="checkbox"]), .card .mcp-field select {
+  box-sizing: border-box; width: 100%; color: var(--text); background: var(--input-background);
+  border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 8px; }
+.card .mcp-field select[multiple] { min-height: 82px; }
 button.act { font: 600 12px/1.35 var(--sans); cursor: pointer; border: 1px solid var(--border-strong); border-radius: 7px; padding: 7px 12px; background: var(--surface2); color: var(--text); text-align: left; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 /* recommended = accent bar + soft tint, NOT a solid-purple fill (that was white-on-#7C5CFF ≈ 4.3:1, unreadable) */
 button.act.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--text-strong); box-shadow: inset 2px 0 0 var(--accent); }

@@ -18,7 +18,7 @@ const fs = require("node:fs");
 const readline = require("node:readline");
 let seq = 0;
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
-send({ type: "ready", version: "fixture", protocol_version: 2, capabilities: {},
+send({ type: "ready", version: "fixture", protocol_version: 3, capabilities: {},
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });

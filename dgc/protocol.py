@@ -1,9 +1,9 @@
 """Wire format for the headless backend: NDJSON events out, JSON commands in.
 
 `Emitter` serializes one event per line (thread-safe, because the agent runs on a worker
-thread while commands arrive on the reader thread). `PendingRequests` implements the three
-blocking round-trips (permission / plan / options): the worker registers an id and blocks on
-an Event; the reader resolves it when the front-end replies.
+thread while commands arrive on the reader thread). `PendingRequests` implements correlated
+blocking round-trips (permission / plan / options / MCP input): the worker registers an id and
+blocks on an Event; the reader resolves it when the front-end replies.
 """
 from __future__ import annotations
 

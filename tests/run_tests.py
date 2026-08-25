@@ -458,12 +458,13 @@ def unit_tests(tmp: Path):
     from dgc.editor_protocol import (COMMAND_FIELDS as _COMMAND_FIELDS,
                                      EVENT_FIELDS as _EVENT_FIELDS,
                                      MAX_COMMAND_BYTES as _MAX_COMMAND_BYTES,
+                                     PROTOCOL_VERSION as _PROTOCOL_VERSION,
                                      command_error as _command_error,
                                      event_error as _event_error,
                                      schema_document as _schema_document,
                                      schema_text as _schema_text,
                                      typescript_source as _typescript_source)
-    _schema_path = PROJECT / "schemas" / "editor-protocol-v2.schema.json"
+    _schema_path = PROJECT / "schemas" / f"editor-protocol-v{_PROTOCOL_VERSION}.schema.json"
     _ts_protocol_path = PROJECT / "editors" / "vscode" / "src" / "protocol.generated.ts"
     check("editor protocol generated artifacts match the authoritative Python contract",
           _schema_path.read_text() == _schema_text()
@@ -490,7 +491,7 @@ def unit_tests(tmp: Path):
         and isinstance(node.func, _ast.Attribute) and node.func.attr == "emit"
         and isinstance(node.args[0], _ast.Constant) and isinstance(node.args[0].value, str)
     }
-    check("every literal headless event is declared in protocol v2",
+    check(f"every literal headless event is declared in protocol v{_PROTOCOL_VERSION}",
           _emitted_types <= set(_EVENT_FIELDS))
     _valid_info = {"type": "info", "seq": 0, "message": "ready"}
     _valid_progress = {"type": "tool_progress", "seq": 1, "call_id": "c1",
@@ -511,6 +512,10 @@ def unit_tests(tmp: Path):
           and _command_error({"type": "list_retained_tasks"}) is None
           and _command_error({"type": "resolve_retained_task", "id": "task-1",
                               "action": "drop", "confirm": True}) is None
+          and _command_error({"type": "mcp_input_response", "id": "m1",
+                              "action": "accept", "content": {"name": "Ada"}}) is None
+          and _event_error({"type": "mcp_input_request", "seq": 1, "id": "m1",
+                            "server": "fixture", "kind": "elicitation", "payload": {}}) is None
           and _event_error({"type": "retained_tasks", "seq": 2, "items": [], "errors": []}) is None
           and "prompt" in _COMMAND_FIELDS)
 
@@ -567,6 +572,25 @@ def unit_tests(tmp: Path):
     check("abandoned headless approval fails closed", _verdict == "no"
           and any(e["type"] == "request_expired" for e in _expiry)
           and not _pending.resolve(_rid, {"decision": "once"}))
+
+    class _MCPEmitter:
+        def __init__(self): self.events, self.ready = [], _th.Event()
+        def emit(self, typ, **fields):
+            self.events.append({"type": typ, **fields}); self.ready.set()
+    _mcp_em, _mcp_pending = _MCPEmitter(), PendingRequests()
+    _mcp_ui = HeadlessUI(_mcp_em, _mcp_pending, approval_timeout_s=1)
+    _mcp_answer = []
+    _mcp_waiter = _th.Thread(target=lambda: _mcp_answer.append(_mcp_ui.mcp_input(
+        "fixture", "elicitation", {"mode": "form", "message": "Name",
+        "requestedSchema": {"type": "object", "properties": {}}})))
+    _mcp_waiter.start(); _mcp_em.ready.wait(1)
+    _mcp_event = _mcp_em.events[0]
+    _mcp_pending.resolve(_mcp_event["id"], {"action": "accept", "content": {"name": "Ada"}})
+    _mcp_waiter.join(1)
+    check("headless MCP input uses one correlated typed consent round-trip",
+          _mcp_event["type"] == "mcp_input_request"
+          and _mcp_event["server"] == "fixture"
+          and _mcp_answer == [{"action": "accept", "content": {"name": "Ada"}}])
 
     class _Capture:
         def __init__(self): self.events = []
@@ -1706,8 +1730,9 @@ def test_mcp_protocol():
     import time as _time
     from dgc import __version__
     from dgc.guards import mcp_process_env
-    from dgc.mcp import (_bounded_lines, MCPManager, MCP_LEGACY_PROTOCOL_VERSION,
-                         MCP_PROTOCOL_VERSION)
+    from dgc.mcp import (_bounded_lines, MCPInputError, MCPManager,
+                         MCP_LEGACY_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION,
+                         sanitize_input_request, validate_elicitation_response)
 
     old_secret = os.environ.get("DGC_PARENT_ONLY_SECRET")
     os.environ["DGC_PARENT_ONLY_SECRET"] = "must-not-leak"
@@ -1721,6 +1746,47 @@ def test_mcp_protocol():
         framed = list(_bounded_lines(_io.StringIO("0123456789abcdef\nvalid\n"), limit=8))
         check("MCP frame reader drains oversized records and recovers at the next line",
               framed == [("", True), ("valid\n", False)], repr(framed))
+
+        safe_form = sanitize_input_request("elicitation/create", {
+            "mode": "form", "message": "Choose a public profile",
+            "requestedSchema": {"type": "object", "properties": {
+                "nickname": {"type": "string", "minLength": 2, "maxLength": 30},
+                "theme": {"type": "string", "enum": ["dark", "light"]},
+                "alerts": {"type": "boolean"}}, "required": ["nickname", "theme"]}})
+        safe_answer = validate_elicitation_response(
+            safe_form, {"action": "accept", "content": {"nickname": "Ada", "theme": "dark"}})
+        check("MCP form elicitation accepts and revalidates the restricted primitive schema",
+              safe_answer == {"action": "accept", "content": {"nickname": "Ada", "theme": "dark"}})
+        try:
+            sanitize_input_request("elicitation/create", {
+                "message": "credential", "requestedSchema": {"type": "object", "properties": {
+                    "api_key": {"type": "string", "description": "access token"}}}})
+            sensitive_rejected = False
+        except MCPInputError:
+            sensitive_rejected = True
+        check("MCP form elicitation refuses credential and payment fields", sensitive_rejected)
+        try:
+            sanitize_input_request("elicitation/create", {
+                "mode": "url", "message": "sign in", "url": "http://evil.example/login"})
+            insecure_url_rejected = False
+        except MCPInputError:
+            insecure_url_rejected = True
+        safe_url = sanitize_input_request("elicitation/create", {
+            "mode": "url", "message": "sign in", "url": "https://auth.example/login"})
+        check("MCP URL elicitation allows HTTPS without fetching and rejects remote plaintext HTTP",
+              insecure_url_rejected and safe_url["host"] == "auth.example")
+        try:
+            sanitize_input_request("sampling/createMessage", {
+                "messages": [{"role": "user", "content": {"type": "text", "text": "hi"}}],
+                "maxTokens": 10, "tools": []})
+            sampling_tools_rejected = False
+        except MCPInputError:
+            sampling_tools_rejected = True
+        bounded_sample = sanitize_input_request("sampling/createMessage", {
+            "messages": [{"role": "user", "content": {"type": "text", "text": "hi"}}],
+            "maxTokens": 999999})
+        check("MCP sampling is text-only, tools-free, context-free, and output bounded",
+              sampling_tools_rejected and bounded_sample["maxTokens"] == 4096)
 
         root = Path(tempfile.mkdtemp())
         server_py = root / "server.py"
@@ -1749,7 +1815,16 @@ def test_mcp_protocol():
                 elif method == "tools/call" and params.get("name") == "odd tool":
                     if not params.get("inputResponses"):
                         out = {"resultType": "input_required", "requestState": "opaque-state",
-                               "inputRequests": {"workspace": {"method": "roots/list", "params": {}}}}
+                               "inputRequests": {
+                                   "workspace": {"method": "roots/list", "params": {}},
+                                   "profile": {"method": "elicitation/create", "params": {
+                                       "mode": "form", "message": "Public display name",
+                                       "requestedSchema": {"type": "object", "properties": {
+                                           "nickname": {"type": "string", "maxLength": 30}},
+                                           "required": ["nickname"]}}},
+                                   "draft": {"method": "sampling/createMessage", "params": {
+                                       "messages": [{"role": "user", "content": {
+                                           "type": "text", "text": "Say hello"}}], "maxTokens": 16}}}}
                         print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
                         continue
                     token = (params.get("_meta") or {}).get("progressToken")
@@ -1769,6 +1844,8 @@ def test_mcp_protocol():
                                       "params": {"progressToken": token, "progress": 2,
                                                  "total": 2, "message": "done"}}), flush=True)
                     roots = params["inputResponses"]["workspace"].get("roots") or []
+                    nickname = params["inputResponses"]["profile"].get("content", {}).get("nickname")
+                    sampled = params["inputResponses"]["draft"].get("content", {}).get("text")
                     out = {"resultType": "complete", "content": [
                               {"type": "text", "text": "hello"},
                               {"type": "resource_link", "name": "guide", "uri": "file:///guide.md"},
@@ -1776,6 +1853,7 @@ def test_mcp_protocol():
                            "structuredContent": {"token": os.environ.get("SERVER_TOKEN"),
                                                  "parent": os.environ.get("DGC_PARENT_ONLY_SECRET"),
                                                  "root": roots[0]["uri"],
+                                                 "nickname": nickname, "sampled": sampled,
                                                  "state": params.get("requestState")}}
                 elif method == "tools/call" and params.get("name") == "odd@tool":
                     time.sleep(30); out = {"content": [{"type": "text", "text": "late"}]}
@@ -1783,7 +1861,15 @@ def test_mcp_protocol():
                     continue
                 print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
         '''))
-        mgr = MCPManager(root)
+        input_events = []
+        def input_handler(server_name, method, params, cancel):
+            input_events.append((server_name, method, params))
+            if method == "elicitation/create":
+                return {"action": "accept", "content": {"nickname": "Ada"}}
+            return {"role": "assistant", "content": {"type": "text", "text": "Hello"},
+                    "model": "fixture-model", "stopReason": "endTurn"}
+        mgr = MCPManager(root, client_capabilities={
+            "sampling": {}, "elicitation": {"form": {}, "url": {}}})
         mgr.connect_all({"fixture name": {"command": sys.executable, "args": [str(server_py)],
                                            "env": {"SERVER_TOKEN": "explicit",
                                                    "WIRE_PATH": str(wire_path)}}})
@@ -1797,10 +1883,15 @@ def test_mcp_protocol():
         check("MCP tool routes are provider-safe and collision-free",
               routes == ["mcp__fixture_name__odd_tool", "mcp__fixture_name__odd_tool_2"], repr(routes))
         progress, logs = [], []
-        out = mgr.call(routes[0], {}, on_progress=progress.append, on_log=logs.append)
+        out = mgr.call(routes[0], {}, on_progress=progress.append, on_log=logs.append,
+                       input_handler=input_handler)
         check("MCP completes modern roots MRTR and preserves typed content without credential leakage",
               "hello" in out and "guide" in out and "note text" in out and '"token": "explicit"' in out
               and '"parent": null' in out and root.as_uri() in out and "opaque-state" in out, out)
+        check("modern MCP MRTR fulfills consent-gated elicitation and sampling through one handler",
+              '"nickname": "Ada"' in out and '"sampled": "Hello"' in out
+              and [event[1] for event in input_events] == ["elicitation/create", "sampling/createMessage"],
+              f"out={out!r} events={input_events!r}")
         check("MCP correlates monotonic progress and severity-filtered logs to the active call",
               [event["progress"] for event in progress] == [1, 2]
               and [event["message"] for event in logs] == ["visible warning"],
@@ -1825,7 +1916,10 @@ def test_mcp_protocol():
                       for msg in modern_requests)
               and all(((msg.get("params") or {}).get("_meta") or {}).get(
                       "io.modelcontextprotocol/clientInfo", {}).get("version") == __version__
-                      for msg in modern_requests), repr(modern_wire))
+                      for msg in modern_requests)
+              and all("sampling" in ((msg.get("params") or {}).get("_meta") or {}).get(
+                      "io.modelcontextprotocol/clientCapabilities", {}) for msg in modern_requests),
+              repr(modern_wire))
 
         # A legacy-only server rejects server/discover. DGC must discard that process before the
         # handshake so a probe cannot poison the session state.
@@ -1844,33 +1938,112 @@ def test_mcp_protocol():
                                       {"code": -32601, "message": "method not found"}}), flush=True)
                     continue
                 if method == "initialize":
+                    print(json.dumps({"jsonrpc": "2.0", "id": 699,
+                                      "method": "roots/list", "params": {}}), flush=True)
+                    orphan_reply = json.loads(sys.stdin.readline())
+                    with open(os.environ["WIRE_PATH"], "a") as f:
+                        f.write(json.dumps(orphan_reply) + "\n")
                     out = {"protocolVersion": "2025-11-25",
                            "capabilities": {"tools": {}, "logging": {}},
                            "serverInfo": {"name": "legacy", "version": "1"}}
-                elif method == "logging/setLevel": out = {}
+                elif method == "logging/setLevel":
+                    print(json.dumps({"jsonrpc": "2.0", "id": 698,
+                                      "method": "roots/list", "params": {}}), flush=True)
+                    roots_reply = json.loads(sys.stdin.readline())
+                    with open(os.environ["WIRE_PATH"], "a") as f:
+                        f.write(json.dumps(roots_reply) + "\n")
+                    out = {}
                 elif method == "tools/list":
-                    out = {"tools": [{"name": "legacy", "inputSchema": {"type": "object"}}]}
+                    out = {"tools": [{"name": "legacy", "inputSchema": {"type": "object"}},
+                                     {"name": "input-lifecycle", "inputSchema": {"type": "object"}}]}
+                elif method == "tools/call" and params.get("name") == "input-lifecycle":
+                    print(json.dumps({"jsonrpc": "2.0", "id": 702,
+                                      "method": "elicitation/create", "params": {
+                                      "message": "Wait for the outer request", "requestedSchema": {
+                                      "type": "object", "properties": {}}}}), flush=True)
+                    while True:
+                        callback_reply = json.loads(sys.stdin.readline())
+                        with open(os.environ["WIRE_PATH"], "a") as f:
+                            f.write(json.dumps(callback_reply) + "\n")
+                        if callback_reply.get("id") == 702:
+                            break
+                    out = {"content": [{"type": "text", "text": "late callback result"}]}
                 elif method == "tools/call":
+                    print(json.dumps({"jsonrpc": "2.0", "id": 700,
+                                      "method": "elicitation/create", "params": {
+                                      "message": "Public display name", "requestedSchema": {
+                                      "type": "object", "properties": {"nickname": {
+                                      "type": "string", "maxLength": 30}},
+                                      "required": ["nickname"]}}}), flush=True)
+                    form_reply = json.loads(sys.stdin.readline())
+                    with open(os.environ["WIRE_PATH"], "a") as f:
+                        f.write(json.dumps(form_reply) + "\n")
+                    print(json.dumps({"jsonrpc": "2.0", "id": 701,
+                                      "method": "sampling/createMessage", "params": {
+                                      "messages": [{"role": "user", "content": {
+                                      "type": "text", "text": "Say hello"}}],
+                                      "maxTokens": 16}}), flush=True)
+                    sample_reply = json.loads(sys.stdin.readline())
+                    with open(os.environ["WIRE_PATH"], "a") as f:
+                        f.write(json.dumps(sample_reply) + "\n")
                     token = (params.get("_meta") or {}).get("progressToken")
                     print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
                                       "params": {"progressToken": token, "progress": 1,
                                                  "message": "legacy progress"}}), flush=True)
-                    out = {"content": [{"type": "text", "text": "legacy ok"}]}
+                    nickname = (form_reply.get("result") or {}).get("content", {}).get("nickname")
+                    sampled = (sample_reply.get("result") or {}).get("content", {}).get("text")
+                    out = {"content": [{"type": "text", "text":
+                           f"legacy ok {nickname} {sampled}"}]}
                 else: continue
                 print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
         '''))
-        legacy_mgr = MCPManager(root)
+        legacy_events = []
+        def legacy_input_handler(server_name, method, params, cancel):
+            legacy_events.append(method)
+            if method == "elicitation/create":
+                return {"action": "accept", "content": {"nickname": "Ada"}}
+            return {"role": "assistant", "content": {"type": "text", "text": "Hello"},
+                    "model": "fixture-model", "stopReason": "endTurn"}
+        legacy_mgr = MCPManager(root, client_capabilities={
+            "sampling": {}, "elicitation": {"form": {}, "url": {}}})
         legacy_mgr.connect_all({"old": {"command": sys.executable, "args": [str(legacy_py)],
                                          "env": {"WIRE_PATH": str(legacy_wire),
                                                  "STARTS_PATH": str(starts)}}})
         old = legacy_mgr.servers["old"]
         legacy_progress = []
-        legacy_out = legacy_mgr.call("mcp__old__legacy", {}, on_progress=legacy_progress.append)
+        legacy_out = legacy_mgr.call("mcp__old__legacy", {}, on_progress=legacy_progress.append,
+                                     input_handler=legacy_input_handler)
         check("MCP falls back on a fresh process to a truthful legacy handshake",
               old.protocol_era == "legacy" and old.protocol_version == MCP_LEGACY_PROTOCOL_VERSION
               and starts.read_text().splitlines() == ["start", "start"]
-              and "legacy ok" in legacy_out and legacy_progress[0]["message"] == "legacy progress",
+              and "legacy ok Ada Hello" in legacy_out
+              and legacy_progress[0]["message"] == "legacy progress",
               f"{old.protocol_era=} {old.protocol_version=} {legacy_out=} {legacy_progress=}")
+        check("legacy MCP associates sampling and elicitation callbacks with the active tool call",
+              legacy_events == ["elicitation/create", "sampling/createMessage"], repr(legacy_events))
+        lifecycle_entered, lifecycle_released = threading.Event(), threading.Event()
+        def lifecycle_input_handler(_server_name, _method, _params, cancel):
+            lifecycle_entered.set()
+            deadline = _time.monotonic() + 2
+            while cancel is not None and not cancel.is_set() and _time.monotonic() < deadline:
+                _time.sleep(0.01)
+            if cancel is not None and cancel.is_set():
+                lifecycle_released.set()
+            # Deliberately return accepted content after expiry: the protocol boundary must
+            # replace this stale result with an error instead of disclosing it to the server.
+            return {"action": "accept", "content": {}}
+        started = _time.monotonic()
+        lifecycle_out = old.call_tool(
+            "input-lifecycle", {}, timeout=0.15, input_handler=lifecycle_input_handler)
+        lifecycle_elapsed = _time.monotonic() - started
+        check("legacy MCP ends a pending callback UI lifecycle when its outer request times out",
+              lifecycle_entered.is_set() and lifecycle_released.wait(1)
+              and lifecycle_elapsed < 2 and "timed out" in lifecycle_out,
+              f"elapsed={lifecycle_elapsed:.2f}s out={lifecycle_out!r}")
+        callback_deadline = _time.monotonic() + 1
+        while ('"id": 702' not in legacy_wire.read_text()
+               and _time.monotonic() < callback_deadline):
+            _time.sleep(0.01)
         old_proc = old.proc
         legacy_mgr.stop_all()
         check("legacy MCP fallback process is reaped", old_proc is not None and old_proc.poll() is not None)
@@ -1878,9 +2051,23 @@ def test_mcp_protocol():
         check("legacy MCP configures negotiated logging without modern request envelopes",
               any(msg.get("method") == "logging/setLevel"
                   and (msg.get("params") or {}).get("level") == "warning" for msg in legacy_messages)
+              and any(msg.get("method") == "initialize"
+                      and "sampling" in (msg.get("params") or {}).get("capabilities", {})
+                      and set(((msg.get("params") or {}).get("capabilities", {}).get(
+                              "elicitation") or {})) == {"form", "url"}
+                      for msg in legacy_messages)
               and all("io.modelcontextprotocol/protocolVersion" not in
                       ((msg.get("params") or {}).get("_meta") or {})
                       for msg in legacy_messages if msg.get("method") != "server/discover"))
+        check("legacy MCP serves roots after negotiation without requiring an unrelated tool call",
+              any(msg.get("id") == 698 and (msg.get("result") or {}).get("roots", [{}])[0].get(
+                  "uri") == root.as_uri() for msg in legacy_messages), repr(legacy_messages))
+        check("legacy MCP never discloses callback content after its origin lifecycle ends",
+              any(msg.get("id") == 702 and "error" in msg and "result" not in msg
+                  for msg in legacy_messages), repr(legacy_messages))
+        check("legacy MCP rejects callbacks outside an originating tool/resource/prompt request",
+              any(msg.get("id") == 699 and (msg.get("error") or {}).get("code") == -32600
+                  for msg in legacy_messages), repr(legacy_messages))
 
         failed = MCPManager(root)
         failed.connect_all({"missing": {"command": str(root / "does-not-exist")}})
@@ -1932,6 +2119,60 @@ def test_mcp_protocol():
               f"elapsed={elapsed:.2f}s pid={stalled_pid_value} alive={stalled_alive} "
               f"out={stalled_out} summary={stalled_summary}")
         stalled.stop_all()
+
+        from dgc.agent import Agent as _MCPAgent
+        from dgc.llm import ChatResult as _ChatResult
+        class _SamplingClient:
+            model = "local-fixture"
+            def __init__(self): self.calls = []
+            def chat(self, messages, **kwargs):
+                self.calls.append((messages, kwargs))
+                return _ChatResult(content="isolated answer", finish_reason="stop",
+                                   usage={"prompt_tokens": 3, "completion_tokens": 2})
+        class _SamplingUI:
+            def __init__(self, actions): self.actions, self.events = list(actions), []
+            def mcp_input(self, server, kind, payload, *, cancel=None):
+                self.events.append((server, kind, payload))
+                return {"action": self.actions.pop(0)}
+        sampling_agent = object.__new__(_MCPAgent)
+        sampling_agent.cancelled = threading.Event()
+        sampling_agent.client = _SamplingClient()
+        sampling_agent.config = type("Cfg", (), {"model": "local-fixture"})()
+        sampling_agent.ui = _SamplingUI(["accept", "accept"])
+        sampling_agent._aux_client = lambda **kwargs: sampling_agent.client
+        sampled_usage = []
+        sampling_agent._record_usage = sampled_usage.append
+        sampling_params = sanitize_input_request("sampling/createMessage", {
+            "systemPrompt": "Answer briefly", "messages": [{"role": "user", "content": {
+                "type": "text", "text": "hello"}}], "maxTokens": 32,
+            "stopSequences": [" answer"]})
+        sampled_result = _MCPAgent._handle_mcp_input(
+            sampling_agent, "fixture", "sampling/createMessage", sampling_params)
+        sample_messages = sampling_agent.client.calls[0][0]
+        check("agent MCP sampling requires approval before generation and before disclosure",
+              [event[1] for event in sampling_agent.ui.events]
+              == ["sampling_request", "sampling_response"]
+              and sampled_result["content"]["text"] == "isolated"
+              and sampled_result["stopReason"] == "stopSequence")
+        check("agent MCP sampling is stateless, tools-disabled, and excludes the project transcript",
+              sampling_agent.client.calls[0][1].get("tools") is None
+              and "Never infer, retrieve, or reveal DGC project files" in sample_messages[0]["content"]
+              and all("project secret" not in str(message) for message in sample_messages)
+              and sampled_usage == [{"prompt_tokens": 3, "completion_tokens": 2}])
+        denied_agent = object.__new__(_MCPAgent)
+        denied_agent.cancelled = threading.Event()
+        denied_agent.client = _SamplingClient()
+        denied_agent.config = sampling_agent.config
+        denied_agent.ui = _SamplingUI(["decline"])
+        denied_agent._aux_client = lambda **kwargs: denied_agent.client
+        denied_agent._record_usage = lambda usage: None
+        try:
+            _MCPAgent._handle_mcp_input(
+                denied_agent, "fixture", "sampling/createMessage", sampling_params)
+            denied_before_model = False
+        except MCPInputError:
+            denied_before_model = not denied_agent.client.calls
+        check("declined MCP sampling never reaches the model", denied_before_model)
     finally:
         if old_secret is None:
             os.environ.pop("DGC_PARENT_ONLY_SECRET", None)
@@ -3799,6 +4040,19 @@ def test_acp_protocol():
         check("ACP lists persisted workspace sessions", any(x["sessionId"] == state.sid for x in listed))
 
         ui = state.ui
+        permission_result = []
+        server._write = lambda message: notices.append({"method": "wire", "params": message})
+        permission_waiter = threading.Thread(target=lambda: permission_result.append(server.request(
+            "session/request_permission", {"sessionId": state.sid}, timeout=2)))
+        permission_waiter.start()
+        deadline = __import__("time").monotonic() + 1
+        while not server._pending and __import__("time").monotonic() < deadline:
+            __import__("time").sleep(0.01)
+        server._cancel_requests(state.sid)
+        permission_waiter.join(timeout=1)
+        check("ACP cancellation releases and forgets its outstanding permission request",
+              permission_result == [{"outcome": {"outcome": "cancelled"}}]
+              and not server._pending and not permission_waiter.is_alive())
         server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
                                                                           "optionId": "once"}}
         notices.clear()

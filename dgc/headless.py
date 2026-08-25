@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import __version__
@@ -187,11 +188,17 @@ class HeadlessUI:
         self.em.emit("error", message=message)
 
     # blocking decisions -------------------------------------------------------
-    def _await(self, rid: str, ev: threading.Event):
-        if not ev.wait(self.approval_timeout_s):
-            self.pending.value(rid)  # discard it so a late response cannot affect another request
-            self.em.emit("request_expired", id=rid)
-            return None
+    def _await(self, rid: str, ev: threading.Event, cancel=None):
+        deadline = time.monotonic() + self.approval_timeout_s
+        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+            if cancel is not None and cancel.is_set():
+                self.pending.value(rid)
+                self.em.emit("request_expired", id=rid)
+                return None
+            if time.monotonic() >= deadline:
+                self.pending.value(rid)  # discard it so a late response cannot affect another request
+                self.em.emit("request_expired", id=rid)
+                return None
         return self.pending.value(rid)
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
@@ -233,6 +240,20 @@ class HeadlessUI:
         if isinstance(choice, str) and choice:
             return choice
         return options[0] if options else ""
+
+    def mcp_capabilities(self) -> dict:
+        return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
+
+    def mcp_input(self, server: str, kind: str, payload: dict, *, cancel=None) -> dict:
+        rid, ev = self.pending.register()
+        self.em.emit("mcp_input_request", id=rid, server=str(server)[:120], kind=kind,
+                     payload=payload)
+        response = self._await(rid, ev, cancel=cancel)
+        if not isinstance(response, dict):
+            return {"action": "cancel"}
+        return {"action": response.get("action", "cancel"),
+                **({"content": response.get("content")}
+                   if isinstance(response.get("content"), dict) else {})}
 
 
 class Backend:
@@ -460,10 +481,13 @@ class Backend:
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "feedback": cmd.get("feedback")})
         elif t == "options_response":
             self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice")})
+        elif t == "mcp_input_response":
+            self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
+                                                  "content": cmd.get("content")})
 
         elif t in ("cancel", "interrupt"):
             self.agent.cancelled.set()
-            self.pending.cancel_all({"decision": "no", "choice": None})
+            self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
             self._queue.clear()
 
         elif t == "set_mode":

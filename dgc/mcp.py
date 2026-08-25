@@ -11,7 +11,9 @@ import signal
 import subprocess
 import threading
 import time
+from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from . import __version__
 
@@ -21,9 +23,365 @@ _MAX_DIAGNOSTIC = 32_000
 _MAX_CONTENT = 120_000
 _MAX_FRAME = 4 * 1024 * 1024
 _MAX_MRTR_ROUNDS = 4
+_MAX_INPUT_REQUESTS = 8
+_MAX_INPUT_BYTES = 64 * 1024
+_MAX_FORM_BYTES = 32 * 1024
+_MAX_SAMPLE_TEXT = 48 * 1024
+_MAX_SAMPLE_TOKENS = 4096
 _MAX_WRITE_SECONDS = 2.0
 _CLIENT_INFO = {"name": "dgc", "version": __version__}
 _LOG_LEVELS = ("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")
+_INPUT_ORIGIN_METHODS = {"tools/call", "prompts/get", "resources/read"}
+_SENSITIVE_FIELD_RE = re.compile(
+    r"\b(?:password|passphrase|secret|client[ _-]?secret|api[ _-]?key|access[ _-]?token|"
+    r"refresh[ _-]?token|bearer|private[ _-]?key|ssh[ _-]?key|seed[ _-]?phrase|mnemonic|"
+    r"one[ _-]?time[ _-]?(?:password|code)|otp|authorization[ _-]?code|session[ _-]?cookie|"
+    r"credit[ _-]?card|debit[ _-]?card|card[ _-]?(?:number|expiry|expiration)|cvv|cvc|"
+    r"payment[ _-]?credential|bank[ _-]?account|routing[ _-]?number|pin)\b",
+    re.I,
+)
+
+
+class MCPInputError(ValueError):
+    """A bounded, user-safe rejection of an MCP server input request."""
+
+
+class _AnyCancel:
+    """The small Event surface consumers need, set when any constituent lifecycle ends."""
+
+    def __init__(self, *events):
+        self.events = tuple(event for event in events if event is not None)
+
+    def is_set(self) -> bool:
+        return any(event.is_set() for event in self.events)
+
+
+def _json_bytes(value) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"),
+                              allow_nan=False).encode("utf-8"))
+    except (TypeError, ValueError) as exc:
+        raise MCPInputError("input request is not valid JSON") from exc
+
+
+def _short_text(value, field: str, limit: int) -> str:
+    if not isinstance(value, str):
+        raise MCPInputError(f"{field} must be a string")
+    if len(value) > limit:
+        raise MCPInputError(f"{field} exceeded {limit} characters")
+    return value
+
+
+def _bounded_number(value, field: str):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise MCPInputError(f"{field} must be a finite number")
+    return value
+
+
+def _sanitize_form_schema(value) -> dict:
+    if not isinstance(value, dict) or value.get("type") != "object":
+        raise MCPInputError("requestedSchema must be a top-level object schema")
+    allowed_top = {"$schema", "type", "properties", "required"}
+    if any(key not in allowed_top for key in value):
+        raise MCPInputError("requestedSchema contains unsupported top-level keywords")
+    properties = value.get("properties")
+    if not isinstance(properties, dict) or len(properties) > 16:
+        raise MCPInputError("requestedSchema properties must be an object with at most 16 fields")
+    required = value.get("required", [])
+    if not isinstance(required, list) or any(not isinstance(key, str) for key in required):
+        raise MCPInputError("requestedSchema.required must be a string array")
+    if len(required) != len(set(required)) or any(key not in properties for key in required):
+        raise MCPInputError("requestedSchema.required contains duplicate or unknown fields")
+
+    clean_properties: dict[str, dict] = {}
+    for raw_key, raw in properties.items():
+        key = _short_text(raw_key, "form field name", 64)
+        if not key or not isinstance(raw, dict):
+            raise MCPInputError("each form field must have a non-empty name and schema")
+        kind = raw.get("type")
+        if kind not in ("string", "number", "integer", "boolean", "array"):
+            raise MCPInputError(f"form field {key!r} has an unsupported type")
+        title = _short_text(raw.get("title", ""), f"{key}.title", 160)
+        description = _short_text(raw.get("description", ""), f"{key}.description", 1000)
+        if _SENSITIVE_FIELD_RE.search(" ".join((key, title, description)).replace("_", " ")):
+            raise MCPInputError(
+                f"form field {key!r} appears to request a credential or payment secret; use URL mode")
+
+        common = {"type", "title", "description", "default"}
+        if kind == "string":
+            enum_style = "enum" in raw or "oneOf" in raw or "enumNames" in raw
+            allowed = common | ({"enum", "oneOf", "enumNames"} if enum_style else
+                                {"minLength", "maxLength", "format"})
+            if any(name not in allowed for name in raw):
+                raise MCPInputError(f"form field {key!r} contains unsupported schema keywords")
+            clean = {name: raw[name] for name in common if name in raw}
+            if enum_style:
+                if "oneOf" in raw:
+                    choices = raw["oneOf"]
+                    if (not isinstance(choices, list) or not 1 <= len(choices) <= 64
+                            or any(not isinstance(item, dict)
+                                   or set(item) != {"const", "title"}
+                                   or not isinstance(item.get("const"), str)
+                                   or not isinstance(item.get("title"), str) for item in choices)):
+                        raise MCPInputError(f"form field {key!r} has malformed enum choices")
+                    clean["oneOf"] = [{"const": _short_text(item["const"], "enum value", 500),
+                                       "title": _short_text(item["title"], "enum title", 160)}
+                                      for item in choices]
+                    if len({item["const"] for item in clean["oneOf"]}) != len(clean["oneOf"]):
+                        raise MCPInputError(f"form field {key!r} has duplicate enum choices")
+                else:
+                    choices = raw.get("enum")
+                    if (not isinstance(choices, list) or not 1 <= len(choices) <= 64
+                            or any(not isinstance(item, str) or len(item) > 500 for item in choices)
+                            or len(choices) != len(set(choices))):
+                        raise MCPInputError(f"form field {key!r} has malformed enum choices")
+                    clean["enum"] = list(choices)
+                    if "enumNames" in raw:
+                        names = raw["enumNames"]
+                        if (not isinstance(names, list) or len(names) != len(choices)
+                                or any(not isinstance(item, str) or len(item) > 160 for item in names)):
+                            raise MCPInputError(f"form field {key!r} has malformed enumNames")
+                        clean["enumNames"] = list(names)
+                default = clean.get("default")
+                options = [item["const"] for item in clean.get("oneOf", [])] or clean.get("enum", [])
+                if default is not None and default not in options:
+                    raise MCPInputError(f"form field {key!r} has an invalid default")
+            else:
+                minimum = raw.get("minLength", 0)
+                maximum = raw.get("maxLength", 4000)
+                if (isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 0
+                        or isinstance(maximum, bool) or not isinstance(maximum, int)
+                        or maximum < minimum or maximum > 4000):
+                    raise MCPInputError(f"form field {key!r} has invalid string bounds")
+                if "minLength" in raw:
+                    clean["minLength"] = minimum
+                clean["maxLength"] = maximum
+                fmt = raw.get("format")
+                if fmt is not None and fmt not in ("email", "uri", "date", "date-time"):
+                    raise MCPInputError(f"form field {key!r} has an unsupported format")
+                if fmt:
+                    clean["format"] = fmt
+                if "default" in clean and not isinstance(clean["default"], str):
+                    raise MCPInputError(f"form field {key!r} has an invalid default")
+        elif kind in ("number", "integer"):
+            if any(name not in common | {"minimum", "maximum"} for name in raw):
+                raise MCPInputError(f"form field {key!r} contains unsupported schema keywords")
+            clean = {name: raw[name] for name in common if name in raw}
+            minimum = raw.get("minimum")
+            maximum = raw.get("maximum")
+            if minimum is not None:
+                clean["minimum"] = _bounded_number(minimum, f"{key}.minimum")
+            if maximum is not None:
+                clean["maximum"] = _bounded_number(maximum, f"{key}.maximum")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise MCPInputError(f"form field {key!r} has inverted numeric bounds")
+            if "default" in clean:
+                default = _bounded_number(clean["default"], f"{key}.default")
+                if kind == "integer" and not isinstance(default, int):
+                    raise MCPInputError(f"form field {key!r} has a non-integer default")
+        elif kind == "boolean":
+            if any(name not in common for name in raw):
+                raise MCPInputError(f"form field {key!r} contains unsupported schema keywords")
+            clean = {name: raw[name] for name in common if name in raw}
+            if "default" in clean and not isinstance(clean["default"], bool):
+                raise MCPInputError(f"form field {key!r} has an invalid default")
+        else:  # MCP multi-select enum
+            if any(name not in common | {"items", "minItems", "maxItems"} for name in raw):
+                raise MCPInputError(f"form field {key!r} contains unsupported schema keywords")
+            items = raw.get("items")
+            if not isinstance(items, dict):
+                raise MCPInputError(f"form field {key!r} has malformed multi-select choices")
+            clean_items: dict
+            if isinstance(items.get("enum"), list) and items.get("type") == "string":
+                choices = items["enum"]
+                if (not 1 <= len(choices) <= 64 or any(not isinstance(v, str) or len(v) > 500 for v in choices)
+                        or len(choices) != len(set(choices)) or set(items) != {"type", "enum"}):
+                    raise MCPInputError(f"form field {key!r} has malformed multi-select choices")
+                clean_items = {"type": "string", "enum": list(choices)}
+                options = list(choices)
+            else:
+                choices = items.get("anyOf")
+                if (not isinstance(choices, list) or not 1 <= len(choices) <= 64
+                        or set(items) != {"anyOf"}
+                        or any(not isinstance(item, dict) or set(item) != {"const", "title"}
+                               or not isinstance(item.get("const"), str)
+                               or not isinstance(item.get("title"), str) for item in choices)):
+                    raise MCPInputError(f"form field {key!r} has malformed multi-select choices")
+                clean_items = {"anyOf": [
+                    {"const": _short_text(item["const"], "enum value", 500),
+                     "title": _short_text(item["title"], "enum title", 160)} for item in choices]}
+                options = [item["const"] for item in clean_items["anyOf"]]
+                if len(options) != len(set(options)):
+                    raise MCPInputError(f"form field {key!r} has duplicate multi-select choices")
+            minimum = raw.get("minItems", 0)
+            maximum = raw.get("maxItems", len(options))
+            if (isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 0
+                    or isinstance(maximum, bool) or not isinstance(maximum, int)
+                    or maximum < minimum or maximum > len(options)):
+                raise MCPInputError(f"form field {key!r} has invalid selection bounds")
+            clean = {name: raw[name] for name in common if name in raw}
+            clean.update({"items": clean_items, "minItems": minimum, "maxItems": maximum})
+            if "default" in clean:
+                default = clean["default"]
+                if (not isinstance(default, list) or any(v not in options for v in default)
+                        or len(default) != len(set(default))
+                        or not minimum <= len(default) <= maximum):
+                    raise MCPInputError(f"form field {key!r} has an invalid default")
+        clean_properties[key] = clean
+
+    clean_schema = {"type": "object", "properties": clean_properties, "required": list(required)}
+    if _json_bytes(clean_schema) > _MAX_FORM_BYTES:
+        raise MCPInputError(f"requestedSchema exceeded {_MAX_FORM_BYTES} bytes")
+    return clean_schema
+
+
+def _form_options(schema: dict) -> list[str]:
+    if "oneOf" in schema:
+        return [item["const"] for item in schema["oneOf"]]
+    if "enum" in schema:
+        return list(schema["enum"])
+    items = schema.get("items") or {}
+    if "anyOf" in items:
+        return [item["const"] for item in items["anyOf"]]
+    return list(items.get("enum") or [])
+
+
+def validate_elicitation_response(params: dict, response) -> dict:
+    """Validate user-provided form data again at the MCP boundary before disclosure."""
+    if not isinstance(response, dict):
+        return {"action": "cancel"}
+    action = response.get("action")
+    if action not in ("accept", "decline", "cancel"):
+        return {"action": "cancel"}
+    if action != "accept":
+        return {"action": action}
+    if params.get("mode", "form") == "url":
+        return {"action": "accept"}
+    schema = params["requestedSchema"]
+    content = response.get("content")
+    if not isinstance(content, dict) or any(key not in schema["properties"] for key in content):
+        raise MCPInputError("form response contains unknown fields")
+    missing = [key for key in schema.get("required", []) if key not in content]
+    if missing:
+        raise MCPInputError("form response is missing required fields: " + ", ".join(missing[:8]))
+    clean: dict = {}
+    for key, value in content.items():
+        field = schema["properties"][key]
+        kind = field["type"]
+        if kind == "string":
+            if not isinstance(value, str):
+                raise MCPInputError(f"form field {key!r} must be a string")
+            if not field.get("minLength", 0) <= len(value) <= field.get("maxLength", 4000):
+                raise MCPInputError(f"form field {key!r} violates its length bounds")
+            options = _form_options(field)
+            if options and value not in options:
+                raise MCPInputError(f"form field {key!r} is not an allowed choice")
+            fmt = field.get("format")
+            try:
+                if fmt == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+                    raise ValueError
+                if fmt == "uri" and not urlsplit(value).scheme:
+                    raise ValueError
+                if fmt == "date":
+                    date.fromisoformat(value)
+                if fmt == "date-time":
+                    datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                raise MCPInputError(f"form field {key!r} does not match format {fmt!r}") from None
+        elif kind in ("number", "integer"):
+            _bounded_number(value, f"form field {key!r}")
+            if kind == "integer" and not isinstance(value, int):
+                raise MCPInputError(f"form field {key!r} must be an integer")
+            if "minimum" in field and value < field["minimum"]:
+                raise MCPInputError(f"form field {key!r} is below its minimum")
+            if "maximum" in field and value > field["maximum"]:
+                raise MCPInputError(f"form field {key!r} is above its maximum")
+        elif kind == "boolean":
+            if not isinstance(value, bool):
+                raise MCPInputError(f"form field {key!r} must be a boolean")
+        else:
+            options = _form_options(field)
+            if (not isinstance(value, list) or any(not isinstance(v, str) or v not in options for v in value)
+                    or len(value) != len(set(value))
+                    or not field.get("minItems", 0) <= len(value) <= field.get("maxItems", len(options))):
+                raise MCPInputError(f"form field {key!r} has invalid selections")
+        clean[key] = value
+    result = {"action": "accept", "content": clean}
+    if _json_bytes(result) > _MAX_FORM_BYTES:
+        raise MCPInputError(f"form response exceeded {_MAX_FORM_BYTES} bytes")
+    return result
+
+
+def sanitize_input_request(method: str, params) -> dict:
+    """Return the small MCP input subset DGC can safely show and fulfill."""
+    if not isinstance(params, dict) or _json_bytes(params) > _MAX_INPUT_BYTES:
+        raise MCPInputError(f"{method} parameters must be an object under {_MAX_INPUT_BYTES} bytes")
+    if method == "elicitation/create":
+        mode = params.get("mode", "form")
+        message = _short_text(params.get("message"), "elicitation message", 4000)
+        if mode == "form":
+            return {"mode": "form", "message": message,
+                    "requestedSchema": _sanitize_form_schema(params.get("requestedSchema"))}
+        if mode != "url":
+            raise MCPInputError("elicitation mode must be form or url")
+        raw_url = _short_text(params.get("url"), "elicitation URL", 2048)
+        parsed = urlsplit(raw_url)
+        host = parsed.hostname or ""
+        loopback = host in ("localhost", "127.0.0.1", "::1")
+        if (parsed.scheme != "https" and not (parsed.scheme == "http" and loopback)):
+            raise MCPInputError("URL elicitation requires HTTPS (HTTP is allowed only for loopback)")
+        if not host or parsed.username or parsed.password or any(ord(ch) < 32 for ch in raw_url):
+            raise MCPInputError("elicitation URL is malformed or embeds credentials")
+        return {"mode": "url", "message": message, "url": raw_url, "host": host,
+                "suspicious_host": host.lower().startswith("xn--") or ".xn--" in host.lower()}
+    if method != "sampling/createMessage":
+        raise MCPInputError(f"client method not supported: {method}")
+    if params.get("tools") is not None or params.get("toolChoice") is not None:
+        raise MCPInputError("sampling tools were not advertised and are not supported")
+    if params.get("includeContext", "none") not in (None, "none"):
+        raise MCPInputError("sampling context inclusion was not advertised and is not supported")
+    messages = params.get("messages")
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 32:
+        raise MCPInputError("sampling messages must contain 1 to 32 messages")
+    clean_messages = []
+    text_size = 0
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") not in ("user", "assistant"):
+            raise MCPInputError("sampling messages contain an invalid role or shape")
+        blocks = message.get("content")
+        blocks = blocks if isinstance(blocks, list) else [blocks]
+        if not 1 <= len(blocks) <= 32:
+            raise MCPInputError("sampling message content must contain 1 to 32 blocks")
+        clean_blocks = []
+        for block in blocks:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                raise MCPInputError("DGC sampling supports text content only")
+            text = _short_text(block.get("text"), "sampling text block", 8000)
+            text_size += len(text)
+            clean_blocks.append({"type": "text", "text": text})
+        clean_messages.append({"role": message["role"], "content": clean_blocks})
+    system_prompt = _short_text(params.get("systemPrompt", ""), "sampling systemPrompt", 8000)
+    text_size += len(system_prompt)
+    if text_size > _MAX_SAMPLE_TEXT:
+        raise MCPInputError(f"sampling prompt exceeded {_MAX_SAMPLE_TEXT} characters")
+    requested_tokens = params.get("maxTokens")
+    if isinstance(requested_tokens, bool) or not isinstance(requested_tokens, int) or requested_tokens < 1:
+        raise MCPInputError("sampling maxTokens must be a positive integer")
+    clean = {"messages": clean_messages, "maxTokens": min(requested_tokens, _MAX_SAMPLE_TOKENS)}
+    if system_prompt:
+        clean["systemPrompt"] = system_prompt
+    if "temperature" in params:
+        temperature = _bounded_number(params["temperature"], "sampling temperature")
+        if not 0 <= temperature <= 2:
+            raise MCPInputError("sampling temperature must be between 0 and 2")
+        clean["temperature"] = temperature
+    if "stopSequences" in params:
+        stops = params["stopSequences"]
+        if (not isinstance(stops, list) or len(stops) > 16
+                or any(not isinstance(stop, str) or len(stop) > 256 for stop in stops)):
+            raise MCPInputError("sampling stopSequences are malformed or too large")
+        clean["stopSequences"] = list(stops)
+    return clean
 
 
 def _safe_name(value: str) -> str:
@@ -48,7 +406,7 @@ def _bounded_lines(stream, limit: int = _MAX_FRAME):
 
 class MCPServer:
     def __init__(self, name: str, command: str, args=None, env=None, root: Path | None = None,
-                 log_level: str = "warning"):
+                 log_level: str = "warning", client_capabilities: dict | None = None):
         self.name = str(name)
         self.command = str(command)
         self.args = [str(a) for a in (args or [])]
@@ -72,6 +430,8 @@ class MCPServer:
         self._lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._generation = 0
+        self._input_capabilities = (dict(client_capabilities)
+                                    if isinstance(client_capabilities, dict) else {})
 
     # lifecycle ----------------------------------------------------------------
     def start(self, timeout: float = 10.0) -> bool:
@@ -107,7 +467,7 @@ class MCPServer:
                 return False
             init, err = self._request("initialize", {
                 "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
-                "capabilities": {"roots": {"listChanged": False}},
+                "capabilities": self._legacy_client_capabilities(),
                 "clientInfo": _CLIENT_INFO,
             }, timeout, modern=False)
             if init is None:
@@ -255,8 +615,9 @@ class MCPServer:
                 if not line:
                     continue
                 try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
+                    msg = json.loads(line, parse_constant=lambda value: (_ for _ in ()).throw(
+                        ValueError(f"invalid JSON constant: {value}")))
+                except (json.JSONDecodeError, ValueError):
                     self._append_diagnostic("invalid stdout: " + line[:2000])
                     continue
                 if not isinstance(msg, dict):
@@ -277,7 +638,7 @@ class MCPServer:
                     continue
                 if mid is not None and msg.get("method"):
                     self._handle_server_request(
-                        proc, mid, str(msg["method"]), msg.get("params") or {})
+                        proc, generation, mid, str(msg["method"]), msg.get("params") or {})
                 elif msg.get("method") == "notifications/progress":
                     self._handle_progress(msg.get("params") or {}, generation)
                 elif msg.get("method") == "notifications/message":
@@ -285,25 +646,76 @@ class MCPServer:
         finally:
             self._fail_pending("server exited", generation)
 
-    def _handle_server_request(self, proc: subprocess.Popen, mid, method: str, params: dict) -> None:
+    def _handle_server_request(self, proc: subprocess.Popen, generation: int, mid,
+                               method: str, params) -> None:
         if self.protocol_era == "modern":
             self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
                 "code": -32601,
                 "message": "server-initiated requests are not valid in MCP 2026-07-28; use MRTR",
             }})
             return
-        if method == "roots/list":
-            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "result": {
-                "roots": [{"uri": self.root.as_uri(), "name": self.root.name or str(self.root)}]
-            }})
-        elif method == "ping":
+        if method == "ping":
             self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "result": {}})
-        else:
-            # Sampling and elicitation require their own user-consent/UI boundaries. DGC does not
-            # advertise them and fails closed if a server requests them anyway.
+            return
+        if method not in ("roots/list", "sampling/createMessage", "elicitation/create"):
             self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
-                "code": -32601, "message": f"client method not supported: {method}"
-            }})
+                "code": -32601, "message": f"client method not supported: {method}"}})
+            return
+        if method == "roots/list":
+            if self.protocol_era != "legacy":
+                self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                    "code": -32600, "message": "roots/list arrived before MCP initialization"}})
+            else:
+                self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "result": {
+                    "roots": [{"uri": self.root.as_uri(),
+                               "name": self.root.name or str(self.root)}]}})
+            return
+        with self._lock:
+            origins = [holder for _ev, holder, gen in self._pending.values()
+                       if gen == generation and holder.get("method") in _INPUT_ORIGIN_METHODS]
+            if len(origins) == 1:
+                holder = origins[0]
+                holder["input_count"] = int(holder.get("input_count", 0)) + 1
+            else:
+                holder = None
+        if holder is None:
+            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                "code": -32600,
+                "message": "server input was not associated with exactly one active client request"}})
+            return
+        if holder["input_count"] > _MAX_INPUT_REQUESTS:
+            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                "code": -32000, "message": "server exceeded the input request limit"}})
+            return
+        handler = holder.get("input_handler")
+        try:
+            clean = self._prepare_input(method, params)
+            if not callable(handler):
+                raise MCPInputError(f"client method not supported: {method}")
+            result = handler(self.name, method, clean, holder.get("cancel"))
+            if method == "elicitation/create":
+                result = validate_elicitation_response(clean, result)
+            if not isinstance(result, dict):
+                raise MCPInputError("client input handler returned an invalid response")
+            callback_cancel = holder.get("cancel")
+            if callback_cancel is not None and callback_cancel.is_set():
+                raise MCPInputError("server input cancelled with its originating request")
+        except MCPInputError as exc:
+            message = str(exc)[:500]
+            if "not supported" in message or "not advertised" in message:
+                code = -32601
+            elif any(word in message for word in ("declined", "cancelled", "failed")):
+                code = -32000
+            else:
+                code = -32602
+            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                "code": code, "message": message}})
+            return
+        except Exception:
+            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                "code": -32000, "message": "client input handler failed"}})
+            return
+        self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "result": result})
 
     def _send(self, obj: dict) -> bool:
         proc = self.proc
@@ -317,7 +729,7 @@ class MCPServer:
         if cancel is not None and cancel.is_set():
             return False, "cancelled by user"
         try:
-            wire = json.dumps(obj, separators=(",", ":")) + "\n"
+            wire = json.dumps(obj, separators=(",", ":"), allow_nan=False) + "\n"
         except (TypeError, ValueError):
             return False, "request is not JSON serializable"
         if len(wire.encode("utf-8")) > _MAX_FRAME:
@@ -352,11 +764,35 @@ class MCPServer:
                  timeout: float = _MAX_WRITE_SECONDS) -> bool:
         return self._write_to(proc, obj, timeout=timeout)[0]
 
-    @staticmethod
-    def _client_capabilities() -> dict:
-        # DGC can answer roots/list in both the legacy callback channel and modern MRTR. Sampling
-        # and elicitation are deliberately absent until their user-consent boundaries are complete.
-        return {"roots": {}}
+    def _client_capabilities(self) -> dict:
+        capabilities = {"roots": {}}
+        sampling = self._input_capabilities.get("sampling")
+        elicitation = self._input_capabilities.get("elicitation")
+        if isinstance(sampling, dict):
+            # DGC deliberately does not advertise sampling context or tool use.
+            capabilities["sampling"] = {}
+        if isinstance(elicitation, dict):
+            modes = {mode: {} for mode in ("form", "url")
+                     if isinstance(elicitation.get(mode), dict)}
+            if modes:
+                capabilities["elicitation"] = modes
+        return capabilities
+
+    def _legacy_client_capabilities(self) -> dict:
+        capabilities = self._client_capabilities()
+        capabilities["roots"] = {"listChanged": False}
+        return capabilities
+
+    def _prepare_input(self, method: str, params) -> dict:
+        capabilities = self._client_capabilities()
+        if method == "sampling/createMessage" and "sampling" not in capabilities:
+            raise MCPInputError("sampling/createMessage was not advertised by this client")
+        if method == "elicitation/create":
+            modes = capabilities.get("elicitation") or {}
+            mode = params.get("mode", "form") if isinstance(params, dict) else "form"
+            if mode not in modes:
+                raise MCPInputError(f"elicitation {mode} mode was not advertised by this client")
+        return sanitize_input_request(method, params)
 
     def _request_meta(self, progress_token=None) -> dict:
         meta = {
@@ -373,7 +809,7 @@ class MCPServer:
 
     def _request(self, method: str, params: dict, timeout: float,
                  cancel: threading.Event | None = None, *, modern: bool | None = None,
-                 on_progress=None, on_log=None) -> tuple[dict | None, str | None]:
+                 on_progress=None, on_log=None, input_handler=None) -> tuple[dict | None, str | None]:
         mid = next(self._id)
         proc, generation = self.proc, self._generation
         if proc is None:
@@ -382,6 +818,8 @@ class MCPServer:
         use_modern = (self.protocol_era == "modern") if modern is None else bool(modern)
         wire_params = dict(params or {})
         progress_token = f"dgc:{self.name}:{mid}" if on_progress is not None else None
+        input_lifecycle = threading.Event()
+        input_cancel = _AnyCancel(cancel, input_lifecycle)
         if use_modern:
             existing = wire_params.get("_meta")
             meta = dict(existing) if isinstance(existing, dict) else {}
@@ -395,6 +833,8 @@ class MCPServer:
         holder: dict = {
             "progress_token": progress_token, "on_progress": on_progress, "on_log": on_log,
             "last_progress": -math.inf, "last_progress_emit": 0.0, "last_log_emit": 0.0,
+            "method": method, "cancel": input_cancel,
+            "input_handler": input_handler, "input_count": 0,
         }
         deadline = time.monotonic() + max(0.01, float(timeout))
         with self._lock:
@@ -404,6 +844,7 @@ class MCPServer:
                    "params": wire_params},
             timeout=max(0.01, deadline - time.monotonic()), cancel=cancel)
         if not sent:
+            input_lifecycle.set()
             with self._lock:
                 self._pending.pop(mid, None)
             if send_error in {"server stdin failed", "server stdin stalled",
@@ -434,7 +875,9 @@ class MCPServer:
                     self.error = cancel_error
                     self._append_diagnostic(cancel_error)
                     self._stop_process(proc, generation)
+                input_lifecycle.set()
                 return None, reason
+        input_lifecycle.set()
         err = holder.get("error")
         if err:
             return None, str(err.get("message", err) if isinstance(err, dict) else err)
@@ -532,12 +975,15 @@ class MCPServer:
         return json.dumps(block, ensure_ascii=False)
 
     def call_tool(self, tool: str, arguments: dict, timeout: float = 120.0,
-                  cancel: threading.Event | None = None, *, on_progress=None, on_log=None) -> str:
+                  cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
+                  input_handler=None) -> str:
         params = {"name": tool, "arguments": arguments}
         res = None
+        input_total = 0
         for _round in range(_MAX_MRTR_ROUNDS):
             res, err = self._request("tools/call", params, timeout, cancel,
-                                     on_progress=on_progress, on_log=on_log)
+                                     on_progress=on_progress, on_log=on_log,
+                                     input_handler=input_handler)
             if res is None:
                 tail = self._diagnostic_tail()
                 detail = f" · {tail}" if tail and tail != err else ""
@@ -547,21 +993,43 @@ class MCPServer:
             if res.get("resultType") != "input_required":
                 return f"ERROR: MCP tool '{tool}' returned an invalid modern resultType"
             requests = res.get("inputRequests") or {}
-            if not isinstance(requests, dict):
+            if not isinstance(requests, dict) or len(requests) > _MAX_INPUT_REQUESTS:
                 return f"ERROR: MCP tool '{tool}' returned malformed inputRequests"
+            input_total += len(requests)
+            if input_total > _MAX_INPUT_REQUESTS:
+                return f"ERROR: MCP tool '{tool}' exceeded {_MAX_INPUT_REQUESTS} input requests"
             responses = {}
             unsupported = []
             for key, request in requests.items():
+                if len(str(key)) > 128:
+                    unsupported.append("input request identifier exceeded 128 characters")
+                    continue
                 method = request.get("method") if isinstance(request, dict) else None
                 if method == "roots/list":
-                    responses[str(key)] = {"resultType": "complete", "roots": [{
+                    responses[str(key)] = {"roots": [{
                         "uri": self.root.as_uri(), "name": self.root.name or str(self.root)}]}
                 else:
-                    unsupported.append(str(method or "malformed request"))
+                    try:
+                        clean = self._prepare_input(str(method or ""),
+                                                    request.get("params") if isinstance(request, dict) else None)
+                        if not callable(input_handler):
+                            raise MCPInputError(f"client method not supported: {method}")
+                        response = input_handler(self.name, str(method), clean, cancel)
+                        if method == "elicitation/create":
+                            response = validate_elicitation_response(clean, response)
+                        if not isinstance(response, dict):
+                            raise MCPInputError("client input handler returned an invalid response")
+                        responses[str(key)] = response
+                    except MCPInputError as exc:
+                        unsupported.append(str(exc))
+                    except Exception:
+                        unsupported.append("client input handler failed")
             if unsupported:
                 return (f"ERROR: MCP tool '{tool}' requires unsupported client input: "
                         + ", ".join(unsupported[:8]))
             request_state = res.get("requestState")
+            if isinstance(request_state, str) and len(request_state.encode("utf-8")) > _MAX_INPUT_BYTES:
+                return f"ERROR: MCP tool '{tool}' returned oversized requestState"
             if not requests and not isinstance(request_state, str):
                 return f"ERROR: MCP tool '{tool}' returned an empty input_required result"
             params = {"name": tool, "arguments": arguments}
@@ -583,11 +1051,13 @@ class MCPServer:
 
 
 class MCPManager:
-    def __init__(self, root: Path | None = None):
+    def __init__(self, root: Path | None = None, *, client_capabilities: dict | None = None):
         self.root = Path(root).resolve(strict=False) if root else Path.cwd().resolve()
         self.servers: dict[str, MCPServer] = {}
         self.failures: dict[str, str] = {}
         self._routes: dict[str, tuple[str, str]] = {}
+        self._client_capabilities = (dict(client_capabilities)
+                                     if isinstance(client_capabilities, dict) else {})
         atexit.register(self.stop_all)
 
     def connect_all(self, config_servers: dict | None) -> None:
@@ -605,7 +1075,7 @@ class MCPManager:
             if old is not None:
                 old.stop()
             server = MCPServer(name, cmd, raw_spec.get("args"), raw_spec.get("env"), self.root,
-                               str(raw_spec.get("log_level") or "warning"))
+                               str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
             if server.start():
                 self.servers[name] = server
             else:
@@ -641,7 +1111,8 @@ class MCPManager:
         return schemas
 
     def call(self, full_name: str, arguments: dict,
-             cancel: threading.Event | None = None, *, on_progress=None, on_log=None) -> str:
+             cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
+             input_handler=None) -> str:
         route = self._routes.get(full_name)
         if not route:
             return f"ERROR: unknown MCP tool route: {full_name}"
@@ -650,7 +1121,8 @@ class MCPManager:
         if not server:
             return f"ERROR: MCP server '{server_name}' is not connected"
         return server.call_tool(tool, arguments, cancel=cancel,
-                                on_progress=on_progress, on_log=on_log)
+                                on_progress=on_progress, on_log=on_log,
+                                input_handler=input_handler)
 
     def summary(self) -> str:
         if not self.servers and not self.failures:

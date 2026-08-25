@@ -157,6 +157,47 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   dom.window.close();
 });
 
+test("MCP consent cards render bounded forms and return typed values without HTML injection", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "mcp_input_request", id: "m1",
+    server: "<img src=x onerror=alert(1)>", kind: "elicitation", payload: {
+      mode: "form", message: "Choose a public profile",
+      requestedSchema: { type: "object", required: ["nickname", "theme"], properties: {
+        nickname: { type: "string", title: "Display name", minLength: 2, maxLength: 30 },
+        theme: { type: "string", enum: ["dark", "light"], default: "dark" },
+        alerts: { type: "boolean", default: true },
+        telemetry: { type: "boolean" },
+      } },
+    } } });
+  const card = doc.querySelector(".card");
+  assert.ok(card.querySelector("form.mcp-form"), "MCP form did not render");
+  assert.equal(card.querySelector("img"), null, "server label became active HTML");
+  const inputs = card.querySelectorAll("[data-mcp-field]");
+  inputs[0].value = "Ada";
+  inputs[1].value = "light";
+  inputs[2].value = "false";
+  inputs[3].value = "";
+  card.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const response = posted.find((message) => message.type === "mcp_input_response");
+  assert.equal(JSON.stringify(response), JSON.stringify({
+    type: "mcp_input_response", id: "m1", action: "accept",
+    content: { nickname: "Ada", theme: "light", alerts: false },
+  }));
+  assert.ok(card.classList.contains("resolved"));
+
+  send({ type: "event", event: { type: "mcp_input_request", id: "m2",
+    server: "fixture", kind: "elicitation", payload: {
+      mode: "url", message: "Sign in", host: "auth.example",
+      url: "https://auth.example/start",
+    } } });
+  const urlCard = [...doc.querySelectorAll(".card")].at(-1);
+  send({ type: "event", event: { type: "request_expired", id: "m2" } });
+  assert.ok(urlCard.classList.contains("resolved"), "expired MCP card remained actionable");
+  assert.deepEqual(errors, [], "webview raised JS errors in MCP form flow");
+  dom.window.close();
+});
+
 test("selection attachments remain typed untrusted context instead of prompt instructions", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   const resource = {

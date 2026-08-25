@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -262,6 +263,129 @@ class UI:
                 return options[0]
             return raw or options[0]
         return options[idx]
+
+    def mcp_capabilities(self) -> dict:
+        return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
+
+    def mcp_input(self, server: str, kind: str, payload: dict, *, cancel=None) -> dict:
+        """Review one MCP server request. Nothing is sampled, opened, or disclosed by default."""
+        self._yield_stdin()
+        self.stop_working()
+        section(self.console, "MCP input requested", str(server)[:120])
+        if cancel is not None and cancel.is_set():
+            return {"action": "cancel"}
+        if kind in ("sampling_request", "sampling_response"):
+            title = ("Let this server ask your model?" if kind == "sampling_request"
+                     else "Share this sampled response with the server?")
+            self.console.print(title, style="bold", markup=False)
+            self.console.print(json.dumps(payload, ensure_ascii=False, indent=2)[:12_000],
+                               style=DIM, markup=False, highlight=False, soft_wrap=True)
+            idx = menu_select("MCP sampling consent", ["approve once", "decline", "cancel"],
+                              ["continue this request", "tell the server no", "dismiss"])
+            if cancel is not None and cancel.is_set():
+                return {"action": "cancel"}
+            return {"action": {0: "accept", 1: "decline"}.get(idx, "cancel")}
+        if kind != "elicitation":
+            return {"action": "cancel"}
+
+        message = str(payload.get("message") or "")
+        self.console.print(message, markup=False, highlight=False, soft_wrap=True)
+        if payload.get("mode") == "url":
+            url, host = str(payload.get("url") or ""), str(payload.get("host") or "")
+            self.console.print(f"Host: {host}", style="bold", markup=False)
+            self.console.print(url, style=DIM, markup=False, highlight=False, soft_wrap=True)
+            if payload.get("suspicious_host"):
+                self.console.print("Warning: this host contains Punycode; inspect it carefully.",
+                                   style="bold red", markup=False)
+            idx = menu_select("Open this exact URL?", ["open in browser", "decline", "cancel"],
+                              ["navigate outside DGC", "tell the server no", "dismiss"])
+            if idx != 0:
+                return {"action": "decline" if idx == 1 else "cancel"}
+            if cancel is not None and cancel.is_set():
+                return {"action": "cancel"}
+            try:
+                opened = webbrowser.open(url, new=2)
+            except Exception:
+                opened = False
+            if not opened:
+                self.error("could not open the MCP URL in a browser")
+                return {"action": "cancel"}
+            return {"action": "accept"}
+
+        schema = payload.get("requestedSchema") or {}
+        properties = schema.get("properties") or {}
+        required = set(schema.get("required") or [])
+        from .mcp import MCPInputError, _form_options, validate_elicitation_response
+
+        while True:
+            content: dict = {}
+            try:
+                for key, field in properties.items():
+                    label = str(field.get("title") or key)
+                    optional = key not in required
+                    options = _form_options(field)
+                    kind_name = field.get("type")
+                    if kind_name == "array":
+                        shown = [str(item.get("title")) for item in
+                                 (field.get("items") or {}).get("anyOf", [])] or options
+                        self.console.print(f"  {label}: " + ", ".join(
+                            f"{i + 1}={name}" for i, name in enumerate(shown)), markup=False)
+                        raw = input("  choose comma-separated numbers" +
+                                    (" (blank skips)" if optional else "") + " › ").strip()
+                        if not raw and optional:
+                            continue
+                        picks = [] if not raw else [int(part.strip()) - 1 for part in raw.split(",")]
+                        content[key] = [options[i] for i in picks if 0 <= i < len(options)]
+                    elif options:
+                        labels = ([str(item.get("title")) for item in field.get("oneOf", [])]
+                                  or list(field.get("enumNames") or []) or options)
+                        rows = list(labels) + (["skip"] if optional else [])
+                        idx = menu_select(label, rows, [""] * len(rows))
+                        if idx is None or (optional and idx == len(labels)):
+                            continue
+                        content[key] = options[idx]
+                    elif kind_name == "boolean":
+                        rows = ["yes", "no"] + (["skip"] if optional else [])
+                        idx = menu_select(label, rows, [""] * len(rows))
+                        if idx is None or (optional and idx == 2):
+                            continue
+                        content[key] = idx == 0
+                    else:
+                        default = field.get("default")
+                        hint = f" [{default}]" if default is not None else ""
+                        raw = input(f"  {label}{hint}{' (optional)' if optional else ''} › ").strip()
+                        if not raw and default is not None:
+                            value = default
+                        elif not raw and optional:
+                            continue
+                        elif kind_name == "integer":
+                            value = int(raw)
+                        elif kind_name == "number":
+                            value = float(raw)
+                        else:
+                            value = raw
+                        content[key] = value
+                candidate = validate_elicitation_response(
+                    payload, {"action": "accept", "content": content})
+            except (EOFError, KeyboardInterrupt):
+                return {"action": "cancel"}
+            except (ValueError, IndexError, MCPInputError) as exc:
+                self.error(f"invalid form response: {exc}")
+                continue
+            self.console.print("Review before sharing:", style="bold", markup=False)
+            self.console.print(json.dumps(candidate["content"], ensure_ascii=False, indent=2),
+                               style=DIM, markup=False, highlight=False)
+            idx = menu_select("Send this form to the MCP server?",
+                              ["submit", "edit", "decline", "cancel"],
+                              ["share these exact values", "change answers", "tell the server no", "dismiss"])
+            if cancel is not None and cancel.is_set():
+                return {"action": "cancel"}
+            if idx == 0:
+                return candidate
+            if idx == 2:
+                return {"action": "decline"}
+            if idx != 1:
+                return {"action": "cancel"}
 
     # ---------------------------------------------------------------- misc ---
     def on_todo(self, todos: list) -> None:

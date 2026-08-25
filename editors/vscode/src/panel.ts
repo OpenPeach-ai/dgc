@@ -36,6 +36,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private _installPrompted = false;
   private modelRequest = 0;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
+  private mcpUrls = new Map<string, string>();
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -114,6 +115,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
     be.on("exit", (code: number | null) => {
+      this.mcpUrls.clear();
       this.post({ type: "backend_exit", code });
     });
     be.start();
@@ -124,6 +126,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   restart(): void {
     this.backend?.dispose();
     this.backend = undefined;
+    this.mcpUrls.clear();
     this.ensureBackend();
     this.post({ type: "cleared" });
   }
@@ -177,6 +180,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "config":
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
+        break;
+      case "mcp_input_request":
+        if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
+          this.mcpUrls.set(String(ev.id), String(ev.payload.url || ""));
+        }
+        break;
+      case "request_expired":
+        this.mcpUrls.delete(String(ev.id));
+        break;
+      case "turn_end":
+        this.mcpUrls.clear();
         break;
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
@@ -274,7 +288,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "options_response":
         be.send({ type: "options_response", id: msg.id, choice: msg.choice });
         break;
+      case "mcp_input_response": {
+        let action = msg.action;
+        const url = this.mcpUrls.get(String(msg.id));
+        this.mcpUrls.delete(String(msg.id));
+        if (action === "accept" && url) {
+          try {
+            const parsed = new URL(url);
+            const target = vscode.Uri.parse(url, true);
+            const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
+            if (target.scheme !== "https" && !(target.scheme === "http" && loopback)) {
+              action = "cancel";
+            } else if (!await vscode.env.openExternal(target)) {
+              action = "cancel";
+            }
+          } catch {
+            action = "cancel";
+          }
+        }
+        be.send({ type: "mcp_input_response", id: msg.id, action,
+                  content: msg.content });
+        break;
+      }
       case "cancel":
+        this.mcpUrls.clear();
         be.send({ type: "cancel" });
         break;
       case "pickModel":

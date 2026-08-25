@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v2 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v3 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -87,6 +87,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
     "options_request": {"id": _S(), "question": _S(), "options": _A()},
+    "mcp_input_request": {
+        "id": _S(), "server": _S(),
+        "kind": _f("string", enum=("elicitation", "sampling_request", "sampling_response")),
+        "payload": _O(),
+    },
     "context": {
         "used": _I(), "size": _I(), "input_tokens": _I(False),
         "output_tokens": _I(False), "cached_input_tokens": _I(False),
@@ -155,6 +160,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "feedback": _S(False),
     },
     "options_response": {"id": _S(), "choice": _f("string", "integer")},
+    "mcp_input_response": {
+        "id": _S(), "action": _f("string", enum=("accept", "decline", "cancel")),
+        "content": _O(False),
+    },
     "cancel": {},
     "interrupt": {},
     "set_mode": {

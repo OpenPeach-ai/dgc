@@ -145,6 +145,7 @@
   }
   function endTurn() {
     if (!turn) return;
+    turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     clearInterval(turn.timer);
     turn.act.classList.add("done");
     turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
@@ -296,6 +297,106 @@
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) }); resolveCard(c); });
         break;
       }
+      case "mcp_input_request": {
+        ensureTurn();
+        const p = ev.payload || {};
+        const title = `MCP server ${ev.server} requests input`;
+        speak(title);
+        if (ev.kind === "sampling_request" || ev.kind === "sampling_response") {
+          const question = ev.kind === "sampling_request"
+            ? "Allow this server to ask your model?"
+            : "Share this generated response with the server?";
+          const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> ${esc(question)}</div><div class="muted">Requested by ${esc(ev.server)}</div><pre>${esc(JSON.stringify(p, null, 2).slice(0, 12000))}</pre><div class="btns"><button type="button" class="act primary" data-a="accept">Approve once</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
+          c.dataset.requestId = String(ev.id);
+          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+            vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
+            resolveCard(c);
+          });
+          break;
+        }
+        if (ev.kind !== "elicitation") break;
+        if (p.mode === "url") {
+          const warning = p.suspicious_host
+            ? `<div class="err">Punycode host — inspect carefully for lookalike characters.</div>` : "";
+          const c = decisionCard(`<div class="q"><span class="codicon codicon-link-external" aria-hidden="true"></span> Open a URL outside DGC?</div><div class="muted">Requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><div><b>Host:</b> ${esc(p.host || "")}</div><pre>${esc(p.url || "")}</pre>${warning}<div class="btns"><button type="button" class="act primary" data-a="accept">Open in secure browser</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div>`, title);
+          c.dataset.requestId = String(ev.id);
+          c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+            vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
+            resolveCard(c);
+          });
+          break;
+        }
+        const schema = p.requestedSchema || {}, fields = Object.entries(schema.properties || {});
+        const required = new Set(schema.required || []);
+        const optionsFor = (f) => f.oneOf?.map((o) => ({ value: o.const, title: o.title }))
+          || f.enum?.map((v, i) => ({ value: v, title: f.enumNames?.[i] || v }))
+          || f.items?.anyOf?.map((o) => ({ value: o.const, title: o.title }))
+          || f.items?.enum?.map((v) => ({ value: v, title: v })) || [];
+        const controls = fields.map(([key, f], i) => {
+          const id = `mcp-field-${ev.id}-${i}`, label = f.title || key;
+          const req = required.has(key) ? " required" : "";
+          const desc = f.description ? `<div class="muted">${esc(f.description)}</div>` : "";
+          const opts = optionsFor(f);
+          let control;
+          if (f.type === "array") {
+            control = `<select id="${esc(id)}" data-mcp-field="${i}" multiple${req}>${opts.map((o) => `<option value="${esc(o.value)}"${(f.default || []).includes(o.value) ? " selected" : ""}>${esc(o.title)}</option>`).join("")}</select>`;
+          } else if (opts.length) {
+            control = `<select id="${esc(id)}" data-mcp-field="${i}"${req}>${required.has(key) ? "" : '<option value="">Skip</option>'}${opts.map((o) => `<option value="${esc(o.value)}"${f.default === o.value ? " selected" : ""}>${esc(o.title)}</option>`).join("")}</select>`;
+          } else if (f.type === "boolean") {
+            const skip = required.has(key) ? "" : '<option value="">Skip</option>';
+            const yes = `<option value="true"${f.default === true ? " selected" : ""}>Yes</option>`;
+            const no = `<option value="false"${f.default === false ? " selected" : ""}>No</option>`;
+            control = `<select id="${esc(id)}" data-mcp-field="${i}"${req}>${skip}${yes}${no}</select>`;
+          } else {
+            const inputType = f.type === "integer" || f.type === "number" ? "number"
+              : ({ email: "email", uri: "url", date: "date", "date-time": "datetime-local" }[f.format] || "text");
+            const step = f.type === "integer" ? ' step="1"' : f.type === "number" ? ' step="any"' : "";
+            const min = f.minimum !== undefined ? ` min="${Number(f.minimum)}"` : "";
+            const max = f.maximum !== undefined ? ` max="${Number(f.maximum)}"` : "";
+            const minLen = f.minLength !== undefined ? ` minlength="${Number(f.minLength)}"` : "";
+            const maxLen = f.maxLength !== undefined ? ` maxlength="${Number(f.maxLength)}"` : "";
+            control = `<input id="${esc(id)}" data-mcp-field="${i}" type="${inputType}" value="${esc(f.default ?? "")}"${step}${min}${max}${minLen}${maxLen}${req}>`;
+          }
+          return `<div class="mcp-field"><label for="${esc(id)}">${esc(label)}${required.has(key) ? " *" : ""}</label>${desc}${control}</div>`;
+        }).join("");
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-form" aria-hidden="true"></span> Information requested by ${esc(ev.server)}</div><p>${esc(p.message || "")}</p><form class="mcp-form">${controls}<div class="muted">Review and edit every value before submitting. Never enter passwords, API keys, access tokens, or payment credentials here.</div><div class="btns"><button type="submit" class="act primary">Submit</button><button type="button" class="act" data-a="decline">Decline</button><button type="button" class="act" data-a="cancel">Cancel</button></div></form>`, title);
+        c.dataset.requestId = String(ev.id);
+        const form = c.querySelector("form");
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          fields.forEach(([, f], i) => {
+            if (f.type !== "array") return;
+            const control = form.querySelector(`[data-mcp-field="${i}"]`);
+            const count = control.selectedOptions.length;
+            const min = Number.isInteger(f.minItems) ? f.minItems : 0;
+            const max = Number.isInteger(f.maxItems) ? f.maxItems : optionsFor(f).length;
+            control.setCustomValidity(count < min || count > max
+              ? `Choose between ${min} and ${max} values.` : "");
+          });
+          if (!form.reportValidity()) return;
+          const content = Object.create(null);
+          fields.forEach(([key, f], i) => {
+            const control = form.querySelector(`[data-mcp-field="${i}"]`);
+            if (f.type === "array") {
+              const selected = [...control.selectedOptions].map((o) => o.value);
+              if (selected.length || required.has(key)) content[key] = selected;
+            }
+            else if (f.type === "boolean") {
+              if (control.value !== "" || required.has(key)) content[key] = control.value === "true";
+            }
+            else if (control.value !== "" || required.has(key)) content[key] =
+              f.type === "integer" ? Number.parseInt(control.value, 10)
+              : f.type === "number" ? Number(control.value) : control.value;
+          });
+          vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: "accept", content });
+          resolveCard(c);
+        };
+        c.querySelectorAll("button[data-a]").forEach((b) => b.onclick = () => {
+          vscode.postMessage({ type: "mcp_input_response", id: ev.id, action: b.dataset.a });
+          resolveCard(c);
+        });
+        break;
+      }
       case "todos": {
         ensureTurn();
         if (!turn._todo) { turn._todo = el("div", "todos"); turn.block.appendChild(turn._todo); }
@@ -351,7 +452,11 @@
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
       case "command_rejected": sysLine(ev.message || "Command unavailable while a turn is running", true); break;
-      case "request_expired": sysLine("Approval request expired; the action was denied.", true); break;
+      case "request_expired":
+        document.querySelectorAll(".card[data-request-id]").forEach((card) => {
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card);
+        });
+        sysLine("Approval request expired; the action was denied.", true); break;
       case "compacted": sysLine("context compacted"); break;
       case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
       case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(); setSending(false); break;

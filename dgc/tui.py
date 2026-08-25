@@ -12,11 +12,13 @@ the composer via a cross-thread request + event.
 from __future__ import annotations
 
 import io
+import json
 import math
 import re
 import shlex
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 from prompt_toolkit.application import Application
@@ -1898,7 +1900,7 @@ class TUI:
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
 
-    def _ask(self, req: dict):
+    def _ask(self, req: dict, cancel=None):
         """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
         thread answers via on_pick / number keys / Esc. If the session is on screen the card opens
         now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
@@ -1916,7 +1918,10 @@ class TUI:
             self._flash(f"◆ {sess.name or 'agent'} needs you — ^\\ to answer")
         self._invalidate()
 
-        sess._req_event.wait()
+        while not sess._req_event.wait(0.1):
+            if cancel is not None and cancel.is_set():
+                sess._req_answer = None
+                break
         sess._req = None
         if sess is self.active and self._overlay is not None:
             self._overlay = None                        # close (option chosen or Esc-cancelled)
@@ -1945,7 +1950,7 @@ class TUI:
         self.deny_reason = ""
         return {0: "once", 1: "always"}.get(ans, "no")
 
-    def _ask_text(self, prompt: str) -> str:
+    def _ask_text(self, prompt: str, cancel=None) -> str:
         """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
         result = {"v": ""}
         self._req_event.clear()
@@ -1955,7 +1960,9 @@ class TUI:
             self._req_event.set()
         self._input = {"cb": cb, "prompt": prompt}
         self._invalidate()
-        self._req_event.wait()
+        while not self._req_event.wait(0.1):
+            if cancel is not None and cancel.is_set():
+                break
         self._input = None
         self._invalidate()
         return result["v"].strip()
@@ -1992,6 +1999,138 @@ class TUI:
         ans = self._ask({"kind": "options", "options": list(options),
                          "header": [Text(question, style="bold")]})
         return options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else options[0]
+
+    def mcp_capabilities(self) -> dict:
+        return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
+
+    def mcp_input(self, server: str, kind: str, payload: dict, *, cancel=None) -> dict:
+        """Park a consent card on the owning fleet session and fail closed on dismissal."""
+        from rich.text import Text
+        self._flush_text()
+        if cancel is not None and cancel.is_set():
+            return {"action": "cancel"}
+        th = style_mod.theme()
+        self._append(self._rich(
+            f"[bold {th.accent}]MCP input requested · {_esc(str(server)[:120])}[/]"))
+        if kind in ("sampling_request", "sampling_response"):
+            title = ("Allow this server to ask your model?" if kind == "sampling_request"
+                     else "Share this generated response with the server?")
+            preview = json.dumps(payload, ensure_ascii=False, indent=2)[:12_000]
+            self._append(self._rich(f"[bold]{_esc(title)}[/]\n[{th.muted}]{_esc(preview)}[/]"))
+            ans = self._ask({"kind": kind,
+                             "header": [Text(title, style="bold")],
+                             "options": ["Approve once", "Decline", "Cancel"],
+                             "footer": "review carefully · Esc cancels"}, cancel=cancel)
+            return {"action": {0: "accept", 1: "decline"}.get(ans, "cancel")}
+        if kind != "elicitation":
+            return {"action": "cancel"}
+
+        message = str(payload.get("message") or "")
+        self._append(self._rich(_esc(message)))
+        if payload.get("mode") == "url":
+            url, host = str(payload.get("url") or ""), str(payload.get("host") or "")
+            warning = ("\n[bold red]Punycode host — inspect for lookalike characters.[/]"
+                       if payload.get("suspicious_host") else "")
+            self._append(self._rich(
+                f"[bold]Host: {_esc(host)}[/]\n[{th.muted}]{_esc(url)}[/]{warning}"))
+            ans = self._ask({"kind": "mcp-url",
+                             "header": [Text("Open this exact URL outside DGC?", style="bold")],
+                             "options": ["Open in browser", "Decline", "Cancel"],
+                             "footer": "the server cannot see browser input · Esc cancels"}, cancel=cancel)
+            if ans != 0:
+                return {"action": "decline" if ans == 1 else "cancel"}
+            if cancel is not None and cancel.is_set():
+                return {"action": "cancel"}
+            try:
+                opened = webbrowser.open(url, new=2)
+            except Exception:
+                opened = False
+            if not opened:
+                self.error("could not open the MCP URL in a browser")
+                return {"action": "cancel"}
+            return {"action": "accept"}
+
+        schema = payload.get("requestedSchema") or {}
+        properties = schema.get("properties") or {}
+        required = set(schema.get("required") or [])
+        from .mcp import MCPInputError, _form_options, validate_elicitation_response
+        while True:
+            content: dict = {}
+            try:
+                for key, field in properties.items():
+                    label = str(field.get("title") or key)
+                    optional = key not in required
+                    options = _form_options(field)
+                    field_kind = field.get("type")
+                    if field_kind == "array":
+                        titles = [str(item.get("title")) for item in
+                                  (field.get("items") or {}).get("anyOf", [])] or options
+                        self._append(self._rich(_esc(
+                            f"{label}: " + ", ".join(f"{i + 1}={v}" for i, v in enumerate(titles)))))
+                        raw = self._ask_text(
+                            f"{label} · comma-separated numbers{' · blank skips' if optional else ''}:",
+                            cancel=cancel)
+                        if cancel is not None and cancel.is_set():
+                            return {"action": "cancel"}
+                        if not raw and optional:
+                            continue
+                        picks = [] if not raw else [int(part.strip()) - 1 for part in raw.split(",")]
+                        content[key] = [options[i] for i in picks if 0 <= i < len(options)]
+                    elif options:
+                        labels = ([str(item.get("title")) for item in field.get("oneOf", [])]
+                                  or list(field.get("enumNames") or []) or options)
+                        rows = list(labels) + (["Skip this field"] if optional else [])
+                        ans = self._ask({"kind": "mcp-form-field", "header": [Text(label, style="bold")],
+                                         "options": rows}, cancel=cancel)
+                        if ans is None:
+                            return {"action": "cancel"}
+                        if optional and ans == len(labels):
+                            continue
+                        content[key] = options[ans]
+                    elif field_kind == "boolean":
+                        rows = ["Yes", "No"] + (["Skip this field"] if optional else [])
+                        ans = self._ask({"kind": "mcp-form-field", "header": [Text(label, style="bold")],
+                                         "options": rows}, cancel=cancel)
+                        if ans is None:
+                            return {"action": "cancel"}
+                        if optional and ans == 2:
+                            continue
+                        content[key] = ans == 0
+                    else:
+                        default = field.get("default")
+                        raw = self._ask_text(
+                            f"{label}{f' · default {default}' if default is not None else ''}"
+                            f"{' · optional' if optional else ''}:", cancel=cancel)
+                        if cancel is not None and cancel.is_set():
+                            return {"action": "cancel"}
+                        if not raw and default is not None:
+                            value = default
+                        elif not raw and optional:
+                            continue
+                        elif field_kind == "integer":
+                            value = int(raw)
+                        elif field_kind == "number":
+                            value = float(raw)
+                        else:
+                            value = raw
+                        content[key] = value
+                candidate = validate_elicitation_response(
+                    payload, {"action": "accept", "content": content})
+            except (ValueError, IndexError, MCPInputError) as exc:
+                self.error(f"invalid form response: {exc}")
+                continue
+            preview = json.dumps(candidate["content"], ensure_ascii=False, indent=2)
+            self._append(self._rich(
+                f"[bold]Review before sharing[/]\n[{th.muted}]{_esc(preview)}[/]"))
+            ans = self._ask({"kind": "mcp-form-review",
+                             "options": ["Submit these values", "Edit answers", "Decline", "Cancel"],
+                             "footer": "nothing is sent until Submit · Esc cancels"}, cancel=cancel)
+            if ans == 0:
+                return candidate
+            if ans == 2:
+                return {"action": "decline"}
+            if ans != 1:
+                return {"action": "cancel"}
 
     # --------------------------------------------------------------- the app ---
     def _build(self) -> None:

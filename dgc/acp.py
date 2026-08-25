@@ -14,6 +14,8 @@ import itertools
 import json
 import sys
 import threading
+import time
+import webbrowser
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -87,7 +89,7 @@ class ACPServer:
             msg["result"] = result if result is not None else {}
         self._write(msg)
 
-    def request(self, method: str, params: dict, timeout: float = 3600.0):
+    def request(self, method: str, params: dict, timeout: float = 3600.0, cancel=None):
         """Server-initiated request (e.g. session/request_permission). Blocks for the reply."""
         rid = next(self._rid)
         ev = threading.Event()
@@ -96,18 +98,21 @@ class ACPServer:
         with self._pending_lock:
             self._pending[rid] = slot
         self._write({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
-        if not ev.wait(timeout):
-            with self._pending_lock:
-                self._pending.pop(rid, None)
-            return None
+        deadline = time.monotonic() + max(0.01, float(timeout))
+        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+            if (cancel is not None and cancel.is_set()) or time.monotonic() >= deadline:
+                with self._pending_lock:
+                    self._pending.pop(rid, None)
+                return None
         return holder[0]
 
     def _cancel_requests(self, sid: str) -> None:
         with self._pending_lock:
-            slots = [slot for slot in self._pending.values() if slot.get("session_id") == sid]
-            for slot in slots:
-                slot["holder"][0] = {"outcome": {"outcome": "cancelled"}}
-                slot["event"].set()
+            slots = [self._pending.pop(rid) for rid, slot in list(self._pending.items())
+                     if slot.get("session_id") == sid]
+        for slot in slots:
+            slot["holder"][0] = {"outcome": {"outcome": "cancelled"}}
+            slot["event"].set()
 
     def _state(self, sid) -> _ACPState | None:
         with self._sessions_lock:
@@ -574,6 +579,51 @@ class _ACPUi:
             except (ValueError, IndexError):
                 pass
         return options[0] if options else ""
+
+    def mcp_capabilities(self) -> dict:
+        # ACP's portable permission request carries binary consent, not an arbitrary form editor.
+        return {"sampling": {}, "elicitation": {"url": {}}}
+
+    def mcp_input(self, server, kind, payload, *, cancel=None):
+        if cancel is not None and cancel.is_set():
+            return {"action": "cancel"}
+        if kind == "elicitation" and payload.get("mode") != "url":
+            return {"action": "cancel"}
+        tcid = f"mcp{next(self._tc)}"
+        if kind == "sampling_request":
+            title = f"Allow MCP server {server} to ask your model?"
+        elif kind == "sampling_response":
+            title = f"Share sampled response with MCP server {server}?"
+        else:
+            title = f"Open URL requested by MCP server {server}?"
+        self._update({"sessionUpdate": "tool_call", "toolCallId": tcid, "title": title,
+                      "kind": "other", "status": "pending", "rawInput": payload,
+                      "content": [{"type": "content", "content": {"type": "text",
+                      "text": json.dumps(payload, ensure_ascii=False)[:8000]}}]})
+        res = self.s.request("session/request_permission", {
+            "sessionId": self.sid,
+            "toolCall": {"toolCallId": tcid, "title": title, "kind": "other",
+                         "rawInput": payload},
+            "options": [
+                {"optionId": "accept", "name": "Approve once", "kind": "allow_once"},
+                {"optionId": "decline", "name": "Decline", "kind": "reject_once"},
+                {"optionId": "cancel", "name": "Cancel", "kind": "reject_once"}]},
+            timeout=self.approval_timeout_s, cancel=cancel)
+        outcome = (res or {}).get("outcome", {})
+        action = outcome.get("optionId") if outcome.get("outcome") == "selected" else "cancel"
+        if action not in ("accept", "decline", "cancel"):
+            action = "cancel"
+        if cancel is not None and cancel.is_set():
+            action = "cancel"
+        if action == "accept" and kind == "elicitation":
+            try:
+                if not webbrowser.open(str(payload.get("url") or ""), new=2):
+                    action = "cancel"
+            except Exception:
+                action = "cancel"
+        self._update({"sessionUpdate": "tool_call_update", "toolCallId": tcid,
+                      "status": "completed" if action == "accept" else "failed"})
+        return {"action": action}
 
     def info(self, msg):
         self.on_text(f"\n[{msg}]\n")

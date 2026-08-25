@@ -163,9 +163,14 @@ Inbound and outbound stdio frames are bounded. If a server stops reading its pip
 the request write remains cancellable, the poisoned process is reaped, and `/mcp`
 reports the disconnected state instead of freezing the agent.
 
-Modern roots requests are answered through bounded multi-round-trip requests.
-Sampling and elicitation are not advertised yet and fail closed because they need
-their own model and user-consent boundaries.
+Modern roots, elicitation, and tools-free sampling inputs are answered through
+bounded multi-round-trip requests; legacy elicitation/sampling callbacks are accepted
+only while exactly one originating tool request is active. Every frontend makes the requesting server
+visible. Forms reject credential/payment fields and are type-checked again before
+sharing. URL requests show the exact host and URL, never prefetch, require consent,
+and allow remote HTTPS or loopback HTTP only. Sampling has no tools, MCP context, or
+project transcript and requires approval before generation and again before its
+response is disclosed. Unsupported modes are not advertised and fail closed.
 
 Servers are stored in your config under `mcp_servers`, so they reconnect on the
 next launch.
