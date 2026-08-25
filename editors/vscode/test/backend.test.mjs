@@ -105,6 +105,15 @@ test("backend gates startup, survives error events, and restarts on the next com
   backend.send({ type: "status" });
   await stillAlive;
 
+  const optionalFields = waitFor(backend, "info",
+    (event) => echoedCommand(event)?.type === "set_model");
+  assert.equal(backend.send({ type: "set_model", base_url: "https://provider.invalid/v1",
+    api_key: "sentinel", model: undefined }), true);
+  const optionalCommand = echoedCommand(await optionalFields);
+  assert.deepEqual(optionalCommand, { type: "set_model",
+    base_url: "https://provider.invalid/v1", api_key: "sentinel" },
+    "optional undefined properties must be omitted before validating the JSON wire object");
+
   const exited = waitFor(backend, "exit", (code) => code === 7);
   backend.send({ type: "compact" });
   await exited;

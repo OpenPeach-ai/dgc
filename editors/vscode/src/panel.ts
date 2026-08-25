@@ -37,6 +37,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private modelRequest = 0;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
   private mcpUrls = new Map<string, string>();
+  private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
@@ -727,7 +728,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const saved = await this.context.secrets.get(key);
     const config = vscode.workspace.getConfiguration("dgc");
     const legacy = config.get<string>(id, "");
-    if (!saved && legacy) { await this.storeSecret(id, legacy, endpoint); }
+    const migrated = !saved && Boolean(legacy);
+    if (migrated) {
+      await this.storeSecret(id, legacy, endpoint);
+    }
 
     // One-way compatibility migration from the old plaintext settings. Remove
     // every scope after the value is safely in SecretStorage so it cannot linger
@@ -738,12 +742,34 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
       [inspected?.globalValue, vscode.ConfigurationTarget.Global],
     ];
-    for (const [value, target] of oldScopes) {
-      if (value !== undefined) { await config.update(id, undefined, target); }
+    // Removed configuration keys can make VS Code reject—or, when its file watcher
+    // is unhealthy, never settle—the update even after settings.json was rewritten.
+    // Keep each cleanup alive, but never hold the credential/backend handshake forever.
+    const removals = oldScopes.filter(([value]) => value !== undefined).map(async ([, target]) => {
+      try { await config.update(id, undefined, target); }
+      catch { /* verify the post-update configuration below */ }
+    });
+    if (removals.length) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1500);
+        void Promise.all(removals).then(() => { clearTimeout(timer); resolve(); });
+      });
+    }
+    const remaining = config.inspect<string>(id);
+    const plaintextRemains = remaining?.workspaceFolderValue !== undefined
+      || remaining?.workspaceValue !== undefined || remaining?.globalValue !== undefined;
+    if (plaintextRemains && !this.plaintextSecretWarnings.has(id)) {
+      this.plaintextSecretWarnings.add(id);
+      void vscode.window.showWarningMessage(
+        `DGC secured this key, but VS Code could not remove the legacy plaintext dgc.${id} setting from every scope. Delete that setting manually.`);
     }
     const secret = saved || legacy;
     if (!secret) { return ""; }
-    const boundEndpoint = await this.context.secrets.get(`${key}.endpoint`);
+    // A completed migration just stored both values atomically from this call's
+    // perspective; avoid a redundant keyring read on the activation hot path.
+    const boundEndpoint = migrated
+      ? endpointId(endpoint)
+      : await this.context.secrets.get(`${key}.endpoint`);
     if (!boundEndpoint || boundEndpoint !== endpointId(endpoint)) {
       await this.deleteSecret(id);
       void vscode.window.showWarningMessage(
@@ -799,7 +825,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const apiKey = await this.storedSecret("apiKey", effectiveBase);
     const model = c.get<string>("model", "");
     if (baseUrl || apiKey || model) {
-      send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
+      send({ type: "set_model", base_url: baseUrl || undefined,
+             api_key: apiKey || undefined, model: model || undefined });
     }
     const values: any = {};
     const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };

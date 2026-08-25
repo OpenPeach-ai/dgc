@@ -29,6 +29,10 @@ function sameRoots(actual, expected) {
   return left.every((path, index) => path === right[index]);
 }
 
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 /** Run inside a real VS Code extension host (invoked by run-extension-host.mjs). */
 async function run() {
   const extension = vscode.extensions.getExtension("vibedgc.dgc");
@@ -55,18 +59,60 @@ async function run() {
 
   const backendPath = process.env.DGC_EXTENSION_TEST_BACKEND;
   const backendLogPath = process.env.DGC_EXTENSION_TEST_BACKEND_LOG;
+  const settingsPath = process.env.DGC_EXTENSION_TEST_SETTINGS;
   const primaryRoot = process.env.DGC_EXTENSION_TEST_PRIMARY_ROOT;
   const secondaryRoot = process.env.DGC_EXTENSION_TEST_SECONDARY_ROOT;
-  assert.ok(backendPath && backendLogPath && primaryRoot && secondaryRoot,
-    "the host runner must provide its fixture backend and workspace roots");
+  const changedEndpoint = process.env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT;
+  assert.ok(backendPath && backendLogPath && settingsPath && primaryRoot && secondaryRoot
+    && changedEndpoint, "the host runner must provide its fixture backend and workspace roots");
+  const seededSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  const fixtureSecret = seededSettings["dgc.apiKey"];
+  const initialEndpoint = seededSettings["dgc.baseUrl"];
+  assert.equal(typeof fixtureSecret, "string", "the disposable profile must contain a secret sentinel");
+  assert.equal(typeof initialEndpoint, "string", "the disposable profile must contain its initial endpoint");
   assert.deepEqual((vscode.workspace.workspaceFolders || []).map((folder) => resolve(folder.uri.fsPath)),
     [resolve(primaryRoot), resolve(secondaryRoot)], "VS Code must open the two-folder fixture workspace");
-  await config.update("command", backendPath, vscode.ConfigurationTarget.Global);
+  assert.equal(config.get("command", ""), backendPath,
+    "the disposable user profile must select the fixture backend before activation");
+  assert.equal(config.get("apiKey", ""), fixtureSecret,
+    "the disposable user profile must expose the legacy plaintext setting for migration");
   await vscode.commands.executeCommand("dgc.focus");
   const rootsCommands = () => backendCommands(backendLogPath)
     .filter((command) => command.type === "set_workspace_roots");
+  const modelCommands = () => backendCommands(backendLogPath)
+    .filter((command) => command.type === "set_model");
   await waitFor(() => rootsCommands().some((command) =>
     sameRoots(command.roots, [primaryRoot, secondaryRoot])));
+  await waitFor(() => modelCommands().length > 0);
+  const migratedCommand = modelCommands().find((command) => command.base_url === initialEndpoint);
+  assert.ok(migratedCommand, "native settings must send the configured initial endpoint");
+  assert.equal(migratedCommand.api_key === fixtureSecret, true,
+    "legacy plaintext must migrate through SecretStorage into backend setup");
+  await waitFor(() => !hasOwn(JSON.parse(readFileSync(settingsPath, "utf8")), "dgc.apiKey"));
+
+  // The plaintext setting is gone. A fresh backend must still receive the sentinel,
+  // proving that the value survived only through the extension host's SecretStorage.
+  const migratedModelCount = modelCommands().filter((command) =>
+    command.base_url === initialEndpoint && command.api_key === fixtureSecret).length;
+  const migratedRootCount = rootsCommands().length;
+  await vscode.commands.executeCommand("dgc.restart");
+  await waitFor(() => rootsCommands().length > migratedRootCount);
+  await waitFor(() => modelCommands().filter((command) =>
+    command.base_url === initialEndpoint && command.api_key === fixtureSecret).length
+      > migratedModelCount);
+
+  // Endpoint binding is part of the credential boundary. Moving to another host
+  // must delete the prior key and send no credential to the new endpoint.
+  const beforeEndpointChange = modelCommands().length;
+  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Global);
+  await waitFor(() => modelCommands().slice(beforeEndpointChange).some((command) =>
+    command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
+  const changedRootCount = rootsCommands().length;
+  const changedModelCount = modelCommands().length;
+  await vscode.commands.executeCommand("dgc.restart");
+  await waitFor(() => rootsCommands().length > changedRootCount);
+  await waitFor(() => modelCommands().slice(changedModelCount).some((command) =>
+    command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
 
   const initialCount = rootsCommands().length;
   assert.equal(vscode.workspace.updateWorkspaceFolders(1, 1), true,
@@ -86,7 +132,7 @@ async function run() {
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
-    handshake: true, multiRootLifecycle: true }));
+    handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true }));
 }
 
 module.exports = { run };

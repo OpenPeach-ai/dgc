@@ -390,16 +390,25 @@ export class DgcBackend extends EventEmitter {
   }
 
   private serialize(cmd: DgcCommand): PendingFrame | undefined {
-    const schemaProblem = dgcCommandError(cmd);
-    if (schemaProblem) {
-      this.reject(`DGC command violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
-      return undefined;
-    }
     let frame: string;
+    let wireCommand: DgcCommand;
     try {
-      frame = JSON.stringify(cmd) + "\n";
+      const encoded = JSON.stringify(cmd);
+      if (typeof encoded !== "string") {
+        throw new TypeError("command did not serialize to JSON");
+      }
+      // Validate the exact object the child will receive. In particular, optional
+      // JavaScript properties set to `undefined` are absent on the JSON wire and
+      // must not be rejected as though an invalid value had been transmitted.
+      wireCommand = JSON.parse(encoded) as DgcCommand;
+      frame = encoded + "\n";
     } catch {
       this.reject("DGC command is not JSON-serializable");
+      return undefined;
+    }
+    const schemaProblem = dgcCommandError(wireCommand);
+    if (schemaProblem) {
+      this.reject(`DGC command violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
       return undefined;
     }
     const bytes = Buffer.byteLength(frame, "utf8");
@@ -407,8 +416,8 @@ export class DgcBackend extends EventEmitter {
       this.reject(`DGC command exceeded ${MAX_COMMAND_BYTES} bytes`);
       return undefined;
     }
-    return { frame, bytes, type: String(cmd.type),
-             requestId: "id" in cmd ? String((cmd as any).id ?? "") : undefined };
+    return { frame, bytes, type: String(wireCommand.type),
+             requestId: "id" in wireCommand ? String((wireCommand as any).id ?? "") : undefined };
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */

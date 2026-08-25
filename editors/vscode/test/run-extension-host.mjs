@@ -14,12 +14,26 @@ const backendPath = join(scratch, "dgc-fixture");
 const backendLogPath = join(scratch, "backend.ndjson");
 const secondaryWorkspace = join(scratch, "secondary-workspace");
 const workspaceFile = join(scratch, "multi-root.code-workspace");
+const userDataDir = join(scratch, "user-data");
+const settingsPath = join(userDataDir, "User", "settings.json");
+const fixtureSecret = "dgc-extension-secret-sentinel";
+const initialEndpoint = "https://provider-a.invalid/v1";
+const changedEndpoint = "https://provider-b.invalid/v1";
 
 mkdirSync(secondaryWorkspace);
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
   { path: workspacePath },
   { path: secondaryWorkspace },
 ] }));
+mkdirSync(join(userDataDir, "User"), { recursive: true });
+// Simulate a pre-SecretStorage extension install. The sentinel exists only in this
+// disposable user-data directory and the fixture log, both removed in finally.
+writeFileSync(settingsPath, JSON.stringify({
+  "dgc.command": backendPath,
+  "dgc.baseUrl": initialEndpoint,
+  "dgc.apiKey": fixtureSecret,
+  "dgc.checkForUpdates": false,
+}));
 
 writeFileSync(backendPath, `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -47,7 +61,7 @@ const executable = configured || (existsSync(systemExecutable) ? systemExecutabl
 const args = [
   `--extensionDevelopmentPath=${extensionRoot}`,
   `--extensionTestsPath=${testsPath}`,
-  `--user-data-dir=${join(scratch, "user-data")}`,
+  `--user-data-dir=${userDataDir}`,
   `--extensions-dir=${join(scratch, "extensions")}`,
   "--disable-gpu",
   "--disable-dev-shm-usage",
@@ -57,6 +71,9 @@ const args = [
   "--disable-crash-reporter",
   "--disable-extension-gallery",
   "--disable-extensions",
+  // Exercise VS Code's real SecretStorage API without consulting or mutating the
+  // developer machine's desktop keychain from this disposable host process.
+  "--use-inmemory-secretstorage",
   "--no-sandbox",
   "--disable-chromium-sandbox",
   "--skip-welcome",
@@ -81,8 +98,10 @@ try {
   env.DGC_EXTENSION_TEST_RESULT = resultPath;
   env.DGC_EXTENSION_TEST_BACKEND = backendPath;
   env.DGC_EXTENSION_TEST_BACKEND_LOG = backendLogPath;
+  env.DGC_EXTENSION_TEST_SETTINGS = settingsPath;
   env.DGC_EXTENSION_TEST_PRIMARY_ROOT = workspacePath;
   env.DGC_EXTENSION_TEST_SECONDARY_ROOT = secondaryWorkspace;
+  env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT = changedEndpoint;
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
     env,
@@ -101,10 +120,15 @@ try {
   const evidence = JSON.parse(readFileSync(resultPath, "utf8"));
   if (evidence.activated !== true || evidence.handshake !== true
       || evidence.multiRootLifecycle !== true
+      || evidence.secretStorageLifecycle !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1) {
     throw new Error("VS Code extension-host test evidence was incomplete");
   }
-  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root lifecycle)\n`);
+  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root + SecretStorage lifecycle)\n`);
 } finally {
-  rmSync(scratch, { recursive: true, force: true });
+  if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
+    process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);
+  } else {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
