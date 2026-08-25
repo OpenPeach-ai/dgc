@@ -82,6 +82,11 @@ wall-time SIGKILL that bypasses the full-transcript finalizer. Schema-v4 and old
 a transcript-derived compatibility fallback and must not be mixed into a newly published controlled
 run.
 
+Round-two compiler/test diagnostics are path-normalized before they are returned to a harness. The
+official grader runs in a disposable clean fixture, so absolute paths from that deleted fixture are
+mapped to `./...` in the still-live exercise worktree; diagnostic text and line numbers are otherwise
+unchanged. This prevents a recovery turn from chasing files that no longer exist.
+
 Each run first preflights the selected harness, language toolchains, dataset, and C++ Boost
 dependency. It then writes a schema-v3 manifest with executable/toolchain hashes and versions,
 exact settings, runner/dataset commits, hardware, and a deterministic run ID. Set
@@ -101,6 +106,10 @@ and Pi sequentially, then writes a task-set/provenance-checked comparison with W
 intervals. By default it starts a loopback provider proxy that enforces reasoning off at the actual
 Ollama/OpenAI transport, drains final usage events, and records request metadata/usage without
 prompts or responses. `DGC_BENCH_NORMALIZE_THINKING=0` disables it only for a documented diagnostic.
+If a deadline-cancelled harness disconnects while the provider is still generating, the runner waits
+for the proxy to drain that request before taking the next round's log offset. It aborts fail-closed
+if quiescence cannot be proven, and DGC rows independently require provider request counts to match
+the crash-safe session journal. Late usage can therefore never leak into the next task.
 
 Without `DGC_BENCH_ALLOW_PARTIAL=1`, comparison rejects anything except all six engines, all 225
 tasks, a clean runner and dataset revision, immutable model digest, hardware label, transport

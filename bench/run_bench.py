@@ -23,11 +23,16 @@ from __future__ import annotations
 import argparse, hashlib, json, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import urlopen
 
 RESULT_SCHEMA_VERSION = 3
 TRACE_LIMIT = 120_000
+
+
+class UsageSynchronizationError(RuntimeError):
+    """Provider activity did not drain, so offset-based round attribution is unsafe."""
 
 
 def _dec(x):        # subprocess bytes → str (TimeoutExpired.stdout is bytes even under text=True)
@@ -203,6 +208,35 @@ def _usage_log_mark(env: dict) -> tuple[Path, int] | None:
         return path, 0
 
 
+def _wait_usage_quiescent(control: str, timeout: float) -> bool:
+    """Wait until requests predating the barrier have produced their usage records.
+
+    The proxy deliberately drains an Ollama stream after a deadline-cancelled harness disconnects,
+    because the final event contains authoritative usage. Such a request can outlive the harness by
+    minutes. Repeated 503 responses mean "still draining"; any other transport failure means the
+    evidence channel itself is unavailable and should fail closed.
+    """
+    deadline = time.monotonic() + max(1.0, float(timeout))
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            with urlopen(control, timeout=max(1.0, min(20.0, remaining))) as response:
+                if response.status == 204:
+                    return True
+                if response.status != 503:
+                    return False
+        except HTTPError as exc:
+            code = exc.code
+            exc.close()
+            if code != 503:
+                return False
+        except OSError:
+            return False
+        time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+
+
 def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> dict | None:
     """Sum provider-proxy usage appended since a round began."""
     if mark is None:
@@ -210,11 +244,17 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
     control = (env or {}).get("DGC_BENCH_PROXY_CONTROL") or os.environ.get("DGC_BENCH_PROXY_CONTROL")
     synchronized = False
     if control:
+        values = env or {}
         try:
-            with urlopen(control, timeout=20) as response:
-                synchronized = response.status == 204
-        except OSError:
-            synchronized = False
+            sync_timeout = float(values.get("DGC_BENCH_USAGE_SYNC_TIMEOUT")
+                                 or os.environ.get("DGC_BENCH_USAGE_SYNC_TIMEOUT") or 1860)
+        except (TypeError, ValueError):
+            sync_timeout = 1860
+        synchronized = _wait_usage_quiescent(control, sync_timeout)
+        if not synchronized:
+            raise UsageSynchronizationError(
+                f"provider usage did not become quiescent within {sync_timeout:g}s; "
+                "aborting before a late request can be attributed to the next round")
     path, offset = mark
     totals = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
               "cached_input_tokens": 0, "requests": 0, "synchronized": synchronized}
@@ -322,7 +362,8 @@ Iterate until every test passes. Do not stop until the implementation is done.
 {instr}
 """
 
-FIX_PROMPT = """The tests still fail. Here is the exact output of `{testcmd}`:
+FIX_PROMPT = """The tests still fail. Here is the path-normalized output of `{testcmd}`. Paths
+beginning with `./` refer to files in the current exercise directory:
 
 --- test output ---
 {output}
@@ -333,6 +374,25 @@ inconsistent or hard-code the displayed fixture. Preserve working code and the t
 make the smallest focused correction implied by the diagnostics instead of broadly rewriting the
 solution. Re-read the exact test declarations and current implementation, then fix {sol} so the
 whole suite passes. Do not modify the tests."""
+
+
+def _portable_grader_output(output: str, grade: Path) -> str:
+    """Replace the disposable isolated-grader root with a path valid in the agent worktree.
+
+    Grading happens in a clean copy that is deleted before round two. Compiler diagnostics often
+    contain its absolute path; feeding that path back makes a harness chase a nonexistent file and
+    distrust the real test. The diagnostic contents and line numbers remain unchanged.
+    """
+    candidates = {str(grade), grade.as_posix()}
+    try:
+        resolved = grade.resolve()
+        candidates.update((str(resolved), resolved.as_posix()))
+    except OSError:
+        pass
+    mapped = str(output or "")
+    for candidate in sorted((value for value in candidates if value), key=len, reverse=True):
+        mapped = mapped.replace(candidate, ".")
+    return mapped
 
 
 # -------------------------------------------------------------- environment ---
@@ -607,6 +667,19 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
         return {"stats_error": str(e)[:200]}
 
 
+def _reconcile_dgc_usage(run: dict, stats: dict) -> None:
+    """Cross-check independent provider and crash-safe session request counters in-place."""
+    usage = run.get("usage")
+    if not isinstance(usage, dict):
+        return
+    provider_requests = max(0, int(usage.get("requests", 0) or 0))
+    journal_requests = max(0, int(stats.get("requests", 0) or 0))
+    if provider_requests != journal_requests:
+        usage["synchronized"] = False
+        usage["request_mismatch"] = {
+            "provider": provider_requests, "session_journal": journal_requests}
+
+
 # ---------------------------------------------------------------- one run -----
 def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> dict:
     exdir = practice_dir(lang) / ex
@@ -650,6 +723,7 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> d
         prep_grade_workdir(exdir, work, grade, sol)
         try:
             ok, out, ttime = run_tests(lang, ex, grade, env, a.test_timeout)
+            out = _portable_grader_output(out, grade)
             solution_sha = _sha256_files(grade, sol)
             tests_sha = _sha256_files(grade, test)
         finally:
@@ -667,6 +741,8 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> d
         if "usage" not in run and a.engine == "dgc" and cumulative:
             run["usage"] = {key: stats.get(key, 0)
                             for key in ("input_tokens", "output_tokens", "requests")}
+        if a.engine == "dgc":
+            _reconcile_dgc_usage(run, stats)
         rec["rounds"].append({"round": r, "agent": run, "stats": stats,
                               "grader_isolated": True, "solution_sha256": solution_sha,
                               "tests_sha256": tests_sha, "test_pass": ok,
@@ -756,8 +832,10 @@ def summary_line(rec: dict) -> str:
     mark = "✅" if rec["solved"] else "❌"
     rnd = rec.get("solved_round", "-")
     t = sum((x.get("agent") or x.get("dgc") or {}).get("time", 0) for x in rec["rounds"])
-    st = rec["rounds"][-1].get("stats", {}) if rec["rounds"] else {}
-    ef = st.get("edit_fails", "?")
+    round_stats = [rd.get("stats", {}) for rd in rec.get("rounds", [])]
+    known_edit_counts = [st.get("edit_fails") for st in round_stats
+                         if isinstance(st.get("edit_fails"), int)]
+    ef = sum(known_edit_counts) if known_edit_counts else "?"
     usages = [(rd.get("agent") or rd.get("dgc") or {}).get("usage") for rd in rec["rounds"]]
     out_tokens = (sum(int((usage or {}).get("output_tokens", 0) or 0) for usage in usages)
                   if usages and all(isinstance(usage, dict)
@@ -854,6 +932,11 @@ def main() -> None:
                 continue
             try:
                 rec = run_one(lang, ex, a, home, env, manifest["run_id"])
+            except UsageSynchronizationError:
+                # Offset-based accounting becomes corrupt if a late provider request is allowed to
+                # cross into the next task's mark. Fail immediately and let the league launcher reap
+                # the proxy rather than manufacturing misleading evidence.
+                raise
             except Exception as e:                       # never let one exercise kill the whole run
                 import traceback
                 rec = {"schema_version": RESULT_SCHEMA_VERSION, "run_id": manifest["run_id"],

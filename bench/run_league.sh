@@ -71,6 +71,10 @@ if [ "${DGC_BENCH_NORMALIZE_THINKING:-1}" = 1 ]; then
   export DGC_BENCH_USAGE_SOURCE=provider-proxy
   export DGC_BENCH_USAGE_LOG="$usage_log"
   export DGC_BENCH_PROXY_CONTROL="http://127.0.0.1:$proxy_port/__dgc_bench__/flush"
+  # A deadline-cancelled harness can disconnect while Ollama is still generating. The proxy drains
+  # that upstream stream so its final usage event cannot leak across round/task attribution marks.
+  # Match the proxy's 1,800-second upstream bound and fail closed if it never becomes quiescent.
+  export DGC_BENCH_USAGE_SYNC_TIMEOUT=${DGC_BENCH_USAGE_SYNC_TIMEOUT:-1860}
   echo "provider normalization proxy: $BENCH_BASE_URL -> $BASE_URL"
 else
   export DGC_BENCH_THINKING_POLICY=${DGC_BENCH_THINKING_POLICY:-harness-default}

@@ -1632,6 +1632,17 @@ def test_benchmark_integrity():
               and (grade / "test_solution.py").read_text() == "assert answer == 42\n"
               and "--ignore" not in (grade / "pyproject.toml").read_text()
               and not (grade / "cheat.py").exists())
+        grader_error = f"{grade}/test_solution.py:7: assertion failed"
+        portable_error = _RB._portable_grader_output(grader_error, grade)
+        check("benchmark round-two diagnostics never reference a deleted grader fixture",
+              str(grade) not in portable_error
+              and portable_error == "./test_solution.py:7: assertion failed")
+        mismatched_run = {"usage": {"requests": 11, "synchronized": True}}
+        _RB._reconcile_dgc_usage(mismatched_run, {"requests": 12})
+        check("benchmark cross-checks provider requests against the DGC journal",
+              mismatched_run["usage"] == {
+                  "requests": 11, "synchronized": False,
+                  "request_mismatch": {"provider": 11, "session_journal": 12}})
         check("benchmark provenance strips URL credentials",
               _RB._safe_base_url("https://user:secret@example.com/v1?x=1") == "https://example.com/v1")
         trace = _RB._trace_record("Authorization: Bearer bench-secret\nworked", "", ("bench-secret",))
@@ -1723,6 +1734,12 @@ def test_benchmark_integrity():
         check("benchmark round-two prompt requires a focused API-preserving correction",
               "smallest focused correction" in _RB.FIX_PROMPT
               and "Preserve working code and the tested public API" in _RB.FIX_PROMPT)
+        summary_fixture = {"solved": False, "lang": "cpp", "ex": "fixture", "rounds": [
+            {"agent": {"time": 1}, "stats": {"edit_fails": 2}},
+            {"agent": {"time": 1}, "stats": {"edit_fails": 3}},
+        ]}
+        check("benchmark task summary totals edit failures across recovery rounds",
+              "editfail=5" in _RB.summary_line(summary_fixture))
 
         # Round two must resume the harness's own context, not silently become a fresh one-shot run.
         # Capture argv instead of calling models so this stays deterministic and offline.
@@ -1865,6 +1882,39 @@ def test_benchmark_integrity():
               round_usage == {"input_tokens": 13, "output_tokens": 5,
                               "reasoning_tokens": 0, "cached_input_tokens": 0,
                               "requests": 2, "synchronized": True})
+
+        # A cancelled harness may disconnect while the provider is still generating its final usage
+        # event. A 503 barrier is "busy", not a synchronization failure: retry it so the late record
+        # can never cross into the next round's offset mark.
+        class _BarrierResponse:
+            status = 204
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+        barrier_calls = []
+        delayed_log = root / "delayed-provider-usage.jsonl"
+        delayed_log.write_text("")
+        old_urlopen = _RB.urlopen
+        def _busy_then_ready(url, timeout):
+            barrier_calls.append((url, timeout))
+            if len(barrier_calls) == 1:
+                raise _RB.HTTPError(url, 503, "busy", {}, None)
+            delayed_log.write_text(json.dumps({
+                "normalization": "reasoning_effort=none",
+                "usage": {"input_tokens": 21, "output_tokens": 8,
+                          "reasoning_tokens": 0, "cached_input_tokens": 0}}) + "\n")
+            return _BarrierResponse()
+        try:
+            _RB.urlopen = _busy_then_ready
+            delayed_usage = _RB._usage_log_since((delayed_log, 0), {
+                "DGC_BENCH_PROXY_CONTROL": "http://proxy/flush",
+                "DGC_BENCH_USAGE_SYNC_TIMEOUT": "2",
+            })
+            check("benchmark usage barrier attributes a late provider record to its own round",
+                  len(barrier_calls) == 2 and delayed_usage == {
+                      "input_tokens": 21, "output_tokens": 8, "reasoning_tokens": 0,
+                      "cached_input_tokens": 0, "requests": 1, "synchronized": True})
+        finally:
+            _RB.urlopen = old_urlopen
     finally:
         if str(bench_dir) in sys.path:
             sys.path.remove(str(bench_dir))
