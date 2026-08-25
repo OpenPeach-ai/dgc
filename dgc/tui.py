@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import math
 import re
+import shlex
 import threading
 import time
 
@@ -2488,6 +2489,8 @@ class TUI:
             self._subagent_flow(rest)
         elif cmd == "worktree":
             self._tui_worktree(rest)
+        elif cmd == "tasks":
+            self._tui_tasks(rest)
         elif cmd in ("bg", "background"):
             val = rest.strip().lower()
             if val not in ("auto", "dark", "inherit"):
@@ -3057,6 +3060,67 @@ class TUI:
         self.blocks.clear(); self._buf = ""
         self._flash(f"worktree {branch} — switched, fresh session")
 
+    def _tui_tasks(self, rest: str) -> None:
+        th = style_mod.theme()
+        try:
+            parts = shlex.split(rest)
+        except ValueError as exc:
+            self._flash(f"invalid /tasks arguments: {exc}")
+            return
+        action = parts[0].lower() if parts else "list"
+        tasks, errors = self.agent.retained_tasks()
+        if action in ("list", "show"):
+            selected = tasks
+            if action == "show":
+                if len(parts) != 2:
+                    self._flash("usage: /tasks show ID")
+                    return
+                selected = [task for task in tasks if task.id == parts[1]]
+                if not selected:
+                    self._flash(f"no retained task matching {parts[1]}")
+                    return
+            if selected:
+                rows = []
+                for task in selected[:100]:
+                    state = "legacy/manual" if task.legacy else ("ready" if task.available else "stale")
+                    paths = ", ".join(task.display_paths[:5]) or "(none)"
+                    if len(task.display_paths) > 5:
+                        paths += f" (+{len(task.display_paths) - 5})"
+                    rows.append(f"  [{th.accent}]{_esc(task.id)}[/]  [{th.faint}]{_esc(state)}[/]\n"
+                                f"    {_esc(paths)}\n    [{th.faint}]{_esc(task.reason or '(unspecified)')}[/]\n"
+                                f"    [{th.faint}]{_esc(str(task.path))}[/]")
+                self._append(self._rich("retained sub-agent work\n" + "\n".join(rows)
+                                        + (f"\n\nshowing 100 of {len(selected)} records" if len(selected) > 100 else "")
+                                        + "\n\n/tasks apply ID  ·  /tasks drop ID --confirm"))
+            else:
+                self._flash("no retained sub-agent work for this project")
+            for error in errors:
+                self._append(self._rich(f"[{th.err}]{_esc(error)}[/]"))
+            return
+        if action not in ("apply", "drop") or len(parts) < 2:
+            self._flash("usage: /tasks [list | show ID | apply ID | drop ID --confirm]")
+            return
+        if self.active._turn.is_set():
+            self._flash("wait for the active turn to finish before resolving retained work")
+            return
+        task_id = parts[1]
+        if action == "drop" and "--confirm" not in parts[2:]:
+            self._flash(f"permanent: repeat /tasks drop {shlex.quote(task_id)} --confirm")
+            return
+        result = self.agent.resolve_retained_task(task_id, action)
+        if result.status == "applied":
+            warning = f" · cleanup warning: {result.cleanup_error}" if result.cleanup_error else ""
+            self._flash(f"applied {len(result.paths)} path(s) from {task_id} · /rewind to undo{warning}")
+        elif result.status == "clean":
+            warning = f" · cleanup warning: {result.cleanup_error}" if result.cleanup_error else ""
+            self._flash(f"{task_id} had no remaining changes{warning}")
+        elif result.status == "dropped":
+            self._flash(f"dropped retained task {task_id}")
+        else:
+            conflicts = f" · conflicts: {', '.join(result.conflicts[:8])}" if result.conflicts else ""
+            self._append(self._rich(f"[{th.err}]could not {_esc(action)} {_esc(task_id)}: "
+                                    f"{_esc(result.error or result.status)}{_esc(conflicts)}[/]"))
+
     def _keys(self) -> KeyBindings:
         kb = KeyBindings()
 
@@ -3462,6 +3526,7 @@ def _tui_help() -> str:
                      ("/name <name>", "name the current session"),
                      ("/resume", "pick a past session to resume"),
                      ("/worktree <name>", "create + switch to a git worktree (dgc/<name>)"),
+                     ("/tasks", "inspect/apply/drop retained sub-agent work"),
                      ("/clear", "clear the transcript")]),
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),

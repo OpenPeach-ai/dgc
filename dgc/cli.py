@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -334,6 +335,7 @@ HELP = """\
   /resume              resume a past conversation in this project
   /name [NAME]         show or name the current session
   /worktree [NAME]     list, create, or remove an isolated git worktree
+  /tasks               retained sub-agent work; show|apply|drop ID (--confirm to drop)
   /artifact            list previews; /artifact stop ID
   /handoff             generate and save a continuation handoff
   /update              update DGC to the latest version
@@ -659,6 +661,8 @@ class CLI:
                 self.ui.info(f"current session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "worktree":
             self._worktree_cmd(rest)
+        elif cmd == "tasks":
+            self._tasks_cmd(rest)
         elif cmd == "update":
             run_update()
         elif cmd == "agents":
@@ -794,6 +798,66 @@ class CLI:
             return
         self.ui.info(f"created worktree on branch {branch}")
         self._reroot(wt_path, f"worktree {branch}")
+
+    def _tasks_cmd(self, rest: str) -> None:
+        try:
+            parts = shlex.split(rest)
+        except ValueError as exc:
+            self.ui.error(f"invalid /tasks arguments: {exc}")
+            return
+        action = parts[0].lower() if parts else "list"
+        tasks, errors = self.agent.retained_tasks()
+        if action in ("list", "show"):
+            selected = tasks
+            if action == "show":
+                if len(parts) != 2:
+                    self.ui.error("usage: /tasks show ID")
+                    return
+                selected = [task for task in tasks if task.id == parts[1]]
+                if not selected:
+                    self.ui.error(f"no retained task matching {parts[1]!r}")
+                    return
+            if not selected:
+                self.ui.info("no retained sub-agent work for this project")
+            else:
+                table = Table("id", "state", "paths", "reason", "worktree")
+                for task in selected[:100]:
+                    state = ("legacy/manual" if task.legacy else
+                             ("ready" if task.available else "stale"))
+                    paths = ", ".join(task.display_paths[:5]) or "(none)"
+                    if len(task.display_paths) > 5:
+                        paths += f" (+{len(task.display_paths) - 5})"
+                    table.add_row(task.id, state, paths, task.reason or "(unspecified)", str(task.path))
+                self.console.print(table)
+                if len(selected) > 100:
+                    self.ui.info(f"showing 100 of {len(selected)} records — /tasks show ID for one record")
+            for error in errors:
+                self.ui.error(error)
+            if selected:
+                self.ui.info("/tasks apply ID  ·  /tasks drop ID --confirm")
+            return
+        if action not in ("apply", "drop") or len(parts) < 2:
+            self.ui.error("usage: /tasks [list | show ID | apply ID | drop ID --confirm]")
+            return
+        task_id = parts[1]
+        if action == "drop" and "--confirm" not in parts[2:]:
+            self.ui.info(f"drop permanently deletes the retained checkout; repeat: "
+                         f"/tasks drop {shlex.quote(task_id)} --confirm")
+            return
+        result = self.agent.resolve_retained_task(task_id, action)
+        if result.status == "applied":
+            warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
+            self.ui.info(f"applied retained task {task_id}: {len(result.paths)} path(s).{warning} "
+                         "Use /rewind to undo.")
+        elif result.status == "clean":
+            warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
+            self.ui.info(f"retained task {task_id} had no remaining changes.{warning}")
+        elif result.status == "dropped":
+            self.ui.info(f"dropped retained task {task_id}")
+        else:
+            conflicts = f" Conflicts: {', '.join(result.conflicts[:12])}." if result.conflicts else ""
+            self.ui.error(f"could not {action} retained task {task_id}: "
+                          f"{result.error or result.status}.{conflicts}")
 
     def _reroot(self, new_root, label: str) -> None:
         import os as _os

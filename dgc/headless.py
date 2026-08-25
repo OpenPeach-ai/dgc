@@ -27,6 +27,7 @@ _PLAN_MODES = ("auto", "acceptEdits", "default")
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
+    "resolve_retained_task",
 }
 _EDITOR_CONTEXT_LIMIT = 64_000
 
@@ -340,6 +341,11 @@ class Backend:
                                           "rel": a.rel, "uptime": a.uptime}
                                          for a in artifacts.registry()])
 
+    def _emit_retained_tasks(self) -> None:
+        tasks, errors = self.agent.retained_tasks()
+        self.em.emit("retained_tasks", items=[task.as_dict() for task in tasks[:100]],
+                     errors=errors, total=len(tasks))
+
     def _emit_config(self) -> None:
         c = self.config
         self.em.emit("config", model=c.model, mode=self.agent.mode,
@@ -591,6 +597,31 @@ class Backend:
         elif t == "rewind":
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
             self.em.emit("rewound", ok=(msgs >= 0), files_restored=nfiles)
+        elif t == "list_retained_tasks":
+            self._emit_retained_tasks()
+        elif t == "resolve_retained_task":
+            task_id = str(cmd.get("id", ""))
+            action = str(cmd.get("action", ""))
+            if action == "drop" and cmd.get("confirm") is not True:
+                self.em.emit("error", message="dropping retained work requires explicit confirmation")
+                self._emit_retained_tasks()
+                return
+            result = self.agent.resolve_retained_task(task_id, action)
+            if result.status == "applied":
+                warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
+                self.em.emit("info", message=f"Applied retained task {task_id}: "
+                             f"{len(result.paths)} path(s). Use rewind to undo.{warning}")
+            elif result.status == "clean":
+                warning = f" Cleanup warning: {result.cleanup_error}." if result.cleanup_error else ""
+                self.em.emit("info", message=f"Retained task {task_id} had no remaining changes.{warning}")
+            elif result.status == "dropped":
+                self.em.emit("info", message=f"Dropped retained task {task_id}.")
+            else:
+                conflicts = (f" Conflicts: {', '.join(result.conflicts[:12])}."
+                             if result.conflicts else "")
+                self.em.emit("error", message=f"Could not {action} retained task {task_id}: "
+                             f"{result.error or result.status}.{conflicts}")
+            self._emit_retained_tasks()
         elif t == "compact":
             self.agent.maybe_compact(force=True)
             self._emit_context()

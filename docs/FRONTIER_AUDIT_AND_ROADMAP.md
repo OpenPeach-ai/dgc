@@ -41,7 +41,7 @@ the editor registries: those are external release actions that require a reviewe
 | Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection, explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
-| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, manual fleet worktrees, and automatic `task` worktrees with exact dirty baselines, conflict-safe delta integration, retained incomplete/conflicting work, and parent rewind/metric accounting | Automatic worktree provisioning for TUI fleet sessions, explicit retained-task resolution commands, and concurrent scheduling of independent `task` calls |
+| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, manual fleet worktrees, automatic `task` worktrees with exact dirty baselines and conflict-safe delta integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Automatic worktree provisioning for TUI fleet sessions and concurrent scheduling of independent `task` calls |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, bounded wire frames/pagination and roots MRTR, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Consent-gated elicitation/sampling, modern subscriptions/cache use, broader MCP/ACP conformance fixtures, published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Broader extension-host interaction/race flows plus manual screen-reader, zoom, forced-colors, and contrast audit |
@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 532 / 532 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 537 / 537 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -315,7 +315,7 @@ listed under “still required.”
 | Safety | String rules plus opt-in broad sandbox | Codex OS-enforced workspace/no-network defaults; OpenCode external-directory permission | Fail closed at canonical filesystem, command, network, environment, and protocol boundaries. |
 | Context | Estimated tokens and summary slicing | Stateful turns, prompt caches, validated compaction trees | Preserve tool groups, use actual usage, cache static context, and support provider compaction/state. |
 | Code intelligence | Repository map, exact static symbols/references/definitions, syntax diagnostics, hash-addressed patching, and optional managed stdio LSP escalation with bounded warm reuse | Aider repo map; OpenCode LSP/apply-patch | Measure cold/warm latency and semantic accuracy across the league; add optional tree-sitter parsing where it materially improves results. |
-| Parallel work | Checkout-leased fleet sessions; automatically isolated `task` sub-agents with conflict-safe integration | Worktree-isolated agent work | Auto-provision TUI fleet worktrees, schedule independent task calls concurrently, and add explicit retained-delta resolve/drop commands. |
+| Parallel work | Checkout-leased fleet sessions; automatically isolated `task` sub-agents with conflict-safe integration and explicit retained-delta recovery | Worktree-isolated agent work | Auto-provision TUI fleet worktrees and schedule independent task calls concurrently. |
 | Extensibility | Skills, hooks, minimal MCP | Goose MCP ecosystem; Pi packages/extensions/SDK/RPC | Complete MCP/ACP, version protocols, publish schemas, then add a stable plugin SDK. |
 | Terminal UX | Strong | Competitive already | Preserve; make state, safety, and command behavior consistent. |
 | IDE | Attractive panel, thin protocol | Codex app-server/IDE shared state; OpenCode client/server | Make the backend the authoritative multi-session service and use structured editor context. |
@@ -402,6 +402,10 @@ parent never auto-merge; incomplete/conflicting work is retained with owner-priv
 mode, symlink, deletion, rollback, cleanup, cancellation, call-ID, rewind, and root-session metric
 paths are contract-tested. Non-Git projects retain the prior shared-checkout behavior with an explicit
 warning. Automatic isolation for manually spawned TUI fleet sessions remains open.
+`/tasks` and the typed editor command now list these records, revalidate a selected delta under the
+checkout lease, apply it into the parent rewind stack, or drop it only after explicit confirmation.
+Versioned metadata stores bounded content fingerprints rather than file contents; legacy records fail
+closed for auto-apply while remaining inspectable and droppable.
 
 ### Milestone 2 — raise model effectiveness and efficiency (P1)
 
@@ -446,7 +450,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 532/532 Python checks, 12/12 editor transport/webview checks, and
+The complete offline evidence is 537/537 Python checks, 12/12 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
@@ -626,7 +630,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-532/532 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+537/537 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

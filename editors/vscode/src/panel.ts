@@ -368,6 +368,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "compact": this.ensureBackend().send({ type: "compact" }); break;
       case "clear": this.ensureBackend().send({ type: "clear_session" }); break;
       case "rewind": this.rewind(); break;
+      case "retainedTasks": void this.retainedTasks(); break;
       case "subagent": vscode.commands.executeCommand("workbench.action.openSettings", "dgc.subagent"); break;
       case "settings": vscode.commands.executeCommand("workbench.action.openSettings", "@ext:vibedgc.dgc"); break;
       case "bug": vscode.env.openExternal(vscode.Uri.parse("https://github.com/OpenPeach-ai/dgc/issues")); break;
@@ -415,7 +416,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const direct: Record<string, string> = {
       "view-plan": "viewPlan", artifact: "artifacts", status: "status", compact: "compact",
       clear: "clear", new: "new", resume: "resume", rewind: "rewind", connect: "connect",
-      subagent: "subagent", settings: "settings", bug: "bug",
+      subagent: "subagent", tasks: "retainedTasks", settings: "settings", bug: "bug",
     };
     if (direct[name]) { this.slash(direct[name]); return; }
     be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error
@@ -477,6 +478,98 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "cleared" });
       vscode.window.showInformationMessage("↩ DGC rewound code + conversation.");
     }
+  }
+
+  async retainedTasks(): Promise<void> {
+    const be = this.ensureBackend();
+    const request = (command: any): Promise<any> => new Promise((resolve) => {
+      const finish = (value: any) => { clearTimeout(timer); be.off("retained_tasks", handler); resolve(value); };
+      const handler = (ev: DgcEvent) => {
+        if (ev.type === "retained_tasks") { finish(ev); }
+      };
+      const timer = setTimeout(() => finish({ items: [], errors: ["Retained-task request timed out."] }), 5000);
+      be.on("retained_tasks", handler);
+      if (!be.send(command)) { finish({ items: [], errors: ["Backend rejected the retained-task request."] }); }
+    });
+    let response = await request({ type: "list_retained_tasks" });
+    let tasks: any[] = Array.isArray(response.items) ? response.items : [];
+    if (Array.isArray(response.errors) && response.errors.length) {
+      void vscode.window.showWarningMessage(String(response.errors[0]));
+    }
+    if (!tasks.length) {
+      vscode.window.showInformationMessage("No retained DGC sub-agent work for this project.");
+      return;
+    }
+
+    const applyButton: vscode.QuickInputButton = {
+      iconPath: new vscode.ThemeIcon("check"), tooltip: "Apply conflict-free delta",
+    };
+    const dropButton: vscode.QuickInputButton = {
+      iconPath: new vscode.ThemeIcon("trash"), tooltip: "Permanently drop retained work",
+    };
+    type RetainedPick = vscode.QuickPickItem & { task: any };
+    const qp = vscode.window.createQuickPick<RetainedPick>();
+    let closed = false;
+    let resolving = false;
+    const render = () => {
+      const total = Number(response.total || tasks.length);
+      qp.placeholder = total > tasks.length
+        ? `Showing ${tasks.length} of ${total} retained tasks — Enter applies; trash drops`
+        : "Retained sub-agent work — Enter applies; trash permanently drops";
+      qp.items = tasks.map((task) => {
+        const state = task.legacy ? "legacy/manual" : (task.available ? "ready" : "stale");
+        const count = Number(task.changed_count || 0);
+        const paths = Array.isArray(task.changed_paths) ? task.changed_paths.join(", ") : "";
+        const buttons = task.available && !task.legacy ? [applyButton, dropButton] : [dropButton];
+        return {
+          label: String(task.id || "retained task"),
+          description: `${state} · ${count} path(s)`,
+          detail: `${String(task.reason || task.problem || "No reason recorded")} · ${paths || task.worktree}`,
+          task, buttons,
+        };
+      });
+    };
+    const resolveTask = async (task: any, action: "apply" | "drop") => {
+      if (resolving || closed) { return; }
+      if (action === "apply" && (task.legacy || !task.available)) {
+        void vscode.window.showWarningMessage(
+          task.legacy
+            ? `This older recovery record cannot be auto-applied safely. Inspect ${task.worktree} manually.`
+            : `This retained checkout is stale or missing: ${task.problem || task.worktree}`);
+        return;
+      }
+      resolving = true;
+      if (action === "drop") {
+        const choice = await vscode.window.showWarningMessage(
+          `Permanently delete retained task '${task.id}' and its isolated checkout?`,
+          { modal: true }, "Drop retained work");
+        if (choice !== "Drop retained work") { resolving = false; return; }
+      }
+      if (!closed) { qp.busy = true; qp.enabled = false; }
+      try {
+        response = await request({ type: "resolve_retained_task", id: String(task.id), action,
+                                   confirm: action === "drop" });
+        if (closed) { return; }
+        tasks = Array.isArray(response.items) ? response.items : [];
+        if (!tasks.length) { qp.hide(); return; }
+        render();
+      } finally {
+        resolving = false;
+        if (!closed) { qp.busy = false; qp.enabled = true; }
+      }
+    };
+    render();
+    return new Promise<void>((resolve) => {
+      qp.onDidAccept(() => {
+        const selected = qp.selectedItems[0];
+        if (selected) { void resolveTask(selected.task, "apply"); }
+      });
+      qp.onDidTriggerItemButton((event) => {
+        void resolveTask(event.item.task, event.button === dropButton ? "drop" : "apply");
+      });
+      qp.onDidHide(() => { closed = true; qp.dispose(); resolve(); });
+      qp.show();
+    });
   }
 
   // ---- model listing --------------------------------------------------------

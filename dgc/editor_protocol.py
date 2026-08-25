@@ -137,6 +137,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "sessions": {"items": _A(), "deleted": _B(False)},
     "checkpoints": {"items": _A()},
     "rewound": {"ok": _B(), "files_restored": _I()},
+    "retained_tasks": {"items": _A(), "errors": _A(False), "total": _I(False)},
 }
 
 
@@ -180,6 +181,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "delete_session": {"path": _S()},
     "list_checkpoints": {},
     "rewind": {"index": _I()},
+    "list_retained_tasks": {},
+    "resolve_retained_task": {
+        "id": _S(), "action": _f("string", enum=("apply", "drop")), "confirm": _B(False),
+    },
     "compact": {},
     "list_artifacts": {},
     "stop_artifact": {"id": _S()},

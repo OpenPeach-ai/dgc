@@ -1272,6 +1272,33 @@
             "files_restored"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "retained_tasks"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "items": {
+              "type": "array"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "total": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "items"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -1690,6 +1717,45 @@
           "required": [
             "type",
             "index"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list_retained_tasks"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resolve_retained_task"
+            },
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "apply",
+                "drop"
+              ]
+            },
+            "confirm": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "action"
           ],
           "additionalProperties": false
         },

@@ -508,6 +508,10 @@ def unit_tests(tmp: Path):
           and "undeclared" in str(_command_error(
               {"type": "prompt", "text": "fix it", "surprise": True}))
           and _command_error({"type": "prompt", "text": "fix it"}) is None
+          and _command_error({"type": "list_retained_tasks"}) is None
+          and _command_error({"type": "resolve_retained_task", "id": "task-1",
+                              "action": "drop", "confirm": True}) is None
+          and _event_error({"type": "retained_tasks", "seq": 2, "items": [], "errors": []}) is None
           and "prompt" in _COMMAND_FIELDS)
 
     from dgc.headless import _command_lines
@@ -572,6 +576,25 @@ def unit_tests(tmp: Path):
     _hb.dispatch({"type": "set_mode", "mode": "auto"})
     check("headless rejects state mutation during a turn",
           _cap.events[-1].get("type") == "command_rejected")
+
+    class _RetainedAgent:
+        def __init__(self): self.calls = []
+        def retained_tasks(self): return ([], [])
+        def resolve_retained_task(self, task_id, action):
+            self.calls.append((task_id, action))
+            return type("Resolution", (), {"status": "dropped", "paths": [], "conflicts": [],
+                                            "error": "", "cleanup_error": ""})()
+    _retained_cap = _Capture(); _retained_backend = object.__new__(Backend)
+    _retained_backend.em = _retained_cap; _retained_backend._worker = None
+    _retained_backend.agent = _RetainedAgent()
+    _retained_backend.dispatch({"type": "resolve_retained_task", "id": "task-1", "action": "drop"})
+    _retained_backend.dispatch({"type": "resolve_retained_task", "id": "task-1",
+                                "action": "drop", "confirm": True})
+    check("headless retained-task drop requires typed explicit confirmation",
+          _retained_backend.agent.calls == [("task-1", "drop")]
+          and any(event.get("type") == "error" and "confirmation" in event.get("message", "")
+                  for event in _retained_cap.events)
+          and _retained_cap.events[-1].get("type") == "retained_tasks")
 
     _untrusted_cap = _Capture(); _untrusted = object.__new__(Backend)
     _untrusted.em = _untrusted_cap; _untrusted._worker = None; _untrusted.workspace_trusted = False
@@ -2874,12 +2897,56 @@ def test_isolated_subagents():
           "did not complete" in incomplete and not (repo / "partial.txt").exists()
           and len(retained) == 1 and retained_meta is not None and retained_meta.exists(),
           detail=incomplete)
-    if retained:
-        _sp.run(["git", "worktree", "remove", "--force", retained[0]["path"]], cwd=repo,
-                capture_output=True)
-        _sp.run(["git", "branch", "-D", retained[0]["branch"]], cwd=repo, capture_output=True)
-    if retained_meta:
-        retained_meta.unlink(missing_ok=True)
+    recoveries, recovery_errors = parent.retained_tasks()
+    recovery = next((item for item in recoveries
+                     if item.branch.startswith("dgc/task-incomplete-work-")), None)
+    retained_payload = json.loads(retained_meta.read_text()) if retained_meta else {}
+    check("retained task registry preserves bounded v2 baseline fingerprints",
+          not recovery_errors and recovery is not None and recovery.available and not recovery.legacy
+          and retained_payload.get("schema_version") == 2
+          and "dirty.txt" in retained_payload.get("protected_baseline", {})
+          and retained_payload.get("repo_changed_paths") == ["partial.txt"],
+          detail=str(recovery_errors))
+    unsafe_record = store / f"{repo.name}-task-unsafe.json"
+    os.symlink(retained_meta, unsafe_record)
+    unsafe_tasks, unsafe_errors = parent.retained_tasks()
+    check("retained task registry refuses symlink metadata without losing valid records",
+          recovery is not None and any(item.id == recovery.id for item in unsafe_tasks) and unsafe_errors
+          and any("unsafe" in error for error in unsafe_errors), detail=str(unsafe_errors))
+    unsafe_record.unlink()
+    resolved = parent.resolve_retained_task(recovery.id if recovery else "missing", "apply")
+    recovery_points = parent.checkpoints.listing()
+    recovery_rewind = parent.rewind(recovery_points[-1][0]) if recovery_points else (-1, 0)
+    check("explicit retained-task apply is conflict-safe, cleaned, and rewindable",
+          resolved.status == "applied" and resolved.paths == ["partial.txt"]
+          and recovery_rewind[1] == 1 and not (repo / "partial.txt").exists()
+          and retained and not _P(retained[0]["path"]).exists()
+          and retained_meta is not None and not retained_meta.exists(),
+          detail=repr(resolved))
+
+    legacy, error = _TaskWorkspace.prepare(repo, "legacy recovery", store)
+    if legacy:
+        (legacy.project_root / "legacy.txt").write_text("older retained work\n")
+        legacy.retain("legacy fixture", legacy.changed_paths())
+        legacy_payload = json.loads(legacy.metadata_path.read_text())
+        for key in ("schema_version", "project_rel", "repo_changed_paths", "protected_baseline"):
+            legacy_payload.pop(key, None)
+        legacy.metadata_path.write_text(json.dumps(legacy_payload))
+        legacy_records, _ = parent.retained_tasks()
+        legacy_record = next((item for item in legacy_records if item.id == legacy.path.name), None)
+        point_count = len(parent.checkpoints.points)
+        legacy_apply = parent.resolve_retained_task(legacy.path.name, "apply")
+        legacy_drop = parent.resolve_retained_task(legacy.path.name, "drop")
+        check("legacy retained work fails closed for apply but remains explicitly droppable",
+              legacy_record is not None and legacy_record.legacy
+              and legacy_apply.status == "error" and "legacy" in legacy_apply.error
+              and len(parent.checkpoints.points) == point_count and legacy_drop.status == "dropped"
+              and not legacy.path.exists() and not legacy.metadata_path.exists()
+              and not (repo / "legacy.txt").exists(),
+              detail=f"apply={legacy_apply!r}; drop={legacy_drop!r}")
+    else:
+        check("legacy retained work fails closed for apply but remains explicitly droppable",
+              False, detail=str(error))
 
     class TaskCadenceClient:
         tools_supported = True

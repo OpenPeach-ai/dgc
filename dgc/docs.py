@@ -67,7 +67,7 @@ type, ↑/↓ to select, Enter to run.
 - **/rewind** — restore code + conversation to a past turn
 - **/model**, **/connect**, **/subagent** — choose the model / host / route transport
 - **/mode** — permission mode · **/think** — reasoning effort · **/thoughts** — show/hide thinking
-- **/worktree** — isolate edits in a git worktree · **/sandbox** — confine bash
+- **/worktree** — isolate fleet edits · **/tasks** — recover retained sub-agent work · **/sandbox** — confine bash
 - **/bg**, **/theme** — appearance · **/context** — context-window usage · **/compact** — summarise older turns
 - **/mcp**, **/agents**, **/skills**, **/memory**, **/permissions** — extend + configure
 - **/artifact** — list / open / stop your running localhost previews
@@ -213,6 +213,12 @@ checkout starts with the caller's tracked and non-ignored untracked state. DGC a
 completed child's conflict-free delta; it never overwrites paths that were already dirty, and it
 retains conflicting or incomplete work with a visible worktree path and branch. Integrated edits
 remain part of the parent turn's `/rewind` checkpoint and usage/edit totals.
+
+Use `/tasks` to inspect retained work. `/tasks apply ID` recomputes its delta, rejects paths that were
+dirty before delegation or changed in the parent, and adds an applied result to `/rewind`. `/tasks
+drop ID --confirm` permanently removes the isolated checkout. Older recovery records created before
+baseline fingerprints remain visible and droppable but deliberately require manual inspection instead
+of unsafe auto-apply. VS Code/Cursor exposes the same operations through its command Quick Pick.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """

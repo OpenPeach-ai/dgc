@@ -7,19 +7,24 @@ files are never overwritten automatically.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import stat
 import subprocess
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 _MAX_TASK_FILES = 4096
 _MAX_TASK_BYTES = 64 * 1024 * 1024
+_MAX_RETAINED_METADATA_BYTES = 1024 * 1024
 _GIT_TIMEOUT = 30.0
+_RETAINED_SCHEMA = 2
+_RETAINED_LEASE_WAIT_S = 2.0
 
 
 def _git(args: list[str], cwd, *, timeout: float = _GIT_TIMEOUT) -> subprocess.CompletedProcess:
@@ -55,7 +60,24 @@ def in_repo(path) -> bool:
 
 
 def _safe(name: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-").lower() or "work"
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", name).lower()
+    while ".." in value:
+        value = value.replace("..", "-")
+    value = value.strip(".-")
+    if value.endswith(".lock"):
+        value += "-work"
+    return value or "work"
+
+
+def _task_repo_prefixes(repo: Path) -> list[str]:
+    """Current bounded task prefix plus compatibility with pre-v2 generated paths."""
+    values = {_safe(repo.name)[:60] + "-task-", _safe(repo.name) + "-task-",
+              repo.name + "-task-"}
+    return sorted(values, key=len, reverse=True)
+
+
+def _bounded_safe(name: str, limit: int) -> str:
+    return _safe(_safe(name)[:max(1, limit)])
 
 
 def list_worktrees(path) -> list[dict]:
@@ -82,7 +104,7 @@ def create(path, name: str) -> tuple[Path | None, str | None, str | None]:
     root = repo_root(path)
     if not root:
         return None, None, "not inside a git repository — run `git init` first"
-    safe = _safe(name)
+    safe = _bounded_safe(name, 80)
     branch = f"dgc/{safe}"
     wt_path = root.parent / f"{root.name}-{safe}"
     if wt_path.exists():
@@ -127,6 +149,17 @@ class _FileState:
 
 def _normal_mode(mode: int) -> int:
     return 0o755 if mode & 0o111 else 0o644
+
+
+def _state_fingerprint(state: _FileState) -> dict:
+    return {"kind": state.kind, "mode": int(state.mode), "bytes": len(state.data),
+            "sha256": hashlib.sha256(state.data).hexdigest()}
+
+
+def _fingerprint_matches(state: _FileState, value: object) -> bool:
+    return (isinstance(value, dict) and value.get("kind") == state.kind
+            and value.get("mode") == int(state.mode) and value.get("bytes") == len(state.data)
+            and value.get("sha256") == hashlib.sha256(state.data).hexdigest())
 
 
 def _read_state(path: Path, *, max_bytes: int = _MAX_TASK_BYTES) -> _FileState:
@@ -206,6 +239,15 @@ def _nul_paths(result: subprocess.CompletedProcess) -> list[str]:
     return paths
 
 
+def _validate_repo_path(path: object) -> str:
+    value = str(path)
+    parsed = Path(value)
+    if (not value or value == ".git" or parsed.is_absolute() or ".." in parsed.parts
+            or "\x00" in value):
+        raise TaskWorkspaceError(f"unsafe repository path: {value!r}")
+    return value
+
+
 def _inside_project(repo_path: str, project_rel: Path) -> bool:
     if project_rel == Path("."):
         return True
@@ -265,7 +307,7 @@ def _head_state(repo: Path, base_commit: str, repo_path: str) -> _FileState:
 
 @dataclass
 class TaskIntegration:
-    status: str                       # applied | clean | conflict | error
+    status: str                       # applied | clean | conflict | dropped | error
     paths: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     error: str = ""
@@ -301,7 +343,7 @@ class TaskWorkspace:
             return None, "repository has no committed HEAD"
         base_commit = base.stdout.strip()
         token = uuid.uuid4().hex[:10]
-        slug = _safe(name)[:40]
+        slug = _bounded_safe(name, 40)
         branch = f"dgc/task-{slug}-{token}"
         if storage_root is None:
             from .config import USER_HOME
@@ -312,7 +354,7 @@ class TaskWorkspace:
                 return None, "isolated task storage must be outside the source repository"
         except ValueError:
             pass
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             return None, f"could not resolve isolated task storage: {exc}"
         try:
             storage_root.mkdir(parents=True, exist_ok=True)
@@ -322,7 +364,7 @@ class TaskWorkspace:
             storage_root.chmod(0o700)
         except OSError:
             pass
-        path = storage_root / f"{repo.name}-task-{slug}-{token}"
+        path = storage_root / f"{_safe(repo.name)[:60]}-task-{slug}-{token}"
         metadata_path = storage_root / f"{path.name}.json"
         add = _git(["worktree", "add", "--quiet", "-b", branch, str(path), base_commit], repo)
         if add.returncode != 0:
@@ -379,47 +421,23 @@ class TaskWorkspace:
 
     def retain(self, reason: str, paths: list[str]) -> str | None:
         payload = {
-            "kind": "dgc-isolated-task", "source": str(self.source_root), "worktree": str(self.path),
+            "kind": "dgc-isolated-task", "schema_version": _RETAINED_SCHEMA,
+            "source": str(self.source_root), "worktree": str(self.path),
             "branch": self.branch, "base_commit": self.base_commit,
+            "project_rel": str(self.project_rel), "repo_changed_paths": list(paths),
             "reason": str(reason)[:2000], "changed_paths": [self._display_path(p) for p in paths],
+            "protected_baseline": {path: _state_fingerprint(state)
+                                   for path, state in self.baseline.items()},
         }
-        tmp = ""
-        try:
-            fd, tmp = tempfile.mkstemp(prefix=f".{self.metadata_path.name}.", suffix=".tmp",
-                                       dir=str(self.metadata_path.parent))
-            try:
-                try:
-                    os.fchmod(fd, 0o600)
-                except (AttributeError, OSError):
-                    pass
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, indent=2)
-                    handle.write("\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(tmp, self.metadata_path)
-            except BaseException:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
-                raise
-            return None
-        except OSError as exc:
-            return f"could not write retained-task metadata: {exc}"
-        finally:
-            if tmp:
-                try:
-                    Path(tmp).unlink()
-                except FileNotFoundError:
-                    pass
+        return _write_retained_metadata(self.metadata_path, payload)
 
     def integrate(self, checkpoints=None) -> TaskIntegration:
         try:
             changed = self.changed_paths()
         except Exception as exc:
-            self.retain(str(exc), [])
-            return TaskIntegration("error", error=str(exc))
+            metadata_error = self.retain(str(exc), [])
+            detail = str(exc) + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("error", error=detail)
         display = [self._display_path(path) for path in changed]
         if not changed:
             cleanup_error = self.cleanup() or ""
@@ -428,8 +446,9 @@ class TaskWorkspace:
         if protected:
             conflicts = [self._display_path(path) for path in protected]
             reason = "sub-agent changed files that were already dirty before delegation"
-            self.retain(reason, changed)
-            return TaskIntegration("conflict", display, conflicts, reason)
+            metadata_error = self.retain(reason, changed)
+            detail = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("conflict", display, conflicts, detail)
 
         expected: dict[str, _FileState] = {}
         desired: dict[str, _FileState] = {}
@@ -443,13 +462,15 @@ class TaskWorkspace:
                 if prior[repo_path] != expected[repo_path]:
                     conflicts.append(repo_path)
         except Exception as exc:
-            self.retain(str(exc), changed)
-            return TaskIntegration("error", display, error=str(exc))
+            metadata_error = self.retain(str(exc), changed)
+            detail = str(exc) + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("error", display, error=detail)
         if conflicts:
             shown = [self._display_path(path) for path in conflicts]
             reason = "parent checkout changed while the isolated task was running"
-            self.retain(reason, changed)
-            return TaskIntegration("conflict", display, shown, reason)
+            metadata_error = self.retain(reason, changed)
+            detail = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("conflict", display, shown, detail)
 
         applied: list[str] = []
         try:
@@ -461,6 +482,8 @@ class TaskWorkspace:
                     raise TaskWorkspaceError(f"could not capture rewind checkpoint: {repo_path}")
                 if _read_state(target) != prior[repo_path]:
                     raise TaskWorkspaceError(f"parent changed during checkpoint capture: {repo_path}")
+                if _read_state(_checked_target(self.path, repo_path)) != desired[repo_path]:
+                    raise TaskWorkspaceError(f"isolated checkout changed during integration: {repo_path}")
                 _replace_state(target, desired[repo_path])
                 applied.append(repo_path)
         except Exception as exc:
@@ -473,23 +496,405 @@ class TaskWorkspace:
             detail = f"integration failed: {exc}"
             if rollback_errors:
                 detail += "; rollback incomplete: " + ", ".join(rollback_errors[:8])
-            self.retain(detail, changed)
+            metadata_error = self.retain(detail, changed)
+            if metadata_error:
+                detail += f"; {metadata_error}"
             return TaskIntegration("error", display, error=detail)
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, cleanup_error=cleanup_error)
 
     def cleanup(self) -> str | None:
-        errors = []
-        registered = _git(["worktree", "remove", "--force", str(self.path)], self.repo)
-        if registered.returncode != 0 and self.path.exists():
-            errors.append((registered.stderr or "worktree removal failed").strip())
-        branch = _git(["branch", "-D", self.branch], self.repo)
-        if branch.returncode != 0 and "not found" not in (branch.stderr or "").lower():
-            errors.append((branch.stderr or "branch removal failed").strip())
+        return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
+
+
+def _write_retained_metadata(path: Path, payload: dict) -> str | None:
+    tmp = ""
+    try:
+        # ASCII escaping round-trips POSIX surrogateescaped filenames without an encoding crash.
+        encoded = (json.dumps(payload, indent=2, ensure_ascii=True) + "\n").encode("ascii")
+        if len(encoded) > _MAX_RETAINED_METADATA_BYTES:
+            return f"retained-task metadata exceeds {_MAX_RETAINED_METADATA_BYTES} bytes"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
         try:
-            self.metadata_path.unlink()
-        except FileNotFoundError:
+            try:
+                os.fchmod(fd, 0o600)
+            except (AttributeError, OSError):
+                pass
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
+        return None
+    except OSError as exc:
+        return f"could not write retained-task metadata: {exc}"
+    finally:
+        if tmp:
+            try:
+                Path(tmp).unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _cleanup_task(repo: Path, path: Path, branch_name: str, metadata_path: Path) -> str | None:
+    """Remove a generated checkout without losing its recovery record on partial failure."""
+    errors = []
+    removed = _git(["worktree", "remove", "--force", str(path)], repo)
+    if removed.returncode != 0 and path.exists():
+        errors.append((removed.stderr or "worktree removal failed").strip())
+    branch = _git(["branch", "-D", branch_name], repo)
+    if branch.returncode != 0 and "not found" not in (branch.stderr or "").lower():
+        errors.append((branch.stderr or "branch removal failed").strip())
+    if errors:
+        return "; ".join(error for error in errors if error)
+    try:
+        metadata_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        return f"metadata cleanup failed: {exc}"
+    return None
+
+
+def _read_retained_metadata(path: Path) -> dict:
+    """Read one bounded regular metadata file without following a symlink where supported."""
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NONBLOCK", 0))
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise TaskWorkspaceError(f"could not open metadata safely: {exc}") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise TaskWorkspaceError("metadata is not a regular file")
+        if info.st_size > _MAX_RETAINED_METADATA_BYTES:
+            raise TaskWorkspaceError("metadata exceeds its size limit")
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, min(65536, _MAX_RETAINED_METADATA_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > _MAX_RETAINED_METADATA_BYTES:
+                raise TaskWorkspaceError("metadata exceeds its size limit")
+        value = json.loads(b"".join(chunks).decode("utf-8"))
+        if not isinstance(value, dict):
+            raise TaskWorkspaceError("metadata root is not an object")
+        return value
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskWorkspaceError(f"metadata is not valid UTF-8 JSON: {exc}") from exc
+    finally:
+        os.close(fd)
+
+
+@dataclass
+class RetainedTask:
+    id: str
+    source_root: Path
+    repo: Path
+    project_rel: Path
+    path: Path
+    project_root: Path
+    branch: str
+    base_commit: str
+    reason: str
+    changed_paths: list[str]
+    display_paths: list[str]
+    protected: dict[str, dict]
+    metadata_path: Path
+    legacy: bool
+    available: bool
+    problem: str
+    payload: dict = field(repr=False)
+
+    def as_dict(self) -> dict:
+        shown, used = [], 0
+        for path in self.display_paths[:50]:
+            if used + len(path) > 4000:
+                break
+            shown.append(path)
+            used += len(path)
+        return {"id": self.id, "reason": self.reason, "changed_paths": shown,
+                "changed_count": len(self.display_paths),
+                "protected_paths": len(self.protected), "branch": self.branch,
+                "worktree": str(self.path), "legacy": self.legacy,
+                "available": self.available, "problem": self.problem}
+
+    def _display_path(self, repo_path: str) -> str:
+        return str(Path(repo_path).relative_to(self.project_rel)) if self.project_rel != Path(".") else repo_path
+
+    def retain(self, reason: str, paths: list[str]) -> str | None:
+        self.reason = str(reason)[:2000]
+        self.changed_paths = list(paths)
+        self.display_paths = [self._display_path(path) for path in paths]
+        self.payload.update({"reason": self.reason, "repo_changed_paths": self.changed_paths,
+                             "changed_paths": self.display_paths})
+        return _write_retained_metadata(self.metadata_path, self.payload)
+
+    def cleanup(self) -> str | None:
+        return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
+
+    def _current_delta(self) -> list[str]:
+        if self.legacy:
+            raise TaskWorkspaceError(
+                "legacy retained metadata lacks the baseline hashes required for safe auto-apply")
+        candidates = set(_dirty_paths(self.path, self.base_commit, self.project_rel)) | set(self.protected)
+        if len(candidates) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError(f"retained task delta exceeds {_MAX_TASK_FILES} files")
+        changed = []
+        total = 0
+        for repo_path in sorted(candidates):
+            actual = _read_state(_checked_target(self.path, repo_path))
+            if repo_path in self.protected:
+                same = _fingerprint_matches(actual, self.protected[repo_path])
+            else:
+                same = actual == _head_state(self.repo, self.base_commit, repo_path)
+            if not same:
+                total += len(actual.data)
+                if total > _MAX_TASK_BYTES:
+                    raise TaskWorkspaceError("retained task delta exceeds integration limits")
+                changed.append(repo_path)
+        return changed
+
+    def integrate(self, checkpoints=None) -> TaskIntegration:
+        if not self.available:
+            return TaskIntegration("error", error=self.problem or "retained worktree is unavailable")
+        try:
+            changed = self._current_delta()
+        except Exception as exc:
+            return TaskIntegration("error", error=str(exc))
+        display = [self._display_path(path) for path in changed]
+        if not changed:
+            cleanup_error = self.cleanup() or ""
+            return TaskIntegration("clean", cleanup_error=cleanup_error)
+        protected = [path for path in changed if path in self.protected]
+        if protected:
+            shown = [self._display_path(path) for path in protected]
+            reason = "retained task changed files that were dirty before delegation"
+            metadata_error = self.retain(reason, changed)
+            error = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("conflict", display, shown, error)
+
+        expected: dict[str, _FileState] = {}
+        desired: dict[str, _FileState] = {}
+        prior: dict[str, _FileState] = {}
+        conflicts = []
+        try:
+            for repo_path in changed:
+                expected[repo_path] = _head_state(self.repo, self.base_commit, repo_path)
+                desired[repo_path] = _read_state(_checked_target(self.path, repo_path))
+                prior[repo_path] = _read_state(_checked_target(self.repo, repo_path))
+                if prior[repo_path] != expected[repo_path]:
+                    conflicts.append(repo_path)
+        except Exception as exc:
+            return TaskIntegration("error", display, error=str(exc))
+        if conflicts:
+            shown = [self._display_path(path) for path in conflicts]
+            reason = "parent checkout changed before retained task resolution"
+            metadata_error = self.retain(reason, changed)
+            error = reason + (f"; {metadata_error}" if metadata_error else "")
+            return TaskIntegration("conflict", display, shown, error)
+
+        applied: list[str] = []
+        try:
+            for repo_path in changed:
+                target = _checked_target(self.repo, repo_path)
+                if _read_state(target) != prior[repo_path]:
+                    raise TaskWorkspaceError(f"parent changed during retained integration: {repo_path}")
+                if checkpoints is not None and not checkpoints.record_file(str(target)):
+                    raise TaskWorkspaceError(f"could not capture rewind checkpoint: {repo_path}")
+                if _read_state(target) != prior[repo_path]:
+                    raise TaskWorkspaceError(
+                        f"parent changed during retained checkpoint capture: {repo_path}")
+                if _read_state(_checked_target(self.path, repo_path)) != desired[repo_path]:
+                    raise TaskWorkspaceError(f"retained checkout changed during integration: {repo_path}")
+                _replace_state(target, desired[repo_path])
+                applied.append(repo_path)
+        except Exception as exc:
+            rollback_errors = []
+            for repo_path in reversed(applied):
+                try:
+                    _replace_state(_checked_target(self.repo, repo_path), prior[repo_path])
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"{repo_path}: {rollback_exc}")
+            detail = f"retained integration failed: {exc}"
+            if rollback_errors:
+                detail += "; rollback incomplete: " + ", ".join(rollback_errors[:8])
+            self.retain(detail, changed)
+            return TaskIntegration("error", display, error=detail)
+        cleanup_error = self.cleanup() or ""
+        return TaskIntegration("applied", display, cleanup_error=cleanup_error)
+
+
+def _retained_storage_root(storage_root: Path | None) -> Path:
+    if storage_root is None:
+        from .config import USER_HOME
+        storage_root = USER_HOME / "worktrees"
+    return Path(storage_root).expanduser().resolve(strict=False)
+
+
+def _load_retained(metadata_path: Path, source_root: Path, storage_root: Path
+                   ) -> tuple[RetainedTask | None, str | None]:
+    try:
+        if metadata_path.is_symlink():
+            return None, f"ignored unsafe retained-task metadata: {metadata_path.name}"
+        payload = _read_retained_metadata(metadata_path)
+        if payload.get("kind") != "dgc-isolated-task":
+            return None, f"invalid retained-task metadata: {metadata_path.name}"
+        recorded_source = Path(str(payload.get("source", ""))).resolve(strict=False)
+        if recorded_source != source_root:
+            return None, None
+        repo = repo_root(source_root)
+        if repo is None:
+            return None, "retained task belongs to a project that is no longer a Git repository"
+        project_rel = source_root.relative_to(repo)
+        task_id = metadata_path.stem
+        path = Path(str(payload.get("worktree", ""))).resolve(strict=False)
+        if path.parent != storage_root or path.name != task_id:
+            raise TaskWorkspaceError("metadata worktree is outside its private storage root")
+        branch = str(payload.get("branch", ""))
+        if not branch.startswith("dgc/task-") or len(branch) > 128:
+            raise TaskWorkspaceError("invalid retained task branch")
+        task_prefix = next((prefix for prefix in _task_repo_prefixes(repo)
+                            if task_id.startswith(prefix)), "")
+        if not task_prefix or branch != f"dgc/task-{task_id[len(task_prefix):]}":
+            raise TaskWorkspaceError("retained task id, path, and branch do not match")
+        base_commit = str(payload.get("base_commit", ""))
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_commit):
+            raise TaskWorkspaceError("invalid retained task base commit")
+        schema = payload.get("schema_version")
+        legacy = schema != _RETAINED_SCHEMA or "protected_baseline" not in payload
+        if not legacy and str(payload.get("project_rel", ".")) != str(project_rel):
+            raise TaskWorkspaceError("retained task project root no longer matches its metadata")
+        raw_paths = payload.get("repo_changed_paths") if not legacy else payload.get("changed_paths", [])
+        if not isinstance(raw_paths, list) or len(raw_paths) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError("invalid retained task changed-path list")
+        changed = []
+        for raw in raw_paths:
+            repo_path = _validate_repo_path(raw if not legacy else str(project_rel / str(raw)))
+            if not _inside_project(repo_path, project_rel):
+                raise TaskWorkspaceError(f"retained path is outside the project: {repo_path}")
+            changed.append(repo_path)
+        protected_raw = payload.get("protected_baseline", {}) if not legacy else {}
+        if not isinstance(protected_raw, dict) or len(protected_raw) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError("invalid retained task protected baseline")
+        protected = {}
+        for raw, fingerprint in protected_raw.items():
+            repo_path = _validate_repo_path(raw)
+            if not _inside_project(repo_path, project_rel):
+                raise TaskWorkspaceError(f"protected path is outside the project: {repo_path}")
+            if not (isinstance(fingerprint, dict)
+                    and fingerprint.get("kind") in ("missing", "file", "symlink")
+                    and fingerprint.get("mode") in (0, 0o644, 0o755, 0o777)
+                    and isinstance(fingerprint.get("bytes"), int)
+                    and 0 <= fingerprint.get("bytes") <= _MAX_TASK_BYTES
+                    and re.fullmatch(r"[0-9a-f]{64}", str(fingerprint.get("sha256", "")))):
+                raise TaskWorkspaceError(f"invalid protected baseline fingerprint: {repo_path}")
+            protected[repo_path] = fingerprint
+        registered = next((item for item in list_worktrees(repo)
+                           if Path(item.get("path", "")).resolve(strict=False) == path), None)
+        available = bool(path.exists() and registered and registered.get("branch") == branch)
+        problem = "" if available else "retained worktree or branch is missing/stale"
+        display = [str(Path(p).relative_to(project_rel)) if project_rel != Path(".") else p
+                   for p in changed]
+        return RetainedTask(task_id, source_root, repo, project_rel, path, path / project_rel,
+                            branch, base_commit, str(payload.get("reason", ""))[:2000],
+                            changed, display, protected, metadata_path, legacy, available,
+                            problem, payload), None
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError, TaskWorkspaceError) as exc:
+        return None, f"could not load {metadata_path.name}: {exc}"
+
+
+def list_retained(source_root: Path, storage_root: Path | None = None
+                  ) -> tuple[list[RetainedTask], list[str]]:
+    source_root = Path(source_root).resolve(strict=False)
+    try:
+        root = _retained_storage_root(storage_root)
+    except (OSError, RuntimeError) as exc:
+        return [], [f"could not resolve retained-task storage: {exc}"]
+    repo = repo_root(source_root)
+    if repo is not None:
+        try:
+            if os.path.commonpath((str(repo), str(root))) == str(repo):
+                return [], ["retained-task storage must be outside the source repository"]
+        except ValueError:
             pass
-        except OSError as exc:
-            errors.append(f"metadata cleanup failed: {exc}")
-        return "; ".join(error for error in errors if error) or None
+    if not root.is_dir():
+        return [], []
+    prefixes = set(_task_repo_prefixes(repo)) if repo else set()
+    tasks, errors = [], []
+    try:
+        candidates = sorted(root.glob("*.json"))[:_MAX_TASK_FILES + 1]
+    except OSError as exc:
+        return [], [f"could not list retained-task storage: {exc}"]
+    overflow = len(candidates) > _MAX_TASK_FILES
+    candidates = candidates[:_MAX_TASK_FILES]
+    for metadata_path in candidates:
+        if prefixes and not any(metadata_path.stem.startswith(prefix) for prefix in prefixes):
+            continue
+        task, error = _load_retained(metadata_path, source_root, root)
+        if task is not None:
+            tasks.append(task)
+        elif error:
+            errors.append(error)
+    if overflow:
+        errors.append(f"retained-task registry exceeds {_MAX_TASK_FILES} records; showing a bounded subset")
+    return sorted(tasks, key=lambda task: task.id), errors[:32]
+
+
+def resolve_retained(source_root: Path, task_id: str, action: str, storage_root: Path | None = None,
+                     checkpoints=None, cancelled=None) -> TaskIntegration:
+    """Apply or drop one retained task under the canonical checkout mutation lease."""
+    action = str(action).strip().lower()
+    task_id = str(task_id)
+    if action not in ("apply", "drop"):
+        return TaskIntegration("error", error="retained task action must be 'apply' or 'drop'")
+    if not task_id or len(str(task_id)) > 240 or Path(str(task_id)).name != str(task_id):
+        return TaskIntegration("error", error="invalid retained task id")
+    from .scheduler import acquire_cancellable, workspace_mutation_lock
+    timer = None
+    cancel = cancelled
+    if cancel is None:
+        cancel = threading.Event()
+        timer = threading.Timer(_RETAINED_LEASE_WAIT_S, cancel.set)
+        timer.daemon = True
+        timer.start()
+    try:
+        lease = workspace_mutation_lock(source_root)
+        acquired = acquire_cancellable(lease, cancel)
+    except Exception as exc:
+        if timer is not None:
+            timer.cancel()
+        return TaskIntegration("error", error=f"could not acquire workspace lease: {type(exc).__name__}: {exc}")
+    if not acquired:
+        if timer is not None:
+            timer.cancel()
+        return TaskIntegration("error", error=lease.last_error or "cancelled waiting for workspace lease")
+    try:
+        tasks, errors = list_retained(source_root, storage_root)
+        task = next((item for item in tasks if item.id == task_id), None)
+        if task is None:
+            detail = errors[0] if errors else f"no retained task matching {task_id!r}"
+            return TaskIntegration("error", error=detail)
+        if action == "drop":
+            cleanup_error = task.cleanup() or ""
+            return TaskIntegration("error" if cleanup_error else "dropped",
+                                   error=cleanup_error, cleanup_error=cleanup_error)
+        return task.integrate(checkpoints)
+    except Exception as exc:
+        return TaskIntegration("error", error=f"retained task resolution failed: {type(exc).__name__}: {exc}")
+    finally:
+        lease.release()
+        if timer is not None:
+            timer.cancel()

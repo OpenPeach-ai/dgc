@@ -1679,6 +1679,27 @@ class Agent:
             self.messages = self.messages[:msg_count]
         return msg_count, n_files
 
+    def retained_tasks(self):
+        """Return preserved delegated work for this exact project root."""
+        from .worktree import list_retained
+        configured = str(self.config.get("subagent_worktree_root", "") or "").strip()
+        return list_retained(self.config.project_root, Path(configured) if configured else None)
+
+    def resolve_retained_task(self, task_id: str, action: str):
+        """Apply/drop preserved delegated work; applied paths join the normal rewind stack."""
+        from .worktree import resolve_retained
+        action = str(action).strip().lower()
+        configured = str(self.config.get("subagent_worktree_root", "") or "").strip()
+        if action == "apply":
+            self.checkpoints.open(len(self.messages), f"apply retained task {task_id}")
+        result = resolve_retained(
+            self.config.project_root, task_id, action,
+            Path(configured) if configured else None,
+            checkpoints=self.checkpoints if action == "apply" else None)
+        if action == "apply" and result.status != "applied":
+            self.checkpoints.discard_last_empty()
+        return result
+
     def _subagent_client(self, adef):
         """Resolve a sub-agent's (base_url, api_key, model): per-agent def → global
         subagent_* config → inherit the main loop. Returns None to reuse the parent client."""
@@ -1792,13 +1813,15 @@ class Agent:
             try:
                 changed = workspace.changed_paths()
             except Exception as e:
-                workspace.retain(f"{reason}; delta inspection failed: {e}", [])
+                metadata_error = workspace.retain(f"{reason}; delta inspection failed: {e}", [])
+                warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
                 return (f" Its isolated worktree was preserved at {workspace.path} on branch "
-                        f"{workspace.branch} because the delta could not be inspected.")
+                        f"{workspace.branch} because the delta could not be inspected.{warning}")
             if changed:
-                workspace.retain(reason, changed)
+                metadata_error = workspace.retain(reason, changed)
+                warning = f" Metadata warning: {metadata_error}." if metadata_error else ""
                 return (f" Its unintegrated changes were preserved at {workspace.path} on branch "
-                        f"{workspace.branch}.")
+                        f"{workspace.branch}.{warning}")
             cleanup_error = workspace.cleanup()
             return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
 

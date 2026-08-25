@@ -110,6 +110,13 @@ class CheckpointManager:
         """(index, preview, files-touched) for each checkpoint, oldest first."""
         return [(i, pt["preview"], len(pt["files"])) for i, pt in enumerate(self.points)]
 
+    def discard_last_empty(self) -> bool:
+        """Remove a speculative checkpoint only when it captured no filesystem state."""
+        if self.points and not self.points[-1]["files"]:
+            self.points.pop()
+            return True
+        return False
+
     def rewind(self, idx: int) -> tuple[int, int]:
         """Restore files to their state at checkpoint idx and drop later checkpoints.
         Returns (message_count_to_truncate_to, files_restored)."""
