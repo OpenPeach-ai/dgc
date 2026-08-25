@@ -42,9 +42,9 @@ the editor registries: those are external release actions that require a reviewe
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, per-checkout mutation leases, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning/merge UX for parallel write agents and cross-process leases |
-| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting, stable call IDs, hash-addressed atomic `apply_patch`, repository map, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, LSP definitions/references |
+| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; stable call IDs, hash-addressed atomic `apply_patch`, repository map, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, LSP definitions/references |
 | MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
-| Editor | Authenticated model discovery, SecretStorage with plaintext-setting removal, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, protocol-v2 handshake, bounded startup/backpressure queue, fail-closed event validation, and restart-on-next-command recovery | Real VS Code extension-host tests, generated schemas, accessibility audit |
+| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, protocol-v2 handshake, bounded startup/backpressure queue, fail-closed event validation, and restart-on-next-command recovery | Real VS Code extension-host tests, generated schemas, accessibility audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 442 / 442 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 450 / 450 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -117,7 +117,7 @@ release rehearsal—not another round of unmeasured feature claims.
 | Grader reference validation | 6 / 6 | 225 / 225 | Every canonical solution passes its official suite; validator now maps Rust manifests and Java helpers correctly. |
 | Six-harness protocol canary | None | 6 / 6 pass on `python/proverb` | Final replacement run used one loaded model, official grading, transport reasoning-off, and synchronized provider usage for every engine. Pi 73.7s, DGC 83.2s, Codex 85.2s, Aider 86.4s, OpenCode 89.7s, Goose 101.6s; zero reasoning tokens. This one-task smoke is not ranking evidence. |
 | Stratified six-harness diagnostic | None | 12 tasks × 6 engines complete | Same model, controlled hardware, two tasks in each of six languages, official isolated grading, reasoning-off transport and synchronized usage. It is trace/controls evidence, not ranking evidence or a replacement for the 225-task league. |
-| Full controlled league | None | New replacement run required | Attempts 1–3 exposed compaction-sensitive counters, hard-timeout persistence loss, deleted isolated-grader paths, and a 573-second late provider completion. Targeted attempt 4 on `cpp/binary-search-tree` validated portable recovery paths and the fail-closed quiescence boundary, then exposed four retry-generated provider completions after deadline cancellation and a premature five-failure stop despite landed edits. After those fixes, clean commit `9c45749` solved the same hard case on round one: 12/12 tests in 1,022.6s, 23 provider requests exactly matching the journal, zero disconnected/reasoning requests, 13 landed edits, one edit mismatch, and no timeout. All partial attempts remain diagnostic only. The controls are covered by 442 checks; the complete six-engine league still requires a new clean candidate run. |
+| Full controlled league | None | New replacement run required | Attempts 1–3 exposed compaction-sensitive counters, hard-timeout persistence loss, deleted isolated-grader paths, and a 573-second late provider completion. Targeted attempt 4 on `cpp/binary-search-tree` validated portable recovery paths and the fail-closed quiescence boundary, then exposed four retry-generated provider completions after deadline cancellation and a premature five-failure stop despite landed edits. After those fixes, clean commit `9c45749` solved the same hard case on round one: 12/12 tests in 1,022.6s, 23 provider requests exactly matching the journal, zero disconnected/reasoning requests, 13 landed edits, one edit mismatch, and no timeout. All partial attempts remain diagnostic only. The controls are covered by 450 checks; the complete six-engine league still requires a new clean candidate run. |
 | Public GitHub history | 1 commit | External state unchanged | New scripts forbid force/snapshot publishing, but the public history has not been migrated. |
 
 The existing 40/52 result is encouraging, but it is not publishable evidence of parity. It covers
@@ -551,7 +551,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-442/442 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
+450/450 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
 latest timeout-journal change and must be rerun on the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed
@@ -603,6 +603,13 @@ The provider-runtime slice is also implemented and contract-tested:
 4. Stable prompt-cache keys are hashes rather than prompt text; cache/state/include/parallel/tool/
    reasoning/output-cap/sampling rejections degrade independently instead of broadly disabling the
    request. Actual cached-input and reasoning-token usage is persisted and emitted to editor clients.
+5. Native Ollama uses `/api/chat` and `/api/tags` directly, preserving streamed thinking, correlated
+   tool calls, exact continuation fields, options, keep-alive, cancellation, and provider usage. Auto
+   mode falls back safely when a proxy does not expose the native route.
+6. Primary, fallback, sub-agent, and auxiliary clients resolve transport per endpoint. Credentials
+   inherit only on the same endpoint; endpoint changes invalidate matching live, persisted, and
+   editor-cached keys. Editor model discovery is correlated through the same provider adapter instead
+   of duplicating a hard-coded `/models` request in TypeScript.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

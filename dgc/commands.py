@@ -40,7 +40,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("model", "switch the model", _TCE, "pickModel"),
     CommandSpec("models", "list models served by the endpoint", frozenset({"classic"})),
     CommandSpec("connect", "pick a provider or a custom LAN host", _TCE, "connect"),
-    CommandSpec("subagent", "set the sub-agent model + host", _TCE, "subagent"),
+    CommandSpec("subagent", "set the sub-agent model, host + API transport", _TCE, "subagent"),
     CommandSpec("mode", "permission mode: default · acceptEdits · plan · auto", _TCE, "pickMode"),
     CommandSpec("plan", "toggle read-only plan mode", frozenset({"classic"})),
     CommandSpec("view-plan", "reopen the plan saved in plan mode", _TCE, "viewPlan"),

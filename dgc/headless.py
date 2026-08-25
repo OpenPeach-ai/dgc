@@ -214,6 +214,7 @@ class Backend:
         self._worker: threading.Thread | None = None
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
+        self._model_list_lock = threading.Lock()
 
     def _add_rule(self, rule_text: str) -> None:
         try:
@@ -227,9 +228,12 @@ class Backend:
         self.em.emit(
             "ready", version=__version__, protocol_version=2,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
-                          "goal_state": True, "saved_plan": True, "command_registry": True},
+                          "goal_state": True, "saved_plan": True, "command_registry": True,
+                          "provider_model_discovery": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
+            subagent_base_url=self.config.get("subagent_base_url", ""),
+            fallback_base_url=self.config.get("fallback_base_url", ""),
             project_root=str(self.config.project_root),
             workspace_trusted=self.workspace_trusted,
             session_id=self.agent.session_file.stem if self.agent.session_file else None,
@@ -313,9 +317,12 @@ class Backend:
                      project_root=str(c.project_root), search=c.get("search_provider"),
                      subagent_model=c.get("subagent_model", ""),
                      subagent_base_url=c.get("subagent_base_url", ""),
+                     subagent_api_mode=c.get("subagent_api_mode", ""),
                      subagent_api_key_set=bool(c.get("subagent_api_key", "")),
                      fallback_model=c.get("fallback_model", ""),
                      fallback_base_url=c.get("fallback_base_url", ""),
+                     fallback_api_key_set=bool(c.get("fallback_api_key", "")),
+                     fallback_api_mode=c.get("fallback_api_mode", ""),
                      context_size=c.get("context_size", 32768),
                      goal={"text": getattr(self.agent, "goal", ""),
                            "status": getattr(self.agent, "goal_status", "none")})
@@ -425,18 +432,52 @@ class Backend:
             self.em.emit("mode_changed", mode=self.agent.mode,
                          workspace_trusted=self.workspace_trusted)
         elif t == "set_model":
+            if cmd.get("clear_stored_api_key"):
+                # The editor owns its active credential in SecretStorage. When it explicitly
+                # switches provider, erase any older CLI secret so a later CLI launch cannot
+                # attach that credential to the newly persisted endpoint.
+                self.config.data["api_key"] = ""
+                if hasattr(self.config, "_stored_secrets"):
+                    self.config._stored_secrets["api_key"] = ""
+                self.config._env_secret_keys.add("api_key")
             if cmd.get("base_url"):
                 self.config.set("base_url", cmd["base_url"])
-            if cmd.get("api_key"):
+            if "api_key" in cmd:
                 # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
                 # a later non-secret config save preserves any existing CLI secret instead of
                 # duplicating the editor key into ~/.dgc/secrets.json.
-                self.config.data["api_key"] = cmd["api_key"]
+                self.config.data["api_key"] = str(cmd.get("api_key") or "")
                 self.config._env_secret_keys.add("api_key")
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
             self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url)
+        elif t == "list_models":
+            request_id = str(cmd.get("request_id") or "")[:128]
+            lock = self._model_list_lock
+            if not lock.acquire(blocking=False):
+                self.em.emit("models", request_id=request_id, ids=[],
+                             base_url=self.config.base_url,
+                             error="model discovery is already in progress")
+                return
+
+            def discover_models():
+                try:
+                    # Use a separate adapter instance so discovery cannot mutate an active turn's
+                    # transport state. It still shares bounded endpoint+model capability evidence.
+                    client = self.agent._new_client(
+                        self.config.base_url, self.config.api_key, self.config.model)
+                    ids = [item[:512] for item in client.list_models()[:4096]
+                           if isinstance(item, str)]
+                    self.em.emit("models", request_id=request_id, ids=ids,
+                                 base_url=self.config.base_url, api_mode=client.api_mode)
+                except Exception as exc:
+                    self.em.emit("models", request_id=request_id, ids=[],
+                                 base_url=self.config.base_url,
+                                 error=f"model discovery failed ({type(exc).__name__[:80]})")
+                finally:
+                    lock.release()
+            threading.Thread(target=discover_models, daemon=True).start()
         elif t == "set_think":
             self.config.set("thinking", cmd.get("level", "off"))   # persisted
             self.em.emit("think_changed", think=self.config.get("thinking", "off"))
@@ -518,21 +559,28 @@ class Backend:
             artifacts.stop(str(cmd.get("id", "")))
             self._emit_artifacts()
         elif t == "set_config":
-            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key", "api_mode",
+            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
+                       "subagent_api_mode", "api_mode",
                        "provider_state", "prompt_cache", "prompt_cache_key",
                        "provider_capabilities", "capability_cache_ttl_s",
-                       "fallback_model", "fallback_base_url", "context_size", "search_provider")
+                       "fallback_model", "fallback_base_url", "fallback_api_key",
+                       "fallback_api_mode",
+                       "context_size", "search_provider")
             refresh = False
-            for k, v in (cmd.get("values") or {}).items():
-                if k in allowed:
-                    if k == "subagent_api_key":
-                        self.config.data[k] = v
-                        self.config._env_secret_keys.add(k)
-                    else:
-                        self.config.set(k, v)
-                    refresh = refresh or k in {"api_mode", "provider_state", "prompt_cache",
-                                               "prompt_cache_key", "provider_capabilities",
-                                               "capability_cache_ttl_s"}
+            values = {k: v for k, v in (cmd.get("values") or {}).items() if k in allowed}
+            secret_keys = ("subagent_api_key", "fallback_api_key")
+            # Apply endpoints first: Config.set invalidates the old endpoint-bound secret. Then
+            # install any replacement credential process-locally, regardless of JSON key order.
+            for k, v in values.items():
+                if k not in secret_keys:
+                    self.config.set(k, v)
+                refresh = refresh or k in {"api_mode", "provider_state", "prompt_cache",
+                                           "prompt_cache_key", "provider_capabilities",
+                                           "capability_cache_ttl_s"}
+            for k in secret_keys:
+                if k in values:
+                    self.config.data[k] = str(values[k] or "")
+                    self.config._env_secret_keys.add(k)
             if refresh:
                 self.agent.refresh_client()
             self._emit_config()

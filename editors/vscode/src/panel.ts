@@ -13,11 +13,11 @@ const THINK = [
   { id: "medium", detail: "reason step by step; consider edge cases" },
   { id: "high", detail: "maximum depth (ultrathink)" },
 ];
-const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string }> = {
-  ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)" },
-  llamacpp: { url: "http://localhost:8080/v1", needsKey: false, label: "llama.cpp (local)" },
-  lmstudio: { url: "http://localhost:1234/v1", needsKey: false, label: "LM Studio (local)" },
-  vllm: { url: "http://localhost:8000/v1", needsKey: false, label: "vLLM (local)" },
+const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string }> = {
+  ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)", apiKey: "ollama" },
+  llamacpp: { url: "http://localhost:8080/v1", needsKey: false, label: "llama.cpp (local)", apiKey: "sk-local" },
+  lmstudio: { url: "http://localhost:1234/v1", needsKey: false, label: "LM Studio (local)", apiKey: "lm-studio" },
+  vllm: { url: "http://localhost:8000/v1", needsKey: false, label: "vLLM (local)", apiKey: "sk-local" },
   openai: { url: "https://api.openai.com/v1", needsKey: true, label: "OpenAI" },
   openrouter: { url: "https://openrouter.ai/api/v1", needsKey: true, label: "OpenRouter" },
   groq: { url: "https://api.groq.com/openai/v1", needsKey: true, label: "Groq" },
@@ -26,12 +26,16 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string 
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
 
+const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
+
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", baseUrl: "", workspaceTrusted: false,
                     goal: { text: "", status: "none" } };
   private _installPrompted = false;
+  private modelRequest = 0;
+  private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -130,6 +134,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
                        workspaceTrusted: ev.workspace_trusted === true,
                        goal: ev.goal || { text: "", status: "none" } };
+        this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
+        this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.postState();
         if (this.backend) {
           const backend = this.backend;
@@ -167,6 +173,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "goal_changed":
         this.state.goal = { text: String(ev.goal || ""), status: String(ev.status || "none") };
         this.postState();
+        break;
+      case "config":
+        this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
+        this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         break;
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
@@ -470,12 +480,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- model listing --------------------------------------------------------
-  private async storedSecret(id: "apiKey" | "subagentApiKey"): Promise<string> {
+  private async deleteSecret(id: "apiKey" | "subagentApiKey" | "fallbackApiKey"): Promise<void> {
+    const key = `dgc.${id}`;
+    await this.context.secrets.delete(key);
+    await this.context.secrets.delete(`${key}.endpoint`);
+  }
+
+  private async storeSecret(id: "apiKey" | "subagentApiKey" | "fallbackApiKey",
+                            value: string, endpoint: string): Promise<void> {
+    const key = `dgc.${id}`;
+    await this.context.secrets.store(key, value);
+    await this.context.secrets.store(`${key}.endpoint`, endpointId(endpoint));
+  }
+
+  private async storedSecret(id: "apiKey" | "subagentApiKey" | "fallbackApiKey",
+                             endpoint: string): Promise<string> {
     const key = `dgc.${id}`;
     const saved = await this.context.secrets.get(key);
     const config = vscode.workspace.getConfiguration("dgc");
     const legacy = config.get<string>(id, "");
-    if (!saved && legacy) { await this.context.secrets.store(key, legacy); }
+    if (!saved && legacy) { await this.storeSecret(id, legacy, endpoint); }
 
     // One-way compatibility migration from the old plaintext settings. Remove
     // every scope after the value is safely in SecretStorage so it cannot linger
@@ -489,20 +513,41 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     for (const [value, target] of oldScopes) {
       if (value !== undefined) { await config.update(id, undefined, target); }
     }
-    return saved || legacy;
+    const secret = saved || legacy;
+    if (!secret) { return ""; }
+    const boundEndpoint = await this.context.secrets.get(`${key}.endpoint`);
+    if (!boundEndpoint || boundEndpoint !== endpointId(endpoint)) {
+      await this.deleteSecret(id);
+      void vscode.window.showWarningMessage(
+        "DGC discarded a provider key whose endpoint binding was missing or stale. Reconnect that provider to continue.");
+      return "";
+    }
+    return secret;
   }
 
   private async fetchModels(): Promise<string[]> {
-    const base = this.state.baseUrl || PROVIDERS.ollama.url;
-    const key = await this.storedSecret("apiKey");
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
-    const res = await fetch(base.replace(/\/$/, "") + "/models", {
-      headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: ctrl.signal,
-    }).finally(() => clearTimeout(timer));
-    if (!res.ok) { throw new Error(`model endpoint returned HTTP ${res.status}`); }
-    const data: any = await res.json();
-    return (data?.data ?? []).map((m: any) => m.id).sort();
+    const be = this.ensureBackend();
+    const requestId = `models-${Date.now()}-${++this.modelRequest}`;
+    return new Promise<string[]>((resolve, reject) => {
+      const finish = (err?: Error, ids: string[] = []) => {
+        clearTimeout(timer);
+        be.off("models", handler);
+        if (err) { reject(err); } else { resolve(ids); }
+      };
+      const handler = (ev: DgcEvent) => {
+        if (ev.request_id !== requestId) { return; }
+        if (ev.error) { finish(new Error(String(ev.error))); return; }
+        const ids = Array.isArray(ev.ids)
+          ? ev.ids.filter((id: unknown): id is string => typeof id === "string").sort()
+          : [];
+        finish(undefined, ids);
+      };
+      const timer = setTimeout(() => finish(new Error("model discovery timed out")), 10000);
+      be.on("models", handler);
+      if (!be.send({ type: "list_models", request_id: requestId })) {
+        finish(new Error("model discovery command was rejected"));
+      }
+    });
   }
 
   // in-composer model menu (rendered inside the webview)
@@ -521,7 +566,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (!be) { return; }
     const send = (cmd: any) => setup ? be.sendSetup(cmd) : be.send(cmd);
     const c = vscode.workspace.getConfiguration("dgc");
-    const baseUrl = c.get<string>("baseUrl", ""), apiKey = await this.storedSecret("apiKey"), model = c.get<string>("model", "");
+    const baseUrl = c.get<string>("baseUrl", "");
+    const effectiveBase = baseUrl || this.state.baseUrl || PROVIDERS.ollama.url;
+    const apiKey = await this.storedSecret("apiKey", effectiveBase);
+    const model = c.get<string>("model", "");
     if (baseUrl || apiKey || model) {
       send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
     }
@@ -529,10 +577,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };
     put("subagent_model", "subagentModel");
     put("subagent_base_url", "subagentBaseUrl");
-    const subagentKey = await this.storedSecret("subagentApiKey");
+    put("subagent_api_mode", "subagentApiMode");
+    const effectiveSubagentBase = c.get<string>("subagentBaseUrl", "")
+      || this.routeState.subagentBaseUrl || effectiveBase;
+    const subagentKey = await this.storedSecret("subagentApiKey", effectiveSubagentBase);
     if (subagentKey) { values.subagent_api_key = subagentKey; }
     put("fallback_model", "fallbackModel");
     put("fallback_base_url", "fallbackBaseUrl");
+    put("fallback_api_mode", "fallbackApiMode");
+    const effectiveFallbackBase = c.get<string>("fallbackBaseUrl", "")
+      || this.routeState.fallbackBaseUrl || effectiveBase;
+    const fallbackKey = await this.storedSecret("fallbackApiKey", effectiveFallbackBase);
+    if (fallbackKey) { values.fallback_api_key = fallbackKey; }
     const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
     if (Object.keys(values).length) { send({ type: "set_config", values }); }
   }
@@ -550,29 +606,59 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   async saveSettings(v: any): Promise<void> {
     const be = this.ensureBackend();
-    if (v.api_key) { await this.context.secrets.store("dgc.apiKey", String(v.api_key)); }
-    if (v.subagent_api_key) {
-      await this.context.secrets.store("dgc.subagentApiKey", String(v.subagent_api_key));
+    const baseChanged = Boolean(v.base_url)
+      && endpointId(v.base_url) !== endpointId(this.state.baseUrl);
+    const subagentBaseChanged = endpointId(v.subagent_base_url)
+      !== endpointId(this.routeState.subagentBaseUrl);
+    const fallbackBaseChanged = endpointId(v.fallback_base_url)
+      !== endpointId(this.routeState.fallbackBaseUrl);
+    let apiKey: string | undefined = v.api_key ? String(v.api_key) : undefined;
+    let subagentKey: string | undefined = v.subagent_api_key
+      ? String(v.subagent_api_key) : undefined;
+    let fallbackKey: string | undefined = v.fallback_api_key
+      ? String(v.fallback_api_key) : undefined;
+    const effectiveBase = String(v.base_url || this.state.baseUrl || PROVIDERS.ollama.url);
+    const effectiveSubagentBase = String(v.subagent_base_url || effectiveBase);
+    const effectiveFallbackBase = String(v.fallback_base_url || effectiveBase);
+    if (apiKey) { await this.storeSecret("apiKey", apiKey, effectiveBase); }
+    else if (baseChanged) { await this.deleteSecret("apiKey"); apiKey = ""; }
+    if (subagentKey) {
+      await this.storeSecret("subagentApiKey", subagentKey, effectiveSubagentBase);
+    }
+    else if (subagentBaseChanged) {
+      await this.deleteSecret("subagentApiKey"); subagentKey = "";
+    }
+    if (fallbackKey) {
+      await this.storeSecret("fallbackApiKey", fallbackKey, effectiveFallbackBase);
+    }
+    else if (fallbackBaseChanged) {
+      await this.deleteSecret("fallbackApiKey"); fallbackKey = "";
     }
     if (v.base_url || v.api_key || v.model) {
       be.send({ type: "set_model", base_url: v.base_url || undefined,
-                api_key: v.api_key || undefined, model: v.model || undefined });
+                api_key: apiKey, clear_stored_api_key: baseChanged,
+                model: v.model || undefined });
     }
     if (v.mode) { await this.requestMode(String(v.mode)); }
     if (v.think) { be.send({ type: "set_think", level: v.think }); }
     const values: any = {
       subagent_model: v.subagent_model || "", subagent_base_url: v.subagent_base_url || "",
+      subagent_api_mode: v.subagent_api_mode || "",
       fallback_model: v.fallback_model || "",
       fallback_base_url: v.fallback_base_url || "",
+      fallback_api_mode: v.fallback_api_mode || "",
       api_mode: v.api_mode || "auto", provider_state: v.provider_state || "stateless",
       prompt_cache: v.prompt_cache !== false,
     };
-    if (v.subagent_api_key) { values.subagent_api_key = v.subagent_api_key; }
+    if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
+    if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
     if (v.context_size) { values.context_size = Number(v.context_size); }
     if (v.capability_cache_ttl_s) {
       values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
     }
     be.send({ type: "set_config", values });
+    this.routeState.subagentBaseUrl = String(v.subagent_base_url || "");
+    this.routeState.fallbackBaseUrl = String(v.fallback_base_url || "");
     vscode.window.showInformationMessage("DGC settings saved.");
   }
 
@@ -626,12 +712,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     let key: string | undefined;
     if (needsKey) {
       key = await vscode.window.showInputBox({ prompt: `API key for ${pick.label}`, password: true });
-      if (key) { await this.context.secrets.store("dgc.apiKey", key); }
+      if (key === undefined || (pick.label !== "custom" && !key)) { return; }
+    } else {
+      key = PROVIDERS[pick.label].apiKey || "sk-local";
     }
+    if (key) { await this.storeSecret("apiKey", key, url); }
+    else { await this.deleteSecret("apiKey"); }
     if (pick.label !== "custom") {
       be.send({ type: "set_config", values: { api_mode: "auto" } });
     }
-    be.send({ type: "set_model", base_url: url, api_key: key });
+    be.send({ type: "set_model", base_url: url, api_key: key, clear_stored_api_key: true });
     setTimeout(() => this.selectModel(), 400);
   }
 
@@ -763,14 +853,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main"></label>
     <label>Sub-agent host URL
       <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
+    <label>Sub-agent API transport
+      <select id="s-subagent_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Sub-agent API key
-      <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit main key"></label>
+      <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit only on the same endpoint"></label>
 
     <div class="set-group">Fallback <span class="set-hint">retried if the primary model errors</span></div>
     <label>Fallback model
       <input id="s-fallback_model" type="text" spellcheck="false" placeholder="none"></label>
     <label>Fallback host URL
       <input id="s-fallback_base_url" type="text" spellcheck="false" placeholder="same as main"></label>
+    <label>Fallback API transport
+      <select id="s-fallback_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+    <label>Fallback API key
+      <input id="s-fallback_api_key" type="password" spellcheck="false" placeholder="same endpoint only / DGC_FALLBACK_API_KEY"></label>
 
     <div class="set-group">Behavior</div>
     <label>Permission mode

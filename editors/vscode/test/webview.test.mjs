@@ -255,16 +255,24 @@ test("provider runtime settings and actual usage round-trip through the webview"
   send({ type: "event", event: {
     type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
     mode: "default", think: "low", api_mode: "responses", provider_state: "server",
+    subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
+    fallback_api_key: "must-not-enter-webview",
     prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
   } });
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
   assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
+  assert.equal(doc.getElementById("s-fallback_api_key").value, "",
+    "backend config must never populate a secret field in the webview");
+  doc.getElementById("s-fallback_api_key").value = "new-fallback-secret";
   doc.getElementById("set-save").click();
   const saved = posted.find((m) => m.type === "saveSettings");
   assert.equal(saved.values.provider_state, "server");
   assert.equal(saved.values.prompt_cache, false);
+  assert.equal(saved.values.subagent_api_mode, "ollama");
+  assert.equal(saved.values.fallback_api_mode, "chat_completions");
+  assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",

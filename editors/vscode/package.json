@@ -208,6 +208,12 @@
           "default": "",
           "description": "Host for `task` sub-agents \u2014 run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
         },
+        "dgc.subagentApiMode": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "auto", "ollama", "chat_completions", "responses"],
+          "description": "Transport for task sub-agents. Blank inherits the main transport on the same host and auto-detects a different host."
+        },
         "dgc.fallbackModel": {
           "type": "string",
           "default": "",
@@ -217,6 +223,12 @@
           "type": "string",
           "default": "",
           "description": "Optional host for the fallback model. Blank = same host as the main model."
+        },
+        "dgc.fallbackApiMode": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "auto", "ollama", "chat_completions", "responses"],
+          "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.contextSize": {
           "type": "number",

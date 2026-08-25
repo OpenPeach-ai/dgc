@@ -65,7 +65,7 @@ type, ↑/↓ to select, Enter to run.
 - **/new** — start a fresh session · **/resume** — reopen a past one (`dN` deletes one)
 - **/history** — search & recall a past prompt · **/jump** — jump the transcript to a past turn
 - **/rewind** — restore code + conversation to a past turn
-- **/model**, **/connect**, **/subagent** — choose the model / host
+- **/model**, **/connect**, **/subagent** — choose the model / host / route transport
 - **/mode** — permission mode · **/think** — reasoning effort · **/thoughts** — show/hide thinking
 - **/worktree** — isolate edits in a git worktree · **/sandbox** — confine bash
 - **/bg**, **/theme** — appearance · **/context** — context-window usage · **/compact** — summarise older turns
@@ -269,7 +269,9 @@ Useful keys:
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never
   repainting your terminal).
 - `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept).
-- `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent.
+- `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
+  sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
+  forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
 """.strip()),
 ]
 

@@ -377,7 +377,8 @@ class Agent:
         self.reset()
 
     # ------------------------------------------------------------ setup ---
-    def _new_client(self, base_url: str, api_key: str, model: str) -> LLMClient:
+    def _new_client(self, base_url: str, api_key: str, model: str,
+                    api_mode: str | None = None) -> LLMClient:
         """Create every primary/fallback/sub-agent client with identical reliability settings."""
         return LLMClient(base_url, api_key, model,
                          read_timeout=int(self.config.get("request_timeout", 1800)),
@@ -385,7 +386,8 @@ class Agent:
                          max_tokens=int(self.config.get("max_tokens", 16384)),
                          ollama_keep_alive=str(self.config.get("ollama_keep_alive", "30m")),
                          sampling=_sampling(self.config),
-                         api_mode=str(self.config.get("api_mode", "auto")),
+                         api_mode=str(self.config.get("api_mode", "auto")
+                                      if api_mode is None else api_mode),
                          provider_capabilities=self.config.get("provider_capabilities", {}),
                          capability_cache_ttl_s=int(self.config.get("capability_cache_ttl_s", 300)),
                          provider_state=str(self.config.get("provider_state", "stateless")),
@@ -396,11 +398,38 @@ class Agent:
     def refresh_client(self) -> None:
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
 
+    def _route_api_mode(self, base_url: str, config_key: str, explicit: str = "") -> str:
+        """Resolve a secondary route without leaking a forced main-provider transport into it."""
+        override = str(explicit or self.config.get(config_key, "") or "").strip().lower()
+        if override:
+            return override
+        return (str(self.config.get("api_mode", "auto"))
+                if Agent._same_provider_endpoint(self, base_url) else "auto")
+
+    def _same_provider_endpoint(self, base_url: str) -> bool:
+        return base_url.rstrip("/").lower() == self.config.base_url.rstrip("/").lower()
+
+    def _route_api_key(self, base_url: str, config_key: str, explicit: str = "") -> str:
+        """Never forward the main provider's credential to an unrelated endpoint."""
+        override = str(explicit or self.config.get(config_key, "") or "")
+        if override:
+            return override
+        return self.config.api_key if Agent._same_provider_endpoint(self, base_url) else ""
+
+    def _fallback_client(self, model: str) -> LLMClient:
+        base = self.config.get("fallback_base_url") or self.config.base_url
+        key = Agent._route_api_key(self, base, "fallback_api_key")
+        return Agent._new_client(
+            self, base, key, model,
+            api_mode=Agent._route_api_mode(self, base, "fallback_api_mode"))
+
     def _aux_client(self):
         """A one-shot client that cannot overwrite the main Responses continuation chain."""
         if not isinstance(self.client, LLMClient):  # lightweight injected clients in embedders/tests
             return self.client
-        client = self._new_client(self.client.base_url, self.client.api_key, self.client.model)
+        client = self._new_client(
+            self.client.base_url, self.client.api_key, self.client.model,
+            api_mode=getattr(self.client, "requested_api_mode", self.client.api_mode))
         client.provider_state = "stateless"         # auxiliary output is never useful as server state
         return client
 
@@ -975,9 +1004,7 @@ class Agent:
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
                     self.ui.info(f"⤳ primary model failed; falling back to {fb}")
-                    self.client = self._new_client(
-                        self.config.get("fallback_base_url") or self.config.base_url,
-                        self.config.api_key, fb)
+                    self.client = self._fallback_client(fb)
                     try:
                         result = self._chat(tools, effort, cancel=chat_cancel,
                                             read_timeout=chat_timeout)
@@ -1507,12 +1534,17 @@ class Agent:
         base = (adef.base_url if adef else "") or cfg.get("subagent_base_url") or cfg.base_url
         import os
         env_key = os.environ.get(adef.api_key_env, "") if adef and adef.api_key_env else ""
-        key = env_key or cfg.get("subagent_api_key") or cfg.api_key
+        key = Agent._route_api_key(self, base, "subagent_api_key", env_key)
         model = (adef.model if adef else "") or cfg.get("subagent_model") or cfg.model
+        api_mode = Agent._route_api_mode(
+            self,
+            base, "subagent_api_mode", (adef.api_mode if adef else ""))
         base = base.rstrip("/")
-        if (base, key, model) == (cfg.base_url, cfg.api_key, cfg.model):
+        main_mode = str(cfg.get("api_mode", "auto"))
+        if ((base, key, model) == (cfg.base_url.rstrip("/"), cfg.api_key, cfg.model)
+                and api_mode == main_mode):
             return None
-        return Agent._new_client(self, base, key, model)
+        return Agent._new_client(self, base, key, model, api_mode=api_mode)
 
     def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
         adef = self.agent_defs.get(agent_name) if agent_name else None

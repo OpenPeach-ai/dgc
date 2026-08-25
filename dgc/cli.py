@@ -306,7 +306,7 @@ HELP = """\
   /skills              list skills (bundled defaults + ~/.dgc/skills + .dgc/skills)
   /skill NAME [ARGS]   invoke a skill directly
   /agents              list named sub-agents (.dgc/agents/*.md) + sub-agent defaults
-  /subagent …          set the sub-agent model/host: model NAME | host URL | clear
+  /subagent …          set sub-agent model/host/transport: model NAME | host URL | transport MODE | clear
   /init                have the agent analyze the project and write DGC.md
   /status              current config
   /context             show context-window usage
@@ -650,21 +650,26 @@ class CLI:
             defs = self.agent.agent_defs
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"
-            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{sm}[/]  ·  host [{BRAND}]{sh}[/]")
-            self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  /subagent clear[/dim]")
+            st = cfg.get("subagent_api_mode") or "(inherit/infer)"
+            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{sm}[/]  ·  "
+                               f"host [{BRAND}]{sh}[/]  ·  transport [{BRAND}]{st}[/]")
+            self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  "
+                               "/subagent transport MODE  ·  /subagent clear[/dim]")
             if not defs:
                 self.ui.info("no named agents — add .dgc/agents/<name>.md "
-                             "(frontmatter: model, base_url, api_key_env, effort)")
+                             "(frontmatter: model, base_url, api_mode, api_key_env, effort)")
             else:
-                table = Table("agent", "description", "model", "host")
+                table = Table("agent", "description", "model", "host", "transport")
                 for a in defs.values():
-                    table.add_row(a.name, a.description, a.model or "(default)", a.base_url or "(default)")
+                    table.add_row(a.name, a.description, a.model or "(default)",
+                                  a.base_url or "(default)", a.api_mode or "(inherit/infer)")
                 self.console.print(table)
         elif cmd == "subagent":
             args = rest.split()
             if not args:
                 self.ui.info(f"sub-agent model: {cfg.get('subagent_model') or '(inherit main)'}  ·  "
-                             f"host: {cfg.get('subagent_base_url') or '(inherit main)'}")
+                             f"host: {cfg.get('subagent_base_url') or '(inherit main)'}  ·  "
+                             f"transport: {cfg.get('subagent_api_mode') or '(inherit/infer)'}")
             elif args[0] == "model" and len(args) > 1:
                 cfg.set("subagent_model", args[1])
                 self.ui.info(f"sub-agent model → {args[1]}")
@@ -674,12 +679,20 @@ class CLI:
                     return True
                 cfg.set("subagent_base_url", args[1])
                 self.ui.info(f"sub-agent host → {args[1]}")
+            elif args[0] == "transport" and len(args) == 2:
+                mode = args[1].lower()
+                if mode not in ("auto", "ollama", "chat_completions", "responses"):
+                    self.ui.error("transport must be auto, ollama, chat_completions, or responses")
+                    return True
+                cfg.set("subagent_api_mode", mode)
+                self.ui.info(f"sub-agent transport → {mode}")
             elif args[0] == "clear":
-                for k in ("subagent_model", "subagent_base_url", "subagent_api_key"):
+                for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
+                          "subagent_api_mode"):
                     cfg.set(k, "")
                 self.ui.info("sub-agent overrides cleared — inherits the main model/host")
             else:
-                self.ui.error("usage: /subagent [model NAME | host URL | clear]")
+                self.ui.error("usage: /subagent [model NAME | host URL | transport MODE | clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)

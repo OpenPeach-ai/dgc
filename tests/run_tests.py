@@ -510,13 +510,94 @@ def unit_tests(tmp: Path):
 
     _secret_cfg = type("SecretCfg", (), {
         "model": "m", "base_url": "https://models.invalid/v1", "project_root": tmp,
-        "get": lambda self, k, d=None: {"subagent_api_key": "super-secret"}.get(k, d),
+        "get": lambda self, k, d=None: {
+            "subagent_api_key": "super-secret", "fallback_api_key": "fallback-secret",
+        }.get(k, d),
     })()
     _hb.config = _secret_cfg; _hb.agent = type("A", (), {"mode": "default"})()
     _hb._emit_config()
     check("headless config redacts API-key material",
           "subagent_api_key" not in _cap.events[-1]
-          and _cap.events[-1].get("subagent_api_key_set") is True)
+          and "fallback_api_key" not in _cap.events[-1]
+          and _cap.events[-1].get("subagent_api_key_set") is True
+          and _cap.events[-1].get("fallback_api_key_set") is True)
+
+    _models_done = threading.Event()
+    class _ModelCapture(_Capture):
+        def emit(self, typ, **fields):
+            super().emit(typ, **fields)
+            if typ == "models": _models_done.set()
+    class _ModelClient:
+        api_mode = "ollama"
+        def list_models(self): return ["z:latest", "a:7b"]
+    class _ModelAgent:
+        def _new_client(self, base_url, api_key, model): return _ModelClient()
+    _model_backend = object.__new__(Backend)
+    _model_backend.em = _ModelCapture(); _model_backend._worker = None
+    _model_backend._model_list_lock = threading.Lock(); _model_backend.agent = _ModelAgent()
+    _model_backend.config = type("ModelCfg", (), {
+        "base_url": "http://proxy.invalid/v1", "api_key": "must-not-emit", "model": "m",
+    })()
+    _model_backend.dispatch({"type": "list_models", "request_id": "models-7"})
+    _models_done.wait(2)
+    _model_event = _model_backend.em.events[-1]
+    check("headless provider discovery is correlated, adapter-backed, and secret-free",
+          _model_event == {"type": "models", "request_id": "models-7",
+                           "ids": ["z:latest", "a:7b"],
+                           "base_url": "http://proxy.invalid/v1", "api_mode": "ollama"})
+    _models_done.clear()
+    class _FailingModelClient(_ModelClient):
+        def list_models(self): raise RuntimeError("provider echoed server-secret")
+    _model_backend.agent = type("FailingModelAgent", (), {
+        "_new_client": lambda self, base_url, api_key, model: _FailingModelClient(),
+    })()
+    _model_backend.dispatch({"type": "list_models", "request_id": "models-8"})
+    _models_done.wait(2)
+    _model_error = _model_backend.em.events[-1]
+    check("headless provider discovery errors cannot echo provider secrets",
+          _model_error.get("request_id") == "models-8"
+          and _model_error.get("error") == "model discovery failed (RuntimeError)"
+          and "server-secret" not in json.dumps(_model_error))
+
+    class _SetModelCfg:
+        base_url, model = "https://cloud.invalid/v1", "m"
+        data = {"api_key": "cloud-secret"}
+        _stored_secrets = {"api_key": "persisted-cloud-secret"}
+        _env_secret_keys = set()
+        def set(self, key, value):
+            setattr(self, key, value); self.data[key] = value
+    class _SetModelAgent:
+        def __init__(self): self.refreshed = False
+        def refresh_client(self): self.refreshed = True
+    _set_model = object.__new__(Backend); _set_model.em = _Capture(); _set_model._worker = None
+    _set_model.config = _SetModelCfg(); _set_model.agent = _SetModelAgent()
+    _set_model.dispatch({"type": "set_model", "base_url": "http://localhost:11434/v1",
+                         "api_key": "", "clear_stored_api_key": True})
+    check("headless provider switching can clear a prior cloud credential",
+          _set_model.config.data["api_key"] == ""
+          and _set_model.config._stored_secrets["api_key"] == ""
+          and "api_key" in _set_model.config._env_secret_keys
+          and _set_model.agent.refreshed)
+
+    class _RouteCfg:
+        data = {"subagent_base_url": "http://old.invalid/v1",
+                "subagent_api_key": "old-secret"}
+        _env_secret_keys = set()
+        def set(self, key, value):
+            if key == "subagent_base_url" and value != self.data[key]:
+                self.data["subagent_api_key"] = ""
+            self.data[key] = value
+    _route_backend = object.__new__(Backend); _route_backend.em = _Capture()
+    _route_backend._worker = None; _route_backend.config = _RouteCfg()
+    _route_backend.agent = type("RouteAgent", (), {"refresh_client": lambda self: None})()
+    _route_backend._emit_config = lambda: None
+    _route_backend.dispatch({"type": "set_config", "values": {
+        "subagent_api_key": "replacement-secret",
+        "subagent_base_url": "http://new.invalid/v1",
+    }})
+    check("headless route replacement credentials survive adversarial JSON key order",
+          _route_backend.config.data["subagent_base_url"] == "http://new.invalid/v1"
+          and _route_backend.config.data["subagent_api_key"] == "replacement-secret")
 
     from dgc.headless import _format_editor_context, _strip_editor_context
     _framed = _format_editor_context([
@@ -1078,13 +1159,14 @@ def unit_tests(tmp: Path):
     adir = tmp / "adefs"; adir.mkdir()
     (adir / "reviewer.md").write_text(
         "---\nname: reviewer\ndescription: careful reviewer\n"
-        "model: qwen3:14b\nbase_url: http://gpu:11434/v1\napi_key_env: REVIEWER_KEY\n"
+        "model: qwen3:14b\nbase_url: http://gpu:11434/v1\napi_mode: ollama\n"
+        "api_key_env: REVIEWER_KEY\n"
         "effort: high\n---\n"
         "Be a meticulous reviewer.")
     ad = _parse_agent(adir / "reviewer.md")
-    check("agentdef parses model+host+effort",
+    check("agentdef parses model+host+transport+effort",
           ad.model == "qwen3:14b" and ad.base_url == "http://gpu:11434/v1"
-          and ad.api_key_env == "REVIEWER_KEY" and ad.effort == "high")
+          and ad.api_mode == "ollama" and ad.api_key_env == "REVIEWER_KEY" and ad.effort == "high")
     check("agentdef keeps body", "meticulous reviewer" in ad.body)
 
     class _Cfg2:
@@ -1098,15 +1180,37 @@ def unit_tests(tmp: Path):
           Agent._subagent_client(_FakeA(_Cfg2({})), None) is None)
     # global subagent_* selects a different host+model
     c = Agent._subagent_client(_FakeA(_Cfg2(
-        {"subagent_model": "sub-model", "subagent_base_url": "http://gpu:11434/v1"})), None)
-    check("subagent global host+model",
-          c is not None and c.model == "sub-model" and c.base_url == "http://gpu:11434/v1")
+        {"api_mode": "responses", "subagent_model": "sub-model",
+         "subagent_base_url": "http://gpu:11434/v1"})), None)
+    check("a different subagent endpoint auto-detects transport instead of leaking the main mode",
+          c is not None and c.model == "sub-model" and c.base_url == "http://gpu:11434/v1"
+          and c.requested_api_mode == "auto" and c.api_mode == "ollama"
+          and c.api_key == "")
     # a named agent def overrides the global default
     c2 = Agent._subagent_client(_FakeA(_Cfg2({"subagent_model": "sub-model"})),
                                 AgentDef(name="r", description="", body="",
-                                         model="def-model", base_url="http://def:1/v1"))
-    check("agentdef overrides global",
-          c2.model == "def-model" and c2.base_url == "http://def:1/v1")
+                                         model="def-model", base_url="http://def:1/v1",
+                                         api_mode="chat_completions"))
+    check("agentdef overrides global model, host, and transport",
+          c2.model == "def-model" and c2.base_url == "http://def:1/v1"
+          and c2.requested_api_mode == "chat_completions")
+    c_same = Agent._subagent_client(_FakeA(_Cfg2(
+        {"api_mode": "responses", "subagent_model": "other-model"})), None)
+    check("a same-endpoint subagent inherits the explicit main transport",
+          c_same is not None and c_same.requested_api_mode == "responses"
+          and c_same.api_key == "ollama")
+    routed = _FakeA(_Cfg2({"api_mode": "responses", "fallback_model": "fallback-model",
+                           "fallback_base_url": "http://other:11434/v1",
+                           "fallback_api_key": "fallback-secret",
+                           "fallback_api_mode": "chat_completions"}))
+    fallback_client = Agent._fallback_client(routed, "fallback-model")
+    check("fallback credentials and transport are independently route-scoped",
+          fallback_client.base_url == "http://other:11434/v1"
+          and fallback_client.api_key == "fallback-secret"
+          and fallback_client.requested_api_mode == "chat_completions")
+    uncredentialed = _FakeA(_Cfg2({"fallback_base_url": "http://untrusted:11434/v1"}))
+    check("another fallback endpoint never receives the main provider credential",
+          Agent._fallback_client(uncredentialed, "fallback-model").api_key == "")
     os.environ["REVIEWER_KEY"] = "key-from-env"
     try:
         c3 = Agent._subagent_client(_FakeA(_Cfg2({})), ad)
@@ -1630,15 +1734,19 @@ def test_private_config():
     _C.USER_HOME, _C.USER_CONFIG, _C.USER_SECRETS = user, user / "config.json", user / "secrets.json"
     user.mkdir()
     _C.USER_CONFIG.write_text(json.dumps({"model": "m", "api_key": "cloud-secret",
-                                          "search_api_key": "search-secret"}))
+                                          "search_api_key": "search-secret",
+                                          "fallback_api_key": "fallback-secret"}))
     try:
         cfg = _C.Config(root / "project")
         public = json.loads(_C.USER_CONFIG.read_text())
         private = json.loads(_C.USER_SECRETS.read_text())
         check("config migration removes plaintext API keys",
-              "api_key" not in public and "search_api_key" not in public)
+              "api_key" not in public and "search_api_key" not in public
+              and "fallback_api_key" not in public)
         check("config migration preserves secret values",
-              cfg.api_key == "cloud-secret" and private.get("search_api_key") == "search-secret")
+              cfg.api_key == "cloud-secret" and private.get("search_api_key") == "search-secret"
+              and cfg.get("fallback_api_key") == "fallback-secret"
+              and private.get("fallback_api_key") == "fallback-secret")
         os.environ["DGC_API_KEY"] = "ephemeral-ci-key"
         try:
             env_cfg = _C.Config(root / "project")
@@ -1648,6 +1756,13 @@ def test_private_config():
                   env_cfg.api_key == "ephemeral-ci-key" and stored_after.get("api_key") == "cloud-secret")
         finally:
             os.environ.pop("DGC_API_KEY", None)
+        cfg.set("fallback_base_url", "https://fallback-2.invalid/v1")
+        cfg.set("base_url", "https://cloud-2.invalid/v1")
+        route_secrets = json.loads(_C.USER_SECRETS.read_text())
+        check("endpoint changes invalidate matching live and persisted credentials",
+              cfg.api_key == "" and cfg.get("fallback_api_key") == ""
+              and route_secrets.get("api_key") == ""
+              and route_secrets.get("fallback_api_key") == "")
         if os.name == "posix":
             check("config and secrets files are private",
                   _stat.S_IMODE(_C.USER_CONFIG.stat().st_mode) == 0o600

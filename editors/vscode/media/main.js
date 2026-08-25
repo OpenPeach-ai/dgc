@@ -430,14 +430,17 @@
 
   // ---- settings page ----
   const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
-    "subagent_api_key", "fallback_model", "fallback_base_url", "api_mode", "provider_state",
-    "prompt_cache", "capability_cache_ttl_s", "mode", "think", "context_size"];
+    "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
+    "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
+    "capability_cache_ttl_s", "mode", "think", "context_size"];
   function fillSettings(cfg) {
     const map = {
       base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
       subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
+      subagent_api_mode: cfg.subagent_api_mode,
       subagent_api_key: "", fallback_model: cfg.fallback_model,
       fallback_base_url: cfg.fallback_base_url, context_size: cfg.context_size,
+      fallback_api_mode: cfg.fallback_api_mode, fallback_api_key: "",
       api_mode: cfg.api_mode, provider_state: cfg.provider_state,
       prompt_cache: String(cfg.prompt_cache !== false),
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,

@@ -14,9 +14,10 @@ USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
 USER_AGENTS = USER_HOME / "agents"
 BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
-SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key"})
+SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key", "fallback_api_key"})
 SECRET_ENV = {"api_key": "DGC_API_KEY", "search_api_key": "DGC_SEARCH_API_KEY",
-              "subagent_api_key": "DGC_SUBAGENT_API_KEY"}
+              "subagent_api_key": "DGC_SUBAGENT_API_KEY",
+              "fallback_api_key": "DGC_FALLBACK_API_KEY"}
 
 
 def _write_private_json(path: Path, payload: dict) -> None:
@@ -88,9 +89,12 @@ DEFAULTS: dict = {
     "hooks": {},                                # event -> [{matcher?, command}] lifecycle hooks
     "fallback_model": "",                       # retried if the primary model errors
     "fallback_base_url": "",                    # optional endpoint for the fallback (default: same)
+    "fallback_api_key": "",                     # credential for another fallback endpoint
+    "fallback_api_mode": "",                    # transport override; empty=infer for another endpoint
     "subagent_model": "",                       # model for `task` sub-agents (empty: inherit main)
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
-    "subagent_api_key": "",                     # key for the sub-agent host (empty: inherit main)
+    "subagent_api_key": "",                     # key for another sub-agent endpoint
+    "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
     "suggest": True,                            # ghost-text: predict the next prompt after each turn
@@ -234,6 +238,21 @@ class Config:
         return self.data.get(key, default)
 
     def set(self, key: str, value) -> None:
+        # Provider credentials are endpoint-scoped. Reusing an old key after a host change can
+        # disclose a cloud credential to an unrelated server, so invalidate both the live and
+        # persisted value before saving the new route. A caller that owns the new key sets it next.
+        route_secrets = {
+            "base_url": "api_key",
+            "subagent_base_url": "subagent_api_key",
+            "fallback_base_url": "fallback_api_key",
+        }
+        secret = route_secrets.get(key)
+        current = str(self.data.get(key, "")).rstrip("/").lower()
+        incoming = str(value).rstrip("/").lower()
+        if secret and current != incoming:
+            self.data[secret] = ""
+            self._stored_secrets[secret] = ""
+            self._env_secret_keys.discard(secret)
         self.data[key] = value
         self.save()
 

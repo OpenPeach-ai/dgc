@@ -348,6 +348,16 @@ class TUI:
             ("sandbox", "Confine bash (sandbox)", "bool"),
             ("sandbox_network", "Sandbox network access", "bool"),
         ],
+        "Model routing": [
+            ("subagent_model", "Sub-agent model", "str"),
+            ("subagent_base_url", "Sub-agent endpoint", "str"),
+            ("subagent_api_mode", "Sub-agent transport", "enum",
+             ["inherit", "auto", "ollama", "chat_completions", "responses"]),
+            ("fallback_model", "Fallback model", "str"),
+            ("fallback_base_url", "Fallback endpoint", "str"),
+            ("fallback_api_mode", "Fallback transport", "enum",
+             ["inherit", "auto", "ollama", "chat_completions", "responses"]),
+        ],
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
             ("background", "Background", "enum", ["auto", "dark", "inherit"]),
@@ -390,6 +400,8 @@ class TUI:
         if typ in ("bool", "enum"):
             choices = (["on", "off"] if typ == "bool" else spec[0])
             cur = self._fmt_setting(key, typ) if typ == "bool" else str(self.config.get(key, ""))
+            if key in ("subagent_api_mode", "fallback_api_mode") and not cur:
+                cur = "inherit"
             rows = [{"label": ("● " if c == cur else "○ ") + c, "value": c} for c in choices]
             self._open_overlay(rows, on_pick=lambda r: self._apply_setting(cat, key, r["value"], typ),
                                title=key, footer="↑↓ move · Enter select · Esc back",
@@ -405,6 +417,8 @@ class TUI:
         try:
             if typ == "bool":
                 val = raw == "on" if isinstance(raw, str) else bool(raw)
+            elif key in ("subagent_api_mode", "fallback_api_mode") and raw == "inherit":
+                val = ""
             elif str(raw).strip() in ("", "default", "none") and typ != "enum":
                 val = DEFAULTS.get(key)         # the REAL default ("" for sampling, "qwen3:8b" for model)
             elif typ == "int":
@@ -2429,9 +2443,12 @@ class TUI:
         elif cmd == "agents":
             sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"
+            st = cfg.get("subagent_api_mode") or "(inherit/infer)"
             defs = ", ".join(getattr(self.agent, "agent_defs", {}).keys()) or "(none)"
             self._append(self._rich(f"[bold {th.accent}]sub-agents[/]\n  model  [{th.text}]{_esc(sm)}[/]\n"
-                                    f"  host   [{th.text}]{_esc(sh)}[/]\n  named  [{th.faint}]{_esc(defs)}[/]\n"
+                                    f"  host   [{th.text}]{_esc(sh)}[/]\n"
+                                    f"  route  [{th.text}]{_esc(st)}[/]\n"
+                                    f"  named  [{th.faint}]{_esc(defs)}[/]\n"
                                     f"  [{th.faint}]/subagent to change[/]"))
         elif cmd in ("skills", "extensions", "ext"):
             self._extensions_modal(tab=0)               # open the tabbed Skills/MCP modal on Skills
@@ -2535,7 +2552,11 @@ class TUI:
 
     def _list_models(self, base_url=None, api_key=None):
         from .llm import LLMClient
-        client = self.agent.client if base_url is None else LLMClient(base_url, api_key or self.config.api_key, "")
+        client = (self.agent.client if base_url is None else
+                  LLMClient(base_url,
+                            self.agent._route_api_key(base_url, "subagent_api_key", api_key or ""),
+                            "",
+                            api_mode=self.agent._route_api_mode(base_url, "subagent_api_mode")))
         return client.list_models()
 
     def _model_flow(self, subagent: bool = False) -> None:
@@ -2768,7 +2789,9 @@ class TUI:
                         return
                 self.config.set(bk, prov["base_url"])
                 self.config.set(kk, key if prov["needs_key"] else prov["api_key"])
-                if not subagent:
+                if subagent:
+                    self.config.set("subagent_api_mode", "auto")
+                else:
                     self.config.set("api_mode", "auto")
                     self.agent.refresh_client()
                 self._flash(f"{who} → {prov['base_url']}")
@@ -2814,12 +2837,20 @@ class TUI:
             self._set_model_tui(args[1], subagent=True); return
         if args and args[0] == "host" and len(args) > 1:
             self._set_host(args[1], subagent=True); return
+        if args and args[0] == "transport" and len(args) == 2:
+            mode = args[1].lower()
+            if mode not in ("auto", "ollama", "chat_completions", "responses"):
+                self._flash("transport must be auto, ollama, chat_completions, or responses"); return
+            cfg.set("subagent_api_mode", mode)
+            self._flash(f"sub-agent transport → {mode}"); return
         if args and args[0] == "clear":
-            for k in ("subagent_model", "subagent_base_url", "subagent_api_key"):
+            for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
+                      "subagent_api_mode"):
                 cfg.set(k, "")
             self._flash("sub-agent overrides cleared — inherits the main model/host"); return
         labels = ["Set sub-agent host (provider or a custom LAN URL)",
                   "Set sub-agent model (from that host)",
+                  "Set sub-agent API transport",
                   "Clear — inherit the main model & host"]
 
         def pick(i):
@@ -2827,13 +2858,20 @@ class TUI:
                 self._connect_flow("", subagent=True)
             elif i == 1:
                 self._model_flow(subagent=True)
+            elif i == 2:
+                modes = ["auto", "ollama", "chat_completions", "responses"]
+                self._show_picker("Sub-agent transport", modes,
+                                  lambda j: self._subagent_flow(f"transport {modes[j]}"))
             else:
-                for k in ("subagent_model", "subagent_base_url", "subagent_api_key"):
+                for k in ("subagent_model", "subagent_base_url", "subagent_api_key",
+                          "subagent_api_mode"):
                     cfg.set(k, "")
                 self._flash("sub-agent → inherits the main model/host")
         sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
         sh = cfg.get("subagent_base_url") or "(inherit main host)"
-        self._append(self._rich(f"[{style_mod.theme().faint}]sub-agent model {sm} · host {sh}[/]"))
+        st = cfg.get("subagent_api_mode") or "inherit/infer"
+        self._append(self._rich(
+            f"[{style_mod.theme().faint}]sub-agent model {sm} · host {sh} · transport {st}[/]"))
         self._show_picker("Sub-agents", labels, pick)
 
     def _tui_worktree(self, rest: str) -> None:
@@ -3285,7 +3323,7 @@ def _tui_help() -> str:
                      ("/clear", "clear the transcript")]),
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
-                          ("/subagent", "sub-agent model + host (or a custom LAN host)"),
+                          ("/subagent", "sub-agent model + host + API transport"),
                           ("/think off|low|medium|high", "reasoning effort")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
