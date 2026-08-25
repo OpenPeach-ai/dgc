@@ -32,11 +32,12 @@ _FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn
 _EDIT_FAIL_SOFT = 3     # consecutive failing edit_file/multi_edit calls before we push write_file
 _EDIT_FAIL_HARD = 6     # consecutive failing edits before we abort — a varied-arg edit grind that
 #                         dodges the identical-call loop guard is DGC's #1 benchmark-timeout driver
-# a passing command matching one of these = the work is likely verified → nudge the model to finish
-# instead of re-running / refactoring working code (the "solved but kept going" waste)
-_VERIFY_KWS = ("pytest", "go test", "cargo test", "npm test", "npm run test", "npx jest", "jest",
-               "vitest", "gradlew test", "gradle test", "ctest", "make test", "unittest",
-               "python -m pytest", "mocha", "rspec", "tox")
+_SHELL_CONTROL = {"&&", "||", ";", "|", "&"}
+_VERIFY_INFO_FLAGS = {
+    "-h", "--help", "--version", "--collect-only", "--co", "--fixtures",
+    "--fixtures-per-test", "--markers", "--trace-config", "--setup-plan", "--showconfig",
+    "--listenvs", "--list-tests", "--listtests",
+}
 _MAX_CONTINUE = 3       # length-truncation auto-continues per turn
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
@@ -173,23 +174,112 @@ def _grind_cap(budget: float, deadline: float) -> int:
     return 3 if rem <= 0.1 else 5
 
 
+def _shell_tokens(command: str) -> list[str]:
+    """Return shell-aware words/operators with real comments removed; malformed input fails closed."""
+    source = str(command or "")
+    # A newline is a shell list separator, but shlex consumes it as ordinary whitespace (and also
+    # consumes the newline terminating a comment). Refuse multiline recognition instead of letting
+    # ``pytest # comment\ntrue`` masquerade as one successful verifier command.
+    if "\n" in source or "\r" in source:
+        return []
+    try:
+        lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def _and_segments(tokens: list[str]) -> list[list[str]] | None:
+    """Split a fail-propagating ``&&`` chain; reject masking/background/pipeline operators."""
+    if not tokens or any(token in _SHELL_CONTROL and token != "&&" for token in tokens):
+        return None
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token == "&&":
+            if not segments[-1]:
+                return None
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return segments if segments[-1] else None
+
+
+def _looks_like_test_invocation(words: list[str]) -> bool:
+    """Recognize an invoked test runner, never a keyword in an argument, string, or comment."""
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0], re.DOTALL):
+        words = words[1:]
+    if not words:
+        return False
+    lowered = [word.lower() for word in words]
+    if _VERIFY_INFO_FLAGS & set(lowered):
+        return False
+    command = Path(lowered[0]).name
+    args = lowered[1:]
+
+    # Common environment/package runners preserve the wrapped command's exit status.
+    if command in {"uv", "poetry", "pipenv"} and args[:1] == ["run"]:
+        return _looks_like_test_invocation(words[2:])
+    if command == "env":
+        nested = words[1:]
+        while nested and (nested[0].startswith("-") or
+                          re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", nested[0], re.DOTALL)):
+            nested = nested[1:]
+        return _looks_like_test_invocation(nested)
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", command):
+        return len(args) >= 2 and args[0] == "-m" and args[1] in {"pytest", "unittest", "tox"}
+    if command == "go":
+        return args[:1] == ["test"] and not any(arg == "-list" or arg.startswith("-list=")
+                                                   for arg in args)
+    if command == "cargo":
+        return args[:1] == ["test"] and not any(arg == "--no-run" or arg.startswith("--no-run=")
+                                                   for arg in args)
+    if command in {"npm", "pnpm", "yarn", "bun"}:
+        return bool(args) and (args[0] == "test" or
+                               (len(args) >= 2 and args[0] == "run" and
+                                (args[1] == "test" or args[1].startswith("test:"))))
+    if command == "npx":
+        return bool(args) and Path(args[0]).name in {"jest", "vitest", "mocha", "tox"}
+    if command in {"gradle", "gradlew"}:
+        return any(arg == "test" or arg.endswith(":test") for arg in args)
+    if command == "make":
+        return any(arg == "test" or arg.startswith("test-") for arg in args)
+    if command == "ctest":
+        return "-n" not in args and not any(arg == "--show-only" or arg.startswith("--show-only=")
+                                             for arg in args)
+    if command == "vitest" and args[:1] == ["list"]:
+        return False
+    if command == "tox" and any(arg in {"-a", "-l"} for arg in args):
+        return False
+    return command in {"pytest", "unittest", "jest", "vitest", "mocha", "rspec", "tox"}
+
+
 def _is_verification_command(command: str, configured: str = "") -> bool:
-    """Recognize tests, not merely compilation; an explicit project verifier is authoritative."""
-    normalized = " ".join(str(command or "").lower().split())
-    expected = " ".join(str(configured or "").lower().split())
-    if expected:
-        # Models routinely remove redundant shell quotes from an exact command copied out of the
-        # prompt (``./build/'exercise'`` -> ``./build/exercise``).  Those commands are shell-
-        # equivalent, but a raw substring comparison misses the green verifier and lets the model
-        # keep editing already-passing code.  shlex gives both forms the same canonical spelling;
-        # surrounding spaces retain token boundaries so ``pytest -q`` does not match ``pytest -qq``.
-        try:
-            normalized = " ".join(shlex.split(normalized, posix=True))
-            expected = " ".join(shlex.split(expected, posix=True))
-        except ValueError:
-            pass
-        return f" {expected} " in f" {normalized} "
-    return any(keyword in normalized for keyword in _VERIFY_KWS)
+    """Recognize a verifier whose observed shell status cannot be masked by surrounding syntax."""
+    actual = _shell_tokens(command)
+    if not actual:
+        return False
+    if str(configured or "").strip():
+        expected = _shell_tokens(configured)
+        if not expected:
+            return False
+        # The exact configured shell program defines the user's policy, including compound syntax.
+        if actual == expected:
+            return True
+        # Also accept shell-equivalent quote changes and a full expected segment inside an ``&&``
+        # chain (most often ``cd repo && <verifier>``). Every extra segment must succeed for the
+        # observed zero status, so it cannot turn a failed verifier into a false green result.
+        actual_segments = _and_segments(actual)
+        expected_segments = _and_segments(expected)
+        if actual_segments is None or expected_segments is None:
+            return False
+        width = len(expected_segments)
+        return any(actual_segments[start:start + width] == expected_segments
+                   for start in range(len(actual_segments) - width + 1))
+
+    segments = _and_segments(actual)
+    return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import TOOL_SCHEMAS, execute
 
 THINK_LEVELS = ("off", "low", "medium", "high")
@@ -1267,7 +1357,7 @@ class Agent:
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
         fail_streak = 0             # consecutive non-zero bash exits (no success) — grind guard
         fail_nudged = False
-        verify_runs = 0             # E: verify_before_done attempts this turn (bounded)
+        verify_runs = 0             # consecutive verify_before_done failures without another action
         last_fail_fp = None         # fingerprint of the last failing bash output
         same_fail = 0               # consecutive failures with the SAME fingerprint (stuck signal)
         edit_fail_streak = 0        # consecutive failing edit_file/multi_edit calls (write_file steer)
@@ -1444,25 +1534,47 @@ class Agent:
                         "If not, take the next concrete step toward it now — don't stop with it unmet.\n"
                         "</system-reminder>"})
                     continue
-                if (verify_runs < 2 and mutating_total > 0                       # E: verify-before-done gate
-                        and self.config.get("verify_before_done") and self.config.get("verify_command")):
+                needs_verifier = (mutating_total > 0 and self.config.get("verify_before_done")
+                                  and self.config.get("verify_command"))
+                if needs_verifier and verify_runs >= 2:
+                    self.ui.error("stopped — the configured verifier is still failing and the model "
+                                  "stopped again without taking corrective action")
+                    return
+                if needs_verifier:                                  # E: verify-before-done gate
                     verify_runs += 1
                     cmd = str(self.config.get("verify_command"))
                     self.ui.info(f"⧗ verify: {cmd}")
-                    import subprocess as _sp
                     try:
-                        pr = _sp.run(["bash", "-lc", cmd], cwd=str(self.config.project_root),
-                                     capture_output=True, text=True,
-                                     timeout=int(self.config.get("bash_timeout", 120)))
-                        if pr.returncode != 0:
-                            tail = ((pr.stdout or "") + "\n" + (pr.stderr or ""))[-3000:]
-                            self.messages.append({"role": "user", "content":
-                                "<system-reminder>\nverify_before_done: your changes fail "
-                                f"`{cmd}` (exit {pr.returncode}). Fix them, then finish:\n" + tail
-                                + "\n</system-reminder>"})
-                            continue
+                        verify_timeout = max(1, int(self.config.get("bash_timeout", 120)))
+                    except (TypeError, ValueError):
+                        verify_timeout = 120
+                    verify_cancel = self.cancelled
+                    if deadline is not None:
+                        cutoff = deadline - 0.06 * budget
+                        verify_cancel = _DeadlineCancel(self.cancelled, cutoff)
+                        verify_timeout = max(1, min(verify_timeout,
+                                                    int(max(1, cutoff - time.monotonic()))))
+                    lease = workspace_mutation_lock(self.config.project_root)
+                    acquired = False
+                    try:
+                        acquired = acquire_cancellable(lease, verify_cancel)
+                        if not acquired:
+                            verify_out = (f"error: {lease.last_error}" if lease.last_error else
+                                          "error: verification cancelled while waiting for the workspace lease")
+                        else:
+                            verify_out = str(execute(
+                                "bash", {"command": cmd, "timeout": verify_timeout}, self.ctx))
                     except Exception as e:
-                        self.ui.info(f"verify skipped: {e}")
+                        verify_out = f"error: {type(e).__name__}: {e}"
+                    finally:
+                        if acquired:
+                            lease.release()
+                    if not verify_out.startswith("exit code: 0\n"):
+                        self.messages.append({"role": "user", "content":
+                            "<system-reminder>\nverify_before_done: the configured verifier did not "
+                            f"pass (`{cmd}`). Fix the code or the verifier failure, then finish:\n"
+                            + verify_out[-3000:] + "\n</system-reminder>"})
+                        continue
                 return
 
             if result.finish_reason == "length" and result.tool_calls:
@@ -1490,10 +1602,8 @@ class Agent:
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
-            batch_verified = False          # did a test/build command pass in THIS batch?
-            batch_verify_index = -1         # an edit after the pass invalidates this batch's evidence
-            batch_edit_index = -1
-            batch_task_edit = False         # a delegated delta integrated into this checkout
+            batch_verified = False          # is the checkout verified at the END of this batch?
+            batch_landed_edits = 0          # successful file/task mutations, not merely attempted calls
             parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
             parallel_outputs = ({} if parallel_tasks else
                                 self._parallel_read_outputs(result.tool_calls, sig_count))
@@ -1540,15 +1650,24 @@ class Agent:
                     if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
                         fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
                         cmdstr = str(call.arguments.get("command", ""))
-                        if _is_verification_command(
-                                cmdstr, str(self.config.get("verify_command", ""))):
-                            batch_verified = True
-                            batch_verify_index = call_index
+                        batch_verified = _is_verification_command(
+                            cmdstr, str(self.config.get("verify_command", "")))
+                        verified = batch_verified
+                        if not verified:
+                            verify_nudged = False
                     else:
                         fail_streak += 1
                         fp = "".join(c for c in body if not c.isdigit())[:400]  # ignore line #s / timings
                         same_fail = same_fail + 1 if fp == last_fail_fp else 1
                         last_fail_fp = fp
+                        batch_verified = verified = False
+                        verify_nudged = False
+                elif call.name == "bash":
+                    # A denied, timed-out, background, or otherwise non-final shell action cannot carry
+                    # a prior green state forward. Shell is mutation-capable and has no trustworthy
+                    # read-only subset, so only a completed recognized verifier can establish green.
+                    batch_verified = verified = False
+                    verify_nudged = False
                 if call.name in ("edit_file", "multi_edit", "apply_patch"):  # varied edit grind
                     if out.lstrip().lower().startswith("error"):  # identical-call loop guard) → count it
                         edit_fail_streak += 1
@@ -1560,8 +1679,9 @@ class Agent:
                                     and not out.lstrip().lower().startswith("error"))
                 landed_task_edit = call.name == "task" and task_integrated
                 if landed_file_edit or landed_task_edit:
-                    batch_task_edit |= landed_task_edit
-                    batch_edit_index = call_index
+                    batch_landed_edits += 1
+                    batch_verified = verified = False
+                    verify_nudged = False
                     # A landed mutation is progress relative to earlier varied command failures.
                     # Let the next verification establish a fresh streak, but deliberately retain
                     # same_fail/last_fail_fp: repeatedly producing the identical failure through
@@ -1586,9 +1706,6 @@ class Agent:
             if text_results:
                 self.messages.append({"role": "user",
                                       "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>"})
-
-            if batch_edit_index > batch_verify_index:
-                batch_verified = False
 
             if deadline is not None and batch_verified and edited_paths:
                 # a test/build just passed → snapshot the edited files so we can restore this known-good
@@ -1623,10 +1740,12 @@ class Agent:
 
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
-            mutating_total += sum(1 for c in result.tool_calls
-                                  if c.name in (*_FILE_EDIT_CALLS, "bash")) + int(batch_task_edit)
-            edited_total += sum(1 for c in result.tool_calls
-                                if c.name in _FILE_EDIT_CALLS) + int(batch_task_edit)
+            mutating_total += batch_landed_edits + sum(1 for c in result.tool_calls if c.name == "bash")
+            edited_total += batch_landed_edits
+            if any(c.name in (*_FILE_EDIT_CALLS, "bash", "task") for c in result.tool_calls):
+                # A tool action may have changed the candidate. Allow the next final-answer attempt to
+                # run the configured verifier again; only repeated unsupported "done" replies are capped.
+                verify_runs = 0
             reminders: list[str] = []
             if fail_streak >= _FAIL_SOFT and not fail_nudged:   # grind guard: nudge a rethink
                 fail_nudged = True
@@ -1639,20 +1758,17 @@ class Agent:
                                  "STOP editing — read the file once, then write the ENTIRE corrected file "
                                  "in ONE write_file call (it always succeeds). Don't keep tweaking old_string.")
             # finish-when-verified: a test/build passed and the model kept tooling without editing → nudge
-            made_edit = (batch_task_edit or any(c.name in _FILE_EDIT_CALLS for c in result.tool_calls))
+            made_edit = batch_landed_edits > 0
             if verified and not made_edit and not verify_nudged:
                 verify_nudged = True
                 reminders.append("A test/build command passed and you haven't changed the code since. If "
                                  "the task is complete, give a brief final summary and stop — don't re-run "
                                  "or refactor code that already works.")
-            if made_edit:                       # new code invalidates the pass → must re-verify
-                verified, verify_nudged = False, False
             if batch_verified:
-                verified = True
                 # Only an explicitly budgeted turn gets a hard closeout. Normal interactive and /goal
                 # work keeps the soft nudge above: a passing subsystem test must not terminate a larger
                 # task. Benchmark prompts supply the authoritative build/test command and outer limit.
-                if (edited_total > 0 or batch_edit_index >= 0) and deadline is not None:
+                if edited_total > 0 and deadline is not None:
                     summary_only = True
                     reminders.append("Verification passed after the code changes. Do not call any more "
                                      "tools, inspect more files, or refactor. Respond now with only a brief "

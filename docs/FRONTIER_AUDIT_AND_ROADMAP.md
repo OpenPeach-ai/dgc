@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 593 / 593 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 599 / 599 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -472,8 +472,21 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 593/593 Python checks, 17/17 editor transport/webview checks, and
+The complete offline evidence is 599/599 Python checks, 17/17 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
+
+Implementation note for step 8: verified-done is now an ordered, fail-closed state rather than a
+test-keyword substring. Shell-aware recognition removes comments, requires a real test-runner
+invocation, rejects help/collect-only forms and status-masking `||`, `;`, pipeline, or background
+syntax, while still accepting an exact configured verifier or its complete segment inside a
+fail-propagating `&&` chain. A later shell action or landed file/task edit invalidates an earlier
+pass; only successful mutations count as edits for hard closeout. Repeated final answers against a
+failing `verify_before_done` command stop visibly, while a corrective tool action re-arms the gate.
+The configured final gate uses the same sandboxed, process-group-cleaned shell executor under the
+checkout mutation lease, so timeout, launch, cancellation, and confinement failures cannot be
+silently treated as success.
+Adversarial unit cases and the mock-model closeout exercise cover false comments/echoes, masked
+failures, ordered pass-then-fail batches, real test execution, and schema-free summary closeout.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
 activates network and product-specific schemas/instructions only from explicit turn or standing-goal
@@ -672,7 +685,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-593/593 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+599/599 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

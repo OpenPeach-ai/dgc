@@ -1158,6 +1158,50 @@ def unit_tests(tmp: Path):
     check("authoritative verifier rejects a premature final and feeds failure back",
           _va.client.saw_failure and _va.client.n == 4
           and (_verify_root / "answer.txt").read_text() == "good\n")
+    _rearm_root = Path(tempfile.mkdtemp()); (_rearm_root / "answer.txt").write_text("start\n")
+    _rearm = _Ag(_Cfg(_rearm_root), _AgUI()); _rearm.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; test \"$(cat answer.txt)\" = good",
+    })
+    class _RearmVerifyClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "rearm-bad", "write_file", {"path": "answer.txt", "content": "bad\n"})])
+            if self.n in (2, 3):
+                return _ChatResult(content="Done.")
+            if self.n == 4:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "rearm-good", "write_file", {"path": "answer.txt", "content": "good\n"})])
+            return _ChatResult(content="Done.")
+    _rearm.client = _RearmVerifyClient(); _rearm.run_turn("repair until the verifier passes")
+    check("a corrective tool action re-arms verify_before_done after repeated failed finals",
+          _rearm.client.n == 5 and (_rearm_root / ".verify-runs").read_text() == "xxx"
+          and (_rearm_root / "answer.txt").read_text() == "good\n")
+    class _VerifyCapUI(_AgUI):
+        def __init__(self): self.errors = []
+        def error(self, message): self.errors.append(message)
+    _cap_root = Path(tempfile.mkdtemp()); _cap_ui = _VerifyCapUI()
+    _cap = _Ag(_Cfg(_cap_root), _cap_ui); _cap.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; false",
+    })
+    class _VerifyCapClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "cap-edit", "write_file", {"path": "answer.txt", "content": "bad\n"})])
+            return _ChatResult(content="Done.")
+    _cap.client = _VerifyCapClient(); _cap.run_turn("stop claiming success without a fix")
+    check("verify_before_done stops visibly after repeated finals without corrective action",
+          _cap.client.n == 4 and (_cap_root / ".verify-runs").read_text() == "xx"
+          and any("still failing" in message for message in _cap_ui.errors))
     check("system prompt specifies phase updates and outcome-first finals",
           "# Response cadence" in _ca.system_prompt() and "phase change" in _ca.system_prompt()
           and "lead with the outcome" in _ca.system_prompt())
@@ -1183,6 +1227,23 @@ def unit_tests(tmp: Path):
     check("shell-equivalent verifier quotes are canonicalized without prefix matches",
           _is_verification_command("./build/all-your-base", "./build/'all-your-base'")
           and not _is_verification_command("pytest -qq", "pytest -q"))
+    check("verifier recognition rejects comments, arguments, and information-only invocations",
+          not _is_verification_command("echo ok  # pytest -q")
+          and not _is_verification_command("echo pytest")
+          and not _is_verification_command("python -m pytest --collect-only")
+          and not _is_verification_command("pytest --fixtures")
+          and not _is_verification_command("go test -list=.")
+          and not _is_verification_command("cargo test --no-run"))
+    check("verifier recognition rejects shell constructs that can mask a failed test",
+          not _is_verification_command("pytest -q || true")
+          and not _is_verification_command("pytest -q ; true")
+          and not _is_verification_command("pytest -q | cat")
+          and not _is_verification_command("pytest -q\ntrue")
+          and not _is_verification_command("pytest -q # hidden separator\ntrue")
+          and not _is_verification_command("pytest -q || true", "pytest -q"))
+    check("real verifier invocations and fail-propagating wrappers remain recognized",
+          _is_verification_command("python -m unittest")
+          and _is_verification_command("cd repo && pytest -q && echo done", "pytest -q"))
     _green_root = Path(tempfile.mkdtemp())
     _green_agent = _Ag(_Cfg(_green_root), _AgUI())
     _green_agent.config.data.update({
@@ -1208,6 +1269,29 @@ def unit_tests(tmp: Path):
           _green_agent.client.n == 2
           and (_green_root / "answer.txt").read_text() == "good\n"
           and not (_green_root / "post-green.txt").exists())
+    _ordered_root = Path(tempfile.mkdtemp())
+    _ordered_agent = _Ag(_Cfg(_ordered_root), _AgUI())
+    _ordered_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
+    class _OrderedVerifyClient:
+        tools_supported = True
+        n = 0
+        third_had_tools = False
+        def chat(self, *args, tools=None, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "ordered-edit", "write_file", {"path": "answer.txt", "content": "candidate\n"})])
+            if self.n == 2:
+                return _ChatResult(tool_calls=[
+                    _ToolCall("ordered-pass", "bash", {"command": "python -m unittest"}),
+                    _ToolCall("ordered-fail", "bash", {"command": "false"}),
+                ])
+            self.third_had_tools = tools is not None
+            return _ChatResult(content="The later check failed; no verified-done claim.")
+    _ordered_agent.client = _OrderedVerifyClient()
+    _ordered_agent.run_turn("make and verify the candidate")
+    check("a later shell failure invalidates an earlier green result in the same batch",
+          _ordered_agent.client.n == 3 and _ordered_agent.client.third_had_tools)
     _parent_cancel = threading.Event()
     check("budget deadline cancellation does not mutate the user's Stop event",
           _DeadlineCancel(_parent_cancel, _now - 1).is_set() and not _parent_cancel.is_set())
@@ -4606,13 +4690,17 @@ class MockHandler(BaseHTTPRequestHandler):
             n = sum(1 for m in messages if m.get("role") == "tool")
             payload = tool_delta("bash", [json.dumps({"command": f"echo 'still failing'  # {n}\nexit 1"})])
         elif self.scenario == "verify":
-            # edit → a passing `go test` → DGC must make the next request without tools, so the
+            # edit → a real passing test invocation → DGC must make the next request without tools, so the
             # model cannot keep inspecting/refactoring code that is already green.
             MockHandler.vcount = getattr(MockHandler, "vcount", 0) + 1
             if MockHandler.vcount == 1:
-                payload = tool_delta("write_file", [json.dumps({"path": "m.py", "content": "x = 1\n"})])
+                payload = tool_delta("write_file", [json.dumps({
+                    "path": "test_m.py",
+                    "content": ("import unittest\n\nclass SmokeTest(unittest.TestCase):\n"
+                                "    def test_ok(self):\n        self.assertTrue(True)\n"),
+                })])
             elif MockHandler.vcount == 2:
-                payload = tool_delta("bash", [json.dumps({"command": "echo ok  # go test ./..."})])
+                payload = tool_delta("bash", [json.dumps({"command": "python3 -m unittest"})])
             elif MockHandler.vcount == 3:
                 MockHandler.verify_summary_without_tools = "tools" not in req
                 if MockHandler.verify_summary_without_tools:
