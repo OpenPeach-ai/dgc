@@ -713,6 +713,7 @@ class Agent:
         self._session_revision = 0
         self._session_exists = False
         self._last_persist_error = ""
+        self._last_turn_error = ""
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.goal_status = "none"  # none | active | completed | blocked
         self._session_started = False       # SessionStart hook fires once per session
@@ -994,6 +995,7 @@ class Agent:
         self._session_revision = 0
         self._session_exists = False
         self._last_persist_error = ""
+        self._last_turn_error = ""
         self.plan_return_mode = None
         self._pending_images = None
         self.steer_queue.clear()
@@ -1270,17 +1272,18 @@ class Agent:
                     release.release()
 
     def run_turn(self, user_text: str, *, reset_cancel: bool = True) -> bool:
-        """Run one foreground turn and report whether its final generation was saved.
+        """Run one foreground turn and report truthful terminal + persistence success.
 
-        ``False`` means the turn was rejected before the model ran or its durable commit failed.
-        Exceptions still propagate after the normal cleanup/persistence attempt.
+        ``False`` means the turn was rejected, ended in a handled terminal error, or its durable
+        commit failed. Exceptions still propagate after the normal cleanup/persistence attempt.
         """
+        self._last_turn_error = ""
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
-                self._last_persist_error = (
+                self._last_turn_error = self._last_persist_error = (
                     "This session has an active turn in another DGC process. Wait for it to finish "
                     "or start a new session; no model request or workspace action was started.")
-                self.ui.error(self._last_persist_error)
+                self.ui.error(self._last_turn_error)
                 return False
             if self.session_file:
                 from . import sessions
@@ -1288,11 +1291,11 @@ class Agent:
                         self.session_file, self.session_root,
                         expected_revision=self._session_revision,
                         expected_exists=self._session_exists):
-                    self._last_persist_error = (
+                    self._last_turn_error = self._last_persist_error = (
                         "This saved session changed or was deleted in another DGC process. Resume "
                         "the latest generation or start a new session; no hook, model request, or "
                         "workspace action was started.")
-                    self.ui.error(self._last_persist_error)
+                    self.ui.error(self._last_turn_error)
                     return False
             # A sub-agent shares the parent's Event, so only a top-level frontend may clear stale
             # state. Serialized frontends clear at dequeue and pass reset_cancel=False, preserving
@@ -1307,17 +1310,27 @@ class Agent:
             self.steer_queue.clear()            # drop stale interjections from a prior turn
             self._activate_tool_intents(user_text, replace=True)
             self._refresh_system()
+            completed = None
             try:
-                self._run_turn(user_text)
+                completed = self._run_turn(user_text)
             finally:
                 self._active_tool_intents.clear()
+                repaired, changed = _repair_tool_transcript(self.messages)
+                if changed:
+                    self.messages = repaired
+                    self.ui.info("closed an interrupted native tool-call group before saving")
                 self._refresh_system()
                 saved = self._persist()
                 if not saved and self.depth == 0:
-                    self.ui.error(self._last_persist_error or "could not persist this session")
+                    self._last_turn_error = (self._last_persist_error
+                                             or "could not persist this session")
+                    self.ui.error(self._last_turn_error)
                 if self.depth == 0:             # Stop lifecycle hook (turn finished)
                     run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
-            return saved
+            if completed is False and not self._last_turn_error:
+                self._last_turn_error = (self._last_persist_error
+                                         or "the turn stopped before it completed")
+            return bool(saved and completed is not False)
 
     def _persist(self) -> bool:
         if not self.session_file:
@@ -1497,6 +1510,7 @@ class Agent:
             self._session_revision = int(record.get("revision", 0))
             self._session_exists = True
             self._last_persist_error = ""
+            self._last_turn_error = ""
             with self._usage_lock:
                 self.usage_totals = sessions.usage_of(path, self.session_root, record)
                 self.activity_totals = sessions.activity_of(path, self.session_root, record)
@@ -1554,18 +1568,25 @@ class Agent:
             except OSError:
                 pass
 
-    def _run_turn(self, user_text: str) -> None:
+    def _fail_turn(self, message: str) -> bool:
+        """Record and render one handled terminal failure for every frontend."""
+        self._last_turn_error = str(message or "the turn failed")
+        self.ui.error(self._last_turn_error)
+        return False
+
+    def _run_turn(self, user_text: str) -> bool:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
             blocked, hout = run_hooks("UserPromptSubmit", {"prompt": user_text},
                                       self.config, self.config.project_root)
             if blocked:
-                self.ui.error(f"prompt blocked by a UserPromptSubmit hook: {hout}")
-                return
+                return self._fail_turn(f"prompt blocked by a UserPromptSubmit hook: {hout}")
             if not self.checkpoints.open(
                     len(self.messages), user_text,
                     [m for m in self.messages if m.get("role") != "system"]):
-                return  # the finalizer reports the durable-save conflict; never start an unsafe turn
+                self._last_turn_error = (self._last_persist_error
+                                         or "could not durably open the turn checkpoint")
+                return False  # the finalizer reports the save conflict; never start an unsafe turn
         images = self._pending_images
         self._pending_images = None
         if images:                                 # vision: OpenAI-style multimodal content
@@ -1613,7 +1634,7 @@ class Agent:
         for _ in range(max_turns):
             if self.cancelled.is_set():
                 self.ui.info("turn cancelled")
-                return
+                return True
             if deadline is not None and (deadline - time.monotonic()) <= 0.06 * budget:
                 # ~94% of the budget spent → stop before the external kill; restore the last version that
                 # passed so the on-disk files are self-consistent (a mid-grind kill would leave 0 credit).
@@ -1622,7 +1643,7 @@ class Agent:
                     self.ui.info("⏱ out of time — restored the last test-passing version of the files")
                 else:
                     self.ui.info("⏱ out of time — stopping")
-                return
+                return True
             self._drain_steer()             # inject anything the user typed mid-turn
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
             self.maybe_compact(deadline=compact_deadline)
@@ -1657,9 +1678,9 @@ class Agent:
                     self.maybe_compact(force=True, deadline=compact_deadline)
                     continue
                 self.ui.end_stream()
-                self.ui.error("context window exceeded even after compaction — start a new session "
-                              "(Ctrl+N) or lower context_size")
-                return
+                return self._fail_turn(
+                    "context window exceeded even after compaction — start a new session "
+                    "(Ctrl+N) or lower context_size")
             except LLMError as e:
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
@@ -1674,12 +1695,10 @@ class Agent:
                         continue
                     except LLMError as e2:
                         self.ui.end_stream()
-                        self.ui.error(f"fallback model also failed: {e2}")
-                        return
+                        return self._fail_turn(f"fallback model also failed: {e2}")
                 else:
                     self.ui.end_stream()
-                    self.ui.error(str(e))
-                    return
+                    return self._fail_turn(str(e))
             if (deadline is not None and chat_cancel.is_set() and not self.cancelled.is_set()):
                 self.ui.end_stream()
                 if good_snapshot:
@@ -1687,7 +1706,14 @@ class Agent:
                     self.ui.info("⏱ out of time — restored the last test-passing version of the files")
                 else:
                     self.ui.info("⏱ out of time — stopped the in-flight model request")
-                return
+                return True
+            if result.finish_reason == "cancelled" or self.cancelled.is_set():
+                self.ui.end_stream()
+                partial = str(result.content or "")
+                if partial.strip():
+                    self.messages.append({"role": "assistant", "content": partial})
+                self.ui.info("turn cancelled")
+                return True
             # A verified turn gets exactly one no-tools closing request. A few local endpoints still emit
             # a tool-shaped response even without schemas; do not execute it and do not leave the user
             # with a silent turn.
@@ -1721,15 +1747,19 @@ class Agent:
                 # Tests already passed and this request deliberately exposed no tools. Never execute a
                 # hallucinated/text-protocol call or re-enter todo/goal gates: that recreates the exact
                 # post-green loop this state exists to prevent.
-                return
+                return True
 
             if not result.tool_calls:
-                if result.finish_reason == "length" and continues < _MAX_CONTINUE:
-                    continues += 1              # reply cut off at the token limit — continue it
-                    self.messages.append({"role": "user", "content":
-                        "Your previous response was cut off at the length limit. Continue exactly "
-                        "where you left off — do not repeat what you already wrote."})
-                    continue
+                if result.finish_reason == "length":
+                    if continues < _MAX_CONTINUE:
+                        continues += 1          # reply cut off at the token limit — continue it
+                        self.messages.append({"role": "user", "content":
+                            "Your previous response was cut off at the length limit. Continue exactly "
+                            "where you left off — do not repeat what you already wrote."})
+                        continue
+                    return self._fail_turn(
+                        "stopped — the model repeatedly hit the output-token limit before finishing; "
+                        "raise max_tokens or ask for a smaller response")
                 pending = [t for t in self.ctx.todos if t.get("status") != "done"]
                 if pending and todo_gate < _MAX_TODO_GATE:     # TodoGate: don't stop mid-plan
                     todo_gate += 1
@@ -1740,17 +1770,21 @@ class Agent:
                         "todo genuinely can't be done, say why. Do not stop with silent open todos.\n"
                         "</system-reminder>"})
                     continue
-                if not (result.content or "").strip() and not summary_nudged:
-                    summary_nudged = True   # empty final reply (worked-but-silent, OR reasoning-only) → ask once
-                    detail = ("You did work this turn but ended without any message to the user."
-                              if did_tools else
-                              "Your last response was empty — you produced only reasoning, with no reply "
-                              "and no tool call.")
-                    self.messages.append({"role": "user", "content":
-                        "<system-reminder>\n" + detail + " Respond now in the normal channel — give a "
-                        "brief final summary (what you did / the answer), or take the next action with a "
-                        "tool. Do not answer only in the thinking channel.\n</system-reminder>"})
-                    continue
+                if not (result.content or "").strip():
+                    if not summary_nudged:
+                        # Empty final reply (worked-but-silent, OR reasoning-only) → ask once.
+                        summary_nudged = True
+                        detail = ("You did work this turn but ended without any message to the user."
+                                  if did_tools else
+                                  "Your last response was empty — you produced only reasoning, with no "
+                                  "reply and no tool call.")
+                        self.messages.append({"role": "user", "content":
+                            "<system-reminder>\n" + detail + " Respond now in the normal channel — give "
+                            "a brief final summary (what you did / the answer), or take the next action "
+                            "with a tool. Do not answer only in the thinking channel.\n</system-reminder>"})
+                        continue
+                    return self._fail_turn(
+                        "stopped — the model ended twice without a user-facing response")
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
                     continue
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
@@ -1765,9 +1799,9 @@ class Agent:
                 needs_verifier = (mutating_total > 0 and self.config.get("verify_before_done")
                                   and self.config.get("verify_command"))
                 if needs_verifier and verify_runs >= 2:
-                    self.ui.error("stopped — the configured verifier is still failing and the model "
-                                  "stopped again without taking corrective action")
-                    return
+                    return self._fail_turn(
+                        "stopped — the configured verifier is still failing and the model stopped "
+                        "again without taking corrective action")
                 if needs_verifier:                                  # E: verify-before-done gate
                     verify_runs += 1
                     cmd = str(self.config.get("verify_command"))
@@ -1803,16 +1837,16 @@ class Agent:
                             f"pass (`{cmd}`). Fix the code or the verifier failure, then finish:\n"
                             + verify_out[-3000:] + "\n</system-reminder>"})
                         continue
-                return
+                return True
 
             if result.finish_reason == "length" and result.tool_calls:
                 # the message hit the OUTPUT-token cap while emitting tool calls → their arguments may be
                 # silently truncated (a partial write_file/edit_file corrupts a file, or dies as opaque
                 # JSON). NEVER run them — including the special-cased tools that skip the JSON-parse net.
                 if continues >= _MAX_CONTINUE:      # kept hitting the cap → stop rather than run garbage
-                    self.ui.error("stopped — the model keeps hitting the output-token limit mid tool "
-                                  "call; raise max_tokens or ask for a smaller change")
-                    return
+                    return self._fail_turn(
+                        "stopped — the model keeps hitting the output-token limit mid tool call; "
+                        "raise max_tokens or ask for a smaller change")
                 # answer each open call so the transcript stays valid + ask for a complete re-issue
                 # (a large file → one full write_file).
                 continues += 1
@@ -1830,6 +1864,15 @@ class Agent:
 
             did_tools = True                # the model called tools → expect a closing summary
             text_results: list[str] = []
+
+            def flush_text_results() -> None:
+                if text_results:
+                    self.messages.append({
+                        "role": "user",
+                        "content": "<tool_results>\n" + "\n".join(text_results)
+                        + "\n</tool_results>"})
+                    text_results.clear()
+
             batch_verified = False          # is the checkout verified at the END of this batch?
             batch_landed_edits = 0          # successful file/task mutations, not merely attempted calls
             parallel_tasks = self._parallel_task_outputs(result.tool_calls, sig_count)
@@ -1840,16 +1883,18 @@ class Agent:
                 # valid assistant/tool group before stopping; sequential work still stops immediately
                 # between calls and lets transcript repair mark any unexecuted siblings explicitly.
                 if self.cancelled.is_set() and not (parallel_tasks or parallel_outputs):
+                    flush_text_results()
                     self.ui.info("turn cancelled")
-                    return
+                    return True
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
                 if call.name not in _LOOP_EXEMPT_CALLS:
                     seen = sig_count[sig] = sig_count.get(sig, 0) + 1
                 task_integrated = False
                 if seen > _LOOP_HARD:
-                    self.ui.error("stopped — the model is stuck repeating the same tool call")
-                    return
+                    flush_text_results()
+                    return self._fail_turn(
+                        "stopped — the model is stuck repeating the same tool call")
                 if seen > _LOOP_SOFT:           # refuse the repeat and tell the model it's looping
                     out = ("error: you have already made this exact tool call "
                            f"{seen - 1} times with identical arguments and got the same result. "
@@ -1931,9 +1976,7 @@ class Agent:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
-            if text_results:
-                self.messages.append({"role": "user",
-                                      "content": "<tool_results>\n" + "\n".join(text_results) + "\n</tool_results>"})
+            flush_text_results()
 
             if deadline is not None and batch_verified and edited_paths:
                 # a test/build just passed → snapshot the edited files so we can restore this known-good
@@ -1949,22 +1992,22 @@ class Agent:
             if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
                 if good_snapshot:
                     self._restore_snapshot(good_snapshot)
-                self.ui.error(f"stopped — the same command failure repeated {same_fail}× with no progress")
-                return
+                return self._fail_turn(
+                    f"stopped — the same command failure repeated {same_fail}× with no progress")
             if deadline is not None and fail_streak >= _grind_cap(budget, deadline):
                 # budgeted run only: a VARIED-error grind (dodges the same_fail identical-fingerprint guard,
                 # which needs 7 identical errors). Abort early — tighter as the deadline nears — and restore
                 # the last good state instead of grinding to max_turns and getting killed mid-edit.
                 if good_snapshot:
                     self._restore_snapshot(good_snapshot)
-                self.ui.error(f"stopped — {fail_streak} commands failed in a row with no progress (time budget)")
-                return
+                return self._fail_turn(
+                    f"stopped — {fail_streak} commands failed in a row with no progress (time budget)")
             if edit_fail_streak >= _EDIT_FAIL_HARD:     # F3: an edit grind that never lands → abort
                 if good_snapshot:
                     self._restore_snapshot(good_snapshot)
-                self.ui.error(f"stopped — {edit_fail_streak} edits in a row failed to match; "
-                              "rewrite the file with write_file and try again")
-                return
+                return self._fail_turn(
+                    f"stopped — {edit_fail_streak} edits in a row failed to match; "
+                    "rewrite the file with write_file and try again")
 
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
@@ -2026,7 +2069,8 @@ class Agent:
                     self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
                 else:                                                        # native: separate turn
                     self.messages.append({"role": "user", "content": note})
-        self.ui.error(f"stopped after {max_turns} tool iterations (max_turns) — say 'continue' to keep going")
+        return self._fail_turn(
+            f"stopped after {max_turns} tool iterations (max_turns) — say 'continue' to keep going")
 
     def _parallel_read_outputs(self, calls: list[ToolCall], prior_counts: dict | None = None) -> dict[int, str]:
         """Run an all-read, internal, hook-free batch concurrently and preserve wire order."""
@@ -2396,7 +2440,10 @@ class Agent:
             if self.cancelled.is_set():
                 thrown = "cancelled before the isolated run started"
             else:
-                sub.run_turn(task_prompt)
+                outcome = sub.run_turn(task_prompt)
+                if outcome is False:
+                    thrown = (sub._last_turn_error or sub._last_persist_error
+                              or "sub-agent turn failed")
         except Exception as exc:
             thrown = f"{type(exc).__name__}: {exc}"
         finally:

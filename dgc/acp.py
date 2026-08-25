@@ -335,7 +335,8 @@ class ACPServer:
                     outcome = state.agent.run_turn(text, reset_cancel=False)
                     if outcome is False:
                         error = {"code": -32004,
-                                 "message": state.agent._last_persist_error
+                                 "message": state.agent._last_turn_error
+                                 or state.agent._last_persist_error
                                  or "session turn could not be committed"}
                     else:
                         reason = "cancelled" if state.agent.cancelled.is_set() else "end_turn"

@@ -1105,9 +1105,11 @@ def unit_tests(tmp: Path):
 
     # --- a sub-agent shares the parent's cancel Event but must NOT clear it on run_turn entry (only a
     #     top-level turn clears), else a cancel arriving during sub construction is silently swallowed.
-    from dgc.agent import Agent as _Ag, _sampling as _samp, _tool_batch_preamble
+    from dgc.agent import (Agent as _Ag, _MAX_CONTINUE as _AGENT_MAX_CONTINUE,
+                           _sampling as _samp, _tool_batch_preamble,
+                           _tool_transcript_errors as _tool_errors)
     from dgc.config import Config as _Cfg
-    from dgc.llm import ChatResult as _ChatResult, ToolCall as _ToolCall
+    from dgc.llm import ChatResult as _ChatResult, LLMError as _LLMError, ToolCall as _ToolCall
     class _AgUI:
         def __getattr__(self, n): return lambda *a, **k: None
     _p = _Ag(_Cfg(), _AgUI()); _sub = _Ag(_Cfg(), _AgUI())
@@ -1249,6 +1251,88 @@ def unit_tests(tmp: Path):
     _aa_resumed = _Ag(_Cfg(_activity_root), _AgUI()); _aa_resumed.load_session(_aa.session_file)
     check("agent resume restores monotonic activity counters",
           _aa_resumed.activity_totals == _aa.activity_totals)
+
+    class _TerminalProviderFailure:
+        tools_supported = True
+        def chat(self, *args, **kwargs):
+            raise _LLMError("fixture provider failed")
+    _failed_turn = _Ag(_Cfg(tmp), _AgUI()); _failed_turn.client = _TerminalProviderFailure()
+    _failed_outcome = _failed_turn.run_turn("surface the provider failure")
+    check("handled provider failures produce a truthful unsuccessful turn result",
+          _failed_outcome is False and "fixture provider failed" in _failed_turn._last_turn_error)
+
+    class _SilentFinalClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return _ChatResult()
+    _silent_turn = _Ag(_Cfg(tmp), _AgUI()); _silent_turn.client = _SilentFinalClient()
+    _silent_outcome = _silent_turn.run_turn("do not end silently")
+    check("two empty model finals fail visibly instead of reporting a completed turn",
+          _silent_outcome is False and _silent_turn.client.calls == 2
+          and "without a user-facing response" in _silent_turn._last_turn_error)
+
+    class _LengthOnlyClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return _ChatResult(content=f"partial {self.calls}", finish_reason="length")
+    _length_turn = _Ag(_Cfg(tmp), _AgUI()); _length_turn.client = _LengthOnlyClient()
+    _length_outcome = _length_turn.run_turn("finish within the output budget")
+    check("repeatedly truncated text cannot masquerade as a completed final answer",
+          _length_outcome is False
+          and _length_turn.client.calls == _AGENT_MAX_CONTINUE + 1
+          and "output-token limit" in _length_turn._last_turn_error)
+
+    _cancel_root = Path(tempfile.mkdtemp())
+    _cancel_group = _Ag(_Cfg(_cancel_root), _AgUI())
+    _cancel_group.session_file = _activity_sessions.new_path(_cancel_root)
+    _cancel_group.client = type("CancelledNativeBatch", (), {
+        "tools_supported": True,
+        "chat": lambda self, *args, **kwargs: _ChatResult(tool_calls=[
+            _ToolCall("native-first", "todo", {"items": []}),
+            _ToolCall("native-second", "todo", {"items": []}),
+        ]),
+    })()
+    _handled_native = []
+    def _cancel_after_first(call):
+        _handled_native.append(call.id)
+        _cancel_group.cancelled.set()
+        return "first result"
+    _cancel_group._handle_call = _cancel_after_first
+    _cancelled_outcome = _cancel_group.run_turn("cancel this native batch")
+    _cancelled_record = _activity_sessions.load_record(
+        _cancel_group.session_file, _cancel_root)
+    _cancelled_tools = [m for m in _cancelled_record["messages"] if m.get("role") == "tool"]
+    check("cancelled native batches persist one adjacent result for every declared call",
+          _cancelled_outcome is True and _handled_native == ["native-first"]
+          and not _tool_errors(_cancelled_record["messages"])
+          and [m.get("tool_call_id") for m in _cancelled_tools]
+          == ["native-first", "native-second"]
+          and "do not assume this action ran" in _cancelled_tools[-1].get("content", ""))
+
+    _cancel_text = _Ag(_Cfg(tmp), _AgUI())
+    _cancel_text.client = type("CancelledTextBatch", (), {
+        "tools_supported": True,
+        "chat": lambda self, *args, **kwargs: _ChatResult(tool_calls=[
+            _ToolCall("textcall_first", "todo", {"items": []}),
+            _ToolCall("textcall_second", "todo", {"items": []}),
+        ]),
+    })()
+    _handled_text = []
+    def _cancel_text_after_first(call):
+        _handled_text.append(call.id)
+        _cancel_text.cancelled.set()
+        return "durable text result"
+    _cancel_text._handle_call = _cancel_text_after_first
+    _cancel_text_outcome = _cancel_text.run_turn("cancel this fenced batch")
+    _text_envelopes = [str(m.get("content", "")) for m in _cancel_text.messages
+                       if m.get("role") == "user" and "<tool_results>" in str(m.get("content", ""))]
+    check("cancelled text-tool batches retain every result produced before cancellation",
+          _cancel_text_outcome is True and _handled_text == ["textcall_first"]
+          and len(_text_envelopes) == 1 and "durable text result" in _text_envelopes[0])
     # A supervisor SIGKILL bypasses run_turn's final transcript save. Metrics must already exist
     # after completed activity so the benchmark can still attribute the interrupted round.
     _crash_root = Path(tempfile.mkdtemp())
@@ -5228,6 +5312,25 @@ def test_acp_protocol():
               external_held and not blocked_model
               and (blocked_reply.get("error") or {}).get("code") == -32004
               and blocked_reply.get("result") is None and state.worker is None)
+
+        from dgc.llm import LLMError as _ACPModelError
+        class _FailingACPClient:
+            tools_supported = True
+            def chat(self, *args, **kwargs):
+                raise _ACPModelError("ACP fixture endpoint failed")
+        state.agent.client = _FailingACPClient()
+        server._dispatch({"jsonrpc": "2.0", "id": 43, "method": "session/prompt",
+                          "params": {"sessionId": state.sid,
+                                     "prompt": [{"type": "text", "text": "fail truthfully"}]}})
+        with state.lock:
+            failed_worker = state.worker
+        if failed_worker:
+            failed_worker.join(2)
+        failed_reply = next((row for row in replies if row["id"] == 43), {})
+        check("ACP never reports a handled provider failure as end_turn success",
+              (failed_reply.get("error") or {}).get("code") == -32004
+              and "ACP fixture endpoint failed" in (failed_reply.get("error") or {}).get("message", "")
+              and failed_reply.get("result") is None and state.worker is None)
 
         server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
                                                                           "optionId": "once"}}
