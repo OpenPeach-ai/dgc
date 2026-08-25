@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import re
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 
 import requests
 
@@ -26,6 +29,90 @@ def _raw_socket(resp):
         if obj is not None and hasattr(obj, "shutdown"):
             return obj
     return None
+
+
+def _close_response(response) -> None:
+    """Release a streamed HTTP response without letting cleanup hide the provider error."""
+    try:
+        setattr(response, "_dgc_closed", True)
+    except Exception:
+        pass
+    try:
+        response.close()
+    except Exception:
+        pass
+
+
+def _error_body(response, limit: int = 600) -> str:
+    """Read a bounded error body and always release its streamed response."""
+    try:
+        return str(response.text or "")[:limit]
+    finally:
+        _close_response(response)
+
+
+def _retry_delay(headers, default: float, cap: float = 10.0) -> float:
+    """Return a safe bounded Retry-After delay, accepting seconds or an HTTP date."""
+    try:
+        fallback = float(default)
+    except (TypeError, ValueError, OverflowError):
+        fallback = 0.0
+    if not math.isfinite(fallback):
+        fallback = 0.0
+
+    raw = str((headers or {}).get("Retry-After") or "").strip()
+    delay = fallback
+    if raw:
+        try:
+            delay = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            try:
+                retry_at = parsedate_to_datetime(raw)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = retry_at.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                delay = fallback
+    if not math.isfinite(delay):
+        delay = fallback
+    return min(max(0.0, delay), max(0.0, cap))
+
+
+def _wait_for_retry(delay: float, cancel=None) -> bool:
+    """Wait for a retry budget, returning False as soon as cancellation becomes terminal."""
+    try:
+        bounded = float(delay)
+    except (TypeError, ValueError, OverflowError):
+        bounded = 0.0
+    if not math.isfinite(bounded):
+        bounded = 0.0
+    bounded = min(max(0.0, bounded), 10.0)
+    if cancel is not None and cancel.is_set():
+        return False
+    if bounded <= 0:
+        return True
+    if cancel is None:
+        time.sleep(bounded)
+        return True
+
+    # threading.Event can wake immediately. Deadline/composite cancellation views only expose
+    # is_set(), so poll those in short slices rather than sleeping through the turn deadline.
+    waiter = getattr(cancel, "wait", None) if cancel is not None else None
+    if callable(waiter):
+        try:
+            if waiter(bounded):
+                return False
+            return not cancel.is_set()
+        except (AttributeError, TypeError):
+            pass
+    deadline = time.monotonic() + bounded
+    while True:
+        if cancel is not None and cancel.is_set():
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return cancel is None or not cancel.is_set()
+        time.sleep(min(remaining, 0.05))
 
 
 class LLMError(Exception):
@@ -729,6 +816,8 @@ class LLMClient:
         if cancel is not None:
             def _watch(resp=r, ev=stop_watch, cx=cancel):
                 while not ev.wait(0.15):
+                    if getattr(resp, "_dgc_closed", False):
+                        return
                     if cx.is_set():
                         sock = _raw_socket(resp)
                         if sock is not None:
@@ -866,7 +955,8 @@ class LLMClient:
                 transient += 1
                 last_err = f"connection: {exc}"
                 if transient < 4:
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(
                     f"cannot connect to {self._ollama_root} — is Ollama running? "
@@ -877,28 +967,30 @@ class LLMClient:
                 transient += 1
                 last_err = f"timeout: {exc}"
                 if transient < 4:
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"request timed out repeatedly: {last_err}") from exc
 
             if r.status_code in (404, 405, 501) and self.requested_api_mode == "auto":
+                _close_response(r)
                 self._mark_rejected("native_chat")
                 self.api_mode = "chat_completions"
                 return self._chat_completions(messages, tools, reasoning_effort,
                                               on_text, on_thinking, cancel)
             if r.status_code == 429:
                 transient += 1
-                last_err = f"429 rate limited: {r.text[:200]}"
+                headers = r.headers
+                body = _error_body(r)
+                last_err = f"429 rate limited: {body[:200]}"
                 if transient < 4:
-                    try:
-                        delay = float(r.headers.get("Retry-After") or 0.5 * transient)
-                    except ValueError:
-                        delay = 0.5 * transient
-                    time.sleep(min(delay, 10))
+                    delay = _retry_delay(headers, 0.5 * transient)
+                    if not _wait_for_retry(delay, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
             if r.status_code in (400, 413):
-                body = r.text[:600]
+                body = _error_body(r)
                 low = body.lower()
                 last_err = body
                 if _OVERFLOW_RE.search(low):
@@ -930,19 +1022,27 @@ class LLMClient:
                 raise LLMError(f"{r.status_code} from Ollama: {body}")
             if r.status_code >= 500:
                 transient += 1
-                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+                status = r.status_code
+                body = _error_body(r)
+                last_err = f"HTTP {status}: {body[:300]}"
                 if transient < 4:
                     if transient >= 2 and not repaired:
                         payload["messages"] = self._ollama_messages(_repair_for_retry(messages))
                         repaired = True
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(
-                    f"HTTP {r.status_code} from {self._ollama_url} after {transient} tries: {r.text[:400]}")
+                    f"HTTP {status} from {self._ollama_url} after {transient} tries: {body[:400]}")
             if r.status_code != 200:
-                raise LLMError(f"HTTP {r.status_code} from {self._ollama_url}: {r.text[:400]}")
+                status = r.status_code
+                body = _error_body(r, 400)
+                raise LLMError(f"HTTP {status} from {self._ollama_url}: {body}")
             budget = 0 if overthink > 2 else self.think_budget_chars
-            result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
+            try:
+                result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
+            finally:
+                _close_response(r)
             if result.finish_reason == "overthink":
                 overthink += 1
                 level = lower.get(str(level or "off"), "off")
@@ -1002,7 +1102,8 @@ class LLMClient:
                 last_err = f"connection: {e}"
                 transient += 1
                 if transient < 4:
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
@@ -1013,24 +1114,24 @@ class LLMClient:
                 last_err = f"timeout: {e}"
                 transient += 1
                 if transient < 4:
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"request timed out repeatedly: {last_err}") from e
             if r.status_code == 429:
                 # rate limited — back off (honour Retry-After) and retry within the budget
-                last_err = f"429 rate limited: {r.text[:200]}"
+                headers = r.headers
+                body = _error_body(r)
+                last_err = f"429 rate limited: {body[:200]}"
                 transient += 1
                 if transient < 4:
-                    ra = r.headers.get("Retry-After", "")
-                    try:
-                        delay = float(ra) if ra else 0.5 * transient
-                    except ValueError:
-                        delay = 0.5 * transient
-                    time.sleep(min(delay, 10))
+                    delay = _retry_delay(headers, 0.5 * transient)
+                    if not _wait_for_retry(delay, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
             if r.status_code in (400, 413):
-                body = r.text[:600]
+                body = _error_body(r)
                 last_err = body
                 low = body.lower()
                 # Classify OVERFLOW first — some overflow bodies contain words like "invalid" that would
@@ -1077,7 +1178,9 @@ class LLMClient:
                 # Transient upstream error — retry instead of killing the turn (robust
                 # clients do the same). Ollama, for one, intermittently 500s
                 # "no user query found in messages" on long tool-loops.
-                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+                status = r.status_code
+                body = _error_body(r)
+                last_err = f"HTTP {status}: {body[:300]}"
                 transient += 1
                 if transient < 4:
                     # After a plain retry fails, also repair the message SHAPE — collapse
@@ -1087,14 +1190,20 @@ class LLMClient:
                     if transient >= 2 and not repaired:
                         payload["messages"] = _repair_for_retry(messages)
                         repaired = True
-                    time.sleep(0.5 * transient)
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
                     continue
                 raise LLMError(
-                    f"HTTP {r.status_code} from {self._url} after {transient} tries: {r.text[:400]}")
+                    f"HTTP {status} from {self._url} after {transient} tries: {body[:400]}")
             if r.status_code != 200:
-                raise LLMError(f"HTTP {r.status_code} from {self._url}: {r.text[:400]}")
+                status = r.status_code
+                body = _error_body(r, 400)
+                raise LLMError(f"HTTP {status} from {self._url}: {body}")
             budget = 0 if overthink > 2 else self.think_budget_chars   # let the last attempt finish
-            res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
+            try:
+                res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
+            finally:
+                _close_response(r)
             if res.finish_reason == "overthink":          # F4: reasoning ran away → retry with less
                 overthink += 1
                 level = _LOWER.get(level or "off", "off")  # high→medium→low→off (floor)
@@ -1258,35 +1367,42 @@ class LLMClient:
                     return ChatResult(finish_reason="cancelled")
                 transient += 1
                 if transient < 4:
-                    time.sleep(0.5 * transient); continue
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
             except requests.Timeout as e:
                 if cancel is not None and cancel.is_set():
                     return ChatResult(finish_reason="cancelled")
                 transient += 1
                 if transient < 4:
-                    time.sleep(0.5 * transient); continue
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
                 raise LLMError(f"Responses API timed out repeatedly: {e}") from e
             if response.status_code == 404:
                 self._mark_rejected("responses")
                 self._reset_response_state()
                 if self.requested_api_mode == "auto":
                     # Defensive compatibility for proxies in front of OpenAI-style URLs.
+                    _close_response(response)
                     self.api_mode = "chat_completions"
                     return self._chat_completions(messages, tools, reasoning_effort,
                                                   on_text, on_thinking, cancel)
             if response.status_code == 429 or response.status_code >= 500:
+                status = response.status_code
+                headers = response.headers
+                body = _error_body(response, 400)
                 transient += 1
                 if transient < 4:
-                    delay = 0.5 * transient
-                    if response.status_code == 429:
-                        try:
-                            delay = min(float(response.headers.get("Retry-After") or delay), 10)
-                        except ValueError:
-                            pass
-                    time.sleep(delay); continue
+                    delay = _retry_delay(headers, 0.5 * transient)
+                    if not _wait_for_retry(delay, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
+                raise LLMError(
+                    f"HTTP {status} from Responses API after {transient} tries: {body}")
             if response.status_code in (400, 413):
-                body = response.text[:600]
+                body = _error_body(response)
                 low = body.lower()
                 if _OVERFLOW_RE.search(low):
                     raise ContextOverflowError("context window exceeded: " + body[:200])
@@ -1327,8 +1443,13 @@ class LLMClient:
                     continue
                 raise LLMError(f"{response.status_code} from Responses API: {body}")
             if response.status_code != 200:
-                raise LLMError(f"HTTP {response.status_code} from Responses API: {response.text[:400]}")
-            result = self._consume_responses(response, on_text, on_thinking, cancel)
+                status = response.status_code
+                body = _error_body(response, 400)
+                raise LLMError(f"HTTP {status} from Responses API: {body}")
+            try:
+                result = self._consume_responses(response, on_text, on_thinking, cancel)
+            finally:
+                _close_response(response)
             if stateful and result.response_id and result.finish_reason != "cancelled":
                 self._response_id = result.response_id
                 self._response_cursor = len(messages)
@@ -1349,6 +1470,8 @@ class LLMClient:
         if cancel is not None:
             def _watch():
                 while not stop_watch.wait(0.15):
+                    if getattr(response, "_dgc_closed", False):
+                        return
                     if cancel.is_set():
                         sock = _raw_socket(response)
                         if sock is not None:
@@ -1499,6 +1622,8 @@ class LLMClient:
         if cancel is not None:
             def _watch(resp=r, ev=stop_watch, cx=cancel):
                 while not ev.wait(0.15):
+                    if getattr(resp, "_dgc_closed", False):
+                        return
                     if cx.is_set():
                         # Shutting the raw socket down is what actually unblocks a stalled
                         # recv(); resp.close() alone races and often waits for the server.

@@ -212,7 +212,9 @@ needed for tool-loop continuity, and uses a hashed cache-routing key when suppor
 `provider_state` to `"server"` only if you intentionally want provider-side response storage and
 `previous_response_id` continuation. `provider_capabilities` can explicitly override feature flags
 for a compatible endpoint; rejected features are retried after `capability_cache_ttl_s` rather than
-being disabled forever.
+being disabled forever. Across Responses, Chat Completions, and native Ollama, transient retries
+honor bounded `Retry-After` values but stop immediately on cancellation or a turn deadline; abandoned
+streamed responses are always released before retry or transport fallback.
 
 ## Development
 

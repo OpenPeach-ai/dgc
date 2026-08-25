@@ -42,7 +42,7 @@ the editor registries: those are external release actions that require a reviewe
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
-| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
+| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, bounded startup/backpressure queues with priority decision/cancel frames, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Installed-host SecretStorage/multi-root/decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 604 / 604 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 612 / 612 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -472,7 +472,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 604/604 Python checks, 17/17 editor transport/webview checks, and
+The complete offline evidence is 612/612 Python checks, 17/17 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 8: verified-done is now an ordered, fail-closed state rather than a
@@ -685,7 +685,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-604/604 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+612/612 Python checks, 17/17 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
@@ -694,7 +694,7 @@ a `pipefail`/SIGPIPE failure in archive membership validation; two subsequent bu
 byte-identical and checksum-valid. Authoritative reviewed-commit release evidence and the clean full
 league remain outstanding.
 
-The stratified diagnostic added six trace-backed runtime controls after this interaction delivery:
+The stratified diagnostic added trace-backed runtime controls after this interaction delivery:
 
 1. Operator interruption now kills and drains the entire benchmark harness process group before
    re-raising, so canceled trials cannot leave a competing model client or browser behind.
@@ -710,8 +710,10 @@ The stratified diagnostic added six trace-backed runtime controls after this int
    failed edits retain their grind evidence. Background-output polling is exempt from identical-call
    blocking.
 6. Budgeted model requests now inherit the remaining monotonic deadline, including a cancellation
-   view that closes an in-flight stream without mutating the user's Stop event. This final control is
-   unit-covered but postdates the frozen post-trace benchmark snapshot.
+   view that closes an in-flight stream without mutating the user's Stop event. Provider retry waits
+   use the same terminal cancellation boundary, so a deadline expiring during exponential or
+   `Retry-After` backoff cannot start another billable generation. This control is unit-covered but
+   postdates the frozen post-trace benchmark snapshot.
 7. Tool calls and successful/failed file edits are persisted as monotonic session-schema-v5
    counters. An atomic `.metrics` journal checkpoints usage and activity after every completed
    request/tool call, so benchmark deltas survive both compaction and an external SIGKILL before the
@@ -755,6 +757,12 @@ The provider-runtime slice is also implemented and contract-tested:
    stale results remain visible. Empty, malformed, tool-calling, canceled, timed-out, or failed
    summaries fall back to a deterministic 12,000-character evidence brief rather than dropping all
    earlier context. Native server-side compaction remains future provider work.
+9. Chat Completions, Responses, and native Ollama now share bounded retry-delay parsing (numeric or
+   HTTP-date), cancellation-aware waits for both event and deadline-only cancellation views, and
+   deterministic response ownership. Error, capability-negotiation, retry, transport-fallback,
+   successful-consumption, and parser-failure paths release streamed responses before control moves
+   on. Adversarial tests prove a five-second `Retry-After` is interrupted without a second request on
+   all three transports.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

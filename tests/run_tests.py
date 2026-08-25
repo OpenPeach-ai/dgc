@@ -5070,6 +5070,138 @@ def test_provider_capabilities():
                          "cached_input_tokens": 21, "reasoning_tokens": 5})
 
 
+def test_provider_retry_lifecycle():
+    """Retries never outlive cancellation, and every abandoned streamed response is released."""
+    import time as _time
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+
+    import dgc.llm as _llm
+    from dgc.llm import ChatResult, LLMClient, _retry_delay, _wait_for_retry
+
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=30), usegmt=True)
+    check("Retry-After accepts HTTP dates and remains bounded",
+          _retry_delay({"Retry-After": future}, 0.5) == 10.0
+          and _retry_delay({"Retry-After": "-5"}, 0.5) == 0.0
+          and _retry_delay({"Retry-After": "nan"}, 0.75) == 0.75)
+
+    class _DeadlineOnly:
+        """The agent's composite deadline view intentionally has no Event.wait method."""
+        def __init__(self, seconds):
+            self.deadline = _time.monotonic() + seconds
+        def is_set(self):
+            return _time.monotonic() >= self.deadline
+
+    started = _time.monotonic()
+    waited = _wait_for_retry(5, _DeadlineOnly(0.05))
+    check("deadline-only cancellation interrupts retry backoff",
+          not waited and _time.monotonic() - started < 1.0)
+
+    class _RetryResponse:
+        status_code = 429
+        text = "provider busy"
+        headers = {"Content-Type": "application/json", "Retry-After": "5"}
+
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    constructors = [
+        ("Chat Completions", lambda: LLMClient(
+            "http://localhost:1234/v1", "k", "retry-chat", api_mode="chat_completions")),
+        ("native Ollama", lambda: LLMClient(
+            "http://localhost:11434/v1", "k", "retry-ollama", api_mode="ollama")),
+        ("Responses", lambda: LLMClient(
+            "https://api.openai.com/v1", "k", "retry-responses", api_mode="responses")),
+    ]
+    original_post = _llm.requests.post
+    try:
+        for label, construct in constructors:
+            response = _RetryResponse()
+            cancel = threading.Event()
+            attempts = []
+            timers = []
+
+            def _rate_limited(url, **_kwargs):
+                attempts.append(url)
+                if not timers:
+                    timer = threading.Timer(0.05, cancel.set)
+                    timers.append(timer)
+                    timer.start()
+                return response
+
+            _llm.requests.post = _rate_limited
+            started = _time.monotonic()
+            result = construct().chat([{"role": "user", "content": "hello"}], cancel=cancel)
+            elapsed = _time.monotonic() - started
+            for timer in timers:
+                timer.join()
+            check(f"{label} cancellation stops Retry-After without a new generation",
+                  result.finish_reason == "cancelled" and len(attempts) == 1
+                  and response.close_calls == 1 and elapsed < 1.0)
+    finally:
+        _llm.requests.post = original_post
+
+    class _MissingRoute:
+        status_code = 404
+        text = "not found"
+        headers = {"Content-Type": "application/json"}
+
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    fallbacks = [
+        ("native Ollama", LLMClient(
+            "http://localhost:11434/v1", "k", "close-ollama-fallback", api_mode="auto")),
+        ("Responses", LLMClient(
+            "https://api.openai.com/v1", "k", "close-responses-fallback", api_mode="auto")),
+    ]
+    try:
+        for label, client in fallbacks:
+            response = _MissingRoute()
+            _llm.requests.post = lambda *_args, **_kwargs: response
+            client._chat_completions = lambda *_args, **_kwargs: ChatResult(content="fallback")
+            result = client.chat([{"role": "user", "content": "hello"}])
+            check(f"{label} fallback releases the abandoned streamed response",
+                  result.content == "fallback" and response.closed
+                  and client.api_mode == "chat_completions")
+    finally:
+        _llm.requests.post = original_post
+
+    class _BrokenJSON:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "application/json"}
+
+        def __init__(self):
+            self.closed = False
+
+        def json(self):
+            raise ValueError("malformed provider response")
+
+        def close(self):
+            self.closed = True
+
+    broken = _BrokenJSON()
+    parser_failed = False
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: broken
+        parser = LLMClient(
+            "https://api.openai.com/v1", "k", "close-parser-failure", api_mode="responses")
+        parser.chat([{"role": "user", "content": "hello"}])
+    except ValueError:
+        parser_failed = True
+    finally:
+        _llm.requests.post = original_post
+    check("provider parser failure still releases the streamed response",
+          parser_failed and broken.closed)
+
+
 def test_ollama_adapter():
     """Native Ollama preserves its real chat/tool/thinking/options contract end to end."""
     import dgc.llm as _llm
@@ -5645,6 +5777,7 @@ def main():
         test_toolcall_recovery()
         test_reasoning_payload()
         test_provider_capabilities()
+        test_provider_retry_lifecycle()
         test_ollama_adapter()
         test_responses_adapter()
         test_overthink_watchdog()
