@@ -30,7 +30,7 @@ The strategy is therefore **correctness and evidence before feature expansion**.
 its strongest differentiators—excellent local-model behavior and a polished terminal experience—while
 rebuilding the execution, provider, protocol, evaluation, and release boundaries beneath them.
 
-## Implementation status — 2026-08-25 working tree
+## Implementation status — 2026-08-26 working tree
 
 The ordered plan below was written before implementation. The current working tree now contains the
 first major delivery, but it has deliberately **not** been published to GitHub, the website, PyPI, or
@@ -40,8 +40,8 @@ the editor registries: those are external release actions that require a reviewe
 |---|---|---|
 | Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection, explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
-| Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
-| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
+| Runtime correctness | Atomic file/session writes, UUID/private/locked schema-v6 sessions, content-addressed exact conversation/file checkpoints durable across resume and compaction, fail-closed pre-edit persistence, transactional rewind persistence/rollback, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted/redacted transcripts and broader crash-fuzz campaigns |
+| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout leases, pre-edit snapshots and rewind captured/restored inside the lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, installed-host migration/backend-restart/endpoint-invalidation evidence, typed selection/tab/diagnostic resources and canonical multi-root file mentions with display/path separation, acknowledged live multi-root grant reconciliation (including active-turn deferral and removal), accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, exact-wire validation with optional-field normalization, bounded startup/backpressure queues with priority decision/cancel frames, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake and live multi-root lifecycle evidence, and automated keyboard/ARIA/reduced-motion coverage | Cross-platform OS-keychain relaunch and installed-host decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
@@ -104,11 +104,11 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 625 / 625 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 644 / 644 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
-| Extension tests | 2 / 2 | 17 / 17 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
+| Extension tests | 2 / 2 | 18 / 18 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
 | Edit microbenchmark | 17,443 / 19,591 | 17,443 / 19,591 | 89.0% accepted and zero wrong-applies; unchanged corpus baseline. |
 | Release preflight | None | Pass | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates pass. |
@@ -391,6 +391,20 @@ Exit gate: zero known permission escapes in the adversarial corpus; zero orphan 
 randomized compaction tests; no leaked child processes; no arbitrary session paths; Python and editor
 gates green on Linux/macOS/Windows CI.
 
+Implementation note for step 5: schema-v6 sessions now atomically embed bounded rewind state rather
+than preserving only the visible transcript. SHA-256-addressed message blobs and linked prefixes keep
+each exact pre-turn non-system conversation available after local transcript compaction without
+quadratically copying every prefix. Project-relative snapshots preserve bytes, executable mode,
+symlink target, deletion, and absence; their manifest is bound to the execution checkout even when a
+fleet conversation is discovered under a different source checkout. Malformed hashes, traversal,
+checkout rebinding, oversized state, and parent-symlink escapes fail closed. Direct file mutations
+capture and save their pre-edit state under the checkout lease and do not run if that save fails.
+Rewind also runs under the lease, preflights rollback images for every target, and consumes its
+checkpoint only after the restored conversation and reduced checkpoint stack are atomically saved;
+a save failure restores the pre-rewind files/conversation and retains the recovery point. Explicitly
+approved external paths remain current-process snapshots so resume cannot silently gain write
+authority outside the project, and arbitrary shell writes remain outside the exact-file guarantee.
+
 Implementation note for step 8: the mutation scheduler now combines one canonical-checkout thread
 lock with a private hash-addressed OS file lock. Separate CLI, editor, headless, ACP, and fleet
 processes therefore cannot run conflicting tool write/shell/MCP actions concurrently on the same
@@ -472,7 +486,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 625/625 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 644/644 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 8: verified-done is now an ordered, fail-closed state rather than a
@@ -694,7 +708,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-625/625 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+644/644 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
@@ -723,11 +737,11 @@ The stratified diagnostic added trace-backed runtime controls after this interac
    use the same terminal cancellation boundary, so a deadline expiring during exponential or
    `Retry-After` backoff cannot start another billable generation. This control is unit-covered but
    postdates the frozen post-trace benchmark snapshot.
-7. Tool calls and successful/failed file edits are persisted as monotonic session-schema-v5
-   counters. An atomic `.metrics` journal checkpoints usage and activity after every completed
-   request/tool call, so benchmark deltas survive both compaction and an external SIGKILL before the
-   transcript finalizer. Schema-v4 sessions retain an explicitly non-publishable compatibility
-   fallback.
+7. Tool calls and successful/failed file edits are persisted as monotonic session-schema-v6
+   counters (with schema-v5 compatibility). An atomic `.metrics` journal checkpoints usage and
+   activity after every completed request/tool call, so benchmark deltas survive both compaction and
+   an external SIGKILL before the transcript finalizer. Schema-v4-and-earlier sessions retain an
+   explicitly non-publishable reconstruction fallback.
 8. Controlled benchmark sessions configure the official test command as DGC's bounded
    verify-before-done gate. Build-only probes no longer trigger a false green closeout, prompts state
    that canonical expectations are reference-validated, and the varied-failure cap tightens only in

@@ -235,6 +235,11 @@
         break;
       }
       case "history": renderHistory(ev.items || []); break;
+      case "rewound":
+        if (ev.ok) {
+          discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
+        }
+        break;
       case "session":
         if (ev.kind === "cleared" || ev.kind === "new") {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);

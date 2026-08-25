@@ -586,6 +586,26 @@ def unit_tests(tmp: Path):
           bare.em.events[-1].get("type") == "command_rejected"
           and bare.em.events[-1].get("reason") == "invalid_command")
 
+    rewind_backend = object.__new__(Backend)
+    rewind_backend.em = type("RewindCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    rewind_backend._busy = lambda: False
+    rewind_backend.config = type("RewindConfig", (), {"get": lambda self, _key, default=None: default})()
+    rewind_backend.agent = type("RewindAgent", (), {
+        "messages": [{"role": "user", "content": "restored question"},
+                     {"role": "assistant", "content": "restored answer"}],
+        "usage_totals": {},
+        "rewind": lambda self, _index: (3, 1),
+        "estimate_tokens": lambda self: 4,
+    })()
+    rewind_backend.dispatch({"type": "rewind", "index": 0})
+    check("headless rewind acknowledges success before repainting restored history",
+          [event["type"] for event in rewind_backend.em.events] ==
+          ["rewound", "history", "context"]
+          and rewind_backend.em.events[1]["items"][-1]["text"] == "restored answer")
+
     # Headless protocol: IDs correlate same-name tools, failures are explicit, abandoned approvals
     # fail closed, and secrets/state mutations do not race an active turn.
     from dgc.headless import HeadlessUI
@@ -2865,13 +2885,16 @@ os._exit(0 if lock.acquire(timeout=1) else 2)
             pass
 
     checkpoint_seen = threading.Event()
+    def capture_checkpoint(_path):
+        checkpoint_seen.set()
+        return True
     harness = Agent.__new__(Agent)
     harness.config = LeaseConfig()
     harness.ui = LeaseUI()
     harness.cancelled = threading.Event()
     harness.ctx = SimpleNamespace(
         project_root=root, config=harness.config, cancelled=harness.cancelled)
-    harness.checkpoints = SimpleNamespace(record_file=lambda _path: checkpoint_seen.set())
+    harness.checkpoints = SimpleNamespace(record_file=capture_checkpoint)
     harness.mcp = SimpleNamespace(call=lambda *_args: "unexpected MCP call")
     ordered_outcome = []
     held = lock.acquire(timeout=1)
@@ -3376,10 +3399,17 @@ def test_sessions_and_worktree():
     d = _P(_tf.mkdtemp()); sp = sessions.new_path(d)
     sp2 = sessions.new_path(d)
     check("session IDs are collision resistant", sp != sp2 and sp.stem != sp2.stem)
-    sessions.save(sp, [{"role": "user", "content": "hi"}], d, name="my session",
-                  usage={"input_tokens": 123, "output_tokens": 45, "cached_input_tokens": 20,
-                         "reasoning_tokens": 7, "requests": 6},
-                  activity={"tool_calls": 9, "edits": 4, "edit_fails": 2})
+    checkpoint_payload = {"schema_version": 99, "opaque": ["preserve-me"]}
+    session_saved = sessions.save(
+        sp, [{"role": "user", "content": "hi"}], d, name="my session",
+        usage={"input_tokens": 123, "output_tokens": 45, "cached_input_tokens": 20,
+               "reasoning_tokens": 7, "requests": 6},
+        activity={"tool_calls": 9, "edits": 4, "edit_fails": 2},
+        checkpoints=checkpoint_payload)
+    check("session save reports durable transcript success",
+          session_saved and json.loads(sp.read_text()).get("schema_version") == 6)
+    check("session persistence carries an opaque checkpoint payload",
+          sessions.checkpoints_of(sp, d) == checkpoint_payload)
     if _os.name == "posix":
         check("session files are private", _stat.S_IMODE(sp.stat().st_mode) == 0o600)
         check("session directories are private", _stat.S_IMODE(sp.parent.stat().st_mode) == 0o700)
@@ -3441,6 +3471,7 @@ def test_sessions_and_worktree():
     sessions.set_name(sp, "renamed", d)
     check("session name is updatable", sessions.name_of(sp, d) == "renamed")
     check("rename keeps the messages", sessions.load(sp, d) == [{"role": "user", "content": "hi"}])
+    check("rename keeps durable checkpoints", sessions.checkpoints_of(sp, d) == checkpoint_payload)
     sessions.save_plan(sp, "# private plan", d)
     sidecar = sessions.plan_path(sp, d)
     check("session plan sidecar is saved", sidecar.exists())
@@ -3631,6 +3662,219 @@ def test_sessions_and_worktree():
     finally:
         _tui_mod.Agent = old_agent_cls
         _config_mod.USER_CONFIG, _config_mod.USER_SECRETS = old_user_config, old_user_secrets
+        sessions.SESSIONS_DIR = old_sessions_dir
+
+
+def test_durable_checkpoints():
+    """Rewind state survives resume/compaction and fails closed at persistence/path boundaries."""
+    import copy as _copy
+    import stat as _stat
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc import sessions
+    from dgc.agent import Agent as _Agent
+    from dgc.checkpoints import CheckpointManager as _Checkpoints
+    from dgc.config import Config as _Config
+    from dgc.llm import ToolCall as _ToolCall
+
+    root = _P(_tf.mkdtemp()).resolve()
+    binary = root / "binary.bin"
+    binary.write_bytes(b"\x00\xffbefore")
+    binary.chmod(0o755)
+    link = root / "alias"
+    link.symlink_to("binary.bin")
+    created = root / "created.txt"
+    conversation = [
+        {"role": "user", "content": "inspect"},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "call-1", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"binary.bin"}'}}]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "binary"},
+        {"role": "assistant", "content": "inspected"},
+    ]
+    checkpoints = _Checkpoints(root)
+    opened = checkpoints.open(17, "exact prefix", conversation)
+    captured = all(checkpoints.record_file(str(path)) for path in (binary, link, created))
+    binary.write_bytes(b"after")
+    binary.chmod(0o600)
+    link.unlink(); link.symlink_to("created.txt")
+    created.write_text("new\n")
+    encoded_state = json.loads(json.dumps(checkpoints.state()))
+
+    # The live transcript may have compacted below the legacy message index. The exact linked
+    # prefix is authoritative and must still load and rewind after a process restart.
+    resumed = _Checkpoints.from_state(encoded_state, root, max_message_count=2)
+    msg_count, restored, exact = resumed.rewind_state(0)
+    exact_files = (binary.read_bytes() == b"\x00\xffbefore"
+                   and (not hasattr(_stat, "S_IXUSR")
+                        or bool(binary.stat().st_mode & _stat.S_IXUSR))
+                   and link.is_symlink() and os.readlink(link) == "binary.bin"
+                   and not created.exists())
+    check("durable rewind restores bytes, modes, symlinks, absence, and exact compacted history",
+          opened and captured and msg_count == 17 and restored == 3
+          and exact == conversation and exact_files,
+          detail=f"result={(msg_count, restored, exact)!r}")
+    check("successful durable rewind consumes its recovery point",
+          resumed.listing() == [] and resumed.state()["messages"] == {})
+
+    wrong_root = _P(_tf.mkdtemp()).resolve()
+    check("durable checkpoints are bound to their execution checkout",
+          _Checkpoints.from_state(encoded_state, wrong_root).listing() == [])
+    traversed = _copy.deepcopy(encoded_state)
+    first_files = traversed["points"][0]["files"]
+    first_files["../outside"] = first_files.pop(next(iter(first_files)))
+    check("tampered checkpoint paths fail closed as one state unit",
+          _Checkpoints.from_state(traversed, root).listing() == [])
+    corrupted = _copy.deepcopy(encoded_state)
+    first_message = next(iter(corrupted["messages"]))
+    corrupted["messages"][first_message]["content"] = "tampered"
+    check("content-addressed checkpoint corruption fails closed",
+          _Checkpoints.from_state(corrupted, root).listing() == [])
+    corrupted_file = _copy.deepcopy(encoded_state)
+    first_snapshot = next(iter(corrupted_file["points"][0]["files"].values()))
+    first_snapshot["data"] = "ZXZpbA=="
+    check("content-addressed file-snapshot corruption fails closed",
+          _Checkpoints.from_state(corrupted_file, root).listing() == [])
+
+    # Validate again at restore time: a safe parent can be swapped for an external symlink after
+    # loading. The checkpoint must remain available and the external target must stay untouched.
+    safe_parent = root / "safe-parent"
+    safe_parent.mkdir()
+    guarded_path = safe_parent / "guarded.txt"
+    guarded_path.write_text("before\n")
+    guarded = _Checkpoints(root)
+    guarded.open(2, "path guard", [{"role": "user", "content": "edit"}])
+    guarded.record_file(str(guarded_path))
+    guarded_state = json.loads(json.dumps(guarded.state()))
+    loaded_guard = _Checkpoints.from_state(guarded_state, root)
+    guarded_path.write_text("after\n")
+    guarded_path.unlink(); safe_parent.rmdir()
+    external = _P(_tf.mkdtemp()).resolve()
+    (external / "guarded.txt").write_text("external sentinel\n")
+    safe_parent.symlink_to(external, target_is_directory=True)
+    unsafe_state = json.loads(json.dumps(loaded_guard.state()))
+    reloaded_unsafe = _Checkpoints.from_state(unsafe_state, root)
+    unsafe_result = reloaded_unsafe.rewind_state(0)
+    check("resumed rewind rejects a parent-symlink escape without consuming recovery state",
+          unsafe_result == (-1, 0, None)
+          and (external / "guarded.txt").read_text() == "external sentinel\n"
+          and len(reloaded_unsafe.listing()) == 1,
+          detail=repr(unsafe_result))
+    fresh_unsafe = _Checkpoints(root)
+    fresh_unsafe.open(2, "unsafe capture", [{"role": "user", "content": "edit"}])
+    check("checkpoint capture rejects a project path whose parent already escapes",
+          not fresh_unsafe.record_file(str(safe_parent / "new.txt"))
+          and not (external / "new.txt").exists())
+
+    failed_open = _Checkpoints(root, on_change=lambda: False)
+    check("checkpoint creation rolls back when its durable save fails",
+          not failed_open.open(1, "save failure", []) and failed_open.listing() == [])
+
+    class _UI:
+        def __init__(self): self.results = []
+        def tool_call(self, *_args, **_kwargs): pass
+        def tool_result(self, name, result, *_args, **_kwargs): self.results.append((name, result))
+        def tool_denied(self, *_args, **_kwargs): pass
+        def approve(self, *_args, **_kwargs): return "yes"
+        def __getattr__(self, _name): return lambda *args, **kwargs: None
+
+    edit_root = _P(_tf.mkdtemp()).resolve()
+    edit_file = edit_root / "guard.txt"
+    edit_file.write_text("original\n")
+    edit_cfg = _Config(edit_root)
+    edit_cfg.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {}})
+    edit_agent = _Agent(edit_cfg, _UI())
+    persistence = iter((True, False))
+    edit_agent.checkpoints = _Checkpoints(edit_root, on_change=lambda: next(persistence, False))
+    edit_agent.checkpoints.open(len(edit_agent.messages), "guarded edit", [])
+    edit_result = edit_agent._handle_call(_ToolCall(
+        "guard-write", "write_file", {"path": "guard.txt", "content": "changed\n"}))
+    check("ordinary edits fail closed when their pre-edit snapshot cannot be persisted",
+          edit_file.read_text() == "original\n" and "durably capture" in edit_result,
+          detail=repr(edit_result))
+
+    # Full Agent/session integration, including the TUI fleet shape where transcript discovery is
+    # rooted in the source checkout but tools/checkpoints are rooted in an isolated checkout.
+    source_root = _P(_tf.mkdtemp()).resolve()
+    execution_root = _P(_tf.mkdtemp()).resolve()
+    old_sessions_dir = sessions.SESSIONS_DIR
+    sessions.SESSIONS_DIR = source_root / "private-sessions"
+    try:
+        cfg = _Config(execution_root)
+        cfg.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {}})
+        ui = _UI()
+        first = _Agent(cfg, ui)
+        first.session_root = source_root
+        first.session_file = sessions.new_path(source_root)
+        original = conversation + [
+            {"role": "user", "content": "implement"},
+            {"role": "assistant", "content": "done"},
+        ]
+        first.messages = [first.messages[0], *original]
+        durable_file = execution_root / "durable.txt"
+        durable_file.write_text("before\n")
+        point_saved = first.checkpoints.open(
+            len(first.messages), "durable agent turn", original)
+        file_saved = first.checkpoints.record_file(str(durable_file))
+        durable_file.write_text("after\n")
+        first.messages = [first.messages[0],
+                          {"role": "user", "content": "[Earlier conversation compacted]"},
+                          {"role": "assistant", "content": "Summary acknowledged."}]
+        compacted_saved = first._persist()
+
+        second = _Agent(_Config(execution_root), _UI())
+        second.session_root = source_root
+        original_load_record = sessions.load_record
+        resume_reads = []
+        def tracked_load_record(*args, **kwargs):
+            resume_reads.append(1)
+            return original_load_record(*args, **kwargs)
+        sessions.load_record = tracked_load_record
+        try:
+            loaded_count = second.load_session(first.session_file)
+        finally:
+            sessions.load_record = original_load_record
+        durable_listing = second.checkpoints.listing()
+        compacted_messages = list(second.messages)
+        original_atomic_write = sessions._atomic_write
+        def fail_atomic_write(*_args, **_kwargs):
+            raise OSError("simulated durable save failure")
+        sessions._atomic_write = fail_atomic_write
+        try:
+            failed_agent_rewind = second.rewind(0)
+        finally:
+            sessions._atomic_write = original_atomic_write
+        failed_rewind_retained = (
+            failed_agent_rewind == (-1, 0) and durable_file.read_text() == "after\n"
+            and second.messages == compacted_messages and len(second.checkpoints.listing()) == 1)
+        wrong_checkout = _Agent(_Config(source_root), _UI())
+        wrong_checkout.session_root = source_root
+        wrong_checkout.load_session(first.session_file)
+        wrong_checkout_empty = wrong_checkout.checkpoints.listing() == []
+        agent_rewind = second.rewind(0)
+        persisted_messages = [m for m in sessions.load(first.session_file, source_root)
+                              if m.get("role") != "system"]
+        persisted_points = sessions.checkpoints_of(first.session_file, source_root).get("points")
+        third = _Agent(_Config(execution_root), _UI())
+        third.session_root = source_root
+        third.load_session(first.session_file)
+        check("Agent resume loads transcript and checkpoints from one locked generation",
+              resume_reads == [1])
+        check("Agent rewind rolls back files and conversation when its durable commit fails",
+              failed_rewind_retained, detail=repr(failed_agent_rewind))
+        check("Agent resume preserves durable rewind across compaction and split session/tool roots",
+              point_saved and file_saved and compacted_saved and loaded_count == 2
+              and len(durable_listing) == 1
+              and agent_rewind == (len(original) + 1, 1)
+              and durable_file.read_text() == "before\n" and second.messages[1:] == original,
+              detail=f"listing={durable_listing!r} rewind={agent_rewind!r}")
+        check("Agent rewind atomically persists the restored conversation and consumed checkpoint",
+              persisted_messages == original and persisted_points == []
+              and third.messages[1:] == original and third.checkpoints.listing() == [])
+
+        check("resume never rebinds checkpoint paths into a different checkout",
+              wrong_checkout_empty)
+    finally:
         sessions.SESSIONS_DIR = old_sessions_dir
 
 
@@ -6030,6 +6274,7 @@ def main():
         test_code_intel_lsp()
         test_code_intel_lsp_pool()
         test_sessions_and_worktree()
+        test_durable_checkpoints()
         test_isolated_subagents()
         test_private_config()
         test_release_script_contract()

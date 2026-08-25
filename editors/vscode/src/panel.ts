@@ -621,9 +621,35 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       items.map((c) => ({ label: c.preview, description: `${c.files} file(s)`, index: c.index })),
       { placeHolder: "Rewind code + conversation to…" });
     if (pick) {
-      be.send({ type: "rewind", index: (pick as any).index });
-      this.post({ type: "cleared" });
-      vscode.window.showInformationMessage("↩ DGC rewound code + conversation.");
+      let finishWait: (value: any) => void = () => undefined;
+      const result = new Promise<any>((resolve) => {
+        const finish = (value: any) => {
+          be.off("rewound", onRewound);
+          be.off("command_rejected", onRejected);
+          be.off("exit", onExit);
+          resolve(value);
+        };
+        finishWait = finish;
+        const onRewound = (ev: DgcEvent) => finish(ev);
+        const onRejected = (ev: DgcEvent) => {
+          if (ev.type === "command_rejected" && ev.command === "rewind") { finish(ev); }
+        };
+        const onExit = () => finish(undefined);
+        be.on("rewound", onRewound);
+        be.on("command_rejected", onRejected);
+        be.on("exit", onExit);
+      });
+      if (!be.send({ type: "rewind", index: (pick as any).index })) {
+        finishWait({ message: "DGC could not queue the rewind command." });
+      }
+      const outcome = await result;
+      if (outcome?.type === "rewound" && outcome.ok === true) {
+        vscode.window.showInformationMessage(
+          `↩ DGC rewound code + conversation; restored ${outcome.files_restored} file(s).`);
+      } else {
+        vscode.window.showErrorMessage(
+          outcome?.message || "DGC could not complete rewind; the recovery point was retained.");
+      }
     }
   }
 

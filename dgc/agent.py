@@ -709,7 +709,7 @@ class Agent:
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
-        self.checkpoints = CheckpointManager()
+        self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
         self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
@@ -976,7 +976,7 @@ class Agent:
         self._active_tool_intents: set[str] = set()
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
-        self.checkpoints = CheckpointManager()
+        self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.session_name = None
         self.plan_return_mode = None
         self._pending_images = None
@@ -1232,12 +1232,19 @@ class Agent:
             if self.depth == 0:             # Stop lifecycle hook (turn finished)
                 run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
 
-    def _persist(self) -> None:
+    def _persist(self) -> bool:
         if self.session_file:
             from . import sessions
-            sessions.save(self.session_file, self.messages, self.session_root,
-                          name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                          usage=self.usage_totals, activity=self.activity_totals)
+            try:
+                checkpoint_state = self.checkpoints.state()
+            except (TypeError, ValueError):
+                return False
+            return sessions.save(
+                self.session_file, self.messages, self.session_root,
+                name=self.session_name, goal=self.goal, goal_status=self.goal_status,
+                usage=self.usage_totals, activity=self.activity_totals,
+                checkpoints=checkpoint_state)
+        return True
 
     def name_session(self, name: str) -> None:
         """Give the current session a human name (shown in --resume / the session picker)."""
@@ -1245,8 +1252,7 @@ class Agent:
         if self.session_file:
             from . import sessions
             if not self.session_file.exists():   # a brand-new session with no turns yet
-                sessions.save(self.session_file, self.messages, self.session_root,
-                              name=self.session_name)
+                self._persist()
             elif self.session_name:
                 sessions.set_name(self.session_file, self.session_name, self.session_root)
 
@@ -1336,16 +1342,23 @@ class Agent:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
         path = sessions.resolve_path(self.session_root, path, must_exist=True)
-        loaded = [m for m in sessions.load(path, self.session_root) if m.get("role") != "system"]
+        record = sessions.load_record(path, self.session_root)
+        loaded = [m for m in record.get("messages", []) if m.get("role") != "system"]
         self.session_file = path
-        self.session_name = sessions.name_of(path, self.session_root)
+        self.session_name = str(record.get("name") or "").strip() or None
         with self._usage_lock:
-            self.usage_totals = sessions.usage_of(path, self.session_root)
-            self.activity_totals = sessions.activity_of(path, self.session_root)
-        self.goal = sessions.goal_of(path, self.session_root)  # restore BEFORE building the prompt so the
-        self.goal_status = sessions.goal_status_of(path, self.session_root)
+            self.usage_totals = sessions.usage_of(path, self.session_root, record)
+            self.activity_totals = sessions.activity_of(path, self.session_root, record)
+        self.goal = str(record.get("goal") or "")[:_GOAL_MAX_CHARS]
+        raw_status = str(record.get("goal_status") or "active")
+        self.goal_status = (raw_status if self.goal and raw_status in ("active", "completed", "blocked")
+                            else ("active" if self.goal else "none"))
         self._active_tool_intents.clear()
         self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded  # # Goal is in it
+        checkpoint_state = record.get("checkpoints")
+        self.checkpoints = CheckpointManager.from_state(
+            checkpoint_state if isinstance(checkpoint_state, dict) else {}, self.config.project_root,
+            on_change=self._persist, max_message_count=len(self.messages))
         return len(loaded)
 
     def set_goal(self, text: str, status: str = "active") -> None:
@@ -1387,7 +1400,9 @@ class Agent:
             if blocked:
                 self.ui.error(f"prompt blocked by a UserPromptSubmit hook: {hout}")
                 return
-            self.checkpoints.open(len(self.messages), user_text)
+            self.checkpoints.open(
+                len(self.messages), user_text,
+                [m for m in self.messages if m.get("role") != "system"])
         images = self._pending_images
         self._pending_images = None
         if images:                                 # vision: OpenAI-style multimodal content
@@ -2021,7 +2036,9 @@ class Agent:
                     try:
                         abs_path = resolve_path(str(args["path"]), self.config.project_root,
                                                 allow_external=bool(external_paths))
-                        self.checkpoints.record_file(str(abs_path))
+                        if not self.checkpoints.record_file(str(abs_path)):
+                            path_error = ("error: could not durably capture the file's pre-edit state; "
+                                          "the file was not changed")
                     except ValueError as e:
                         path_error = f"error: {e}"
                 if path_error:
@@ -2076,10 +2093,37 @@ class Agent:
 
     def rewind(self, idx: int) -> tuple[int, int]:
         """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
-        msg_count, n_files = self.checkpoints.rewind(idx)
-        if msg_count >= 0:
-            self.messages = self.messages[:msg_count]
-        return msg_count, n_files
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            return (-1, 0)
+        old_messages = self.messages
+        rewind_pending = False
+        try:
+            msg_count, n_files, conversation = self.checkpoints.rewind_state(
+                idx, transactional=True)
+            if msg_count < 0:
+                return (-1, 0)
+            rewind_pending = True
+            if conversation is not None:
+                system = next((m for m in self.messages if m.get("role") == "system"),
+                              {"role": "system", "content": self.system_prompt()})
+                self.messages = [system, *conversation]
+                msg_count = len(self.messages)
+            else:
+                self.messages = self.messages[:msg_count]
+            if not self._persist():
+                self.messages = old_messages
+                self.checkpoints.rollback_rewind()
+                rewind_pending = False
+                return (-1, 0)
+            self.checkpoints.commit_rewind()
+            rewind_pending = False
+            return msg_count, n_files
+        finally:
+            if rewind_pending:
+                self.messages = old_messages
+                self.checkpoints.rollback_rewind()
+            lease.release()
 
     def retained_tasks(self):
         """Return preserved delegated work for this exact project root."""
@@ -2093,7 +2137,9 @@ class Agent:
         action = str(action).strip().lower()
         configured = str(self.config.get("subagent_worktree_root", "") or "").strip()
         if action == "apply":
-            self.checkpoints.open(len(self.messages), f"apply retained task {task_id}")
+            self.checkpoints.open(
+                len(self.messages), f"apply retained task {task_id}",
+                [m for m in self.messages if m.get("role") != "system"])
         result = resolve_retained(
             self.config.project_root, task_id, action,
             Path(configured) if configured else None,

@@ -335,6 +335,18 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   assert.match(panelSrc, /case "clear": this\.ensureBackend\(\)\.send\(\{ type: "clear_session" \}\)/);
   send({ type: "event", event: { type: "session", kind: "cleared" } });
   assert.equal(doc.getElementById("log").children.length, 0);
+
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "text_delta", text: "discard this future" } });
+  send({ type: "event", event: { type: "rewound", ok: true, files_restored: 1 } });
+  assert.equal(doc.getElementById("log").children.length, 0,
+    "a successful typed rewind must clear the abandoned future");
+  send({ type: "event", event: { type: "history", items: [
+    { role: "user", text: "restored question" },
+    { role: "assistant", text: "restored answer", tools: [] },
+  ] } });
+  assert.match(doc.getElementById("log").textContent, /restored question.*restored answer/s,
+    "rewind history must repaint the exact restored prefix");
   assert.deepEqual(errors, [], "webview raised JS errors in state/error flows");
   dom.window.close();
 });

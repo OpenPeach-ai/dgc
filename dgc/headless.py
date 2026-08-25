@@ -673,7 +673,11 @@ class Backend:
             self.em.emit("checkpoints", items=items)
         elif t == "rewind":
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
-            self.em.emit("rewound", ok=(msgs >= 0), files_restored=nfiles)
+            ok = msgs >= 0
+            self.em.emit("rewound", ok=ok, files_restored=nfiles)
+            if ok:
+                self.em.emit("history", items=self._history())
+                self._emit_context()
         elif t == "list_retained_tasks":
             self._emit_retained_tasks()
         elif t == "resolve_retained_task":

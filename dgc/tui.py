@@ -1139,9 +1139,12 @@ class TUI:
 
     def _do_rewind(self, idx: int) -> None:
         try:
-            _msgs, nfiles = self.agent.rewind(idx)
+            msgs, nfiles = self.agent.rewind(idx)
         except Exception as e:
             self._flash(f"rewind failed: {type(e).__name__}"); return
+        if msgs < 0:
+            self._flash("rewind could not complete; recovery point retained")
+            return
         self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._think = ""
         self._render_history()
         self._scroll_off = 0

@@ -242,8 +242,12 @@ Every conversation is a session, saved as you go.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
 - **/rewind** — restore both the code *and* the conversation to how they were at
-  a chosen turn. DGC snapshots file state before each turn, so this genuinely
-  undoes edits, not just chat.
+  a chosen turn. Exact conversation prefixes and project-root file snapshots are
+  saved with the private session, so rewind survives resume and context compaction.
+  Direct file-tool and integrated sub-agent changes are captured before mutation;
+  the edit is refused if that durable capture fails. Arbitrary shell writes are not
+  guaranteed rewindable, and approved external-path snapshots last only for the
+  current process so resume never gains ambient authority outside the project.
 """.strip()),
 
     ("Standing goals", "persistent objectives with an explicit lifecycle", """

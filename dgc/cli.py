@@ -748,8 +748,11 @@ class CLI:
                 labels = [f"{prev}  [{nf} file{'' if nf == 1 else 's'}]" for (_i, prev, nf) in pts]
                 mi = select("Rewind to (restores code + conversation)", labels)
                 if mi is not None:
-                    _, nfiles = self.agent.rewind(pts[mi][0])
-                    self.ui.info(f"↩ rewound — restored {nfiles} file(s); conversation truncated")
+                    msgs, nfiles = self.agent.rewind(pts[mi][0])
+                    if msgs >= 0:
+                        self.ui.info(f"↩ rewound — restored {nfiles} file(s); conversation truncated")
+                    else:
+                        self.ui.error("rewind could not complete; the recovery point was retained")
         elif cmd == "search":
             self._search_cmd(rest)
         elif cmd == "resume":

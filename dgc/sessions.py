@@ -1,6 +1,7 @@
 """Per-project conversation persistence — the familiar `--continue` / `--resume` model.
 
-Every conversation is saved (after each turn) to ~/.dgc/sessions/<project-slug>/<timestamp>.json.
+Every conversation and its durable rewind state are saved (after each turn) to
+~/.dgc/sessions/<project-slug>/<timestamp>.json.
 `--continue` resumes the most recent session for the current directory; `--resume` lists and picks.
 This is transcript resume, NOT semantic/episodic memory — durable facts still live in DGC.md.
 """
@@ -20,7 +21,7 @@ from pathlib import Path
 from .config import USER_HOME
 
 SESSIONS_DIR = USER_HOME / "sessions"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 METRICS_SCHEMA_VERSION = 1
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
@@ -175,7 +176,9 @@ def metrics_of(path, project_root) -> dict:
 
 def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
-         usage: dict | None = None, activity: dict | None = None) -> None:
+         usage: dict | None = None, activity: dict | None = None,
+         checkpoints: dict | None = None) -> bool:
+    saved = False
     try:
         path = resolve_path(project_root, path)
         data = {"schema_version": SCHEMA_VERSION, "id": path.stem,
@@ -195,18 +198,23 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["activity"] = {
                 key: max(0, int(activity.get(key, 0) or 0)) for key in ACTIVITY_KEYS
             }
+        if checkpoints is not None:
+            data["checkpoints"] = checkpoints
         with _lock_for(path):
             _atomic_write(path, json.dumps(data, default=str))
-    except OSError:
+        saved = True
+    except (OSError, TypeError, ValueError):
         pass  # never let a failed save crash the turn
     save_metrics(path, project_root, usage=usage, activity=activity)
+    return saved
 
 
 def _load_data(path, project_root) -> dict:
     p = resolve_path(project_root, path, must_exist=True)
     with _lock_for(p):
         data = json.loads(p.read_text())
-    if not isinstance(data, dict) or not isinstance(data.get("messages", []), list):
+    if (not isinstance(data, dict) or not isinstance(data.get("messages", []), list)
+            or any(not isinstance(message, dict) for message in data.get("messages", []))):
         raise ValueError(f"invalid session file: {p.name}")
     recorded = data.get("project")
     if recorded and Path(recorded).resolve(strict=False) != Path(project_root).resolve(strict=False):
@@ -214,8 +222,22 @@ def _load_data(path, project_root) -> dict:
     return data
 
 
+def load_record(path, project_root) -> dict:
+    """Load one internally consistent transcript/goal/checkpoint generation under its file lock."""
+    return _load_data(path, project_root)
+
+
 def load(path, project_root) -> list:
-    return _load_data(path, project_root).get("messages", [])
+    return load_record(path, project_root).get("messages", [])
+
+
+def checkpoints_of(path, project_root) -> dict:
+    """Opaque checkpoint payload; CheckpointManager performs all structural/path validation."""
+    try:
+        value = _load_data(path, project_root).get("checkpoints")
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 # Plan persistence: the approved/proposed plan lives beside the session so
@@ -383,9 +405,9 @@ def name_of(path, project_root) -> str | None:
         return None
 
 
-def usage_of(path, project_root) -> dict:
+def usage_of(path, project_root, record: dict | None = None) -> dict:
     try:
-        usage = _load_data(path, project_root).get("usage") or {}
+        usage = (record if isinstance(record, dict) else _load_data(path, project_root)).get("usage") or {}
     except (OSError, ValueError, TypeError):
         usage = {}
     journal = _load_metrics(path, project_root).get("usage") or {}
@@ -396,10 +418,11 @@ def usage_of(path, project_root) -> dict:
         return {key: 0 for key in USAGE_KEYS}
 
 
-def activity_of(path, project_root) -> dict:
+def activity_of(path, project_root, record: dict | None = None) -> dict:
     """Return monotonic tool/edit counters, defaulting safely for schema <=4 sessions."""
     try:
-        activity = _load_data(path, project_root).get("activity") or {}
+        activity = (record if isinstance(record, dict)
+                    else _load_data(path, project_root)).get("activity") or {}
     except (OSError, ValueError, TypeError):
         activity = {}
     journal = _load_metrics(path, project_root).get("activity") or {}
@@ -411,16 +434,13 @@ def activity_of(path, project_root) -> dict:
 
 
 def set_name(path, name: str, project_root) -> None:
-    p = resolve_path(project_root, path, must_exist=True)
     try:
-        data = _load_data(p, project_root)
-    except (OSError, ValueError):
-        data = {"messages": []}
-    data["name"] = name
-    try:
+        p = resolve_path(project_root, path, must_exist=True)
         with _lock_for(p):
+            data = _load_data(p, project_root)  # the lock is re-entrant; retain it through replace
+            data["name"] = name
             _atomic_write(p, json.dumps(data, default=str))
-    except OSError:
+    except (OSError, TypeError, ValueError):
         pass
 
 
