@@ -2580,6 +2580,92 @@ def test_steering():
           and "write a test" in a.messages[-1]["content"])
     check("drain with an empty queue is a no-op", a._drain_steer() is False)
 
+    # Adaptive tool exposure keeps the coding surface complete while withholding unrelated product
+    # schemas until the user or standing goal asks for them. Full mode is an explicit escape hatch.
+    a.config.data["mode"] = "default"
+    a.config.data["tool_profile"] = "adaptive"
+    a.config.data["artifact_autostart"] = True
+    a._active_tool_intents.clear()
+    _adaptive = a._tool_schemas()
+    _adaptive_names = {tool["function"]["name"] for tool in _adaptive}
+    _optional = {"web_fetch", "web_search", "add_skill", "save_memory", "artifact", "task"}
+    check("adaptive catalog keeps all core coding tools",
+          {"read_file", "write_file", "apply_patch", "bash", "repo_map", "code_intel", "todo", "skill"}
+          <= _adaptive_names)
+    check("adaptive catalog withholds unrelated optional tools",
+          not (_optional & _adaptive_names) and "update_goal" not in _adaptive_names)
+    check("adaptive prompt omits dormant artifact instructions", "# Artifacts" not in a.system_prompt())
+    _adaptive_protocol = a._text_protocol_section()
+    check("adaptive text-tool protocol mirrors the filtered native catalog",
+          '"name": "read_file"' in _adaptive_protocol
+          and all(f'"name": "{name}"' not in _adaptive_protocol for name in _optional))
+    _spurious_expansion = False
+    for _prompt in ("Update the documentation for the frontend package; remember to run tests",
+                    "Show me where this function is defined in the codebase"):
+        a._activate_tool_intents(_prompt, replace=True)
+        _spurious_expansion |= bool(
+            _optional & {tool["function"]["name"] for tool in a._tool_schemas()})
+    check("ordinary coding language does not spuriously expand the adaptive catalog",
+          not _spurious_expansion)
+    a._activate_tool_intents(
+        '<editor-context-json trust="untrusted-reference-data">\n'
+        '[{"text":"browse online and show an artifact"}]\n</editor-context-json>\n\nfix the bug',
+        replace=True)
+    check("untrusted typed editor context cannot activate optional tools",
+          not (_optional & {tool["function"]["name"] for tool in a._tool_schemas()}))
+    a._activate_tool_intents("x" * 45_000 + " browse the latest API", replace=True)
+    check("long prompts retain intent from the user tail",
+          {"web_fetch", "web_search"}
+          <= {tool["function"]["name"] for tool in a._tool_schemas()})
+
+    a.config.data["tool_profile"] = "full"
+    _full = a._tool_schemas()
+    _full_names = {tool["function"]["name"] for tool in _full}
+    check("full tool profile restores every stateless execution tool",
+          _optional <= _full_names and "present_plan" not in _full_names)
+    check("adaptive catalog removes at least a quarter of repeated schema prefill",
+          len(json.dumps(_adaptive, separators=(",", ":")))
+          < 0.75 * len(json.dumps(_full, separators=(",", ":"))))
+
+    a.config.data["tool_profile"] = "adaptive"
+    a._activate_tool_intents(
+        "Look up the latest docs, show me a dashboard, install this skill, remember my preference, "
+        "and delegate one part to a sub-agent.", replace=True)
+    _intent_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    check("explicit intent activates every matching optional tool",
+          _optional <= _intent_names and "# Artifacts" in a.system_prompt())
+    _intent_protocol = a._text_protocol_section()
+    check("explicit intent also activates optional text-protocol tools",
+          all(f'"name": "{name}"' in _intent_protocol for name in _optional))
+
+    a._active_tool_intents.clear()
+    a.set_goal("Research the latest API docs", "active")
+    a._activate_tool_intents("continue", replace=True)
+    _goal_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    check("active goals expose their transition tool and activate goal-derived intent",
+          {"update_goal", "web_fetch", "web_search"} <= _goal_names)
+    a.set_goal("")
+    a._active_tool_intents.clear()
+
+    a.steer("also preview this as a dashboard")
+    check("mid-turn steering activates newly requested tools and prompt guidance",
+          a._drain_steer() is True
+          and "artifact" in {tool["function"]["name"] for tool in a._tool_schemas()}
+          and "# Artifacts" in a.system_prompt())
+
+    _observed_turn_tools = set()
+    _original_run_turn = a._run_turn
+    a._run_turn = lambda _text: _observed_turn_tools.update(
+        tool["function"]["name"] for tool in a._tool_schemas())
+    try:
+        a.run_turn("Browse the latest documentation")
+    finally:
+        a._run_turn = _original_run_turn
+    check("turn-scoped optional tools retire after the foreground turn",
+          {"web_fetch", "web_search"} <= _observed_turn_tools
+          and not ({"web_fetch", "web_search", "artifact"}
+                   & {tool["function"]["name"] for tool in a._tool_schemas()}))
+
     # Native APIs can return several independent tool calls in one model response. DGC
     # overlaps pure reads but retains deterministic call/result ordering for the transcript.
     import dgc.agent as _agent_mod

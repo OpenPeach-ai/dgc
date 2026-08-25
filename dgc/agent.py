@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shlex
 import threading
 import time
@@ -47,6 +48,50 @@ _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "c
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options"}
 _GOAL_MAX_CHARS = 4000
+
+# Keep the core coding catalog available on every execution turn. Product-specific and network
+# tools activate from explicit user/goal intent, avoiding repeated irrelevant prefill for small
+# local models. ``tool_profile: full`` remains an escape hatch.
+_OPTIONAL_TOOL_INTENT = {
+    "web_fetch": "web", "web_search": "web",
+    "add_skill": "skill_install", "save_memory": "memory",
+    "artifact": "artifact", "task": "delegate",
+}
+_TOOL_INTENT_PATTERNS = {
+    "web": re.compile(
+        r"https?://|\bwww\.|\b(?:browse|internet|online|web[_ -]?search|search the web|"
+        r"look up|latest|news|(?:api|official|online)\s+docs?)\b|"
+        r"\b(?:research|search)\b.{0,24}\b(?:online|the web|internet|latest|current|official)\b|"
+        r"\b(?:upgrade|update)\b.{0,32}\b(?:dependency|package|library|version)\b",
+        re.IGNORECASE | re.DOTALL),
+    "artifact": re.compile(
+        r"\b(?:artifact|preview|dashboard|chart|wireframe|mockup|visuali[sz](?:e|ation)?)\b|"
+        r"\b(?:show|open|serve|render)\b.{0,32}\b(?:page|website|front ?end|ui|dashboard|"
+        r"chart|preview|browser)\b|\b(?:in (?:the )?browser|on (?:a )?(?:local )?url|live page)\b",
+        re.IGNORECASE | re.DOTALL),
+    "skill_install": re.compile(
+        r"\b(?:add|install|import|download)\b.{0,32}\bskill\b|\badd_skill\b|SKILL\.md",
+        re.IGNORECASE | re.DOTALL),
+    "memory": re.compile(
+        r"\b(?:memorize|save_memory)\b|\bremember\s*(?::|,|this\b|that\b|my\b|"
+        r"for\s+(?:later|the future|future)\b)|\bsave\b.{0,24}\b(?:to|as|in)\s+"
+        r"(?:memory|a preference)\b",
+        re.IGNORECASE | re.DOTALL),
+    "delegate": re.compile(
+        r"\b(?:sub[- ]?agents?|delegate|delegation|fleet|task tool|parallel\b.{0,16}\bagents?)\b",
+        re.IGNORECASE | re.DOTALL),
+}
+
+
+def _tool_intents(text: str) -> set[str]:
+    source = str(text or "")
+    editor_end = "</editor-context-json>\n\n"
+    if source.startswith("<editor-context-json ") and editor_end in source:
+        source = source.split(editor_end, 1)[1]
+    if len(source) > 40_000:
+        source = source[:20_000] + "\n" + source[-20_000:]
+    return {intent for intent, pattern in _TOOL_INTENT_PATTERNS.items()
+            if pattern.search(source)}
 
 
 class _DeadlineCancel:
@@ -464,8 +509,17 @@ class Agent:
         sessions.save_metrics(self.session_file, self.config.project_root,
                               usage=usage, activity=activity)
 
+    def _activate_tool_intents(self, text: str, *, replace: bool = False) -> bool:
+        """Activate optional tools from explicit turn/goal intent; return whether it changed."""
+        detected = _tool_intents(text)
+        if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
+            detected |= _tool_intents(self.goal)
+        before = set(self._active_tool_intents)
+        self._active_tool_intents = detected if replace else before | detected
+        return self._active_tool_intents != before
+
     def _tool_schemas(self) -> list[dict]:
-        """Built-in tools plus any tools from connected MCP servers."""
+        """Built-in/MCP tools filtered by mode, state, and explicit adaptive-tool intent."""
         schemas = TOOL_SCHEMAS + self.mcp.tool_schemas()
         if self.mode == "plan":
             allowed = set(_PLAN_TOOLS)
@@ -477,6 +531,18 @@ class Agent:
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
+        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
+        if profile != "full":
+            active = set(getattr(self, "_active_tool_intents", set()))
+            schemas = [tool for tool in schemas
+                       if (tool.get("function", {}).get("name", "").startswith("mcp__")
+                           or tool.get("function", {}).get("name") not in _OPTIONAL_TOOL_INTENT
+                           or _OPTIONAL_TOOL_INTENT[tool["function"]["name"]] in active
+                           or (tool["function"]["name"] == "artifact" and self.mode == "plan"
+                               and self.config.get("artifact_in_plan", False)))]
+        if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "update_goal"]
         return schemas
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None):
@@ -516,6 +582,7 @@ class Agent:
     def reset(self) -> None:
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
+        self._active_tool_intents: set[str] = set()
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
         self.checkpoints = CheckpointManager()
@@ -635,7 +702,9 @@ class Agent:
         # live — i.e. the shared server is set to autostart. A headless/scripted run with artifacts off
         # (e.g. the benchmark) never reaches them, so this reclaims per-turn prefill instead of re-sending
         # instructions that can't fire. Plan-mode opt-in still shows them when enabled.
-        artifacts_live = bool(self.config.get("artifact_autostart", True))
+        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
+        artifacts_live = ("artifact" in getattr(self, "_active_tool_intents", set())
+                          or (profile == "full" and bool(self.config.get("artifact_autostart", True))))
         if (mode != "plan" and artifacts_live) or self.config.get("artifact_in_plan", False):
             parts += [
                 "",
@@ -740,6 +809,8 @@ class Agent:
         joined = "\n".join(m for m in msgs if m and m.strip())
         if not joined:
             return False
+        if self._activate_tool_intents(joined):
+            self._refresh_system()
         self.messages.append({"role": "user", "content":
             "<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
             f"course now if it changes anything:\n{joined}\n</user-interjection>"})
@@ -756,9 +827,13 @@ class Agent:
                 run_hooks("SessionStart", {"project": str(self.config.project_root)},
                           self.config, self.config.project_root)
         self.steer_queue.clear()            # drop any stale interjections from a prior turn
+        self._activate_tool_intents(user_text, replace=True)
+        self._refresh_system()
         try:
             self._run_turn(user_text)
         finally:
+            self._active_tool_intents.clear()
+            self._refresh_system()
             self._persist()
             if self.depth == 0:             # Stop lifecycle hook (turn finished)
                 run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
@@ -875,6 +950,7 @@ class Agent:
             self.activity_totals = sessions.activity_of(path, self.config.project_root)
         self.goal = sessions.goal_of(path, self.config.project_root)  # restore BEFORE building the prompt so the
         self.goal_status = sessions.goal_status_of(path, self.config.project_root)
+        self._active_tool_intents.clear()
         self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded  # # Goal is in it
         return len(loaded)
 

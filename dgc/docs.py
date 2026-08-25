@@ -266,6 +266,9 @@ Useful keys:
   interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — auto-sized to the model; long sessions compact at
   `compact_threshold` of it.
+- `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
+  skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
+  `full` to expose the whole execution catalog on every model request.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never
   repainting your terminal).
 - `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion

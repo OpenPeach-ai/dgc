@@ -74,6 +74,7 @@ DEFAULTS: dict = {
                                                 #   >0 (e.g. a benchmark cap), DGC nudges itself to land+verify
                                                 #   the fix as the clock runs down and preserves the last
                                                 #   test-passing files if it runs out of time (no 0-credit).
+    "tool_profile": "adaptive",                 # adaptive intent-aware catalog | full catalog every round
     "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
                                                 #   only sent to the ollama provider; "" = don't send)
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
