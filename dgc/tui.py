@@ -3806,7 +3806,9 @@ class TUI:
             self._tls.session = sess        # route this worker thread's agent callbacks to `sess`
             try:
                 self._foreground_aux_barrier()
-                self.agent.run_turn(text)
+                # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
+                # received while the worker waits at the auxiliary-generation barrier.
+                self.agent.run_turn(text, reset_cancel=False)
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:

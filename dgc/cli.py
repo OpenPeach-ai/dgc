@@ -1129,7 +1129,9 @@ class CLI:
 
         def work() -> None:
             try:
-                self.agent.run_turn(text)
+                # _run_turn_live cleared stale state before exposing the interruptible turn.
+                # Preserve any Esc/Ctrl-C that arrives while this worker thread is starting.
+                self.agent.run_turn(text, reset_cancel=False)
             except Exception as e:
                 self.ui.error(f"{type(e).__name__}: {e}")
             finally:

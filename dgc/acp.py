@@ -54,7 +54,10 @@ class _ACPState:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def busy(self) -> bool:
-        return bool(self.worker and self.worker.is_alive())
+        with self.lock:
+            # The worker clears this reference only after all Agent/UI state for the turn is done.
+            # Thread.is_alive() leaves a completion window where a new prompt can race the old one.
+            return self.worker is not None
 
 
 class ACPServer:
@@ -313,34 +316,58 @@ class ACPServer:
             if not state:
                 self.respond(rid, error={"code": -32002, "message": "unknown session"})
                 return
-            if state.busy():
-                self.respond(rid, error={"code": -32003, "message": "session already has an active turn"})
-                return
             text = _prompt_text(params.get("prompt", []))
             images = _prompt_images(params.get("prompt", []))
 
             def run():
+                result, error = None, None
                 try:
                     state.agent._pending_images = images or None
-                    state.agent.run_turn(text)
+                    # Cancellation was reset atomically with worker installation below. Do not
+                    # clear again here: a session/cancel arriving during thread startup must win.
+                    state.agent.run_turn(text, reset_cancel=False)
                     reason = "cancelled" if state.agent.cancelled.is_set() else "end_turn"
                     state.ui.usage(state.agent.estimate_tokens(),
                                    int(state.config.get("context_size", 32768)))
-                    self.respond(rid, {"stopReason": reason})
+                    result = {"stopReason": reason}
                 except Exception as e:
                     if state.agent.cancelled.is_set():
-                        self.respond(rid, {"stopReason": "cancelled"})
+                        result = {"stopReason": "cancelled"}
                     else:
-                        self.respond(rid, error={"code": -32603, "message": str(e)})
+                        error = {"code": -32603, "message": str(e)}
+                finally:
+                    current = threading.current_thread()
+                    with state.lock:
+                        try:
+                            # Publish completion before exposing the session as idle. This prevents
+                            # the next prompt's updates from overtaking the prior prompt response.
+                            self.respond(rid, result, error=error)
+                        finally:
+                            if state.worker is current:
+                                state.worker = None
 
-            state.worker = threading.Thread(target=run, daemon=True,
-                                            name=f"dgc-acp-{state.sid[:12]}")
-            state.worker.start()
+            with state.lock:
+                if state.worker is not None:
+                    self.respond(rid, error={"code": -32003,
+                                            "message": "session already has an active turn"})
+                    return
+                # Serialize stale-event reset with session/cancel. Whichever operation acquires
+                # this lock second determines whether the new turn begins or is cancelled.
+                state.agent.cancelled.clear()
+                worker = threading.Thread(target=run, daemon=True,
+                                          name=f"dgc-acp-{state.sid[:12]}")
+                state.worker = worker
+                try:
+                    worker.start()
+                except Exception:
+                    state.worker = None
+                    raise
 
         elif method == "session/cancel":
             state = self._state(params.get("sessionId"))
             if state:
-                state.agent.cancelled.set()
+                with state.lock:
+                    state.agent.cancelled.set()
                 self._cancel_requests(state.sid)
             # notification — no response
 

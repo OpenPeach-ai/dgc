@@ -1090,6 +1090,58 @@ def unit_tests(tmp: Path):
     check("a serialized frontend can preserve a cancel that races with turn startup",
           _seen_cancel[-1:] == [True] and _p.cancelled.is_set())
 
+    # Both terminal frontends expose the turn as interruptible before their worker enters Agent.
+    # They must therefore own the stale reset and use the same no-second-clear contract as ACP/editor.
+    from dgc.cli import CLI as _CLI
+    class _TerminalProbeAgent:
+        def __init__(self, cfg):
+            self.config = cfg; self.cancelled = _threading.Event(); self.calls = []
+            self.session_name = "named"; self.messages = []
+        def run_turn(self, text, *, reset_cancel=True):
+            self.calls.append((text, reset_cancel, self.cancelled.is_set()))
+    class _TerminalCfg:
+        project_root = tmp; model = "fixture"; base_url = "http://localhost.invalid/v1"
+        def get(self, key, default=None): return False if key == "suggest" else default
+    _terminal_cfg = _TerminalCfg(); _classic_agent = _TerminalProbeAgent(_terminal_cfg)
+    _classic = object.__new__(_CLI); _classic.agent = _classic_agent
+    _classic.ui = type("LiveUI", (), {
+        "_tool_count": 0,
+        "start_working": lambda self: None,
+        "stop_working": lambda self: None,
+        "turn_complete": lambda self, elapsed, cancelled: None,
+    })()
+    _old_stdio = sys.stdin, sys.stdout
+    _non_tty = type("NonTTY", (), {"isatty": lambda self: False})()
+    try:
+        sys.stdin = sys.stdout = _non_tty
+        _classic._run_turn_live("classic startup", [])
+    finally:
+        sys.stdin, sys.stdout = _old_stdio
+    check("classic CLI preserves interrupts delivered during worker startup",
+          _classic_agent.calls == [("classic startup", False, False)])
+
+    from dgc.tui import AgentSession as _AgentSession
+    _tui_agent = _TerminalProbeAgent(_terminal_cfg); _tui_done = _threading.Event()
+    original_tui_run = _tui_agent.run_turn
+    def tui_probe(text, *, reset_cancel=True):
+        original_tui_run(text, reset_cancel=reset_cancel); _tui_done.set()
+    _tui_agent.run_turn = tui_probe
+    _startup_tui = object.__new__(TUI)
+    _tui_session = _AgentSession(_terminal_cfg, _startup_tui, agent=_tui_agent)
+    _startup_tui._sessions = [_tui_session]; _startup_tui._active_idx = 0
+    _startup_tui._tls = _threading.local(); _startup_tui._prompt_history = []
+    _startup_tui._cancel_auxiliary = lambda: None
+    _startup_tui._foreground_aux_barrier = lambda: _tui_session._cancel.set()
+    _startup_tui._flush_text = lambda: None
+    _startup_tui._settle_running_tools = lambda: None
+    _startup_tui._append = lambda block: None
+    _startup_tui._rich = lambda block: block
+    _startup_tui._invalidate = lambda: None
+    _startup_tui._schedule_auxiliary = lambda *args, **kwargs: None
+    _startup_tui._submit("TUI startup"); _tui_done.wait(2)
+    check("full-screen TUI preserves interrupts delivered at its auxiliary barrier",
+          _tui_agent.calls == [("TUI startup", False, True)])
+
     # --- plan contract + Codex-style cadence: feedback round-trips, state transitions stay scoped,
     #     and a bare-tool local model still narrates BEFORE its tool card.
     class _PlanUI(_AgUI):
@@ -4489,6 +4541,35 @@ def test_acp_protocol():
         check("ACP cancellation releases and forgets its outstanding permission request",
               permission_result == [{"outcome": {"outcome": "cancelled"}}]
               and not server._pending and not permission_waiter.is_alive())
+
+        # Hold the worker after ACP installs it but before the real Agent.run_turn entry. A cancel
+        # in this exact window used to be erased by the Agent's top-level stale-event reset.
+        startup_ready, startup_release = threading.Event(), threading.Event()
+        observed_cancel = []
+        original_run_turn, original_inner_turn = state.agent.run_turn, state.agent._run_turn
+        state.agent._run_turn = lambda text: observed_cancel.append(state.agent.cancelled.is_set())
+        def delayed_run_turn(text, *, reset_cancel=True):
+            startup_ready.set(); startup_release.wait(2)
+            return original_run_turn(text, reset_cancel=reset_cancel)
+        state.agent.run_turn = delayed_run_turn
+        server._dispatch({"jsonrpc": "2.0", "id": 41, "method": "session/prompt",
+                          "params": {"sessionId": state.sid,
+                                     "prompt": [{"type": "text", "text": "startup race"}]}})
+        startup_ready.wait(1)
+        with state.lock:
+            startup_worker = state.worker
+        server._dispatch({"jsonrpc": "2.0", "method": "session/cancel",
+                          "params": {"sessionId": state.sid}})
+        startup_release.set()
+        if startup_worker:
+            startup_worker.join(2)
+        startup_reply = next((row for row in replies if row["id"] == 41), {})
+        check("ACP preserves cancellation that arrives during worker startup",
+              observed_cancel == [True]
+              and startup_reply.get("result") == {"stopReason": "cancelled"}
+              and state.worker is None)
+        state.agent.run_turn, state.agent._run_turn = original_run_turn, original_inner_turn
+
         server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
                                                                           "optionId": "once"}}
         notices.clear()
