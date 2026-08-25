@@ -93,7 +93,8 @@ class UI:
                 sys.stdout.flush()
         self._work_stop = None
 
-    def turn_complete(self, elapsed: float, cancelled: bool = False) -> None:
+    def turn_complete(self, elapsed: float, cancelled: bool = False,
+                      failed: bool = False) -> None:
         """A clear end-of-turn delimiter so the user knows the model is done and it's
         their turn — not still working, not waiting on a follow-up."""
         self.stop_working()
@@ -102,7 +103,7 @@ class UI:
             self._streamed = False
         if not sys.stdout.isatty():              # scripts / pipes don't want a UX marker
             return
-        verb = "stopped" if cancelled else "done"
+        verb = "stopped" if cancelled else ("failed" if failed else "done")
         parts = [f"{elapsed:.0f}s"]
         if self._tool_count:
             parts.append(f"{self._tool_count} tool" + ("" if self._tool_count == 1 else "s"))
@@ -749,8 +750,10 @@ class CLI:
             else:
                 self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")
         elif cmd == "compact":
-            self.agent.maybe_compact(force=True)
-            self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
+            if self.agent.maybe_compact(force=True):
+                self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
+            else:
+                self.ui.error(self.agent._last_persist_error or "context compaction failed")
         elif cmd in ("clear", "new"):
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(cfg.project_root)
@@ -1146,13 +1149,15 @@ class CLI:
         t0 = time.time()
         self.ui.start_working()          # live spinner until the first token / tool
         done = threading.Event()
+        outcome = {"failed": False}
 
         def work() -> None:
             try:
                 # _run_turn_live cleared stale state before exposing the interruptible turn.
                 # Preserve any Esc/Ctrl-C that arrives while this worker thread is starting.
-                self.agent.run_turn(text, reset_cancel=False)
+                outcome["failed"] = self.agent.run_turn(text, reset_cancel=False) is False
             except Exception as e:
+                outcome["failed"] = True
                 self.ui.error(f"{type(e).__name__}: {e}")
             finally:
                 self.ui.stop_working()
@@ -1162,7 +1167,8 @@ class CLI:
 
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             done.wait()
-            self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set())
+            self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set(),
+                                  failed=outcome["failed"])
             return
 
         import select as _sel
@@ -1210,7 +1216,8 @@ class CLI:
             live["released"].set()               # let a waiting approval proceed
             self.ui._live = None
         done.wait()
-        self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set())
+        self.ui.turn_complete(time.time() - t0, self.agent.cancelled.is_set(),
+                              failed=outcome["failed"])
 
 
 def run_doctor(config: Config) -> None:
@@ -1324,7 +1331,7 @@ def run_help() -> None:
     render_help(c)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve", "acp", "bug"):
         if raw_argv[0] == "help":
@@ -1431,9 +1438,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.prompt is not None:
         if config.data.get("mode") == "auto":
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
-        cli.agent.run_turn(cli.expand_mentions(args.prompt))
+        outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
         cli.ui.end_stream()
         print()
+        if outcome is False:
+            return 1
     else:
         import atexit
 

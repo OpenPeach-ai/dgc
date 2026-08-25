@@ -113,6 +113,12 @@ def generation_matches(path, project_root, *, expected_revision: int,
         return False
 
 
+def session_turn_lock(path, project_root):
+    """Return the crash-released exclusive foreground-turn lease for one session path."""
+    session = resolve_path(project_root, path)
+    return named_process_lock("session-turn", str(session))
+
+
 def _atomic_write(path: Path, text: str) -> None:
     """Write private session state atomically in the destination directory."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -488,8 +494,14 @@ def clear_workspace(session_file, project_root, *, expected_revision: int | None
 
 def delete(path, project_root, *, expected_revision: int | None = None,
            expected_exists: bool | None = None) -> bool:
+    turn_lease = None
+    turn_acquired = False
     try:
         p = resolve_path(project_root, path, must_exist=True)
+        turn_lease = session_turn_lock(p, project_root)
+        turn_acquired = turn_lease.acquire(blocking=False)
+        if not turn_acquired:
+            return False
         with _lock_for(p):
             exists, revision = _generation(p, project_root)
             if not _expected_generation_matches(
@@ -511,6 +523,9 @@ def delete(path, project_root, *, expected_revision: int | None = None,
         return True
     except (OSError, ValueError):
         return False
+    finally:
+        if turn_lease is not None and turn_acquired:
+            turn_lease.release()
 
 
 def goal_of(path, project_root) -> str:

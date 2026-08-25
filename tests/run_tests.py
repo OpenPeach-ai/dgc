@@ -439,9 +439,9 @@ def unit_tests(tmp: Path):
     from dgc.headless import Backend
     import threading as _th
     class _Em:
-        def __init__(self): self.evs, self.done = [], _th.Event()
+        def __init__(self): self.evs, self.rows, self.done = [], [], _th.Event()
         def emit(self, t, **k):
-            self.evs.append(t)
+            self.evs.append(t); self.rows.append({"type": t, **k})
             if t == "turn_end": self.done.set()
     class _StubAgent:
         cancelled = _th.Event()
@@ -454,6 +454,20 @@ def unit_tests(tmp: Path):
     b.em.done.wait(5)
     check("headless failing turn emits error", "error" in b.em.evs)
     check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
+
+    class _RejectedAgent:
+        cancelled = _th.Event()
+        _last_persist_error = "session has an active turn elsewhere"
+        def run_turn(self, text, *, reset_cancel=True): return False
+        def estimate_tokens(self): return 0
+    rejected = object.__new__(Backend)
+    rejected.em, rejected.agent = _Em(), _RejectedAgent()
+    rejected._queue, rejected._turn_n, rejected._emit_context = [], 0, lambda: None
+    rejected._start_turn("must be rejected")
+    rejected.em.done.wait(5)
+    rejected_end = next((row for row in rejected.em.rows if row["type"] == "turn_end"), {})
+    check("headless reports a turn reservation rejection as an error, never completed",
+          rejected_end.get("reason") == "error")
 
     # One locked FIFO owns the complete busy -> idle transition. A follow-up sent after Cancel but
     # before the cancelled call unwinds must run next; the old per-turn handoff stranded this prompt.
@@ -1128,7 +1142,7 @@ def unit_tests(tmp: Path):
         "_tool_count": 0,
         "start_working": lambda self: None,
         "stop_working": lambda self: None,
-        "turn_complete": lambda self, elapsed, cancelled: None,
+        "turn_complete": lambda self, elapsed, cancelled, failed=False: None,
     })()
     _old_stdio = sys.stdin, sys.stdout
     _non_tty = type("NonTTY", (), {"isatty": lambda self: False})()
@@ -3671,6 +3685,36 @@ with sessions._lock_for(path):
     sessions.delete(legacy, d)
     corrupt.unlink(missing_ok=True)
 
+    turn_session = sessions.new_path(d)
+    sessions.save(turn_session, [{"role": "user", "content": "turn"}], d)
+    turn_lease = sessions.session_turn_lock(turn_session, d)
+    turn_held = turn_lease.acquire(blocking=False)
+    try:
+        delete_while_active = sessions.delete(turn_session, d)
+    finally:
+        if turn_held:
+            turn_lease.release()
+    check("active session turn lease rejects concurrent deletion without waiting",
+          turn_held and not delete_while_active and turn_session.exists())
+    turn_crash = r'''import os
+import pathlib
+import sys
+from dgc import sessions
+
+lease = sessions.session_turn_lock(pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]))
+os._exit(0 if lease.acquire(blocking=False) else 2)
+'''
+    crashed_turn = _sp.run(
+        [sys.executable, "-c", turn_crash, str(turn_session), str(d)],
+        cwd=str(PROJECT), capture_output=True, text=True, timeout=5)
+    recovered_turn = sessions.session_turn_lock(turn_session, d)
+    recovered_turn_ok = recovered_turn.acquire(blocking=False)
+    if recovered_turn_ok:
+        recovered_turn.release()
+    check("active session turn lease is released automatically after process crash",
+          crashed_turn.returncode == 0 and recovered_turn_ok, crashed_turn.stderr)
+    sessions.delete(turn_session, d)
+
     if _sp.run(["git", "--version"], capture_output=True).returncode != 0:
         return
     repo = _P(_tf.mkdtemp())
@@ -3837,6 +3881,26 @@ with sessions._lock_for(path):
         stale_session.workspace.cleanup()
         fleet_tui._sessions.remove(stale_session)
 
+        busy_session = fleet_tui._new_session()
+        busy_path = busy_session.workspace.path
+        busy_turn = sessions.session_turn_lock(busy_session.agent.session_file, repo)
+        busy_turn_held = busy_turn.acquire(blocking=False)
+        try:
+            busy_result = fleet_tui._finalize_session_workspace(
+                busy_session, "competing process close")
+            open_while_busy = fleet_tui._new_session(
+                session_path=busy_session.agent.session_file)
+        finally:
+            if busy_turn_held:
+                busy_turn.release()
+        check("TUI never cleans a fleet checkout while its session turn is active elsewhere",
+              busy_turn_held and busy_result is not None and busy_result.status == "retained"
+              and busy_path.exists())
+        check("TUI refuses to attach or replace workspace state for an active saved session",
+              busy_turn_held and open_while_busy is None and len(fleet_tui._sessions) == 2)
+        busy_session.workspace.cleanup()
+        fleet_tui._sessions.remove(busy_session)
+
         clean_session = fleet_tui._new_session()
         clean_path = clean_session.workspace.path
         clean_session._req_event.clear()
@@ -3859,7 +3923,7 @@ def test_durable_checkpoints():
     from dgc.agent import Agent as _Agent
     from dgc.checkpoints import CheckpointManager as _Checkpoints
     from dgc.config import Config as _Config
-    from dgc.llm import ToolCall as _ToolCall
+    from dgc.llm import ChatResult as _ChatResult, ToolCall as _ToolCall
 
     root = _P(_tf.mkdtemp()).resolve()
     binary = root / "binary.bin"
@@ -4080,7 +4144,7 @@ def test_durable_checkpoints():
             "tools_supported": True,
             "chat": lambda self, *_args, **_kwargs: stale_turn_calls.append(1),
         })()
-        stale_turn.run_turn("must stop before the model")
+        stale_turn_result = stale_turn.run_turn("must stop before the model")
         stale.messages.append({"role": "assistant", "content": "stale overwrite"})
         stale_saved = stale._persist()
         stale_goal = stale.set_goal("must not appear")
@@ -4099,9 +4163,10 @@ def test_durable_checkpoints():
               and not sessions.plan_path(concurrent_path, source_root).exists()
               and "changed in another process" in stale._last_persist_error,
               detail=stale._last_persist_error)
-        check("stale Agent turn stops before making another model request",
-              not stale_turn_calls and len(stale_turn.messages) == 2
-              and any("changed in another process" in error
+        check("stale Agent turn stops before hooks or another model request",
+              stale_turn_result is False and not stale_turn._session_started
+              and not stale_turn_calls and len(stale_turn.messages) == 2
+              and any("saved session changed" in error
                       for error in stale_turn_ui.errors),
               detail=repr(stale_turn_ui.errors))
 
@@ -4132,6 +4197,73 @@ def test_durable_checkpoints():
         check("stale Agent activity cannot recreate a deleted metrics journal",
               deleted_concurrent and not concurrent_path.exists()
               and not sessions.metrics_path(concurrent_path, source_root).exists())
+
+        # Generation checks guard durable writes; the turn lease additionally reserves the entire
+        # model/tool lifecycle so a process that resumes the newest revision cannot take over while
+        # its current owner is between persistence boundaries.
+        turn_path = sessions.new_path(source_root)
+        turn_cfg = _Config(execution_root)
+        turn_cfg.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {}})
+        turn_owner_ui = _UI(); turn_owner = _Agent(turn_cfg, turn_owner_ui)
+        turn_owner.session_root = source_root; turn_owner.session_file = turn_path
+        turn_owner.messages = [turn_owner.messages[0], {"role": "user", "content": "base"}]
+        turn_owner._persist()
+        contender_ui = _UI(); contender = _Agent(_Config(execution_root), contender_ui)
+        contender.session_root = source_root; contender.load_session(turn_path)
+        owner_started = __import__("threading").Event()
+        owner_release = __import__("threading").Event()
+
+        class _BlockingTurnClient:
+            tools_supported = True
+            def chat(self, *_args, **_kwargs):
+                owner_started.set()
+                owner_release.wait(5)
+                return _ChatResult(content="owner finished")
+
+        turn_owner.client = _BlockingTurnClient()
+        owner_thread = __import__("threading").Thread(
+            target=turn_owner.run_turn, args=("hold the session",), daemon=True)
+        owner_thread.start(); owner_ready = owner_started.wait(3)
+        contender_calls = []
+        contender.client = type("NoConcurrentTurn", (), {
+            "tools_supported": True,
+            "chat": lambda self, *_args, **_kwargs: contender_calls.append(1),
+        })()
+        contender_turn = contender.run_turn("must not start")
+        busy_goal = contender.set_goal("must not save")
+        busy_name = contender.name_session("must not save")
+        busy_compact = contender.maybe_compact(force=True)
+        busy_delete = sessions.delete(turn_path, source_root)
+        owner_release.set(); owner_thread.join(5)
+        check("one process owns the full saved-session turn and rejects competing mutations",
+              owner_ready and not owner_thread.is_alive() and contender_turn is False
+              and not contender_calls
+              and not busy_goal and not busy_name and not busy_compact and not busy_delete
+              and turn_path.exists()
+              and any("active turn" in error for error in contender_ui.errors),
+              detail=repr(contender_ui.errors))
+
+        compacter = _Agent(_Config(execution_root), _UI())
+        compacter.session_root = source_root; compacter.load_session(turn_path)
+        compacter.messages = [compacter.messages[0],
+                              {"role": "user", "content": "x" * 5000},
+                              {"role": "assistant", "content": "tail"}]
+        compact_before = _copy.deepcopy(compacter.messages)
+        disk_before = turn_path.read_bytes()
+        original_atomic_write = sessions._atomic_write
+        sessions._atomic_write = fail_atomic_write
+        try:
+            compact_failed = compacter.maybe_compact(force=True)
+        finally:
+            sessions._atomic_write = original_atomic_write
+        check("manual compaction rolls memory back when its generation cannot be saved",
+              not compact_failed and compacter.messages == compact_before
+              and turn_path.read_bytes() == disk_before)
+        compact_ok = compacter.maybe_compact(force=True)
+        compact_record = sessions.load_record(turn_path, source_root)
+        check("manual compaction persists its exact resulting session generation",
+              compact_ok and compact_record.get("messages") == compacter.messages
+              and compact_record.get("revision") == compacter._session_revision)
     finally:
         sessions.SESSIONS_DIR = old_sessions_dir
 
@@ -5071,6 +5203,31 @@ def test_acp_protocol():
               and startup_reply.get("result") == {"stopReason": "cancelled"}
               and state.worker is None)
         state.agent.run_turn, state.agent._run_turn = original_run_turn, original_inner_turn
+
+        # ACP's in-process worker lock cannot see a turn owned by another DGC process. The Agent's
+        # durable session lease must reject it before model execution, and the JSON-RPC response
+        # must be an error rather than a false end_turn success.
+        blocked_model = []
+        state.agent._run_turn = lambda text: blocked_model.append(text)
+        external_turn = _S.session_turn_lock(state.agent.session_file, project)
+        external_held = external_turn.acquire(blocking=False)
+        try:
+            server._dispatch({"jsonrpc": "2.0", "id": 42, "method": "session/prompt",
+                              "params": {"sessionId": state.sid,
+                                         "prompt": [{"type": "text", "text": "blocked"}]}})
+            with state.lock:
+                blocked_worker = state.worker
+            if blocked_worker:
+                blocked_worker.join(2)
+        finally:
+            if external_held:
+                external_turn.release()
+            state.agent._run_turn = original_inner_turn
+        blocked_reply = next((row for row in replies if row["id"] == 42), {})
+        check("ACP surfaces a cross-process turn reservation conflict as a JSON-RPC error",
+              external_held and not blocked_model
+              and (blocked_reply.get("error") or {}).get("code") == -32004
+              and blocked_reply.get("result") is None and state.worker is None)
 
         server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
                                                                           "optionId": "once"}}

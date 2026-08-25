@@ -1326,7 +1326,9 @@ class TUI:
                 if kind == "switch" and v in self._sessions:
                     self._close_session(self._sessions.index(v)); self._open_dashboard()
                 elif kind == "open":
-                    sessions.delete(v, fleet_root); self._flash("deleted"); self._open_dashboard()
+                    deleted = sessions.delete(v, fleet_root)
+                    self._flash("deleted" if deleted else "session is active; deletion was not run")
+                    self._open_dashboard()
             elif key == "p" and kind == "switch":
                 v.pinned = not v.pinned; self._open_dashboard()
             elif key == "r" and kind == "switch":
@@ -2414,6 +2416,25 @@ class TUI:
         session receives an exact tracked/non-ignored-untracked snapshot under the source mutation
         lease. Non-Git projects retain the shared-checkout fallback and say so explicitly.
         """
+        if not session_path:
+            return self._new_session_reserved(name=name, session_path=session_path)
+        from . import sessions as _sess
+        try:
+            turn_lease = _sess.session_turn_lock(session_path, self._fleet_root)
+            turn_acquired = turn_lease.acquire(blocking=False)
+        except (OSError, TypeError, ValueError):
+            turn_lease, turn_acquired = None, False
+        if not turn_acquired:
+            self._flash("couldn't open session — it has an active turn in another DGC process")
+            return None
+        try:
+            return self._new_session_reserved(name=name, session_path=session_path)
+        finally:
+            turn_lease.release()
+
+    def _new_session_reserved(self, name: str | None = None,
+                              session_path=None) -> AgentSession | None:
+        """Build and durably associate a fleet runtime while its saved session is reserved."""
         from . import sessions as _sess, worktree as _wt
         from .config import Config as _Config
         from .scheduler import workspace_mutation_lock
@@ -2560,10 +2581,8 @@ class TUI:
                     workspace.retain(reason, [])
                 return None
             from . import sessions as _sess
-            guard = _session_generation_guard(sess.agent)
-            if guard and not _sess.generation_matches(
-                    sess.agent.session_file, self._fleet_root, **guard):
-                detail = f"{reason}: session generation changed in another process"
+
+            def retain_uncertain(detail):
                 error = workspace.retain(detail, []) or ""
                 from .worktree import FleetWorkspaceResult
                 result = FleetWorkspaceResult(
@@ -2571,24 +2590,43 @@ class TUI:
                     error=error)
                 sess._workspace_finalized = True
                 return result
-            result = workspace.finish(reason)
-            sess._workspace_finalized = True
-            if result.status == "cleaned":
-                if sess.agent.session_file:
-                    associated = _sess.clear_workspace(
-                        sess.agent.session_file, self._fleet_root,
+
+            try:
+                turn_lease = _sess.session_turn_lock(
+                    sess.agent.session_file, self._fleet_root)
+                turn_acquired = turn_lease.acquire(blocking=False)
+            except (OSError, TypeError, ValueError):
+                turn_lease, turn_acquired = None, False
+            if not turn_acquired:
+                return retain_uncertain(
+                    f"{reason}: session has an active turn in another DGC process")
+            try:
+                guard = _session_generation_guard(sess.agent)
+                if guard and not _sess.generation_matches(
+                        sess.agent.session_file, self._fleet_root, **guard):
+                    return retain_uncertain(
+                        f"{reason}: session generation changed in another process")
+                result = workspace.finish(reason)
+                sess._workspace_finalized = True
+                if result.status == "cleaned":
+                    if sess.agent.session_file:
+                        associated = _sess.clear_workspace(
+                            sess.agent.session_file, self._fleet_root,
+                            **_session_generation_guard(sess.agent))
+                        if not associated:
+                            self._flash(
+                                "workspace cleaned, but the session association changed elsewhere")
+                elif sess.agent.session_file:
+                    associated = _sess.save_workspace(
+                        sess.agent.session_file, self._fleet_root, kind="managed",
+                        worktree=workspace.path, branch=workspace.branch,
+                        metadata=workspace.metadata_path,
                         **_session_generation_guard(sess.agent))
                     if not associated:
-                        self._flash("workspace cleaned, but the session association changed elsewhere")
-            elif sess.agent.session_file:
-                associated = _sess.save_workspace(
-                    sess.agent.session_file, self._fleet_root, kind="managed",
-                    worktree=workspace.path, branch=workspace.branch,
-                    metadata=workspace.metadata_path,
-                    **_session_generation_guard(sess.agent))
-                if not associated:
-                    self._flash("retained workspace association changed in another process")
-            return result
+                        self._flash("retained workspace association changed in another process")
+                return result
+            finally:
+                turn_lease.release()
 
     def _close_session(self, idx: int) -> None:
         """Stop + remove a session, safely resolving any DGC-owned checkout."""
@@ -2897,7 +2935,11 @@ class TUI:
         elif cmd == "context":
             self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
-            self.agent.maybe_compact(force=True); self._flash("context compacted")
+            if self.agent.maybe_compact(force=True):
+                self._flash("context compacted")
+            else:
+                self._flash(getattr(self.agent, "_last_persist_error", "")
+                            or "context compaction failed")
         elif cmd == "status":
             self._append(self._rich(self._status_block()))
         elif cmd == "mcp":
@@ -3123,8 +3165,9 @@ class TUI:
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
         def dele(i):
-            sessions.delete(items[i][0], self._fleet_root)
-            self._flash("session deleted")
+            deleted = sessions.delete(items[i][0], self._fleet_root)
+            self._flash("session deleted" if deleted else
+                        "session is active; deletion was not run")
             self._resume_flow()             # re-show the updated list
         self._show_picker("Resume a session", labels, pick, delete_cb=dele)
 
@@ -3859,11 +3902,12 @@ class TUI:
 
         def work():
             self._tls.session = sess        # route this worker thread's agent callbacks to `sess`
+            succeeded = False
             try:
                 self._foreground_aux_barrier()
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
-                self.agent.run_turn(text, reset_cancel=False)
+                succeeded = self.agent.run_turn(text, reset_cancel=False) is not False
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
@@ -3873,7 +3917,8 @@ class TUI:
                 sess.last_activity = time.monotonic()
                 el = time.monotonic() - self._turn_t0
                 th = style_mod.theme()
-                verb = "stopped" if self._cancel.is_set() else "done"
+                verb = ("stopped" if self._cancel.is_set() else
+                        ("done" if succeeded else "failed"))
                 self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {verb} · {el:.0f}s"
                                         + (f" · {self._tool_count} tool" +
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
@@ -3885,6 +3930,10 @@ class TUI:
                     sess._worker_thread = None
                     if result is not None and result.status != "cleaned":
                         self._flash(f"retained {result.branch} at {result.path}")
+                    return
+                if not succeeded:
+                    self._queue.clear()
+                    sess._worker_thread = None
                     return
                 if self._queue:
                     sess._worker_thread = None

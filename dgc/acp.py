@@ -310,8 +310,8 @@ class ACPServer:
                 self.respond(rid, error={"code": -32001, "message": "session not found"})
                 return
             if not sessions.delete(path, root, **guard):
-                message = ("session changed in another process; refresh before deleting" if
-                           Path(path).is_file() else "session not found")
+                message = ("session is active or changed in another process; refresh before "
+                           "deleting" if Path(path).is_file() else "session not found")
                 self.respond(rid, error={"code": -32004, "message": message})
                 return
             with self._sessions_lock:
@@ -332,11 +332,16 @@ class ACPServer:
                     state.agent._pending_images = images or None
                     # Cancellation was reset atomically with worker installation below. Do not
                     # clear again here: a session/cancel arriving during thread startup must win.
-                    state.agent.run_turn(text, reset_cancel=False)
-                    reason = "cancelled" if state.agent.cancelled.is_set() else "end_turn"
-                    state.ui.usage(state.agent.estimate_tokens(),
-                                   int(state.config.get("context_size", 32768)))
-                    result = {"stopReason": reason}
+                    outcome = state.agent.run_turn(text, reset_cancel=False)
+                    if outcome is False:
+                        error = {"code": -32004,
+                                 "message": state.agent._last_persist_error
+                                 or "session turn could not be committed"}
+                    else:
+                        reason = "cancelled" if state.agent.cancelled.is_set() else "end_turn"
+                        state.ui.usage(state.agent.estimate_tokens(),
+                                       int(state.config.get("context_size", 32768)))
+                        result = {"stopReason": reason}
                 except Exception as e:
                     if state.agent.cancelled.is_set():
                         result = {"stopReason": "cancelled"}

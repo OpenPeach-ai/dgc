@@ -2,6 +2,7 @@
 thinking levels, and plan-mode orchestration."""
 from __future__ import annotations
 
+import copy
 import json
 import platform
 import re
@@ -9,6 +10,7 @@ import shlex
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -704,6 +706,10 @@ class Agent:
         self.session_root = Path(config.project_root).resolve(strict=False)
         self.session_name = None  # optional user-given name for the current session
         self._session_persist_lock = threading.RLock()
+        self._session_turn_state_lock = threading.Lock()
+        self._session_turn_lease = None
+        self._session_turn_owner: int | None = None
+        self._session_turn_depth = 0
         self._session_revision = 0
         self._session_exists = False
         self._last_persist_error = ""
@@ -1219,103 +1225,183 @@ class Agent:
         return True
 
     # ------------------------------------------------------------- main loop ---
-    def run_turn(self, user_text: str, *, reset_cancel: bool = True) -> None:
-        # A sub-agent shares the parent's Event, so only a top-level frontend may clear stale state.
-        # Serialized frontends clear it at their own dequeue boundary and pass reset_cancel=False,
-        # preventing a cancel that arrives during turn startup from being swallowed here.
-        if self.depth == 0:
-            if reset_cancel:
-                self.cancelled.clear()
-            if not self._session_started:   # SessionStart lifecycle hook (fires once per session)
-                self._session_started = True
-                run_hooks("SessionStart", {"project": str(self.config.project_root)},
-                          self.config, self.config.project_root)
-        self.steer_queue.clear()            # drop any stale interjections from a prior turn
-        self._activate_tool_intents(user_text, replace=True)
-        self._refresh_system()
+    @contextmanager
+    def _session_turn_scope(self, *, reentrant: bool = True):
+        """Reserve this saved session across processes for a turn or durable mutation.
+
+        The OS owns crash recovery. Nested persistence on the owning thread is re-entrant without
+        trying to lock the same file descriptor again; a different local thread fails immediately.
+        """
+        if self.depth > 0 or not self.session_file:
+            yield True
+            return
+        owner = threading.get_ident()
+        entered = False
+        with self._session_turn_state_lock:
+            if self._session_turn_lease is not None:
+                allowed = bool(reentrant and self._session_turn_owner == owner)
+                if allowed:
+                    self._session_turn_depth += 1
+                    entered = True
+            else:
+                from . import sessions
+                try:
+                    lease = sessions.session_turn_lock(self.session_file, self.session_root)
+                    allowed = lease.acquire(blocking=False)
+                except (OSError, TypeError, ValueError):
+                    lease, allowed = None, False
+                if allowed:
+                    self._session_turn_lease = lease
+                    self._session_turn_owner = owner
+                    self._session_turn_depth = 1
+                    entered = True
         try:
-            self._run_turn(user_text)
+            yield allowed
         finally:
-            self._active_tool_intents.clear()
+            release = None
+            if entered:
+                with self._session_turn_state_lock:
+                    self._session_turn_depth -= 1
+                    if self._session_turn_depth == 0:
+                        release = self._session_turn_lease
+                        self._session_turn_lease = None
+                        self._session_turn_owner = None
+                if release is not None:
+                    release.release()
+
+    def run_turn(self, user_text: str, *, reset_cancel: bool = True) -> bool:
+        """Run one foreground turn and report whether its final generation was saved.
+
+        ``False`` means the turn was rejected before the model ran or its durable commit failed.
+        Exceptions still propagate after the normal cleanup/persistence attempt.
+        """
+        with self._session_turn_scope(reentrant=False) as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "This session has an active turn in another DGC process. Wait for it to finish "
+                    "or start a new session; no model request or workspace action was started.")
+                self.ui.error(self._last_persist_error)
+                return False
+            if self.session_file:
+                from . import sessions
+                if not sessions.generation_matches(
+                        self.session_file, self.session_root,
+                        expected_revision=self._session_revision,
+                        expected_exists=self._session_exists):
+                    self._last_persist_error = (
+                        "This saved session changed or was deleted in another DGC process. Resume "
+                        "the latest generation or start a new session; no hook, model request, or "
+                        "workspace action was started.")
+                    self.ui.error(self._last_persist_error)
+                    return False
+            # A sub-agent shares the parent's Event, so only a top-level frontend may clear stale
+            # state. Serialized frontends clear at dequeue and pass reset_cancel=False, preserving
+            # a cancel that races with worker startup.
+            if self.depth == 0:
+                if reset_cancel:
+                    self.cancelled.clear()
+                if not self._session_started:   # SessionStart hook fires once per session
+                    self._session_started = True
+                    run_hooks("SessionStart", {"project": str(self.config.project_root)},
+                              self.config, self.config.project_root)
+            self.steer_queue.clear()            # drop stale interjections from a prior turn
+            self._activate_tool_intents(user_text, replace=True)
             self._refresh_system()
-            saved = self._persist()
-            if not saved and self.depth == 0:
-                self.ui.error(self._last_persist_error or "could not persist this session")
-            if self.depth == 0:             # Stop lifecycle hook (turn finished)
-                run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
+            try:
+                self._run_turn(user_text)
+            finally:
+                self._active_tool_intents.clear()
+                self._refresh_system()
+                saved = self._persist()
+                if not saved and self.depth == 0:
+                    self.ui.error(self._last_persist_error or "could not persist this session")
+                if self.depth == 0:             # Stop lifecycle hook (turn finished)
+                    run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
+            return saved
 
     def _persist(self) -> bool:
         if not self.session_file:
             self._last_persist_error = ""
             return True
-        from . import sessions
-        with self._session_persist_lock:
-            try:
-                checkpoint_state = self.checkpoints.state()
-            except (TypeError, ValueError) as exc:
-                self._last_persist_error = f"could not persist checkpoint state: {exc}"
+        with self._session_turn_scope() as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "Session save stopped because another DGC process owns its active turn. "
+                    "This process kept its in-memory state; wait, use /new, or resume the latest save.")
                 return False
-            with self._usage_lock:
-                usage, activity = dict(self.usage_totals), dict(self.activity_totals)
-            saved = sessions.save(
-                self.session_file, self.messages, self.session_root,
-                name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                usage=usage, activity=activity, checkpoints=checkpoint_state,
-                expected_revision=self._session_revision,
-                expected_exists=self._session_exists)
-            if saved:
-                self._session_revision += 1
-                self._session_exists = True
-                self._last_persist_error = ""
-                return True
+            from . import sessions
+            with self._session_persist_lock:
+                try:
+                    checkpoint_state = self.checkpoints.state()
+                except (TypeError, ValueError) as exc:
+                    self._last_persist_error = f"could not persist checkpoint state: {exc}"
+                    return False
+                with self._usage_lock:
+                    usage, activity = dict(self.usage_totals), dict(self.activity_totals)
+                saved = sessions.save(
+                    self.session_file, self.messages, self.session_root,
+                    name=self.session_name, goal=self.goal, goal_status=self.goal_status,
+                    usage=usage, activity=activity, checkpoints=checkpoint_state,
+                    expected_revision=self._session_revision,
+                    expected_exists=self._session_exists)
+                if saved:
+                    self._session_revision += 1
+                    self._session_exists = True
+                    self._last_persist_error = ""
+                    return True
 
-            try:
-                if not self.session_file.is_file():
-                    detail = ("the session was deleted by another process" if self._session_exists else
-                              "the new session path could not be created or was claimed")
-                else:
-                    current = sessions.load_record(self.session_file, self.session_root)
-                    revision = int(current.get("revision", 0))
-                    detail = (f"the session changed in another process (expected revision "
-                              f"{self._session_revision}, found {revision})" if
-                              revision != self._session_revision else
-                              "the current session generation could not be written")
-            except (OSError, TypeError, ValueError):
-                detail = "the session file could not be written or revalidated"
-            self._last_persist_error = (
-                f"Session save stopped because {detail}. This process kept its in-memory state; "
-                "use /new or resume the latest saved session before making more edits.")
-            return False
+                try:
+                    if not self.session_file.is_file():
+                        detail = ("the session was deleted by another process" if self._session_exists else
+                                  "the new session path could not be created or was claimed")
+                    else:
+                        current = sessions.load_record(self.session_file, self.session_root)
+                        revision = int(current.get("revision", 0))
+                        detail = (f"the session changed in another process (expected revision "
+                                  f"{self._session_revision}, found {revision})" if
+                                  revision != self._session_revision else
+                                  "the current session generation could not be written")
+                except (OSError, TypeError, ValueError):
+                    detail = "the session file could not be written or revalidated"
+                self._last_persist_error = (
+                    f"Session save stopped because {detail}. This process kept its in-memory state; "
+                    "use /new or resume the latest saved session before making more edits.")
+                return False
 
     def name_session(self, name: str) -> bool:
         """Give the current session a human name (shown in --resume / the session picker)."""
         value = name.strip() or None
-        with self._session_persist_lock:
-            previous = self.session_name
-            self.session_name = value
-            if not self.session_file:
-                self._last_persist_error = ""
-                return True
-            if not self._session_exists:          # a brand-new session with no turns yet
-                saved = self._persist()
-            elif self.session_name:
-                from . import sessions
-                saved = sessions.set_name(
-                    self.session_file, self.session_name, self.session_root,
-                    expected_revision=self._session_revision,
-                    expected_exists=True)
-                if saved:
-                    self._session_revision += 1
+        with self._session_turn_scope() as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "Session rename stopped because another DGC process owns its active turn.")
+                return False
+            with self._session_persist_lock:
+                previous = self.session_name
+                self.session_name = value
+                if not self.session_file:
                     self._last_persist_error = ""
+                    return True
+                if not self._session_exists:          # a brand-new session with no turns yet
+                    saved = self._persist()
+                elif self.session_name:
+                    from . import sessions
+                    saved = reserved and sessions.set_name(
+                        self.session_file, self.session_name, self.session_root,
+                        expected_revision=self._session_revision,
+                        expected_exists=True)
+                    if saved:
+                        self._session_revision += 1
+                        self._last_persist_error = ""
+                    else:
+                        self._last_persist_error = (
+                            "Session rename stopped because the saved session changed in another "
+                            "process or storage could not be written.")
                 else:
-                    self._last_persist_error = (
-                        "Session rename stopped because the saved session changed in another process "
-                        "or could not be written.")
-            else:
-                saved = self._persist()
-            if not saved:
-                self.session_name = previous
-            return saved
+                    saved = self._persist()
+                if not saved:
+                    self.session_name = previous
+                return saved
 
     def generate_title(self, prompt: str, cancel=None) -> str | None:
         """A short, distinctive 5-10 word session title derived from the first prompt (
@@ -1997,11 +2083,15 @@ class Agent:
                 return "error: the proposed plan is empty. Research the task and present concrete steps."
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
-                with self._session_persist_lock:
-                    saved = sessions.save_plan(
-                        self.session_file, plan, self.session_root,
-                        expected_revision=self._session_revision,
-                        expected_exists=self._session_exists)
+                with self._session_turn_scope() as reserved:
+                    if not reserved:
+                        return ("error: the plan was not saved because another DGC process owns "
+                                "this session's active turn. Wait or resume a different session.")
+                    with self._session_persist_lock:
+                        saved = sessions.save_plan(
+                            self.session_file, plan, self.session_root,
+                            expected_revision=self._session_revision,
+                            expected_exists=self._session_exists)
                 if not saved:
                     return ("error: the plan was not saved because this session changed in another "
                             "process or its storage was unavailable. Resume the latest session and "
@@ -2179,37 +2269,42 @@ class Agent:
 
     def rewind(self, idx: int) -> tuple[int, int]:
         """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
-        lease = workspace_mutation_lock(self.config.project_root)
-        if not acquire_cancellable(lease, self.cancelled):
-            return (-1, 0)
-        old_messages = self.messages
-        rewind_pending = False
-        try:
-            msg_count, n_files, conversation = self.checkpoints.rewind_state(
-                idx, transactional=True)
-            if msg_count < 0:
+        with self._session_turn_scope() as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "Rewind stopped because this session has an active turn in another DGC process.")
                 return (-1, 0)
-            rewind_pending = True
-            if conversation is not None:
-                system = next((m for m in self.messages if m.get("role") == "system"),
-                              {"role": "system", "content": self.system_prompt()})
-                self.messages = [system, *conversation]
-                msg_count = len(self.messages)
-            else:
-                self.messages = self.messages[:msg_count]
-            if not self._persist():
-                self.messages = old_messages
-                self.checkpoints.rollback_rewind()
-                rewind_pending = False
+            lease = workspace_mutation_lock(self.config.project_root)
+            if not acquire_cancellable(lease, self.cancelled):
                 return (-1, 0)
-            self.checkpoints.commit_rewind()
+            old_messages = self.messages
             rewind_pending = False
-            return msg_count, n_files
-        finally:
-            if rewind_pending:
-                self.messages = old_messages
-                self.checkpoints.rollback_rewind()
-            lease.release()
+            try:
+                msg_count, n_files, conversation = self.checkpoints.rewind_state(
+                    idx, transactional=True)
+                if msg_count < 0:
+                    return (-1, 0)
+                rewind_pending = True
+                if conversation is not None:
+                    system = next((m for m in self.messages if m.get("role") == "system"),
+                                  {"role": "system", "content": self.system_prompt()})
+                    self.messages = [system, *conversation]
+                    msg_count = len(self.messages)
+                else:
+                    self.messages = self.messages[:msg_count]
+                if not self._persist():
+                    self.messages = old_messages
+                    self.checkpoints.rollback_rewind()
+                    rewind_pending = False
+                    return (-1, 0)
+                self.checkpoints.commit_rewind()
+                rewind_pending = False
+                return msg_count, n_files
+            finally:
+                if rewind_pending:
+                    self.messages = old_messages
+                    self.checkpoints.rollback_rewind()
+                lease.release()
 
     def retained_tasks(self):
         """Return preserved delegated work for this exact project root."""
@@ -2219,20 +2314,28 @@ class Agent:
 
     def resolve_retained_task(self, task_id: str, action: str):
         """Apply/drop preserved delegated work; applied paths join the normal rewind stack."""
-        from .worktree import resolve_retained
+        from .worktree import TaskIntegration, resolve_retained
         action = str(action).strip().lower()
         configured = str(self.config.get("subagent_worktree_root", "") or "").strip()
-        if action == "apply":
-            self.checkpoints.open(
-                len(self.messages), f"apply retained task {task_id}",
-                [m for m in self.messages if m.get("role") != "system"])
-        result = resolve_retained(
-            self.config.project_root, task_id, action,
-            Path(configured) if configured else None,
-            checkpoints=self.checkpoints if action == "apply" else None)
-        if action == "apply" and result.status != "applied":
-            self.checkpoints.discard_last_empty()
-        return result
+        with self._session_turn_scope() as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "Retained-task resolution stopped because this session has an active turn in "
+                    "another DGC process.")
+                return TaskIntegration("error", error=self._last_persist_error)
+            if action == "apply" and not self.checkpoints.open(
+                    len(self.messages), f"apply retained task {task_id}",
+                    [m for m in self.messages if m.get("role") != "system"]):
+                return TaskIntegration(
+                    "error", error=self._last_persist_error
+                    or "could not durably create a rewind point for retained work")
+            result = resolve_retained(
+                self.config.project_root, task_id, action,
+                Path(configured) if configured else None,
+                checkpoints=self.checkpoints if action == "apply" else None)
+            if action == "apply" and result.status != "applied":
+                self.checkpoints.discard_last_empty()
+            return result
 
     def _subagent_client(self, adef):
         """Resolve a sub-agent's (base_url, api_key, model): per-agent def → global
@@ -2612,7 +2715,28 @@ class Agent:
                 changed = True
         return changed
 
-    def maybe_compact(self, force: bool = False, *, deadline: float | None = None) -> None:
+    def maybe_compact(self, force: bool = False, *, deadline: float | None = None) -> bool:
+        """Compact transactionally and persist the exact generation before reporting success."""
+        with self._session_turn_scope() as reserved:
+            if not reserved:
+                self._last_persist_error = (
+                    "Compaction stopped because this session has an active turn in another DGC process.")
+                return False
+            before = copy.deepcopy(self.messages)
+            try:
+                self._compact(force=force, deadline=deadline)
+            except BaseException:
+                self.messages = before
+                raise
+            if self.messages == before:
+                return True
+            if self._persist():
+                return True
+            self.messages = before
+            self.ui.error(self._last_persist_error or "compaction could not be saved and was rolled back")
+            return False
+
+    def _compact(self, force: bool = False, *, deadline: float | None = None) -> None:
         # A legacy/interrupted session may already contain an orphan. Repair before choosing groups so
         # the compaction boundary and the next provider request are always valid.
         self.messages, repaired = _repair_tool_transcript(self.messages)

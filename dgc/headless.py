@@ -364,7 +364,8 @@ class Backend:
                 self.em.emit("turn_start", turn_id=tid, prompt=text)
                 failed = False
                 try:
-                    self.agent.run_turn(model_text, reset_cancel=False)
+                    outcome = self.agent.run_turn(model_text, reset_cancel=False)
+                    failed = outcome is False
                 except Exception as e:             # a model/endpoint failure must NOT kill the turn silently
                     failed = True                  # (unreachable base_url, model not pulled, HTTP error, …)
                     import traceback
@@ -708,7 +709,10 @@ class Backend:
                              f"{result.error or result.status}.{conflicts}")
             self._emit_retained_tasks()
         elif t == "compact":
-            self.agent.maybe_compact(force=True)
+            if not self.agent.maybe_compact(force=True):
+                self.em.emit("error", message=self.agent._last_persist_error
+                             or "context compaction failed")
+                return
             self._emit_context()
         elif t == "list_artifacts":
             self._emit_artifacts()
