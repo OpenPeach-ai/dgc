@@ -1730,7 +1730,7 @@ def test_mcp_protocol():
     import time as _time
     from dgc import __version__
     from dgc.guards import mcp_process_env
-    from dgc.mcp import (_bounded_lines, MCPInputError, MCPManager,
+    from dgc.mcp import (_bounded_lines, MCPInputError, MCPManager, MCPServer,
                          MCP_LEGACY_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION,
                          sanitize_input_request, validate_elicitation_response)
 
@@ -1788,30 +1788,153 @@ def test_mcp_protocol():
         check("MCP sampling is text-only, tools-free, context-free, and output bounded",
               sampling_tools_rejected and bounded_sample["maxTokens"] == 4096)
 
+        bounded_catalog = MCPServer("bounded", sys.executable)
+        bounded_catalog.protocol_era = "modern"
+        catalog_pages = iter([
+            ({"resultType": "complete", "tools": [], "nextCursor": "repeat",
+              "ttlMs": 1000, "cacheScope": "private"}, None),
+            ({"resultType": "complete", "tools": [], "nextCursor": "repeat",
+              "ttlMs": 1000, "cacheScope": "private"}, None),
+        ])
+        bounded_catalog._request = lambda *_args, **_kwargs: next(catalog_pages)
+        check("MCP catalog loading rejects cyclic pagination instead of retaining unbounded state",
+              not bounded_catalog._load_tools(0.1)
+              and "repeated a pagination cursor" in str(bounded_catalog.error))
+
+        invalid_cache_catalog = MCPServer("invalid-cache", sys.executable)
+        invalid_cache_catalog.protocol_era = "modern"
+        invalid_cache_catalog._request = lambda *_args, **_kwargs: (
+            {"resultType": "complete", "tools": []}, None)
+        check("modern MCP catalog loading fails closed on missing cache metadata",
+              not invalid_cache_catalog._load_tools(0.1)
+              and "invalid ttlMs" in str(invalid_cache_catalog.error))
+
+        oversized_catalog = MCPServer("oversized", sys.executable)
+        oversized_catalog.protocol_era = "modern"
+        oversized_catalog._request = lambda *_args, **_kwargs: ({
+            "resultType": "complete", "ttlMs": 1000, "cacheScope": "private",
+            "tools": [{"name": f"tool-{index}", "inputSchema": {"type": "object"}}
+                      for index in range(513)]}, None)
+        check("MCP catalog loading enforces a bounded exposed-tool count",
+              not oversized_catalog._load_tools(0.1)
+              and "exceeded 512 tools" in str(oversized_catalog.error))
+
+        legacy_catalog = MCPServer("legacy-catalog", sys.executable)
+        legacy_catalog.protocol_era = "legacy"
+        legacy_catalog.server_capabilities = {"tools": {"listChanged": True}}
+        legacy_catalog._handle_catalog_notification(
+            "notifications/tools/list_changed", {}, legacy_catalog._generation)
+        check("legacy MCP preserves capability-gated free-floating catalog invalidation",
+              legacy_catalog._tools_invalidated.is_set())
+
+        from types import SimpleNamespace
+        pending_subscription = MCPServer("pending-subscription", sys.executable)
+        pending_subscription.protocol_era = "modern"
+        pending_subscription.server_capabilities = {"tools": {"listChanged": True}}
+        pending_subscription._generation = 1
+        pending_subscription.proc = SimpleNamespace(poll=lambda: None)
+        pending_subscription._write_to = lambda *_args, **_kwargs: (True, None)
+        pending_subscription._send_to = lambda *_args, **_kwargs: True
+        subscription_result = []
+        subscription_thread = threading.Thread(target=lambda: subscription_result.append(
+            pending_subscription._open_tool_subscription(2.0)))
+        subscription_thread.start()
+        subscription_deadline = _time.monotonic() + 1
+        while (pending_subscription._subscription_id is None
+               and _time.monotonic() < subscription_deadline):
+            _time.sleep(0.005)
+        with pending_subscription._lock:
+            pending_id = pending_subscription._subscription_id
+            pending_generation = pending_subscription._subscription_generation
+        if pending_id is not None:
+            pending_subscription._cancel_subscription(
+                pending_id, pending_generation, "test lifecycle ended")
+        subscription_thread.join(0.5)
+        check("modern MCP cancellation wakes a subscription awaiting acknowledgement",
+              pending_id is not None and not subscription_thread.is_alive()
+              and subscription_result == [False])
+
+        subscription_lifecycle = MCPServer("subscription-lifecycle", sys.executable)
+        subscription_lifecycle.protocol_era = "modern"
+        subscription_lifecycle._generation = 4
+        subscription_lifecycle._subscription_id = 17
+        subscription_lifecycle._subscription_generation = 4
+        lifecycle_ack = threading.Event()
+        lifecycle_holder = {"method": "subscriptions/listen", "subscription_ack": lifecycle_ack,
+                            "subscription_honored": False}
+        subscription_lifecycle._pending[17] = (
+            threading.Event(), lifecycle_holder, subscription_lifecycle._generation)
+        unhonored_ack = {"notifications": {"toolsListChanged": False}, "_meta": {
+            "io.modelcontextprotocol/subscriptionId": 17}}
+        subscription_lifecycle._handle_catalog_notification(
+            "notifications/subscriptions/acknowledged", unhonored_ack, 4)
+        subscription_lifecycle._handle_catalog_notification(
+            "notifications/subscriptions/acknowledged", unhonored_ack, 4)
+        subscription_lifecycle._handle_catalog_notification(
+            "notifications/tools/list_changed", {"_meta": {
+                "io.modelcontextprotocol/subscriptionId": 17}}, 4)
+        check("modern MCP ignores duplicate acknowledgements and unhonored catalog events",
+              lifecycle_ack.is_set() and not subscription_lifecycle._tools_invalidated.is_set()
+              and "duplicate subscription acknowledgement" in subscription_lifecycle.diagnostics)
+        subscription_lifecycle._pending.pop(17)
+        subscription_lifecycle._finish_subscription(17, 4, {
+            "resultType": "complete", "_meta": {
+                "io.modelcontextprotocol/subscriptionId": 17}}, None)
+        check("modern MCP graceful subscription completion ends and invalidates its lifecycle",
+              subscription_lifecycle._subscription_id is None
+              and subscription_lifecycle._tools_invalidated.is_set()
+              and "invalid result" not in subscription_lifecycle.diagnostics)
+
         root = Path(tempfile.mkdtemp())
         server_py = root / "server.py"
         wire_path = root / "modern-wire.jsonl"
         server_py.write_text(textwrap.dedent(r'''
             import json, os, sys, time
+            catalog_version = 1
+            subscription_id = None
             for raw in sys.stdin:
                 msg = json.loads(raw)
                 method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
                 with open(os.environ["WIRE_PATH"], "a") as wire:
                     wire.write(json.dumps(msg) + "\n")
                 if method == "server/discover":
+                    print(json.dumps({"jsonrpc": "2.0", "id": True, "result": {
+                                      "resultType": "complete", "supportedVersions": ["bogus"],
+                                      "capabilities": {}, "ttlMs": 0,
+                                      "cacheScope": "private"}}), flush=True)
                     out = {"resultType": "complete", "supportedVersions": ["2026-07-28"],
-                           "capabilities": {"tools": {}, "logging": {}},
+                           "capabilities": {"tools": {"listChanged": True}, "logging": {}},
                            "_meta": {"io.modelcontextprotocol/serverInfo":
-                                     {"name": "fixture", "version": "1"}}}
+                                     {"name": "fixture", "version": "1"}},
+                           "ttlMs": 60000, "cacheScope": "private"}
                 elif method == "tools/list" and not params.get("cursor"):
                     out = {"resultType": "complete",
                            "tools": [{"name": "odd tool", "description": "typed fixture",
-                                      "inputSchema": {"type": "object", "properties": {}}}],
-                           "nextCursor": "page-2"}
+                                      "inputSchema": {"type": "object", "properties": {}}}]
+                                    + ([{"name": "new.tool", "description": "changed catalog",
+                                         "inputSchema": {"type": "object", "properties": {}}}]
+                                       if catalog_version > 1 else []),
+                           "nextCursor": "page-2", "ttlMs": 500, "cacheScope": "private"}
                 elif method == "tools/list":
                     out = {"resultType": "complete",
                            "tools": [{"name": "odd@tool", "description": "collision",
-                                      "inputSchema": {"type": "object", "properties": {}}}]}
+                                      "inputSchema": {"type": "object", "properties": {}}}],
+                           "ttlMs": 500, "cacheScope": "public"}
+                elif method == "subscriptions/listen":
+                    subscription_id = mid
+                    # Adversarial events before acknowledgement and for another ID must not
+                    # invalidate the catalog.
+                    print(json.dumps({"jsonrpc": "2.0",
+                                      "method": "notifications/tools/list_changed", "params": {
+                                      "_meta": {"io.modelcontextprotocol/subscriptionId": mid}}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0",
+                                      "method": "notifications/subscriptions/acknowledged", "params": {
+                                      "notifications": {"toolsListChanged": True},
+                                      "_meta": {"io.modelcontextprotocol/subscriptionId": mid}}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0",
+                                      "method": "notifications/tools/list_changed", "params": {
+                                      "_meta": {"io.modelcontextprotocol/subscriptionId": mid + 999}}}), flush=True)
+                    continue
                 elif method == "tools/call" and params.get("name") == "odd tool":
                     if not params.get("inputResponses"):
                         out = {"resultType": "input_required", "requestState": "opaque-state",
@@ -1846,6 +1969,11 @@ def test_mcp_protocol():
                     roots = params["inputResponses"]["workspace"].get("roots") or []
                     nickname = params["inputResponses"]["profile"].get("content", {}).get("nickname")
                     sampled = params["inputResponses"]["draft"].get("content", {}).get("text")
+                    catalog_version = 2
+                    print(json.dumps({"jsonrpc": "2.0",
+                                      "method": "notifications/tools/list_changed", "params": {
+                                      "_meta": {"io.modelcontextprotocol/subscriptionId":
+                                                subscription_id}}}), flush=True)
                     out = {"resultType": "complete", "content": [
                               {"type": "text", "text": "hello"},
                               {"type": "resource_link", "name": "guide", "uri": "file:///guide.md"},
@@ -1882,6 +2010,13 @@ def test_mcp_protocol():
               detail=repr(routes))
         check("MCP tool routes are provider-safe and collision-free",
               routes == ["mcp__fixture_name__odd_tool", "mcp__fixture_name__odd_tool_2"], repr(routes))
+        initial_list_requests = sum(
+            json.loads(line).get("method") == "tools/list"
+            for line in wire_path.read_text().splitlines())
+        check("modern MCP acknowledges an ID-correlated tool subscription and ignores early/forged events",
+              modern_server._subscription_live() and initial_list_requests == 2
+              and "invalid response id" in modern_server.diagnostics,
+              modern_server._diagnostic_tail())
         progress, logs = [], []
         out = mgr.call(routes[0], {}, on_progress=progress.append, on_log=logs.append,
                        input_handler=input_handler)
@@ -1896,6 +2031,31 @@ def test_mcp_protocol():
               [event["progress"] for event in progress] == [1, 2]
               and [event["message"] for event in logs] == ["visible warning"],
               f"progress={progress!r} logs={logs!r}")
+        refreshed_routes = [schema["function"]["name"] for schema in mgr.tool_schemas()]
+        check("modern MCP list_changed invalidates and atomically refreshes the exposed tool catalog",
+              "mcp__fixture_name__new_tool" in refreshed_routes and len(refreshed_routes) == 3,
+              repr(refreshed_routes))
+        with modern_server._lock:
+            subscription = (modern_server._subscription_id,
+                            modern_server._subscription_generation)
+        modern_server._cancel_subscription(subscription[0], subscription[1], "cache fallback test")
+        lists_before_cache = sum(
+            json.loads(line).get("method") == "tools/list"
+            for line in wire_path.read_text().splitlines())
+        mgr.tool_schemas()
+        lists_while_fresh = sum(
+            json.loads(line).get("method") == "tools/list"
+            for line in wire_path.read_text().splitlines())
+        _time.sleep(0.55)
+        mgr.tool_schemas()
+        lists_after_expiry = sum(
+            json.loads(line).get("method") == "tools/list"
+            for line in wire_path.read_text().splitlines())
+        check("modern MCP honors catalog TTL while fresh and refreshes after expiry without a subscription",
+              lists_while_fresh == lists_before_cache
+              and lists_after_expiry == lists_before_cache + 2
+              and modern_server._subscription_live(),
+              f"before={lists_before_cache} fresh={lists_while_fresh} expired={lists_after_expiry}")
         cancelled = threading.Event()
         threading.Thread(target=lambda: (_time.sleep(0.15), cancelled.set()), daemon=True).start()
         started = _time.monotonic(); out = mgr.call(routes[1], {}, cancelled); elapsed = _time.monotonic() - started
@@ -2084,10 +2244,12 @@ def test_mcp_protocol():
                 method, mid = msg.get("method"), msg.get("id")
                 if method == "server/discover":
                     out = {"resultType": "complete", "supportedVersions": ["2026-07-28"],
-                           "capabilities": {"tools": {}}}
+                           "capabilities": {"tools": {}},
+                           "ttlMs": 60000, "cacheScope": "private"}
                 elif method == "tools/list":
                     out = {"resultType": "complete", "tools": [{"name": "stall",
-                           "inputSchema": {"type": "object"}}]}
+                           "inputSchema": {"type": "object"}}],
+                           "ttlMs": 60000, "cacheScope": "private"}
                 else:
                     continue
                 print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)

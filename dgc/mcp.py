@@ -28,6 +28,16 @@ _MAX_INPUT_BYTES = 64 * 1024
 _MAX_FORM_BYTES = 32 * 1024
 _MAX_SAMPLE_TEXT = 48 * 1024
 _MAX_SAMPLE_TOKENS = 4096
+_MAX_TOOL_PAGES = 100
+_MAX_TOOLS = 512
+_MAX_TOOL_SCHEMA_BYTES = 128 * 1024
+_MAX_TOOL_CATALOG_BYTES = 8 * 1024 * 1024
+_MAX_CURSOR_BYTES = 4096
+_MAX_CACHE_TTL_MS = 60 * 60 * 1000
+_MAX_SAFE_INTEGER = (1 << 53) - 1
+_CATALOG_RETRY_SECONDS = 5.0
+_SUBSCRIPTION_ACK_SECONDS = 5.0
+_SUBSCRIPTION_ID_META = "io.modelcontextprotocol/subscriptionId"
 _MAX_WRITE_SECONDS = 2.0
 _CLIENT_INFO = {"name": "dgc", "version": __version__}
 _LOG_LEVELS = ("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")
@@ -60,8 +70,41 @@ def _json_bytes(value) -> int:
     try:
         return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"),
                               allow_nan=False).encode("utf-8"))
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, ValueError) as exc:
         raise MCPInputError("input request is not valid JSON") from exc
+
+
+def _cache_hint(value: dict, operation: str) -> tuple[float, str]:
+    """Validate a 2026 cache hint and return DGC's bounded in-process freshness window."""
+    ttl = value.get("ttlMs")
+    scope = value.get("cacheScope")
+    if (isinstance(ttl, bool) or not isinstance(ttl, int)
+            or not 0 <= ttl <= _MAX_SAFE_INTEGER):
+        raise MCPInputError(f"{operation} returned an invalid ttlMs")
+    if scope not in ("private", "public"):
+        raise MCPInputError(f"{operation} returned an invalid cacheScope")
+    return min(ttl, _MAX_CACHE_TTL_MS) / 1000.0, scope
+
+
+def _sanitize_tool(value) -> dict:
+    if not isinstance(value, dict):
+        raise MCPInputError("tools/list contained a non-object tool")
+    name = _short_text(value.get("name"), "tool name", 128)
+    if not name:
+        raise MCPInputError("tools/list contained an empty tool name")
+    description = _short_text(value.get("description", ""), f"tool {name!r} description", 8000)
+    schema = value.get("inputSchema")
+    if not isinstance(schema, dict):
+        raise MCPInputError(f"tool {name!r} inputSchema must be an object")
+    if _json_bytes(schema) > _MAX_TOOL_SCHEMA_BYTES:
+        raise MCPInputError(f"tool {name!r} inputSchema exceeded {_MAX_TOOL_SCHEMA_BYTES} bytes")
+    return {"name": name, "description": description, "inputSchema": schema}
+
+
+def _same_request_id(left, right) -> bool:
+    """JSON-RPC booleans must never alias numeric request IDs in Python dictionaries."""
+    return type(left) is type(right) and isinstance(left, (str, int)) and not isinstance(left, bool) \
+        and left == right
 
 
 def _short_text(value, field: str, limit: int) -> str:
@@ -429,9 +472,17 @@ class MCPServer:
         self._pending: dict[int, tuple[threading.Event, dict, int]] = {}
         self._lock = threading.Lock()
         self._send_lock = threading.Lock()
+        self._catalog_lock = threading.Lock()
         self._generation = 0
         self._input_capabilities = (dict(client_capabilities)
                                     if isinstance(client_capabilities, dict) else {})
+        self._tools_invalidated = threading.Event()
+        self._tools_expires_at = 0.0
+        self._tools_retry_at = 0.0
+        self.tools_cache_scope = "private"
+        self._subscription_id: int | None = None
+        self._subscription_generation = 0
+        self._subscription_honored = False
 
     # lifecycle ----------------------------------------------------------------
     def start(self, timeout: float = 10.0) -> bool:
@@ -446,12 +497,24 @@ class MCPServer:
         discovered, discover_error = self._request(
             "server/discover", {}, probe_timeout, modern=True)
         supported = (discovered or {}).get("supportedVersions")
+        claims_modern = (isinstance(supported, list) and MCP_PROTOCOL_VERSION in supported)
         modern = (isinstance(discovered, dict)
                   and discovered.get("resultType") == "complete"
-                  and isinstance(supported, list)
-                  and MCP_PROTOCOL_VERSION in supported
+                  and claims_modern
                   and isinstance(discovered.get("capabilities"), dict))
+        if claims_modern and not modern:
+            self.error = "server/discover claimed MCP 2026-07-28 but returned a malformed result"
+            self.stop()
+            return False
         if modern:
+            try:
+                # Discovery is negotiated once for this pinned stdio process. Validate its
+                # required cache contract even though there is no second discovery read to reuse.
+                _cache_hint(discovered, "server/discover")
+            except MCPInputError as exc:
+                self.error = str(exc)
+                self.stop()
+                return False
             self.protocol_version = MCP_PROTOCOL_VERSION
             self.protocol_era = "modern"
             self.server_capabilities = dict(discovered.get("capabilities") or {})
@@ -501,6 +564,10 @@ class MCPServer:
         if not self._load_tools(timeout):
             self.stop()
             return False
+        if self.protocol_era == "modern" and self._tools_list_changed_capability():
+            if not self._open_tool_subscription(min(float(timeout), _SUBSCRIPTION_ACK_SECONDS)):
+                self._append_diagnostic(
+                    "tools/list_changed subscription unavailable; using cache TTL refresh")
         return True
 
     def _launch(self) -> bool:
@@ -523,33 +590,208 @@ class MCPServer:
         return True
 
     def _load_tools(self, timeout: float) -> bool:
+        self._tools_invalidated.clear()
         cursor = None
         tools: list[dict] = []
-        for _ in range(100):
+        names: set[str] = set()
+        cursors: set[str] = set()
+        ttl_windows: list[float] = []
+        cache_scopes: list[str] = []
+        catalog_bytes = 0
+
+        def fail(message: str) -> bool:
+            self.error = message
+            self._tools_invalidated.set()
+            self._tools_retry_at = time.monotonic() + _CATALOG_RETRY_SECONDS
+            return False
+
+        for _ in range(_MAX_TOOL_PAGES):
             params = {"cursor": cursor} if cursor else {}
             page, err = self._request("tools/list", params, timeout)
             if page is None:
-                self.error = f"tools/list failed: {err or self._diagnostic_tail() or 'no response'}"
-                return False
+                return fail(f"tools/list failed: {err or self._diagnostic_tail() or 'no response'}")
             if self.protocol_era == "modern" and page.get("resultType") != "complete":
-                self.error = "tools/list returned an invalid modern resultType"
-                return False
-            tools.extend(t for t in (page.get("tools") or []) if isinstance(t, dict))
-            cursor = page.get("nextCursor")
-            if not cursor:
+                return fail("tools/list returned an invalid modern resultType")
+            try:
+                catalog_bytes += _json_bytes(page)
+            except MCPInputError as exc:
+                return fail(str(exc))
+            if catalog_bytes > _MAX_TOOL_CATALOG_BYTES:
+                return fail(f"tools/list exceeded {_MAX_TOOL_CATALOG_BYTES} catalog bytes")
+            if self.protocol_era == "modern":
+                try:
+                    ttl, scope = _cache_hint(page, "tools/list")
+                except MCPInputError as exc:
+                    return fail(str(exc))
+                ttl_windows.append(ttl)
+                cache_scopes.append(scope)
+            raw_tools = page.get("tools")
+            if not isinstance(raw_tools, list):
+                return fail("tools/list did not return a tools array")
+            if len(tools) + len(raw_tools) > _MAX_TOOLS:
+                return fail(f"tools/list exceeded {_MAX_TOOLS} tools")
+            for raw_tool in raw_tools:
+                try:
+                    tool = _sanitize_tool(raw_tool)
+                except MCPInputError as exc:
+                    self._append_diagnostic(f"excluded malformed tool: {exc}")
+                    continue
+                if tool["name"] in names:
+                    self._append_diagnostic(
+                        f"excluded duplicate tool name: {tool['name'][:128]}")
+                    continue
+                names.add(tool["name"])
+                tools.append(tool)
+            next_cursor = page.get("nextCursor")
+            if next_cursor in (None, ""):
                 break
+            if (not isinstance(next_cursor, str)
+                    or len(next_cursor.encode("utf-8")) > _MAX_CURSOR_BYTES):
+                return fail("tools/list returned an invalid or oversized nextCursor")
+            if next_cursor in cursors:
+                return fail("tools/list repeated a pagination cursor")
+            cursors.add(next_cursor)
+            cursor = next_cursor
         else:
-            self.error = "tools/list exceeded 100 pagination pages"
-            return False
-        self.tools = tools
+            return fail(f"tools/list exceeded {_MAX_TOOL_PAGES} pagination pages")
+        self.tools = sorted(tools, key=lambda tool: tool["name"])
+        if self.protocol_era == "modern":
+            self._tools_expires_at = time.monotonic() + min(ttl_windows or [0.0])
+            self.tools_cache_scope = ("private" if "private" in cache_scopes else "public")
+        else:
+            self._tools_expires_at = math.inf
+            self.tools_cache_scope = "private"
+        self._tools_retry_at = 0.0
+        self.error = None
         return True
 
+    def _tools_list_changed_capability(self) -> bool:
+        capability = self.server_capabilities.get("tools")
+        return isinstance(capability, dict) and capability.get("listChanged") is True
+
+    def _subscription_live(self) -> bool:
+        with self._lock:
+            return (self._subscription_id is not None and self._subscription_honored
+                    and self._subscription_generation == self._generation
+                    and self.proc is not None and self.proc.poll() is None)
+
+    def refresh_tools_if_stale(self, timeout: float = 10.0) -> bool:
+        """Refresh an invalidated/expired catalog; return whether its exposed tools changed."""
+        if self.proc is None or self.proc.poll() is not None or "tools" not in self.server_capabilities:
+            return False
+        now = time.monotonic()
+        subscribed = self.protocol_era == "modern" and self._subscription_live()
+        stale = self._tools_invalidated.is_set()
+        if self.protocol_era == "modern" and not subscribed:
+            stale = stale or now >= self._tools_expires_at
+        if not stale or now < self._tools_retry_at:
+            return False
+        with self._catalog_lock:
+            now = time.monotonic()
+            subscribed = self.protocol_era == "modern" and self._subscription_live()
+            stale = self._tools_invalidated.is_set()
+            if self.protocol_era == "modern" and not subscribed:
+                stale = stale or now >= self._tools_expires_at
+            if not stale or now < self._tools_retry_at:
+                return False
+            previous = self.tools
+            if not self._load_tools(timeout):
+                self._append_diagnostic(self.error or "tools/list refresh failed")
+                return False
+            changed = self.tools != previous
+            if (self.protocol_era == "modern" and self._tools_list_changed_capability()
+                    and not self._subscription_live()):
+                if not self._open_tool_subscription(min(float(timeout), _SUBSCRIPTION_ACK_SECONDS)):
+                    self._append_diagnostic(
+                        "tools/list_changed subscription unavailable; using cache TTL refresh")
+            return changed
+
+    def _open_tool_subscription(self, timeout: float) -> bool:
+        """Open and synchronously acknowledge one modern stdio tool-list subscription."""
+        if self.protocol_era != "modern" or not self._tools_list_changed_capability():
+            return False
+        with self._lock:
+            if (self._subscription_id is not None and self._subscription_generation == self._generation
+                    and self._subscription_honored):
+                return True
+            mid = next(self._id)
+            proc, generation = self.proc, self._generation
+            if proc is None or proc.poll() is not None:
+                return False
+            final = threading.Event()
+            ack = threading.Event()
+            holder = {"method": "subscriptions/listen", "subscription_ack": ack,
+                      "subscription_honored": False}
+            self._pending[mid] = (final, holder, generation)
+            self._subscription_id = mid
+            self._subscription_generation = generation
+            self._subscription_honored = False
+        params = {"notifications": {"toolsListChanged": True},
+                  "_meta": self._request_meta()}
+        sent, send_error = self._write_to(
+            proc, {"jsonrpc": "2.0", "id": mid, "method": "subscriptions/listen",
+                   "params": params}, timeout=max(0.01, float(timeout)))
+        if not sent:
+            self._abandon_subscription(mid, generation, send_error or "subscription write failed")
+            return False
+        deadline = time.monotonic() + max(0.01, float(timeout))
+        while not ack.wait(min(0.05, max(0.0, deadline - time.monotonic()))):
+            if final.is_set():
+                self._abandon_subscription(mid, generation,
+                                           "subscription ended before acknowledgement")
+                return False
+            if time.monotonic() >= deadline:
+                self._cancel_subscription(mid, generation, "subscription acknowledgement timed out")
+                return False
+        with self._lock:
+            honored = (self._subscription_id == mid and self._subscription_generation == generation
+                       and bool(holder.get("subscription_honored")))
+        if not honored:
+            self._cancel_subscription(mid, generation,
+                                      "server did not honor toolsListChanged")
+        return honored
+
+    def _abandon_subscription(self, mid: int, generation: int, reason: str) -> None:
+        slot = None
+        with self._lock:
+            slot = self._pending.pop(mid, None)
+            if self._subscription_id == mid and self._subscription_generation == generation:
+                self._subscription_id = None
+                self._subscription_honored = False
+        if slot is not None:
+            final, holder, _ = slot
+            holder["error"] = {"code": -32800, "message": reason}
+            final.set()
+        self._append_diagnostic(reason)
+
+    def _cancel_subscription(self, mid: int, generation: int, reason: str) -> None:
+        proc = self.proc if generation == self._generation else None
+        self._abandon_subscription(mid, generation, reason)
+        if proc is not None:
+            self._send_to(proc, {"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                 "params": {"requestId": mid, "reason": reason}}, timeout=0.2)
+
     def stop(self) -> None:
+        with self._lock:
+            subscription = (self._subscription_id, self._subscription_generation)
+        if subscription[0] is not None:
+            self._cancel_subscription(subscription[0], subscription[1], "client shutdown")
         self._stop_process(self.proc, self._generation)
 
     def _stop_process(self, proc: subprocess.Popen | None, generation: int) -> None:
         if not proc:
             return
+        subscription_slot = None
+        with self._lock:
+            if self._subscription_generation == generation:
+                if self._subscription_id is not None:
+                    subscription_slot = self._pending.pop(self._subscription_id, None)
+                self._subscription_id = None
+                self._subscription_honored = False
+        if subscription_slot is not None:
+            event, holder, _ = subscription_slot
+            holder["error"] = {"code": -32000, "message": "server stopped"}
+            event.set()
         if self.proc is proc:
             self.proc = None
         if proc.poll() is None:
@@ -617,13 +859,19 @@ class MCPServer:
                 try:
                     msg = json.loads(line, parse_constant=lambda value: (_ for _ in ()).throw(
                         ValueError(f"invalid JSON constant: {value}")))
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, RecursionError, ValueError):
                     self._append_diagnostic("invalid stdout: " + line[:2000])
                     continue
                 if not isinstance(msg, dict):
                     continue
+                if msg.get("jsonrpc") != "2.0":
+                    self._append_diagnostic("invalid JSON-RPC version on server message")
+                    continue
                 mid = msg.get("id")
                 if mid is not None and ("result" in msg or "error" in msg):
+                    if not isinstance(mid, int) or isinstance(mid, bool):
+                        self._append_diagnostic("invalid response id from MCP server")
+                        continue
                     with self._lock:
                         slot = self._pending.get(mid)
                         if slot and slot[2] == generation:
@@ -634,17 +882,90 @@ class MCPServer:
                         ev, holder, _ = slot
                         holder["result"] = msg.get("result")
                         holder["error"] = msg.get("error")
+                        if holder.get("method") == "subscriptions/listen":
+                            self._finish_subscription(
+                                mid, generation, msg.get("result"), msg.get("error"))
                         ev.set()
                     continue
                 if mid is not None and msg.get("method"):
+                    if (not isinstance(mid, (str, int)) or isinstance(mid, bool)
+                            or isinstance(mid, str) and len(mid) > 128):
+                        self._send_to(proc, {"jsonrpc": "2.0", "id": None, "error": {
+                            "code": -32600, "message": "invalid server request id"}})
+                        continue
+                    raw_params = msg.get("params")
                     self._handle_server_request(
-                        proc, generation, mid, str(msg["method"]), msg.get("params") or {})
+                        proc, generation, mid, str(msg["method"]),
+                        {} if raw_params is None else raw_params)
+                elif msg.get("method") in (
+                        "notifications/subscriptions/acknowledged",
+                        "notifications/tools/list_changed"):
+                    self._handle_catalog_notification(
+                        str(msg.get("method")), msg.get("params"), generation)
                 elif msg.get("method") == "notifications/progress":
                     self._handle_progress(msg.get("params") or {}, generation)
                 elif msg.get("method") == "notifications/message":
                     self._handle_log(msg.get("params") or {}, generation)
         finally:
             self._fail_pending("server exited", generation)
+
+    def _handle_catalog_notification(self, method: str, params, generation: int) -> None:
+        if self.protocol_era == "legacy":
+            if method == "notifications/tools/list_changed" and self._tools_list_changed_capability():
+                self._tools_invalidated.set()
+            return
+        if self.protocol_era != "modern":
+            return
+        if not isinstance(params, dict) or not isinstance(params.get("_meta"), dict):
+            self._append_diagnostic(f"ignored uncorrelated modern notification: {method}")
+            return
+        sid = params["_meta"].get(_SUBSCRIPTION_ID_META)
+        with self._lock:
+            current = self._subscription_id
+            holder_slot = self._pending.get(current) if current is not None else None
+            valid = (current is not None and _same_request_id(sid, current)
+                     and self._subscription_generation == generation
+                     and holder_slot is not None and holder_slot[2] == generation)
+            holder = holder_slot[1] if valid else None
+            acknowledged = bool(holder and holder.get("subscription_acknowledged"))
+        if not valid or holder is None:
+            self._append_diagnostic(f"ignored notification for an unknown subscription: {method}")
+            return
+        if method == "notifications/subscriptions/acknowledged":
+            if acknowledged:
+                self._append_diagnostic("ignored duplicate subscription acknowledgement")
+                return
+            notifications = params.get("notifications")
+            honored = (isinstance(notifications, dict)
+                       and notifications.get("toolsListChanged") is True)
+            holder["subscription_acknowledged"] = True
+            holder["subscription_honored"] = honored
+            with self._lock:
+                if self._subscription_id == current:
+                    self._subscription_honored = honored
+            ack = holder.get("subscription_ack")
+            if isinstance(ack, threading.Event):
+                ack.set()
+            return
+        if not acknowledged or not holder.get("subscription_honored"):
+            self._append_diagnostic(
+                "ignored tools/list_changed before an honored subscription acknowledgement")
+            return
+        self._tools_invalidated.set()
+
+    def _finish_subscription(self, mid: int, generation: int, result, error) -> None:
+        with self._lock:
+            if self._subscription_id == mid and self._subscription_generation == generation:
+                self._subscription_id = None
+                self._subscription_honored = False
+        valid_result = (isinstance(result, dict) and result.get("resultType") == "complete"
+                        and isinstance(result.get("_meta"), dict)
+                        and _same_request_id(result["_meta"].get(_SUBSCRIPTION_ID_META), mid))
+        if error is not None:
+            self._append_diagnostic(f"tools/list_changed subscription ended with error: {error}")
+        elif not valid_result:
+            self._append_diagnostic("tools/list_changed subscription ended with an invalid result")
+        self._tools_invalidated.set()
 
     def _handle_server_request(self, proc: subprocess.Popen, generation: int, mid,
                                method: str, params) -> None:
@@ -653,6 +974,10 @@ class MCPServer:
                 "code": -32601,
                 "message": "server-initiated requests are not valid in MCP 2026-07-28; use MRTR",
             }})
+            return
+        if not isinstance(params, dict):
+            self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "error": {
+                "code": -32602, "message": "server request params must be an object"}})
             return
         if method == "ping":
             self._send_to(proc, {"jsonrpc": "2.0", "id": mid, "result": {}})
@@ -730,7 +1055,7 @@ class MCPServer:
             return False, "cancelled by user"
         try:
             wire = json.dumps(obj, separators=(",", ":"), allow_nan=False) + "\n"
-        except (TypeError, ValueError):
+        except (RecursionError, TypeError, ValueError):
             return False, "request is not JSON serializable"
         if len(wire.encode("utf-8")) > _MAX_FRAME:
             return False, f"outbound frame exceeded {_MAX_FRAME} bytes"
@@ -1083,18 +1408,25 @@ class MCPManager:
         self._rebuild_routes()
 
     def _rebuild_routes(self) -> None:
-        self._routes = {}
+        routes: dict[str, tuple[str, str]] = {}
         for server_name, server in self.servers.items():
             for tool in server.tools:
                 original = str(tool.get("name", ""))
                 base = f"mcp__{_safe_name(server_name)}__{_safe_name(original)}"
                 exposed = base
                 n = 2
-                while exposed in self._routes:
+                while exposed in routes:
                     exposed, n = f"{base}_{n}", n + 1
-                self._routes[exposed] = (server_name, original)
+                routes[exposed] = (server_name, original)
+        self._routes = routes
 
     def tool_schemas(self) -> list[dict]:
+        changed = False
+        for server in list(self.servers.values()):
+            if server.refresh_tools_if_stale():
+                changed = True
+        if changed:
+            self._rebuild_routes()
         schemas = []
         by_route = {route: pair for route, pair in self._routes.items()}
         for exposed, (server_name, original) in by_route.items():
@@ -1132,8 +1464,10 @@ class MCPManager:
             dropped = f" · dropped env: {', '.join(server._env_dropped)}" if server._env_dropped else ""
             live = server.proc is not None and server.proc.poll() is None
             if live:
+                catalog = (" · catalog subscribed" if server._subscription_live()
+                           else f" · catalog cache {server.tools_cache_scope}")
                 rows.append(f"  {name}: {len(server.tools)} tool(s) · MCP {server.protocol_version or '?'} "
-                            f"({server.protocol_era or '?'}){dropped}")
+                            f"({server.protocol_era or '?'}){catalog}{dropped}")
             else:
                 detail = server.error or server._diagnostic_tail() or "process exited"
                 rows.append(f"  {name}: disconnected · {detail[:500]}{dropped}")
