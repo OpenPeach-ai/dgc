@@ -110,7 +110,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Vision input** — attach an image with `@path/to/image.png` for models that can see.
 - **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors. Put another host's credential in `DGC_FALLBACK_API_KEY`; DGC never forwards the main provider key there, auto-detects its transport, and honors a `fallback_api_mode` override.
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the live terminal/editor palette.
-- **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
+- **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension through a generated protocol-v2 command/event contract with bounded frames and strict wire ordering; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
 - **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
 - **Tools** — `read_file` · `repo_map` · `code_intel` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
 
@@ -209,6 +209,7 @@ being disabled forever.
 
 ```bash
 .venv/bin/python tests/run_tests.py   # units + end-to-end against a mock LLM server
+./scripts/generate-editor-protocol.py # regenerate checked-in JSON + TypeScript protocol schemas
 ./scripts/preflight.sh                # complete local release gate
 ```
 

@@ -13,16 +13,24 @@ import threading
 
 
 class Emitter:
-    def __init__(self, fp):
+    def __init__(self, fp, validator=None):
         self.fp = fp
+        self.validator = validator
         self._lock = threading.Lock()
         self._seq = itertools.count()
 
     def emit(self, type: str, **fields) -> None:
-        obj = {"type": type, "seq": next(self._seq)}
-        obj.update(fields)
-        line = json.dumps(obj, default=str, ensure_ascii=False)
         with self._lock:
+            # Allocate the sequence under the same lock as the write. Multiple worker/provider
+            # threads can emit concurrently; allocating before the lock allowed seq=1 to reach the
+            # wire before seq=0 even though each individual write was atomic.
+            obj = {"type": type, "seq": next(self._seq)}
+            obj.update(fields)
+            if self.validator:
+                problem = self.validator(obj)
+                if problem:
+                    raise ValueError(f"invalid protocol event: {problem}")
+            line = json.dumps(obj, default=str, ensure_ascii=False)
             try:
                 self.fp.write(line + "\n")
                 self.fp.flush()

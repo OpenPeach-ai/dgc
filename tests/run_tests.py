@@ -452,24 +452,95 @@ def unit_tests(tmp: Path):
     check("headless failing turn emits error", "error" in b.em.evs)
     check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
 
-    # --- headless: a bad command raises a catchable (non-_Shutdown) error, so the serve loop's
-    #     guard keeps the backend alive instead of crashing the whole session
-    from dgc.headless import _Shutdown
+    # Generated protocol artifacts and both runtime validators share one Python source of truth.
+    import ast as _ast
+    import io as _io2, json as _json2
+    from dgc.editor_protocol import (COMMAND_FIELDS as _COMMAND_FIELDS,
+                                     EVENT_FIELDS as _EVENT_FIELDS,
+                                     MAX_COMMAND_BYTES as _MAX_COMMAND_BYTES,
+                                     command_error as _command_error,
+                                     event_error as _event_error,
+                                     schema_document as _schema_document,
+                                     schema_text as _schema_text,
+                                     typescript_source as _typescript_source)
+    _schema_path = PROJECT / "schemas" / "editor-protocol-v2.schema.json"
+    _ts_protocol_path = PROJECT / "editors" / "vscode" / "src" / "protocol.generated.ts"
+    check("editor protocol generated artifacts match the authoritative Python contract",
+          _schema_path.read_text() == _schema_text()
+          and _ts_protocol_path.read_text() == _typescript_source())
+    _protocol_schema = _schema_document()
+    def _schema_nodes(value):
+        yield value
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from _schema_nodes(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from _schema_nodes(child)
+    check("editor protocol JSON Schema validates complete frames at its root",
+          _protocol_schema.get("oneOf") == [
+              {"$ref": "#/$defs/event"}, {"$ref": "#/$defs/command"}]
+          and set(_protocol_schema.get("$defs", {})) == {"event", "command"}
+          and not any(isinstance(node, dict) and isinstance(node.get("type"), list)
+                      for node in _schema_nodes(_protocol_schema)))
+    _headless_tree = _ast.parse((PROJECT / "dgc" / "headless.py").read_text())
+    _emitted_types = {
+        node.args[0].value for node in _ast.walk(_headless_tree)
+        if isinstance(node, _ast.Call) and node.args
+        and isinstance(node.func, _ast.Attribute) and node.func.attr == "emit"
+        and isinstance(node.args[0], _ast.Constant) and isinstance(node.args[0].value, str)
+    }
+    check("every literal headless event is declared in protocol v2",
+          _emitted_types <= set(_EVENT_FIELDS))
+    _valid_info = {"type": "info", "seq": 0, "message": "ready"}
+    check("protocol validators accept valid frames and reject names, fields, and enums",
+          _event_error(_valid_info) is None
+          and "required" in str(_event_error({"type": "text_delta", "seq": 1}))
+          and "unknown" in str(_command_error({"type": "surprise"}))
+          and len(str(_command_error({"type": "x" * 10_000}))) < 256
+          and "unsupported" in str(_command_error({"type": "set_mode", "mode": "unsafe"}))
+          and "undeclared" in str(_event_error({**_valid_info, "secret": "must not pass"}))
+          and "undeclared" in str(_command_error(
+              {"type": "prompt", "text": "fix it", "surprise": True}))
+          and _command_error({"type": "prompt", "text": "fix it"}) is None
+          and "prompt" in _COMMAND_FIELDS)
+
+    from dgc.headless import _command_lines
+    _binary_frames = type("BinaryFrames", (), {"buffer": _io2.BytesIO(
+        b"x" * (_MAX_COMMAND_BYTES + 8) + b"\n"
+        b"\xff\n"
+        b'{"type":"status"}\n')})()
+    _bounded_frames = list(_command_lines(_binary_frames))
+    check("headless command reader bounds, drains, and recovers after invalid frames",
+          len(_bounded_frames) == 3
+          and "exceeded" in str(_bounded_frames[0][1])
+          and "UTF-8" in str(_bounded_frames[1][1])
+          and _bounded_frames[2] == ('{"type":"status"}\n', None))
+
+    # A malformed command is rejected before dispatch can mutate state or raise through the server.
     bare = object.__new__(Backend)
-    outcome = None
-    try:
-        bare.dispatch({"type": "rewind", "index": "not-a-number"})
-    except _Shutdown:
-        outcome = "shutdown"
-    except Exception:
-        outcome = "caught"
-    check("headless bad command is catchable (backend survives)", outcome == "caught")
+    bare.em = type("ProtocolCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    bare.dispatch({"type": "rewind", "index": "not-a-number"})
+    check("headless rejects a malformed command before state mutation",
+          bare.em.events[-1].get("type") == "command_rejected"
+          and bare.em.events[-1].get("reason") == "invalid_command")
 
     # Headless protocol: IDs correlate same-name tools, failures are explicit, abandoned approvals
     # fail closed, and secrets/state mutations do not race an active turn.
-    import io as _io2, json as _json2
     from dgc.headless import HeadlessUI
     from dgc.protocol import Emitter, PendingRequests
+    _ordered_wire = _io2.StringIO(); _ordered_emitter = Emitter(_ordered_wire)
+    _emit_threads = [_th.Thread(target=lambda start=i: [
+        _ordered_emitter.emit("info", message=f"{start}:{n}") for n in range(25)])
+                     for i in range(4)]
+    for _thread in _emit_threads: _thread.start()
+    for _thread in _emit_threads: _thread.join()
+    _ordered_events = [_json2.loads(line) for line in _ordered_wire.getvalue().splitlines()]
+    check("concurrent headless events retain strict wire sequence order",
+          [event["seq"] for event in _ordered_events] == list(range(100)))
     _wire = _io2.StringIO(); _pending = PendingRequests()
     _hui = HeadlessUI(Emitter(_wire), _pending, approval_timeout_s=0.01)
     _hui.tool_call("bash", {"command": "false"}, "call-7")

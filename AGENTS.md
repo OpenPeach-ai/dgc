@@ -14,6 +14,7 @@ dgc/
   tools.py         read/map/search/intelligence, atomic patch/edit/write, process, web, skill and memory tools
   agent.py         deterministic tool loop, transcript repair, usage, convergence and compaction
   sessions.py      scoped UUID sessions with atomic private persistence
+  editor_protocol.py authoritative editor command/event contract and schema generator
   headless.py      versioned NDJSON service used by editor clients
   acp.py           stable ACP v1 multi-session adapter
   cli.py           REPL, slash commands, banner, streaming render, approvals, `dgc setup` / `dgc doctor`
@@ -22,6 +23,7 @@ dgc/
 tests/run_tests.py security, protocol, unit and mock-server end-to-end checks
 bench/             reproducible same-model harness comparison and edit-quality tooling
 editors/vscode/    VS Code/Cursor client, webview and tests
+schemas/           generated reviewable wire schemas (regenerate, never hand-edit)
 install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`)
 site/              vibedgc.com landing page (index.html) + the files it serves (install.sh, dgc.tar.gz)
 ```

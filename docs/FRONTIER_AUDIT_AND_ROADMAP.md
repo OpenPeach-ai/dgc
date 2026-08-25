@@ -44,7 +44,7 @@ the editor registries: those are external release actions that require a reviewe
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, per-checkout mutation leases, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning/merge UX for parallel write agents and cross-process leases |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured one-shot LSP symbols/diagnostics/definitions/references, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, persistent indexed LSP sessions and optional tree-sitter parsing |
 | MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
-| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, protocol-v2 handshake, bounded startup/backpressure queue, fail-closed event validation, and restart-on-next-command recovery | Real VS Code extension-host tests, generated schemas, accessibility audit |
+| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, and restart-on-next-command recovery | Real VS Code extension-host tests and accessibility audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 482 / 482 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 488 / 488 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -422,7 +422,7 @@ and timeouts, UTF-8/16/32 position conversion, a minimal inherited environment w
 credential variables, no shell, project-confined returned locations, cancellation, static fallback,
 and POSIX process-group cleanup. The one-shot
 design deliberately favors isolation over warm-index latency; a measured persistent service remains
-future work. The complete offline evidence is 482/482 Python checks plus 11/11 editor checks.
+future work. The complete offline evidence is 488/488 Python checks plus 11/11 editor checks.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
 activates network and product-specific schemas/instructions only from explicit turn or standing-goal
@@ -452,6 +452,15 @@ requests preserve those capabilities.
 
 Exit gate: protocol conformance and extension-host suites green; no key reaches webview output;
 multi-root and authenticated model listing work; all interactive commands have parity tests.
+
+Implementation note for step 3: `dgc/editor_protocol.py` is now the protocol-v2 source of truth and
+generates both the checked-in JSON Schema and the TypeScript client contract. Python validates every
+incoming command before dispatch and every emitted event before it reaches stdout. The editor rejects
+unknown or malformed events, any event before `ready`, and duplicate/out-of-order sequence numbers;
+sequence allocation and NDJSON writes share one lock. The backend bounds binary command frames,
+rejects invalid UTF-8, drains the rejected line, and recovers at the next frame. Generated-artifact
+drift, declared-event coverage, invalid enums/fields, concurrent ordering, and spawned-child failures
+are regression-tested.
 
 ### Milestone 4 — build evidence users can trust (P1)
 
@@ -568,7 +577,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-482/482 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
+488/488 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
 latest timeout-journal change and must be rerun on the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed

@@ -1,22 +1,20 @@
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
+import {
+  DgcEvent,
+  DgcCommand,
+  DGC_PROTOCOL_VERSION,
+  MAX_COMMAND_BYTES,
+  MAX_EVENT_BYTES,
+  MAX_PENDING_BYTES,
+  MAX_PENDING_COMMANDS,
+  dgcCommandError,
+  dgcEventError,
+} from "./protocol.generated";
 
-/** Any protocol event from `dgc serve` (see dgc/headless.py). */
-export interface DgcEvent {
-  type: string;
-  [k: string]: any;
-}
-
-export const DGC_PROTOCOL_VERSION = 2;
-const MAX_EVENT_BYTES = 4 * 1024 * 1024;
-const MAX_COMMAND_BYTES = 1024 * 1024;
-const MAX_PENDING_BYTES = 4 * 1024 * 1024;
-const MAX_PENDING_COMMANDS = 256;
+export { DGC_PROTOCOL_VERSION };
+export type { DgcEvent };
 const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeListener"]);
-
-function validMessageType(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(value);
-}
 
 interface PendingFrame {
   frame: string;
@@ -42,6 +40,7 @@ export class DgcBackend extends EventEmitter {
   private draining = false;
   private stopping = false;
   private released = false;
+  private lastSeq = -1;
   ready = false;
 
   constructor(private readonly cwd: string, private readonly command: string) {
@@ -56,6 +55,7 @@ export class DgcBackend extends EventEmitter {
     this.ready = false;
     this.draining = false;
     this.released = false;
+    this.lastSeq = -1;
     this.buf = "";
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -101,6 +101,7 @@ export class DgcBackend extends EventEmitter {
       this.ready = false;
       this.draining = false;
       this.released = false;
+      this.lastSeq = -1;
       this.buf = "";
       this.rejectPending("the backend command stream failed before queued commands could run");
       this.emit("event", {
@@ -123,6 +124,7 @@ export class DgcBackend extends EventEmitter {
       this.ready = false;
       this.draining = false;
       this.released = false;
+      this.lastSeq = -1;
       this.buf = "";
       this.rejectPending("the backend failed before queued commands could run");
       this.launchError(err);
@@ -135,6 +137,7 @@ export class DgcBackend extends EventEmitter {
       this.ready = false;
       this.draining = false;
       this.released = false;
+      this.lastSeq = -1;
       this.buf = "";
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
@@ -175,15 +178,26 @@ export class DgcBackend extends EventEmitter {
       if (!line) {
         continue;
       }
-      let ev: DgcEvent;
+      let parsed: unknown;
       try {
-        ev = JSON.parse(line);
+        parsed = JSON.parse(line);
       } catch {
         this.protocolFailure("dgc backend emitted malformed NDJSON");
         return;
       }
-      if (!ev || typeof ev !== "object" || Array.isArray(ev) || !validMessageType(ev.type)) {
-        this.protocolFailure("dgc backend emitted an event without a valid type");
+      const schemaProblem = dgcEventError(parsed);
+      if (schemaProblem) {
+        this.protocolFailure(`dgc backend violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
+        return;
+      }
+      const ev = parsed as DgcEvent;
+      if (ev.seq <= this.lastSeq) {
+        this.protocolFailure("dgc backend emitted a duplicate or out-of-order event sequence");
+        return;
+      }
+      this.lastSeq = ev.seq;
+      if (!this.ready && ev.type !== "ready") {
+        this.protocolFailure("dgc backend emitted an event before the ready handshake");
         return;
       }
       if (ev.type === "ready") {
@@ -275,9 +289,10 @@ export class DgcBackend extends EventEmitter {
     }
   }
 
-  private serialize(cmd: Record<string, any>): PendingFrame | undefined {
-    if (!cmd || typeof cmd !== "object" || Array.isArray(cmd) || !validMessageType(cmd.type)) {
-      this.reject("DGC command must contain a non-empty string type");
+  private serialize(cmd: DgcCommand): PendingFrame | undefined {
+    const schemaProblem = dgcCommandError(cmd);
+    if (schemaProblem) {
+      this.reject(`DGC command violated protocol v${DGC_PROTOCOL_VERSION}: ${schemaProblem}`);
       return undefined;
     }
     let frame: string;
@@ -296,7 +311,7 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send one command object to the backend. Returns false when it is explicitly rejected. */
-  send(cmd: Record<string, any>): boolean {
+  send(cmd: DgcCommand): boolean {
     const item = this.serialize(cmd);
     if (!item) {
       return false;
@@ -319,7 +334,7 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send handshake configuration ahead of user commands queued during backend startup. */
-  sendSetup(cmd: Record<string, any>): boolean {
+  sendSetup(cmd: DgcCommand): boolean {
     const item = this.serialize(cmd);
     if (!item || !this.proc || !this.ready) {
       if (item) {

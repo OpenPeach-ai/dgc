@@ -17,6 +17,7 @@ from . import sessions as sessions_mod
 from .agent import Agent
 from .commands import discover_commands, editor_command_metadata, render_command
 from .config import Config
+from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
 from .tools import TOOL_SCHEMAS
@@ -94,6 +95,31 @@ def _strip_editor_context(text: str) -> str:
 
 class _Shutdown(Exception):
     pass
+
+
+def _command_lines(stream):
+    """Yield bounded UTF-8 command lines and recover after an oversized/malformed frame."""
+    binary = getattr(stream, "buffer", None)
+    if binary is None:  # StringIO and other test/embedded text streams
+        for line in stream:
+            if len(line.encode("utf-8")) > MAX_COMMAND_BYTES:
+                yield None, f"command frame exceeded {MAX_COMMAND_BYTES} bytes"
+            else:
+                yield line, None
+        return
+    while True:
+        raw = binary.readline(MAX_COMMAND_BYTES + 1)
+        if not raw:
+            return
+        if len(raw) > MAX_COMMAND_BYTES:
+            while raw and not raw.endswith(b"\n"):
+                raw = binary.readline(MAX_COMMAND_BYTES + 1)
+            yield None, f"command frame exceeded {MAX_COMMAND_BYTES} bytes"
+            continue
+        try:
+            yield raw.decode("utf-8"), None
+        except UnicodeDecodeError:
+            yield None, "command frame was not valid UTF-8"
 
 
 class HeadlessUI:
@@ -204,7 +230,7 @@ class Backend:
         if not self.workspace_trusted and config.mode in ("acceptEdits", "auto"):
             config.data["mode"] = "default"  # do not persist a downgrade of the user's global preference
         self.config = config
-        self.em = Emitter(sys.stdout)
+        self.em = Emitter(sys.stdout, validator=event_error)
         self.pending = PendingRequests()
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
@@ -226,7 +252,7 @@ class Backend:
 
     def start(self) -> None:
         self.em.emit(
-            "ready", version=__version__, protocol_version=2,
+            "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
                           "goal_state": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True},
@@ -354,6 +380,11 @@ class Backend:
         return items
 
     def dispatch(self, cmd: dict) -> None:
+        problem = command_error(cmd)
+        if problem:
+            self.em.emit("command_rejected", command=str(cmd.get("type") or "")[:128],
+                         reason="invalid_command", message=f"invalid command: {problem}")
+            return
         t = cmd.get("type")
 
         if self._busy() and t in _BUSY_MUTATIONS:
@@ -604,7 +635,10 @@ def serve(config: Config) -> None:
     backend = Backend(config)
     backend.start()
     try:
-        for line in sys.stdin:
+        for line, frame_problem in _command_lines(sys.stdin):
+            if frame_problem:
+                backend.em.emit("error", message=frame_problem)
+                continue
             line = line.strip()
             if not line:
                 continue
