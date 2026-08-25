@@ -286,6 +286,60 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "tool_progress"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "call_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "progress": {
+              "type": "number"
+            },
+            "total": {
+              "type": "number"
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "debug",
+                "info",
+                "notice",
+                "warning",
+                "error",
+                "critical",
+                "alert",
+                "emergency"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "name",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "tool_result"
             },
             "seq": {

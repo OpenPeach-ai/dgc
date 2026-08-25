@@ -7,7 +7,7 @@ export const MAX_COMMAND_BYTES = 1048576;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "context" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound";
+export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "context" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound";
 export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
@@ -236,6 +236,55 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    }
+  },
+  "tool_progress": {
+    "call_id": {
+      "types": [
+        "null",
+        "string"
+      ],
+      "required": false
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "message": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "progress": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "total": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "level": {
+      "types": [
+        "string"
+      ],
+      "required": false,
+      "enum": [
+        "debug",
+        "info",
+        "notice",
+        "warning",
+        "error",
+        "critical",
+        "alert",
+        "emergency"
+      ]
     }
   },
   "tool_result": {

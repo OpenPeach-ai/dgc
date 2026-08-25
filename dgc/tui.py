@@ -869,6 +869,21 @@ class TUI:
         if running:                                     # a live marker on the header while it works
             frags.append((f"fg:{th.accent}", f"  {self._live_marker()}"))
 
+        progress = b.get("progress") if running else None
+        if isinstance(progress, dict):
+            value, total = progress.get("value"), progress.get("total")
+            amount = ""
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if isinstance(total, (int, float)) and not isinstance(total, bool) and total:
+                    pct = max(0.0, min(100.0, value / total * 100.0))
+                    amount = f" · {pct:.0f}%"
+                else:
+                    amount = f" · {value:g}"
+            frags.append(("", "\n")); frags.append(rail())
+            level = str(progress.get("level") or "")
+            color = th.err if level in ("error", "critical", "alert", "emergency") else th.faint
+            frags.append((f"fg:{color}", f"{str(progress.get('message') or '')[:500]}{amount}"))
+
         diff = b.get("diff")
         if diff:                                        # pre-rendered (coloured) diff — rail each line
             for ln in diff.split("\n"):
@@ -1057,7 +1072,7 @@ class TUI:
                 return 1 + blk["diff"].count("\n") + 1          # header + rendered diff lines
             n = len((blk.get("out") or "").splitlines())
             body = (n if blk.get("exp") else min(n, self._TOOL_HEAD)) + (1 if n > self._TOOL_HEAD else 0)
-            return 1 + body                                     # header line + output body
+            return 1 + body + (1 if blk.get("running") and blk.get("progress") else 0)
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
     def _jump_to_block(self, i: int) -> None:
@@ -1602,6 +1617,15 @@ class TUI:
                             "error": False, "out": None, "diff": None, "exp": False})
         if self._follow:
             self._scroll_off = 0
+        self._invalidate()
+
+    def tool_progress(self, name: str, message: str, *, progress=None, total=None,
+                      level: str = "", call_id: str | None = None) -> None:
+        blk = self._live_tool_block(name, call_id)
+        if blk is None:
+            return
+        blk["progress"] = {"message": str(message)[:500], "value": progress,
+                           "total": total, "level": str(level)[:20]}
         self._invalidate()
 
     def _live_tool_block(self, name: str, call_id: str | None = None):

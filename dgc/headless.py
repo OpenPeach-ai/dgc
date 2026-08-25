@@ -149,6 +149,17 @@ class HeadlessUI:
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
                      summary=arg_summary(name, args))
 
+    def tool_progress(self, name: str, message: str, *, progress=None, total=None,
+                      level: str = "", call_id: str | None = None) -> None:
+        fields = {"call_id": call_id, "name": name, "message": str(message)[:500]}
+        if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+            fields["progress"] = progress
+        if isinstance(total, (int, float)) and not isinstance(total, bool):
+            fields["total"] = total
+        if level:
+            fields["level"] = level
+        self.em.emit("tool_progress", **fields)
+
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         is_diff, diff = split_diff(out)
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,

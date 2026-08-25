@@ -147,6 +147,21 @@ class UI:
         self.console.print(f"\n[bold {BRAND}]{glyphs.tool_icon(name)} {name}[/] "
                            f"[{DIM}]{summary}[/]", highlight=False)
 
+    def tool_progress(self, name: str, message: str, *, progress=None, total=None,
+                      level: str = "", call_id: str | None = None) -> None:
+        self.stop_working()
+        amount = ""
+        if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+            if isinstance(total, (int, float)) and not isinstance(total, bool) and total:
+                amount = f" · {progress:g}/{total:g} ({max(0, min(100, progress / total * 100)):.0f}%)"
+            else:
+                amount = f" · {progress:g}"
+        color = "red" if level in ("error", "critical", "alert", "emergency") else DIM
+        # MCP text is untrusted server output, not Rich markup.
+        self.console.print(f"  · {message[:500]}{amount}", style=color, markup=False,
+                           highlight=False)
+        self.start_working(name)
+
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]

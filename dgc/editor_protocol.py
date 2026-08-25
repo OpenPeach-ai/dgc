@@ -28,6 +28,7 @@ _I = lambda required=True: _f("integer", required=required)
 _B = lambda required=True: _f("boolean", required=required)
 _O = lambda required=True: _f("object", required=required)
 _A = lambda required=True: _f("array", required=required)
+_N = lambda required=True: _f("number", required=required)
 _NS = lambda required=True: _f("null", "string", required=required)
 _NA = lambda required=True: _f("null", "array", required=required)
 
@@ -57,6 +58,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "thinking_delta": {"text": _S()},
     "stream_end": {},
     "tool_call": {"call_id": _NS(False), "name": _S(), "args": _O(), "summary": _S()},
+    "tool_progress": {
+        "call_id": _NS(False), "name": _S(), "message": _S(),
+        "progress": _N(False), "total": _N(False),
+        "level": _f("string", required=False,
+                    enum=("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")),
+    },
     "tool_result": {
         "call_id": _NS(False), "name": _S(), "output": _S(), "is_error": _B(),
         "is_diff": _B(), "diff": _S(False),

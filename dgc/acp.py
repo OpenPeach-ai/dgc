@@ -471,6 +471,16 @@ class _ACPUi:
                       "rawInput": args, "content": [{"type": "content",
                       "content": {"type": "text", "text": arg_summary(name, args)}}]})
 
+    def tool_progress(self, name, message, *, progress=None, total=None, level="", call_id=None):
+        amount = ""
+        if isinstance(progress, (int, float)) and not isinstance(progress, bool):
+            amount = f" ({progress:g}/{total:g})" if (
+                isinstance(total, (int, float)) and not isinstance(total, bool)) else f" ({progress:g})"
+        self._update({"sessionUpdate": "tool_call_update",
+                      "toolCallId": call_id or self._last_tool or "tc0",
+                      "status": "in_progress", "content": [{"type": "content",
+                      "content": {"type": "text", "text": f"{message}{amount}"}}]})
+
     def tool_result(self, name, out, call_id=None):
         is_diff, diff = split_diff(out)
         content = [{"type": "content", "content": {"type": "text", "text": out[:8000]}}]

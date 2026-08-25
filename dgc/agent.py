@@ -344,6 +344,11 @@ class _SubUI:
     def tool_call(self, name, args, call_id=None):
         self._parent.tool_call(name, args, call_id)
 
+    def tool_progress(self, name, message, *, progress=None, total=None, level="", call_id=None):
+        callback = getattr(self._parent, "tool_progress", None)
+        if callback:
+            callback(name, message, progress=progress, total=total, level=level, call_id=call_id)
+
     def tool_result(self, name, out, call_id=None):
         self._parent.tool_result(name, out, call_id)
 
@@ -1601,8 +1606,28 @@ class Agent:
                         self.ui.tool_denied(name, args, "PreToolUse hook", call_id)
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
                                 "Do not retry this exact action.")
-                    out = (self.mcp.call(name, args, self.cancelled)
-                           if name.startswith("mcp__") else execute(name, exec_args, self.ctx))
+                    if name.startswith("mcp__"):
+                        progress_ui = getattr(self.ui, "tool_progress", None)
+
+                        def on_progress(event):
+                            if progress_ui:
+                                progress_ui(
+                                    name, str(event.get("message") or "MCP server is working"),
+                                    progress=event.get("progress"), total=event.get("total"),
+                                    call_id=call_id)
+
+                        def on_log(event):
+                            if progress_ui:
+                                logger = f" [{event.get('logger')}]" if event.get("logger") else ""
+                                progress_ui(
+                                    name, f"{event.get('level', 'info')}{logger}: "
+                                    f"{event.get('message', '')}", level=str(event.get("level") or "info"),
+                                    call_id=call_id)
+
+                        out = self.mcp.call(name, args, self.cancelled,
+                                            on_progress=on_progress, on_log=on_log)
+                    else:
+                        out = execute(name, exec_args, self.ctx)
             finally:
                 if lease is not None:
                     lease.release()

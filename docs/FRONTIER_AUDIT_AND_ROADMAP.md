@@ -43,7 +43,7 @@ the editor registries: those are external release actions that require a reviewe
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning and explicit merge/conflict UX for parallel write agents |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
-| MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
+| MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, bounded wire frames/pagination and roots MRTR, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Consent-gated elicitation/sampling, modern subscriptions/cache use, broader MCP/ACP conformance fixtures, published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Broader extension-host interaction/race flows plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
@@ -433,7 +433,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 505/505 Python checks, 12/12 editor transport/webview checks, and
+The complete offline evidence is 512/512 Python checks, 12/12 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
@@ -526,6 +526,19 @@ Exit gate: a clean tagged commit produces signed identical artifacts across chan
 documented and tested; public docs and manifests agree; release provenance is independently
 verifiable.
 
+Implementation note for step 6: DGC previously sent the removed `initialize` handshake while
+claiming MCP `2026-07-28`. It now probes `server/discover` on a disposable stdio process, attaches
+the required protocol/client/capability metadata to every modern request, validates modern
+`resultType`, and restarts on a clean process before a truthful `2025-11-25`-era fallback. Tool
+wire frames and catalog pagination are bounded; roots-only multi-round-trip input is retried with opaque request
+state; unsupported elicitation/sampling is not advertised and fails closed. Progress tokens and
+severity-filtered server logs stay correlated with the active tool card across classic CLI, TUI,
+headless/editor, and ACP surfaces. Connection failures and negotiated eras remain visible in
+`/mcp`, and generation-scoped pending requests prevent a retired probe reader from failing the
+replacement connection. Modern/legacy fixtures cover wire metadata, MRTR, progress monotonicity,
+logging, cancellation, process replacement, and cleanup. Consent-gated elicitation/sampling,
+modern subscriptions/cache consumption, and external conformance remain open.
+
 ## Interaction-semantics audit and implementation plan — 2026-08-25
 
 The plan workflow, response cadence, slash-command surface, and standing-goal behavior are part of
@@ -598,7 +611,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-505/505 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+512/512 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

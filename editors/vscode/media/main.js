@@ -239,9 +239,24 @@
         turn.reasonEl.textContent += ev.text; break;
       case "stream_end": breakText(); break;
       case "tool_call": ensureTurn(); turn._tools = turn._tools || {}; turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
+      case "tool_progress": {
+        ensureTurn();
+        turn._tools = turn._tools || {};
+        const key = ev.call_id || ev.name;
+        const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
+        const numeric = Number.isFinite(ev.progress);
+        const hasTotal = numeric && Number.isFinite(ev.total) && ev.total !== 0;
+        c.querySelector(".body pre").textContent = String(ev.message || "").slice(0, 500);
+        c.querySelector(".badge").textContent = hasTotal
+          ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
+          : (numeric ? String(ev.progress) : "");
+        break;
+      }
       case "tool_result": {
         ensureTurn();
-        const c = (turn._tools && turn._tools[ev.call_id]) || toolCard({ name: ev.name });
+        turn._tools = turn._tools || {};
+        const key = ev.call_id || ev.name;
+        const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
         if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
@@ -249,7 +264,9 @@
       }
       case "tool_denied": {
         ensureTurn();
-        const c = (turn._tools && turn._tools[ev.call_id]) || toolCard({ name: ev.name, summary: ev.reason });
+        turn._tools = turn._tools || {};
+        const key = ev.call_id || ev.name;
+        const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny"; break;
       }
       case "permission_request": {

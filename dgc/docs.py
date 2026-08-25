@@ -151,6 +151,18 @@ tools become callable by the agent as `mcp__<server>__<tool>`.
 - **/mcp add** — connect one: give it a name, a command, args, and any env vars.
 - **/mcp remove <name>** — disconnect it.
 
+DGC probes the stateless MCP 2026 protocol (`server/discover` plus self-describing
+requests). If a handshake-era server rejects that probe, DGC discards the probe
+process and reconnects cleanly with the legacy `initialize` lifecycle. Long-running
+tools update the same tool card with correlated progress and warning/error logs;
+`/mcp` reports the negotiated era and connection failures. Per-server config may
+set `log_level` to `debug`, `info`, `notice`, `warning` (default), `error`,
+`critical`, `alert`, `emergency`, or `off`.
+
+Modern roots requests are answered through bounded multi-round-trip requests.
+Sampling and elicitation are not advertised yet and fail closed because they need
+their own model and user-consent boundaries.
+
 Servers are stored in your config under `mcp_servers`, so they reconnect on the
 next launch.
 """.strip()),

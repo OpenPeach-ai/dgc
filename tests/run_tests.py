@@ -493,8 +493,13 @@ def unit_tests(tmp: Path):
     check("every literal headless event is declared in protocol v2",
           _emitted_types <= set(_EVENT_FIELDS))
     _valid_info = {"type": "info", "seq": 0, "message": "ready"}
+    _valid_progress = {"type": "tool_progress", "seq": 1, "call_id": "c1",
+                       "name": "mcp__fixture__scan", "message": "halfway",
+                       "progress": 1.0, "total": 2.0, "level": "warning"}
     check("protocol validators accept valid frames and reject names, fields, and enums",
           _event_error(_valid_info) is None
+          and _event_error(_valid_progress) is None
+          and "unsupported" in str(_event_error({**_valid_progress, "level": "verbose"}))
           and "required" in str(_event_error({"type": "text_delta", "seq": 1}))
           and "unknown" in str(_command_error({"type": "surprise"}))
           and len(str(_command_error({"type": "x" * 10_000}))) < 256
@@ -544,10 +549,13 @@ def unit_tests(tmp: Path):
     _wire = _io2.StringIO(); _pending = PendingRequests()
     _hui = HeadlessUI(Emitter(_wire), _pending, approval_timeout_s=0.01)
     _hui.tool_call("bash", {"command": "false"}, "call-7")
+    _hui.tool_progress("bash", "halfway", progress=1, total=2, call_id="call-7")
     _hui.tool_result("bash", "exit code: 1\nfailed", "call-7")
     _events = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
-    check("headless tool events preserve call IDs",
-          [e.get("call_id") for e in _events] == ["call-7", "call-7"])
+    check("headless tool lifecycle events preserve call IDs and typed progress",
+          [e.get("call_id") for e in _events] == ["call-7", "call-7", "call-7"]
+          and _events[1].get("type") == "tool_progress"
+          and _events[1].get("progress") == 1 and _events[1].get("total") == 2)
     check("headless marks failed tool results", _events[-1].get("is_error") is True)
     _verdict = _hui.approve("bash", {"command": "echo no"}, "call-8")
     _expiry = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
@@ -815,8 +823,11 @@ def unit_tests(tmp: Path):
     ot.blocks = []
     ot.tool_call("bash", {"cmd": "npm test"})
     check("tool_call opens ONE running tool block", len(ot.blocks) == 1 and ot.blocks[0].get("running"))
+    ot.tool_progress("bash", "halfway", progress=1, total=2)
     _live = _fltt(ot._transcript())
-    check("running tool shows present-tense verb + rail", "Running" in _live and "┃" in _live)
+    check("running tool shows present-tense verb, rail, and correlated progress",
+          "Running" in _live and "┃" in _live and "halfway · 50%" in _live
+          and ot._block_lines(ot.blocks[0]) == 2)
     ot.tool_result("bash", "\n".join(f"out{i}" for i in range(15)))
     check("tool_result fills the SAME block (no second block)", len(ot.blocks) == 1 and not ot.blocks[0].get("running"))
     _done = _fltt(ot._transcript())
@@ -1627,12 +1638,14 @@ def test_supply_chain_guard():
 
 
 def test_mcp_protocol():
-    """MCP uses a minimal environment, paginates tools, sanitizes routes, renders typed content,
-    propagates cancellation, and reaps the stdio server process."""
+    """MCP negotiates both protocol eras, uses modern per-request metadata/MRTR, reports progress,
+    sanitizes routes and environments, propagates cancellation, and reaps every stdio process."""
     import textwrap
     import time as _time
+    from dgc import __version__
     from dgc.guards import mcp_process_env
-    from dgc.mcp import MCPManager, MCP_PROTOCOL_VERSION
+    from dgc.mcp import (_bounded_lines, MCPManager, MCP_LEGACY_PROTOCOL_VERSION,
+                         MCP_PROTOCOL_VERSION)
 
     old_secret = os.environ.get("DGC_PARENT_ONLY_SECRET")
     os.environ["DGC_PARENT_ONLY_SECRET"] = "must-not-leak"
@@ -1642,30 +1655,66 @@ def test_mcp_protocol():
               "DGC_PARENT_ONLY_SECRET" not in env and env.get("SERVER_TOKEN") == "explicit")
         check("MCP config cannot inject runtime startup options", "NODE_OPTIONS" in dropped)
 
+        import io as _io
+        framed = list(_bounded_lines(_io.StringIO("0123456789abcdef\nvalid\n"), limit=8))
+        check("MCP frame reader drains oversized records and recovers at the next line",
+              framed == [("", True), ("valid\n", False)], repr(framed))
+
         root = Path(tempfile.mkdtemp())
         server_py = root / "server.py"
+        wire_path = root / "modern-wire.jsonl"
         server_py.write_text(textwrap.dedent(r'''
             import json, os, sys, time
             for raw in sys.stdin:
                 msg = json.loads(raw)
                 method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
-                if method == "initialize":
-                    out = {"protocolVersion": "2026-07-28", "capabilities": {"tools": {}},
-                           "serverInfo": {"name": "fixture", "version": "1"}}
+                with open(os.environ["WIRE_PATH"], "a") as wire:
+                    wire.write(json.dumps(msg) + "\n")
+                if method == "server/discover":
+                    out = {"resultType": "complete", "supportedVersions": ["2026-07-28"],
+                           "capabilities": {"tools": {}, "logging": {}},
+                           "_meta": {"io.modelcontextprotocol/serverInfo":
+                                     {"name": "fixture", "version": "1"}}}
                 elif method == "tools/list" and not params.get("cursor"):
-                    out = {"tools": [{"name": "odd tool", "description": "typed fixture",
+                    out = {"resultType": "complete",
+                           "tools": [{"name": "odd tool", "description": "typed fixture",
                                       "inputSchema": {"type": "object", "properties": {}}}],
                            "nextCursor": "page-2"}
                 elif method == "tools/list":
-                    out = {"tools": [{"name": "odd@tool", "description": "collision",
+                    out = {"resultType": "complete",
+                           "tools": [{"name": "odd@tool", "description": "collision",
                                       "inputSchema": {"type": "object", "properties": {}}}]}
                 elif method == "tools/call" and params.get("name") == "odd tool":
-                    out = {"content": [
+                    if not params.get("inputResponses"):
+                        out = {"resultType": "input_required", "requestState": "opaque-state",
+                               "inputRequests": {"workspace": {"method": "roots/list", "params": {}}}}
+                        print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
+                        continue
+                    token = (params.get("_meta") or {}).get("progressToken")
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                      "params": {"progressToken": "wrong", "progress": 99}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                      "params": {"progressToken": token, "progress": 1,
+                                                 "total": 2, "message": "halfway"}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                      "params": {"progressToken": token, "progress": 0}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/message",
+                                      "params": {"level": "info", "data": "filtered detail"}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/message",
+                                      "params": {"level": "warning", "logger": "fixture",
+                                                 "data": "visible warning"}}), flush=True)
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                      "params": {"progressToken": token, "progress": 2,
+                                                 "total": 2, "message": "done"}}), flush=True)
+                    roots = params["inputResponses"]["workspace"].get("roots") or []
+                    out = {"resultType": "complete", "content": [
                               {"type": "text", "text": "hello"},
                               {"type": "resource_link", "name": "guide", "uri": "file:///guide.md"},
                               {"type": "resource", "resource": {"uri": "file:///note", "text": "note text"}}],
                            "structuredContent": {"token": os.environ.get("SERVER_TOKEN"),
-                                                 "parent": os.environ.get("DGC_PARENT_ONLY_SECRET")}}
+                                                 "parent": os.environ.get("DGC_PARENT_ONLY_SECRET"),
+                                                 "root": roots[0]["uri"],
+                                                 "state": params.get("requestState")}}
                 elif method == "tools/call" and params.get("name") == "odd@tool":
                     time.sleep(30); out = {"content": [{"type": "text", "text": "late"}]}
                 else:
@@ -1674,17 +1723,26 @@ def test_mcp_protocol():
         '''))
         mgr = MCPManager(root)
         mgr.connect_all({"fixture name": {"command": sys.executable, "args": [str(server_py)],
-                                           "env": {"SERVER_TOKEN": "explicit"}}})
+                                           "env": {"SERVER_TOKEN": "explicit",
+                                                   "WIRE_PATH": str(wire_path)}}})
         routes = [s["function"]["name"] for s in mgr.tool_schemas()]
-        check("MCP negotiates the current protocol and paginates tool discovery",
-              len(routes) == 2 and mgr.servers["fixture name"].protocol_version == MCP_PROTOCOL_VERSION,
+        modern_server = mgr.servers["fixture name"]
+        check("MCP negotiates the stateless modern era and paginates tool discovery",
+              len(routes) == 2 and modern_server.protocol_version == MCP_PROTOCOL_VERSION
+              and modern_server.protocol_era == "modern"
+              and modern_server.server_info.get("name") == "fixture",
               detail=repr(routes))
         check("MCP tool routes are provider-safe and collision-free",
               routes == ["mcp__fixture_name__odd_tool", "mcp__fixture_name__odd_tool_2"], repr(routes))
-        out = mgr.call(routes[0], {})
-        check("MCP preserves structured and resource content without parent credential leakage",
+        progress, logs = [], []
+        out = mgr.call(routes[0], {}, on_progress=progress.append, on_log=logs.append)
+        check("MCP completes modern roots MRTR and preserves typed content without credential leakage",
               "hello" in out and "guide" in out and "note text" in out and '"token": "explicit"' in out
-              and '"parent": null' in out, out)
+              and '"parent": null' in out and root.as_uri() in out and "opaque-state" in out, out)
+        check("MCP correlates monotonic progress and severity-filtered logs to the active call",
+              [event["progress"] for event in progress] == [1, 2]
+              and [event["message"] for event in logs] == ["visible warning"],
+              f"progress={progress!r} logs={logs!r}")
         cancelled = threading.Event()
         threading.Thread(target=lambda: (_time.sleep(0.15), cancelled.set()), daemon=True).start()
         started = _time.monotonic(); out = mgr.call(routes[1], {}, cancelled); elapsed = _time.monotonic() - started
@@ -1693,6 +1751,80 @@ def test_mcp_protocol():
         proc = mgr.servers["fixture name"].proc
         mgr.stop_all()
         check("MCP stop reaps the whole stdio server", proc is not None and proc.poll() is not None)
+
+        modern_wire = [json.loads(line) for line in wire_path.read_text().splitlines()]
+        modern_requests = [msg for msg in modern_wire if msg.get("id") is not None]
+        required_meta = {"io.modelcontextprotocol/protocolVersion",
+                         "io.modelcontextprotocol/clientInfo",
+                         "io.modelcontextprotocol/clientCapabilities"}
+        check("modern MCP never initializes and makes every request self-describing",
+              "initialize" not in [msg.get("method") for msg in modern_wire]
+              and all(required_meta <= set((msg.get("params") or {}).get("_meta") or {})
+                      for msg in modern_requests)
+              and all(((msg.get("params") or {}).get("_meta") or {}).get(
+                      "io.modelcontextprotocol/clientInfo", {}).get("version") == __version__
+                      for msg in modern_requests), repr(modern_wire))
+
+        # A legacy-only server rejects server/discover. DGC must discard that process before the
+        # handshake so a probe cannot poison the session state.
+        legacy_py = root / "legacy.py"
+        legacy_wire = root / "legacy-wire.jsonl"
+        starts = root / "legacy-starts.txt"
+        legacy_py.write_text(textwrap.dedent(r'''
+            import json, os, sys
+            with open(os.environ["STARTS_PATH"], "a") as f: f.write("start\n")
+            for raw in sys.stdin:
+                msg = json.loads(raw)
+                with open(os.environ["WIRE_PATH"], "a") as f: f.write(json.dumps(msg) + "\n")
+                method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+                if method == "server/discover":
+                    print(json.dumps({"jsonrpc": "2.0", "id": mid, "error":
+                                      {"code": -32601, "message": "method not found"}}), flush=True)
+                    continue
+                if method == "initialize":
+                    out = {"protocolVersion": "2025-11-25",
+                           "capabilities": {"tools": {}, "logging": {}},
+                           "serverInfo": {"name": "legacy", "version": "1"}}
+                elif method == "logging/setLevel": out = {}
+                elif method == "tools/list":
+                    out = {"tools": [{"name": "legacy", "inputSchema": {"type": "object"}}]}
+                elif method == "tools/call":
+                    token = (params.get("_meta") or {}).get("progressToken")
+                    print(json.dumps({"jsonrpc": "2.0", "method": "notifications/progress",
+                                      "params": {"progressToken": token, "progress": 1,
+                                                 "message": "legacy progress"}}), flush=True)
+                    out = {"content": [{"type": "text", "text": "legacy ok"}]}
+                else: continue
+                print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
+        '''))
+        legacy_mgr = MCPManager(root)
+        legacy_mgr.connect_all({"old": {"command": sys.executable, "args": [str(legacy_py)],
+                                         "env": {"WIRE_PATH": str(legacy_wire),
+                                                 "STARTS_PATH": str(starts)}}})
+        old = legacy_mgr.servers["old"]
+        legacy_progress = []
+        legacy_out = legacy_mgr.call("mcp__old__legacy", {}, on_progress=legacy_progress.append)
+        check("MCP falls back on a fresh process to a truthful legacy handshake",
+              old.protocol_era == "legacy" and old.protocol_version == MCP_LEGACY_PROTOCOL_VERSION
+              and starts.read_text().splitlines() == ["start", "start"]
+              and "legacy ok" in legacy_out and legacy_progress[0]["message"] == "legacy progress",
+              f"{old.protocol_era=} {old.protocol_version=} {legacy_out=} {legacy_progress=}")
+        old_proc = old.proc
+        legacy_mgr.stop_all()
+        check("legacy MCP fallback process is reaped", old_proc is not None and old_proc.poll() is not None)
+        legacy_messages = [json.loads(line) for line in legacy_wire.read_text().splitlines()]
+        check("legacy MCP configures negotiated logging without modern request envelopes",
+              any(msg.get("method") == "logging/setLevel"
+                  and (msg.get("params") or {}).get("level") == "warning" for msg in legacy_messages)
+              and all("io.modelcontextprotocol/protocolVersion" not in
+                      ((msg.get("params") or {}).get("_meta") or {})
+                      for msg in legacy_messages if msg.get("method") != "server/discover"))
+
+        failed = MCPManager(root)
+        failed.connect_all({"missing": {"command": str(root / "does-not-exist")}})
+        check("MCP connection failures remain visible in process diagnostics",
+              "missing: failed" in failed.summary() and not failed.servers, failed.summary())
+        failed.stop_all()
     finally:
         if old_secret is None:
             os.environ.pop("DGC_PARENT_ONLY_SECRET", None)

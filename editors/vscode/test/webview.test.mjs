@@ -49,7 +49,7 @@ function makeDom() {
   return { dom, errors, posted, send, doc: dom.window.document };
 }
 
-test("webview renders a full turn: thinking → text → 2 tool cards → diff → permission round-trip", () => {
+test("webview renders a full turn: thinking → text → progress cards → diff → permission round-trip", () => {
   const { dom, errors, posted, send, doc } = makeDom();
 
   // model / mode state
@@ -76,9 +76,22 @@ test("webview renders a full turn: thinking → text → 2 tool cards → diff �
 
   // tool card 1 — read_file (glyph →)
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/auth.ts", call_id: "c1" } });
+  send({ type: "event", event: { type: "tool_progress", name: "read_file", call_id: "c1",
+    message: "Indexing symbols", progress: 1, total: 2 } });
+  assert.equal(doc.querySelector(".tool .badge").textContent, "50%", "tool progress percentage");
+  assert.match(doc.querySelector(".tool .body pre").textContent, /Indexing symbols/);
   send({ type: "event", event: { type: "tool_result", call_id: "c1", name: "read_file", output: "line one\nline two", is_diff: false } });
 
-  // tool card 2 — edit_file (glyph ✎) with an inline unified diff
+  // Protocol call IDs are nullable. The name fallback must still update one card in place.
+  send({ type: "event", event: { type: "tool_call", name: "mcp__fixture__scan", summary: "workspace" } });
+  send({ type: "event", event: { type: "tool_progress", name: "mcp__fixture__scan",
+    message: "Scanning", progress: 3 } });
+  send({ type: "event", event: { type: "tool_result", name: "mcp__fixture__scan",
+    output: "scan complete", is_diff: false } });
+  assert.equal(doc.querySelectorAll(".tool").length, 2,
+    "nullable call-ID lifecycle should retain one progress card");
+
+  // tool card 3 — edit_file (glyph ✎) with an inline unified diff
   send({ type: "event", event: { type: "tool_call", name: "edit_file", summary: "src/auth.ts", call_id: "c2" } });
   send({
     type: "event",
@@ -89,10 +102,10 @@ test("webview renders a full turn: thinking → text → 2 tool cards → diff �
   });
 
   const tools = doc.querySelectorAll(".tool");
-  assert.equal(tools.length, 2, "expected exactly 2 tool cards");
+  assert.equal(tools.length, 3, "expected exactly 3 tool cards");
   assert.equal(tools[0].querySelector(".glyph").textContent, "→", "read_file glyph");
   assert.equal(tools[0].querySelector(".verb").textContent, "read_file");
-  assert.equal(tools[1].querySelector(".glyph").textContent, "✎", "edit_file glyph");
+  assert.equal(tools[2].querySelector(".glyph").textContent, "✎", "edit_file glyph");
 
   const diff = doc.querySelector(".diff");
   assert.ok(diff, "inline diff did not render");
