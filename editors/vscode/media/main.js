@@ -310,9 +310,8 @@
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
-    const textAtts = attachments.filter((a) => !a.img);
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
-    const full = textAtts.map((a) => a.text).join("\n") + (textAtts.length ? "\n" : "") + text;
+    const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     if (text.startsWith("/") && !attachments.length) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
@@ -325,7 +324,8 @@
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
-    vscode.postMessage({ type: "prompt", text: full, images: imgs.length ? imgs : undefined });   // backend queues it if a turn is running
+    vscode.postMessage({ type: "prompt", text, images: imgs.length ? imgs : undefined,
+      context: resources.length ? resources : undefined });   // backend queues it if a turn is running
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
   }
   function renderAtts() {
@@ -346,7 +346,9 @@
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
     if (popMode === "@") {
-      attachments.push({ label: it.label, text: `<file path="${it.label}"></file>` });
+      attachments.push({ label: it.label, resource: {
+        type: "file_mention", path: it.label, relative_path: it.label,
+      } });
       renderAtts();
       input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
     } else if (popMode === "/") {
@@ -502,7 +504,10 @@
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
     else if (msg.type === "cleared") { log.innerHTML = ""; turn = null; setSending(false); }
-    else if (msg.type === "attach") { attachments.push({ label: msg.label, text: msg.text }); renderAtts(); }
+    else if (msg.type === "prompt_rejected") { setSending(false); }
+    else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
+      attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
+    }
     else if (msg.type === "files") { files = msg.files || []; if (popMode === "@") onInput(); }
     else if (msg.type === "backend_exit") { sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });

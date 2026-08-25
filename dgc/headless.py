@@ -30,14 +30,19 @@ _BUSY_MUTATIONS = {
 _EDITOR_CONTEXT_LIMIT = 64_000
 
 
+def _editor_context_json(value) -> str:
+    """Encode JSON without allowing source text to synthesize our framing delimiter."""
+    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
+
+
 def _format_editor_context(resources) -> str:
     """Bound and frame typed editor resources as untrusted reference data for the model."""
     if not isinstance(resources, list):
         return ""
     allowed = {"type", "uri", "path", "relative_path", "workspace", "language", "range",
                "text", "diagnostics"}
-    clean: list[dict] = []
-    used = 0
+    encoded_items: list[str] = []
     def bounded(value, depth=0):
         if depth > 4:
             return None
@@ -67,14 +72,16 @@ def _format_editor_context(resources) -> str:
             else:
                 continue
             resource[key] = value
-        encoded = json.dumps(resource, ensure_ascii=False, separators=(",", ":"))
-        if used + len(encoded.encode("utf-8")) > _EDITOR_CONTEXT_LIMIT:
+        encoded = _editor_context_json(resource)
+        # Include the list brackets and separators in the actual wire-size bound.
+        candidate_size = 2 + sum(len(part.encode("utf-8")) for part in encoded_items) \
+            + len(encoded_items) + len(encoded.encode("utf-8"))
+        if candidate_size > _EDITOR_CONTEXT_LIMIT:
             break
-        clean.append(resource)
-        used += len(encoded.encode("utf-8"))
-    if not clean:
+        encoded_items.append(encoded)
+    if not encoded_items:
         return ""
-    payload = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
+    payload = "[" + ",".join(encoded_items) + "]"
     return ("<editor-context-json trust=\"untrusted-reference-data\">\n" + payload
             + "\n</editor-context-json>\n\n")
 

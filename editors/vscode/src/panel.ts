@@ -131,9 +131,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                        workspaceTrusted: ev.workspace_trusted === true,
                        goal: ev.goal || { text: "", status: "none" } };
         this.postState();
-        this.backend?.send({ type: "set_workspace_roots",
-                             roots: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath) });
-        this.applyNativeSettings();   // let explicitly-set VS Code settings override the CLI config
+        if (this.backend) {
+          const backend = this.backend;
+          backend.sendSetup({ type: "set_workspace_roots",
+                              roots: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath) });
+          // SecretStorage is asynchronous. Keep user prompts queued until roots and all explicit
+          // native settings have reached this exact backend instance.
+          void this.applyNativeSettings(backend, true)
+            .catch((err: any) => this.post({ type: "event", event: {
+              type: "error", message: `Could not initialize DGC editor settings: ${err?.message ?? err}`,
+            } }))
+            .finally(() => {
+              if (this.backend === backend) {
+                backend.completeHandshake();
+              }
+            });
+        }
         break;
       case "model_changed":
         this.state.model = ev.model;
@@ -220,8 +233,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         let text = String(msg.text ?? "");
         // Slash commands remain pure command text. Normal prompts carry typed resources
         // separately so display/history and model input cannot be confused.
-        be.send({ type: "prompt", text, images: msg.images,
-                  context: text && !text.startsWith("/") ? this.editorContext() : [] });
+        const attached = Array.isArray(msg.context)
+          ? msg.context.filter((item: any) => item && typeof item === "object").slice(0, 64)
+          : [];
+        const live = text && !text.startsWith("/") ? this.editorContext() : [];
+        const accepted = be.send({ type: "prompt", text, images: msg.images,
+                                   context: [...attached, ...live].slice(0, 64) });
+        if (!accepted) {
+          this.post({ type: "prompt_rejected" });
+        }
         break;
       }
       case "permission_response":
@@ -497,13 +517,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- native VS Code settings → backend (only explicitly-set values override the CLI config) ---
-  async applyNativeSettings(): Promise<void> {
-    const be = this.backend;
+  async applyNativeSettings(be = this.backend, setup = false): Promise<void> {
     if (!be) { return; }
+    const send = (cmd: any) => setup ? be.sendSetup(cmd) : be.send(cmd);
     const c = vscode.workspace.getConfiguration("dgc");
     const baseUrl = c.get<string>("baseUrl", ""), apiKey = await this.storedSecret("apiKey"), model = c.get<string>("model", "");
     if (baseUrl || apiKey || model) {
-      be.send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
+      send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
     }
     const values: any = {};
     const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };
@@ -514,7 +534,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     put("fallback_model", "fallbackModel");
     put("fallback_base_url", "fallbackBaseUrl");
     const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
-    if (Object.keys(values).length) { be.send({ type: "set_config", values }); }
+    if (Object.keys(values).length) { send({ type: "set_config", values }); }
   }
 
   // ---- in-webview settings page --------------------------------------------
@@ -677,8 +697,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const rel = vscode.workspace.asRelativePath(ed.document.uri);
     const a = ed.selection.start.line + 1;
     const b = ed.selection.end.line + 1;
+    const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri);
+    let text = ed.document.getText(ed.selection);
+    if (text.length > 8192) { text = text.slice(0, 8192); }
     this.focus();
-    this.post({ type: "attach", label: `${rel}:${a}-${b}`, text: `<selection path="${rel}" lines="${a}-${b}">\n${ed.document.getText(ed.selection)}\n</selection>` });
+    this.post({ type: "attach", label: `${rel}:${a}-${b}`, resource: {
+      type: "selection", uri: ed.document.uri.toString(), path: ed.document.uri.fsPath,
+      relative_path: rel, workspace: folder?.name || "", language: ed.document.languageId,
+      range: { start_line: a, end_line: b }, text,
+    } });
   }
 
   dispose(): void {

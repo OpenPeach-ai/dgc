@@ -44,7 +44,7 @@ the editor registries: those are external release actions that require a reviewe
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, per-checkout mutation leases, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning/merge UX for parallel write agents and cross-process leases |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting, stable call IDs, hash-addressed atomic `apply_patch`, repository map, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native non-OpenAI transports, server-side compaction, richer per-model discovery, LSP definitions/references |
 | MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
-| Editor | Authenticated model discovery, SecretStorage with plaintext-setting removal, typed selection/tab/diagnostic resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning | Real VS Code extension-host tests, reconnect/backpressure, generated schemas, accessibility audit |
+| Editor | Authenticated model discovery, SecretStorage with plaintext-setting removal, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, protocol-v2 handshake, bounded startup/backpressure queue, fail-closed event validation, and restart-on-next-command recovery | Real VS Code extension-host tests, generated schemas, accessibility audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
@@ -108,7 +108,7 @@ release rehearsal—not another round of unmeasured feature claims.
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
-| Extension tests | 2 / 2 | 6 / 6 | jsdom protocol/render/safety and typed slash/goal/plan/artifact flows are green; real extension-host coverage remains. |
+| Extension tests | 2 / 2 | 11 / 11 | jsdom protocol/render/safety plus real spawned-child handshake, error, backpressure, incompatibility, and restart flows are green; real VS Code extension-host coverage remains. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
 | Edit microbenchmark | 17,443 / 19,591 | 17,443 / 19,591 | 89.0% accepted and zero wrong-applies; unchanged corpus baseline. |
 | Release preflight | None | Pass | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates pass. |
@@ -551,7 +551,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-427/427 Python checks and 6/6 editor webview checks. Step 6's complete preflight was green before the
+428/428 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
 latest timeout-journal change and must be rerun on the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed
