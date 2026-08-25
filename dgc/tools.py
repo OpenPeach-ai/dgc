@@ -885,7 +885,8 @@ def _bash_background(command: str, ctx) -> str:
     from .scheduler import acquire_cancellable, workspace_mutation_lock
     workspace_lock = workspace_mutation_lock(ctx.project_root)
     if not acquire_cancellable(workspace_lock, getattr(ctx, "cancelled", None)):
-        return "error: background command was cancelled while waiting for the workspace write lease"
+        return (f"error: {workspace_lock.last_error}" if workspace_lock.last_error else
+                "error: background command was cancelled while waiting for the workspace write lease")
     try:
         from . import sandbox
         sandboxed = sandbox.active(ctx.config)

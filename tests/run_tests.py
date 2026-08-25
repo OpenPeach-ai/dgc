@@ -1750,6 +1750,180 @@ def test_mcp_protocol():
             check("sandbox network requires an explicit opt-in", host_net in shared)
 
 
+def test_cross_process_workspace_leases():
+    """Checkout mutations are serialized across processes and recover after crashes."""
+    import stat as _stat
+    import time as _time
+    import dgc.scheduler as _scheduler
+    from dgc.scheduler import (
+        WorkspaceMutationLock, acquire_cancellable, workspace_mutation_lock,
+    )
+
+    root = Path(tempfile.mkdtemp())
+    marker_dir = Path(tempfile.mkdtemp())
+    lock = workspace_mutation_lock(root)
+    alias = workspace_mutation_lock(root / ".")
+    other = workspace_mutation_lock(root.parent / f"{root.name}-other")
+    check("workspace leases canonicalize one checkout without coupling distinct worktrees",
+          lock is alias and lock is not other)
+
+    child = r'''import pathlib
+import sys
+from dgc.scheduler import workspace_mutation_lock
+
+lock = workspace_mutation_lock(pathlib.Path(sys.argv[1]))
+acquired = lock.acquire(timeout=float(sys.argv[3]))
+value = "acquired" if acquired else ("error:" + lock.last_error if lock.last_error else "blocked")
+pathlib.Path(sys.argv[2]).write_text(value)
+if acquired:
+    lock.release()
+'''
+    held = lock.acquire(timeout=1)
+    try:
+        lock_path = lock.path
+        blocked_marker = marker_dir / "blocked"
+        blocked = subprocess.run(
+            [sys.executable, "-c", child, str(root), str(blocked_marker), "0.25"],
+            cwd=str(PROJECT), capture_output=True, text=True, timeout=5)
+        blocked_value = blocked_marker.read_text() if blocked_marker.exists() else ""
+        check("workspace lease blocks a second DGC process on the same checkout",
+              held and blocked.returncode == 0 and blocked_value == "blocked",
+              f"held={held} rc={blocked.returncode} value={blocked_value!r} stderr={blocked.stderr!r}")
+        private = bool(lock_path and lock_path.exists())
+        if private and os.name == "posix":
+            private = (_stat.S_IMODE(lock_path.stat().st_mode) == 0o600
+                       and _stat.S_IMODE(lock_path.parent.stat().st_mode) == 0o700)
+        check("workspace lease metadata is owner-private and hash-addressed",
+              private and lock_path is not None and root.name not in lock_path.name
+              and lock._fd is not None and not os.get_inheritable(lock._fd),
+              str(lock_path))
+    finally:
+        if held:
+            lock.release()
+
+    acquired_marker = marker_dir / "acquired"
+    acquired = subprocess.run(
+        [sys.executable, "-c", child, str(root), str(acquired_marker), "1"],
+        cwd=str(PROJECT), capture_output=True, text=True, timeout=5)
+    acquired_value = acquired_marker.read_text() if acquired_marker.exists() else ""
+    check("workspace lease becomes available to another process after release",
+          acquired.returncode == 0 and acquired_value == "acquired",
+          f"rc={acquired.returncode} value={acquired_value!r} stderr={acquired.stderr!r}")
+
+    crash_child = r'''import os
+import pathlib
+import sys
+from dgc.scheduler import workspace_mutation_lock
+
+lock = workspace_mutation_lock(pathlib.Path(sys.argv[1]))
+os._exit(0 if lock.acquire(timeout=1) else 2)
+'''
+    crashed = subprocess.run(
+        [sys.executable, "-c", crash_child, str(root)], cwd=str(PROJECT), timeout=5)
+    recovered = lock.acquire(timeout=1)
+    if recovered:
+        lock.release()
+    check("workspace lease is released automatically when its holder crashes",
+          crashed.returncode == 0 and recovered,
+          f"child_rc={crashed.returncode} recovered={recovered}")
+
+    held = lock.acquire(timeout=1)
+    cancelled = threading.Event()
+    timer = threading.Timer(0.12, cancelled.set)
+    timer.start()
+    started = _time.monotonic()
+    waited = acquire_cancellable(lock, cancelled)
+    elapsed = _time.monotonic() - started
+    timer.join()
+    if held:
+        lock.release()
+
+    class CancelAfterAcquire:
+        def __init__(self):
+            self.calls = 0
+
+        def is_set(self):
+            self.calls += 1
+            return self.calls > 1
+
+    race_cancelled = not acquire_cancellable(lock, CancelAfterAcquire())
+    released_after_race = lock.acquire(timeout=0.2)
+    if released_after_race:
+        lock.release()
+    check("workspace lease contention remains promptly cancellable",
+          held and not waited and elapsed < 0.5 and race_cancelled and released_after_race,
+          f"waited={waited} elapsed={elapsed:.3f} race={race_cancelled}")
+
+    broken = WorkspaceMutationLock(f"failure-test:{root}")
+    original_lock_directory = _scheduler._lock_directory
+
+    def deny_lock_directory():
+        raise PermissionError("denied by test")
+
+    _scheduler._lock_directory = deny_lock_directory
+    try:
+        failed_closed = not broken.acquire(timeout=0.1)
+        failure = broken.last_error
+    finally:
+        _scheduler._lock_directory = original_lock_directory
+    reusable = broken.acquire(timeout=1)
+    if reusable:
+        broken.release()
+    check("workspace lease backend failures fail closed without poisoning the local lock",
+          failed_closed and "workspace lease unavailable" in failure and reusable,
+          f"failure={failure!r} reusable={reusable}")
+
+    from types import SimpleNamespace
+    from dgc.agent import Agent
+    from dgc.llm import ToolCall
+
+    class LeaseConfig:
+        project_root = root
+        data = {"mode": "auto"}
+        permissions = {"allow": [], "ask": [], "deny": []}
+        session_permissions = {"allow": [], "ask": [], "deny": []}
+
+        def get(self, _key, default=None):
+            return default
+
+    class LeaseUI:
+        def tool_call(self, *_args):
+            pass
+
+        def tool_result(self, *_args):
+            pass
+
+        def tool_denied(self, *_args):
+            pass
+
+    checkpoint_seen = threading.Event()
+    harness = Agent.__new__(Agent)
+    harness.config = LeaseConfig()
+    harness.ui = LeaseUI()
+    harness.cancelled = threading.Event()
+    harness.ctx = SimpleNamespace(
+        project_root=root, config=harness.config, cancelled=harness.cancelled)
+    harness.checkpoints = SimpleNamespace(record_file=lambda _path: checkpoint_seen.set())
+    harness.mcp = SimpleNamespace(call=lambda *_args: "unexpected MCP call")
+    ordered_outcome = []
+    held = lock.acquire(timeout=1)
+    worker = threading.Thread(target=lambda: ordered_outcome.append(
+        Agent._handle_call(harness, ToolCall("lease-order", "write_file", {
+            "path": "ordered.txt", "content": "serialized\n"}))))
+    worker.start()
+    _time.sleep(0.15)
+    snapshot_waited = not checkpoint_seen.is_set() and not (root / "ordered.txt").exists()
+    if held:
+        lock.release()
+    worker.join(timeout=2)
+    check("pre-edit checkpoint capture and mutation both occur inside the checkout lease",
+          held and snapshot_waited and checkpoint_seen.is_set() and not worker.is_alive()
+          and (root / "ordered.txt").exists()
+          and (root / "ordered.txt").read_text() == "serialized\n"
+          and ordered_outcome and "wrote" in ordered_outcome[0],
+          f"held={held} waited={snapshot_waited} outcome={ordered_outcome!r}")
+
+
 def test_code_intel_lsp():
     """Configured LSP queries use bounded stdio JSON-RPC, filtered paths, and clean shutdown."""
     from types import SimpleNamespace
@@ -3953,6 +4127,7 @@ def main():
         test_context_prune()
         test_supply_chain_guard()
         test_mcp_protocol()
+        test_cross_process_workspace_leases()
         test_code_intel_lsp()
         test_code_intel_lsp_pool()
         test_sessions_and_worktree()

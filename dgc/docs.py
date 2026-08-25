@@ -187,6 +187,10 @@ conversation. Kick off a long task on one, spawn another, and keep going.
 
 New agents use your current model by default; point one at a different model or
 a cloud key with `/model` / `/connect` for true parallelism.
+
+Mutating tools use a crash-safe lease for the canonical checkout, including across
+separate DGC CLI, editor, headless, and ACP processes. Reads remain parallel. Use
+`/worktree <name>` when agents should write concurrently on isolated branches.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """

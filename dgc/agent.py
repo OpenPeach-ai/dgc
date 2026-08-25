@@ -1570,31 +1570,39 @@ class Agent:
             # permission engine (or explicit auto mode) has approved this exact call.
             exec_args["_dgc_external_approved"] = True
 
-        if name in ("write_file", "edit_file", "multi_edit", "apply_patch") and args.get("path"):
-            from .workspace import resolve_path
-            try:
-                abs_path = resolve_path(str(args["path"]), self.config.project_root,
-                                        allow_external=bool(external_paths))
-                self.checkpoints.record_file(str(abs_path))  # snapshot before the edit, for rewind
-            except ValueError as e:
-                return f"error: {e}"
-        blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
-                                  self.config, self.config.project_root)
-        if blocked:
-            self.ui.tool_denied(name, args, "PreToolUse hook", call_id)
-            return f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. Do not retry this exact action."
-        self.ui.tool_call(name, args, call_id)
-        # Concurrent fleet sessions may share a checkout. Serialize every known mutation and
-        # every third-party MCP call; a background shell owns its lease until the process exits.
+        # Concurrent DGC processes may share a checkout. Serialize every known mutation and every
+        # third-party MCP call; a background shell acquires and owns its own lease until process exit.
+        # The pre-edit checkpoint is captured only after acquiring the lease, otherwise another
+        # process could change the file between the snapshot and this tool's mutation.
         needs_lease = ((name in _SERIAL_MUTATIONS and not (name == "bash" and args.get("background")))
                        or name.startswith("mcp__"))
         lease = workspace_mutation_lock(self.config.project_root) if needs_lease else None
+        self.ui.tool_call(name, args, call_id)
         if lease is not None and not acquire_cancellable(lease, self.cancelled):
-            out = "error: tool call cancelled while waiting for another agent's workspace write lease"
+            out = (f"error: {lease.last_error}" if lease.last_error else
+                   "error: tool call cancelled while waiting for another agent's workspace write lease")
         else:
             try:
-                out = (self.mcp.call(name, args, self.cancelled)
-                       if name.startswith("mcp__") else execute(name, exec_args, self.ctx))
+                path_error = ""
+                if name in ("write_file", "edit_file", "multi_edit", "apply_patch") and args.get("path"):
+                    from .workspace import resolve_path
+                    try:
+                        abs_path = resolve_path(str(args["path"]), self.config.project_root,
+                                                allow_external=bool(external_paths))
+                        self.checkpoints.record_file(str(abs_path))
+                    except ValueError as e:
+                        path_error = f"error: {e}"
+                if path_error:
+                    out = path_error
+                else:
+                    blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
+                                              self.config, self.config.project_root)
+                    if blocked:
+                        self.ui.tool_denied(name, args, "PreToolUse hook", call_id)
+                        return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
+                                "Do not retry this exact action.")
+                    out = (self.mcp.call(name, args, self.cancelled)
+                           if name.startswith("mcp__") else execute(name, exec_args, self.ctx))
             finally:
                 if lease is not None:
                     lease.release()
