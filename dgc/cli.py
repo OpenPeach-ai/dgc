@@ -662,18 +662,33 @@ class CLI:
             action = rest.strip()
             low = action.lower()
             if low in ("clear", "off", "none", "remove"):
-                self.agent.set_goal(""); self.ui.info("standing goal cleared")
+                if self.agent.set_goal(""):
+                    self.ui.info("standing goal cleared")
+                else:
+                    self.ui.error(self.agent._last_persist_error or "goal update was not saved")
             elif low in ("complete", "completed", "done"):
                 if not self.agent.update_goal("completed"):
-                    self.ui.info("no standing goal to complete")
+                    if self.agent._last_persist_error:
+                        self.ui.error(self.agent._last_persist_error)
+                    else:
+                        self.ui.info("no standing goal to complete")
             elif low in ("blocked", "block"):
                 if not self.agent.update_goal("blocked"):
-                    self.ui.info("no standing goal to block")
+                    if self.agent._last_persist_error:
+                        self.ui.error(self.agent._last_persist_error)
+                    else:
+                        self.ui.info("no standing goal to block")
             elif low in ("resume", "active", "reactivate"):
                 if not self.agent.update_goal("active"):
-                    self.ui.info("no standing goal to resume")
+                    if self.agent._last_persist_error:
+                        self.ui.error(self.agent._last_persist_error)
+                    else:
+                        self.ui.info("no standing goal to resume")
             elif action:
-                self.agent.set_goal(action); self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+                if self.agent.set_goal(action):
+                    self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+                else:
+                    self.ui.error(self.agent._last_persist_error or "goal update was not saved")
             elif self.agent.goal:
                 self.console.print(render.render_markdown(
                     f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}"))
@@ -782,8 +797,10 @@ class CLI:
             self.console.print(render.render_markdown(md))
         elif cmd == "name":
             if rest.strip():
-                self.agent.name_session(rest.strip())
-                self.ui.info(f"session named: {rest.strip()}")
+                if self.agent.name_session(rest.strip()):
+                    self.ui.info(f"session named: {rest.strip()}")
+                else:
+                    self.ui.error(self.agent._last_persist_error or "session rename failed")
             else:
                 self.ui.info(f"current session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "worktree":

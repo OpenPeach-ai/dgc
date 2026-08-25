@@ -610,11 +610,15 @@ class Backend:
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
             if status == "none" or (not text and status == "active"):
-                self.agent.set_goal("")
+                ok = self.agent.set_goal("")
             elif text:
-                self.agent.set_goal(text, status if status in ("active", "completed", "blocked") else "active")
-            elif not self.agent.update_goal(status):
-                self.em.emit("error", message="no standing goal to update")
+                ok = self.agent.set_goal(
+                    text, status if status in ("active", "completed", "blocked") else "active")
+            else:
+                ok = self.agent.update_goal(status)
+            if not ok:
+                message = getattr(self.agent, "_last_persist_error", "")
+                self.em.emit("error", message=message or "no standing goal to update")
                 return
             self._emit_goal()
         elif t == "get_goal":

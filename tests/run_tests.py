@@ -1510,14 +1510,19 @@ def unit_tests(tmp: Path):
     _goal_tool = _g3._handle_call(_ToolCall("g1", "update_goal", {"status": "blocked"}))
     check("model goal transition is explicit and user-visible",
           _g3.goal_status == "blocked" and "visible to the user" in _goal_tool)
-    _g1.set_goal(""); check("goal cleared → section gone", "# Standing goal" not in _g1.system_prompt())
+    check("stale goal mutation rolls back instead of overwriting a newer session generation",
+          not _g1.set_goal("") and _g1.goal == "ship the release"
+          and "changed in another process" in _g1._last_persist_error)
+    _g4 = _Ag(_Cfg(_goal_root), _AgUI()); _g4.load_session(_gp)
+    check("goal cleared → section gone",
+          _g4.set_goal("") and "# Standing goal" not in _g4.system_prompt())
 
     _gbcap = _Capture(); _gb = object.__new__(Backend)
-    _gb.em = _gbcap; _gb._worker = None; _gb.agent = _g1; _gb.config = _g1.config
+    _gb.em = _gbcap; _gb._worker = None; _gb.agent = _g4; _gb.config = _g4.config
     _gb.dispatch({"type": "set_goal", "text": "finish typed protocol", "status": "active"})
     _gb.dispatch({"type": "set_goal", "status": "completed"})
     check("headless typed goal state round-trips without model slash text",
-          _g1.goal == "finish typed protocol" and _g1.goal_status == "completed"
+          _g4.goal == "finish typed protocol" and _g4.goal_status == "completed"
           and [e["status"] for e in _gbcap.events if e["type"] == "goal_changed"][-1] == "completed")
 
     # --- /handoff: generate_handoff builds a sectioned doc from the whole session (for another agent)
@@ -3501,6 +3506,171 @@ def test_sessions_and_worktree():
     check("cross-project session delete is rejected", sessions.delete(outside, d) is False and outside.exists())
     check("resume ID traversal is rejected", sessions.by_id(d, "../../outside") is None)
 
+    # Two independently running DGC processes may resume the same transcript. Both load the same
+    # generation before either writes; the family lease + revision CAS must choose exactly one and
+    # still merge the loser's already-observed monotonic counters into the surviving journal.
+    race_session = sessions.new_path(d)
+    check("session generations start at one",
+          sessions.save(race_session, [{"role": "user", "content": "base"}], d)
+          and sessions.load_record(race_session, d).get("revision") == 1)
+    race_dir = _P(_tf.mkdtemp()); go = race_dir / "go"
+    family_members = (
+        race_session, sessions.metrics_path(race_session, d),
+        sessions.plan_path(race_session, d), sessions.workspace_path(race_session, d))
+    check("transcript, metrics, plan, and workspace sidecars share one local session-family lock",
+          len({id(sessions._lock_for(path)) for path in family_members}) == 1)
+    contention_marker = race_dir / "family-contention"
+    contention_child = r'''import pathlib
+import sys
+from dgc import sessions
+
+sessions._SESSION_LOCK_TIMEOUT_S = 0.25
+try:
+    with sessions._lock_for(pathlib.Path(sys.argv[1])):
+        value = "acquired"
+except OSError:
+    value = "blocked"
+pathlib.Path(sys.argv[2]).write_text(value)
+'''
+    with sessions._lock_for(race_session):
+        contended = _sp.run(
+            [sys.executable, "-c", contention_child,
+             str(sessions.metrics_path(race_session, d)), str(contention_marker)],
+            cwd=str(PROJECT), capture_output=True, text=True, timeout=5)
+    check("session-family lease blocks a second DGC process through any sidecar path",
+          contended.returncode == 0 and contention_marker.read_text() == "blocked",
+          f"rc={contended.returncode} stderr={contended.stderr!r}")
+    race_child = r'''import pathlib
+import sys
+import time
+from dgc import sessions
+
+path, root = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+ready, go, result = map(pathlib.Path, sys.argv[3:6])
+label, count = sys.argv[6], int(sys.argv[7])
+revision = sessions.load_record(path, root).get("revision", 0)
+ready.write_text(str(revision))
+deadline = time.monotonic() + 5
+while not go.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+ok = sessions.save(
+    path, [{"role": "user", "content": label}], root,
+    usage={"input_tokens": count, "requests": count},
+    expected_revision=revision, expected_exists=True)
+result.write_text("saved" if ok else "stale")
+'''
+    children = []
+    for index, count in enumerate((101, 202)):
+        ready, result = race_dir / f"ready-{index}", race_dir / f"result-{index}"
+        proc = _sp.Popen(
+            [sys.executable, "-c", race_child, str(race_session), str(d), str(ready),
+             str(go), str(result), f"writer-{index}", str(count)],
+            cwd=str(PROJECT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
+        children.append((proc, ready, result))
+    deadline = __import__("time").monotonic() + 5
+    while (not all(ready.exists() for _, ready, _ in children)
+           and __import__("time").monotonic() < deadline):
+        __import__("time").sleep(0.01)
+    both_ready = all(ready.exists() and ready.read_text() == "1" for _, ready, _ in children)
+    go.touch()
+    child_details = []
+    for proc, _, result in children:
+        try:
+            stdout, stderr = proc.communicate(timeout=10)
+        except _sp.TimeoutExpired:
+            proc.kill(); stdout, stderr = proc.communicate()
+        child_details.append((proc.returncode, result.read_text() if result.exists() else "",
+                              stdout, stderr))
+    race_record = sessions.load_record(race_session, d)
+    outcomes = [item[1] for item in child_details]
+    check("cross-process session CAS rejects exactly one stale transcript writer",
+          both_ready and outcomes.count("saved") == 1 and outcomes.count("stale") == 1
+          and race_record.get("revision") == 2
+          and race_record.get("messages", [{}])[0].get("content") in ("writer-0", "writer-1"),
+          repr(child_details))
+    check("stale transcript writers still merge monotonic observed metrics",
+          sessions.usage_of(race_session, d).get("input_tokens") == 202
+          and sessions.usage_of(race_session, d).get("requests") == 202)
+
+    # An abrupt holder exit must not strand the lease. The next valid generation mutation should
+    # acquire it and advance normally without a stale lockfile cleanup protocol.
+    crash_marker = race_dir / "crash-held"
+    crash_child = r'''import os
+import pathlib
+import sys
+from dgc import sessions
+
+path = pathlib.Path(sys.argv[1])
+with sessions._lock_for(path):
+    pathlib.Path(sys.argv[2]).write_text("held")
+    os._exit(0)
+'''
+    crashed = _sp.run([sys.executable, "-c", crash_child, str(race_session), str(crash_marker)],
+                      cwd=str(PROJECT), capture_output=True, text=True, timeout=5)
+    pre_rename = sessions.load_record(race_session, d).get("revision")
+    recovered = sessions.set_name(
+        race_session, "after crash", d,
+        expected_revision=pre_rename, expected_exists=True)
+    check("session lease is released automatically when its holder crashes",
+          crashed.returncode == 0 and crash_marker.exists() and recovered
+          and sessions.load_record(race_session, d).get("revision") == pre_rename + 1,
+          crashed.stderr)
+
+    # A process holding an old generation must not resurrect any member of a deleted session family.
+    stale_revision = sessions.load_record(race_session, d).get("revision")
+    sessions.save_plan(race_session, "# guarded", d,
+                       expected_revision=stale_revision, expected_exists=True)
+    sessions.save_workspace(
+        race_session, d, kind="manual", worktree=d, branch="main",
+        expected_revision=stale_revision, expected_exists=True)
+    deleted = sessions.delete(
+        race_session, d, expected_revision=stale_revision, expected_exists=True)
+    stale_saved = sessions.save(
+        race_session, [{"role": "user", "content": "resurrect"}], d,
+        usage={"requests": 999}, expected_revision=stale_revision, expected_exists=True)
+    stale_plan = sessions.save_plan(
+        race_session, "# resurrect", d,
+        expected_revision=stale_revision, expected_exists=True)
+    stale_workspace = sessions.save_workspace(
+        race_session, d, kind="manual", worktree=d, branch="stale",
+        expected_revision=stale_revision, expected_exists=True)
+    check("deleted session generations cannot be resurrected by stale writers",
+          deleted and not stale_saved and not stale_plan and not stale_workspace
+          and not race_session.exists()
+          and not sessions.metrics_path(race_session, d).exists()
+          and not sessions.plan_path(race_session, d).exists()
+          and not sessions.workspace_path(race_session, d).exists())
+
+    legacy = sessions.new_path(d)
+    legacy.write_text(json.dumps({
+        "schema_version": 5, "id": legacy.stem, "project": str(d.resolve()),
+        "messages": [{"role": "user", "content": "legacy"}],
+    }))
+    legacy_saved = sessions.save(
+        legacy, [{"role": "user", "content": "migrated"}], d,
+        expected_revision=0, expected_exists=True)
+    check("legacy sessions migrate from generation zero on their first guarded write",
+          legacy_saved and sessions.load_record(legacy, d).get("revision") == 1
+          and sessions.load(legacy, d)[0].get("content") == "migrated")
+    corrupt = sessions.new_path(d)
+    corrupt.write_text(json.dumps({
+        "schema_version": 6, "id": "wrong-id", "project": str(d.resolve()),
+        "revision": True, "messages": [],
+    }))
+    corrupt_before = corrupt.read_bytes()
+    try:
+        sessions.load_record(corrupt, d)
+        corrupt_rejected = False
+    except ValueError:
+        corrupt_rejected = True
+    corrupt_saved = sessions.save(
+        corrupt, [{"role": "user", "content": "replace invalid"}], d,
+        expected_revision=0, expected_exists=True)
+    check("malformed session identity and revisions fail closed without replacement",
+          corrupt_rejected and not corrupt_saved and corrupt.read_bytes() == corrupt_before)
+    sessions.delete(legacy, d)
+    corrupt.unlink(missing_ok=True)
+
     if _sp.run(["git", "--version"], capture_output=True).returncode != 0:
         return
     repo = _P(_tf.mkdtemp())
@@ -3653,6 +3823,20 @@ def test_sessions_and_worktree():
         check("TUI retained checkout remains explicitly recoverable",
               managed_session.workspace.cleanup() is None)
 
+        stale_session = fleet_tui._new_session()
+        stale_session.agent._session_revision = 0
+        stale_session.agent._session_exists = False
+        sessions.save(stale_session.agent.session_file,
+                      [{"role": "user", "content": "claimed elsewhere"}], repo)
+        stale_path = stale_session.workspace.path
+        stale_result = fleet_tui._finalize_session_workspace(
+            stale_session, "stale process close")
+        check("stale TUI process retains rather than deleting an uncertain fleet checkout",
+              stale_result is not None and stale_result.status == "retained"
+              and stale_path.exists() and stale_session.workspace.payload.get("status") == "retained")
+        stale_session.workspace.cleanup()
+        fleet_tui._sessions.remove(stale_session)
+
         clean_session = fleet_tui._new_session()
         clean_path = clean_session.workspace.path
         clean_session._req_event.clear()
@@ -3771,11 +3955,12 @@ def test_durable_checkpoints():
           not failed_open.open(1, "save failure", []) and failed_open.listing() == [])
 
     class _UI:
-        def __init__(self): self.results = []
+        def __init__(self): self.results = []; self.errors = []
         def tool_call(self, *_args, **_kwargs): pass
         def tool_result(self, name, result, *_args, **_kwargs): self.results.append((name, result))
         def tool_denied(self, *_args, **_kwargs): pass
         def approve(self, *_args, **_kwargs): return "yes"
+        def error(self, message): self.errors.append(message)
         def __getattr__(self, _name): return lambda *args, **kwargs: None
 
     edit_root = _P(_tf.mkdtemp()).resolve()
@@ -3874,6 +4059,79 @@ def test_durable_checkpoints():
 
         check("resume never rebinds checkpoint paths into a different checkout",
               wrong_checkout_empty)
+
+        # Independently resumed Agent instances retain their loaded generation. A later save from
+        # one instance must make the other fail closed instead of silently replacing newer history,
+        # goal/name state, or a plan artifact.
+        concurrent_path = sessions.new_path(source_root)
+        owner = _Agent(_Config(execution_root), _UI())
+        owner.session_root = source_root; owner.session_file = concurrent_path
+        owner.messages = [owner.messages[0], {"role": "user", "content": "base"}]
+        owner_saved = owner._persist()
+        stale = _Agent(_Config(execution_root), _UI())
+        stale.session_root = source_root; stale.load_session(concurrent_path)
+        stale_turn_ui = _UI()
+        stale_turn = _Agent(_Config(execution_root), stale_turn_ui)
+        stale_turn.session_root = source_root; stale_turn.load_session(concurrent_path)
+        owner.messages.append({"role": "assistant", "content": "new owner state"})
+        owner_advanced = owner._persist()
+        stale_turn_calls = []
+        stale_turn.client = type("NoStaleRequest", (), {
+            "tools_supported": True,
+            "chat": lambda self, *_args, **_kwargs: stale_turn_calls.append(1),
+        })()
+        stale_turn.run_turn("must stop before the model")
+        stale.messages.append({"role": "assistant", "content": "stale overwrite"})
+        stale_saved = stale._persist()
+        stale_goal = stale.set_goal("must not appear")
+        stale_name = stale.name_session("must not appear")
+        stale.config.data["mode"] = "plan"
+        stale._refresh_system()
+        stale_plan_result = stale._handle_call(_ToolCall(
+            "stale-plan", "present_plan", {"plan": "# Must not appear\n\n1. stale"}))
+        concurrent_record = sessions.load_record(concurrent_path, source_root)
+        check("Agent compare-and-swap rejects stale transcript, goal, name, and plan mutations",
+              owner_saved and owner_advanced and not stale_saved and not stale_goal
+              and not stale_name and stale.goal == "" and stale.session_name is None
+              and "not saved" in stale_plan_result
+              and concurrent_record.get("revision") == owner._session_revision
+              and concurrent_record.get("messages") == owner.messages
+              and not sessions.plan_path(concurrent_path, source_root).exists()
+              and "changed in another process" in stale._last_persist_error,
+              detail=stale._last_persist_error)
+        check("stale Agent turn stops before making another model request",
+              not stale_turn_calls and len(stale_turn.messages) == 2
+              and any("changed in another process" in error
+                      for error in stale_turn_ui.errors),
+              detail=repr(stale_turn_ui.errors))
+
+        # A direct edit records its pre-image durably before mutation. If another process advanced
+        # the transcript since this Agent opened its checkpoint, that callback must abort the edit.
+        edit_path = execution_root / "stale-edit.txt"
+        edit_path.write_text("original\n")
+        editor_cfg = _Config(execution_root)
+        editor_cfg.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {}})
+        editor = _Agent(editor_cfg, _UI())
+        editor.session_root = source_root; editor.load_session(concurrent_path)
+        checkpoint_opened = editor.checkpoints.open(
+            len(editor.messages), "stale edit", editor.messages[1:])
+        advancing = _Agent(_Config(execution_root), _UI())
+        advancing.session_root = source_root; advancing.load_session(concurrent_path)
+        advancing.messages.append({"role": "assistant", "content": "advanced elsewhere"})
+        advanced = advancing._persist()
+        stale_edit = editor._handle_call(_ToolCall(
+            "stale-write", "write_file", {"path": "stale-edit.txt", "content": "changed\n"}))
+        check("stale session generation blocks an edit before touching the workspace",
+              checkpoint_opened and advanced and edit_path.read_text() == "original\n"
+              and "durably capture" in stale_edit,
+              detail=stale_edit)
+        deleted_concurrent = sessions.delete(
+            concurrent_path, source_root,
+            expected_revision=advancing._session_revision, expected_exists=True)
+        editor._record_activity("read_file")
+        check("stale Agent activity cannot recreate a deleted metrics journal",
+              deleted_concurrent and not concurrent_path.exists()
+              and not sessions.metrics_path(concurrent_path, source_root).exists())
     finally:
         sessions.SESSIONS_DIR = old_sessions_dir
 

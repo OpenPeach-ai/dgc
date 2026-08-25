@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import USER_HOME
+from .scheduler import named_process_lock
 
 SESSIONS_DIR = USER_HOME / "sessions"
 SCHEMA_VERSION = 6
@@ -28,13 +29,88 @@ _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests")
 ACTIVITY_KEYS = ("tool_calls", "edits", "edit_fails")
 _LOCKS_GUARD = threading.Lock()
-_LOCKS: dict[str, threading.RLock] = {}
+_LOCKS: dict[str, "_SessionLock"] = {}
+_SESSION_LOCK_TIMEOUT_S = 30.0
 
 
-def _lock_for(path: Path) -> threading.RLock:
-    key = str(path.resolve(strict=False))
+def _session_family(path: Path) -> Path:
+    """Map transcript sidecars to one lock/CAS family rooted at the `.json` session path."""
+    path = Path(path).resolve(strict=False)
+    if path.name.endswith(".plan.md"):
+        return path.with_name(path.name[:-len(".plan.md")] + ".json")
+    if path.suffix in (".metrics", ".workspace"):
+        return path.with_suffix(".json")
+    return path
+
+
+class _SessionLock:
+    """Re-entrant thread lock backed by a crash-released cross-process lease."""
+    def __init__(self, key: str):
+        self._local = threading.RLock()
+        self._depth = threading.local()
+        self._process = named_process_lock("session", key)
+
+    def __enter__(self):
+        self._local.acquire()
+        depth = int(getattr(self._depth, "value", 0))
+        if depth == 0 and not self._process.acquire(timeout=_SESSION_LOCK_TIMEOUT_S):
+            self._local.release()
+            raise OSError(self._process.last_error or "timed out waiting for the session lease")
+        self._depth.value = depth + 1
+        return self
+
+    def __exit__(self, _exc_type, _exc, _tb):
+        depth = int(getattr(self._depth, "value", 0))
+        if depth <= 0:
+            raise RuntimeError("release unlocked session lock")
+        self._depth.value = depth - 1
+        try:
+            if depth == 1:
+                self._process.release()
+        finally:
+            self._local.release()
+
+
+def _lock_for(path: Path) -> _SessionLock:
+    key = str(_session_family(path))
     with _LOCKS_GUARD:
-        return _LOCKS.setdefault(key, threading.RLock())
+        lock = _LOCKS.get(key)
+        if lock is None:
+            lock = _SessionLock(key)
+            _LOCKS[key] = lock
+        return lock
+
+
+def _generation(path: Path, project_root) -> tuple[bool, int]:
+    """Return transcript existence/revision while its session-family lock is held."""
+    exists = path.is_file()
+    revision = _record_revision(_load_data(path, project_root), path) if exists else 0
+    return exists, revision
+
+
+def _expected_generation_matches(exists: bool, revision: int,
+                                 expected_revision: int | None,
+                                 expected_exists: bool | None) -> bool:
+    """Validate an optional compare-and-swap expectation (both fields or neither)."""
+    if expected_revision is None and expected_exists is None:
+        return True
+    return (not isinstance(expected_revision, bool)
+            and isinstance(expected_revision, int) and expected_revision >= 0
+            and isinstance(expected_exists, bool)
+            and exists == expected_exists and revision == expected_revision)
+
+
+def generation_matches(path, project_root, *, expected_revision: int,
+                       expected_exists: bool) -> bool:
+    """Check an Agent's session generation under the family lease without mutating it."""
+    try:
+        session = resolve_path(project_root, path)
+        with _lock_for(session):
+            exists, revision = _generation(session, project_root)
+            return _expected_generation_matches(
+                exists, revision, expected_revision, expected_exists)
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -107,7 +183,8 @@ def metrics_path(session_file, project_root) -> Path:
 
 
 def save_metrics(path: Path, project_root, *, usage: dict | None = None,
-                 activity: dict | None = None) -> None:
+                 activity: dict | None = None, expected_revision: int | None = None,
+                 expected_exists: bool | None = None) -> bool:
     """Atomically checkpoint monotonic counters without rewriting the full transcript.
 
     A benchmark or supervisor may SIGKILL DGC at its wall-clock deadline, bypassing the normal
@@ -117,11 +194,15 @@ def save_metrics(path: Path, project_root, *, usage: dict | None = None,
     counter backwards.
     """
     if usage is None and activity is None:
-        return
+        return True
     try:
         session = resolve_path(project_root, path)
         journal = metrics_path(session, project_root)
         with _lock_for(journal):
+            exists, revision = _generation(session, project_root)
+            if not _expected_generation_matches(
+                    exists, revision, expected_revision, expected_exists):
+                return False
             old: dict = {}
             try:
                 loaded = json.loads(journal.read_text())
@@ -150,8 +231,9 @@ def save_metrics(path: Path, project_root, *, usage: dict | None = None,
                 },
             }
             _atomic_write(journal, json.dumps(data, default=str))
+        return True
     except (OSError, ValueError, TypeError):
-        pass  # metrics are best-effort and must never break the agent loop
+        return False  # metrics are best-effort and must never break the agent loop
 
 
 def _load_metrics(path, project_root) -> dict:
@@ -177,7 +259,8 @@ def metrics_of(path, project_root) -> dict:
 def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
-         checkpoints: dict | None = None) -> bool:
+         checkpoints: dict | None = None, *, expected_revision: int | None = None,
+         expected_exists: bool | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
@@ -201,11 +284,23 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
         with _lock_for(path):
-            _atomic_write(path, json.dumps(data, default=str))
-        saved = True
+            exists, current_revision = _generation(path, project_root)
+            matches = _expected_generation_matches(
+                exists, current_revision, expected_revision, expected_exists)
+            if matches:
+                data["revision"] = current_revision + 1
+                _atomic_write(path, json.dumps(data, default=str))
+                saved = True
+            # Keep the transcript and journal in one deletion-serialized family. A stale writer may
+            # merge monotonic counters into a newer generation, but must not recreate state after
+            # deletion or contaminate a colliding newly-created path.
+            stale_current = (expected_exists is True and exists
+                             and not isinstance(expected_revision, bool)
+                             and isinstance(expected_revision, int) and expected_revision >= 0)
+            if saved or stale_current:
+                save_metrics(path, project_root, usage=usage, activity=activity)
     except (OSError, TypeError, ValueError):
         pass  # never let a failed save crash the turn
-    save_metrics(path, project_root, usage=usage, activity=activity)
     return saved
 
 
@@ -216,10 +311,22 @@ def _load_data(path, project_root) -> dict:
     if (not isinstance(data, dict) or not isinstance(data.get("messages", []), list)
             or any(not isinstance(message, dict) for message in data.get("messages", []))):
         raise ValueError(f"invalid session file: {p.name}")
+    _record_revision(data, p)
     recorded = data.get("project")
     if recorded and Path(recorded).resolve(strict=False) != Path(project_root).resolve(strict=False):
         raise ValueError("session belongs to a different project")
     return data
+
+
+def _record_revision(data: dict, path: Path) -> int:
+    """Validate a persisted generation; schemas before v6 migrate from revision zero."""
+    revision = data.get("revision", 0)
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        raise ValueError(f"invalid session revision: {path.name}")
+    recorded_id = data.get("id")
+    if recorded_id is not None and str(recorded_id) != path.stem:
+        raise ValueError(f"session id does not match its filename: {path.name}")
+    return revision
 
 
 def load_record(path, project_root) -> dict:
@@ -247,13 +354,21 @@ def plan_path(session_file, project_root) -> Path:
     return p.with_name(p.stem + ".plan.md")
 
 
-def save_plan(session_file, markdown: str, project_root) -> None:
+def save_plan(session_file, markdown: str, project_root, *,
+              expected_revision: int | None = None,
+              expected_exists: bool | None = None) -> bool:
     try:
-        p = plan_path(session_file, project_root)
+        session = resolve_path(project_root, session_file)
+        p = plan_path(session, project_root)
         with _lock_for(p):
+            exists, revision = _generation(session, project_root)
+            if not _expected_generation_matches(
+                    exists, revision, expected_revision, expected_exists):
+                return False
             _atomic_write(p, markdown)
-    except OSError:
-        pass
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def load_plan(session_file, project_root) -> str | None:
@@ -277,7 +392,8 @@ def workspace_path(session_file, project_root) -> Path:
 
 
 def save_workspace(session_file, project_root, *, kind: str, worktree, branch: str,
-                   metadata="") -> None:
+                   metadata="", expected_revision: int | None = None,
+                   expected_exists: bool | None = None) -> bool:
     """Atomically associate a saved conversation with a managed/manual worktree."""
     if kind not in ("managed", "manual"):
         raise ValueError("workspace kind must be managed or manual")
@@ -295,9 +411,15 @@ def save_workspace(session_file, project_root, *, kind: str, worktree, branch: s
     encoded = json.dumps(payload, ensure_ascii=True)
     if len(encoded.encode("ascii")) > _MAX_WORKSPACE_SIDECAR_BYTES:
         raise ValueError("workspace association is too large")
-    p = workspace_path(session_file, project_root)
+    session = resolve_path(project_root, session_file)
+    p = workspace_path(session, project_root)
     with _lock_for(p):
+        exists, revision = _generation(session, project_root)
+        if not _expected_generation_matches(
+                exists, revision, expected_revision, expected_exists):
+            return False
         _atomic_write(p, encoded)
+    return True
 
 
 def load_workspace(session_file, project_root) -> dict | None:
@@ -348,19 +470,31 @@ def load_workspace(session_file, project_root) -> dict | None:
                 pass
 
 
-def clear_workspace(session_file, project_root) -> None:
+def clear_workspace(session_file, project_root, *, expected_revision: int | None = None,
+                    expected_exists: bool | None = None) -> bool:
     try:
-        p = workspace_path(session_file, project_root)
+        session = resolve_path(project_root, session_file)
+        p = workspace_path(session, project_root)
         with _lock_for(p):
+            exists, revision = _generation(session, project_root)
+            if not _expected_generation_matches(
+                    exists, revision, expected_revision, expected_exists):
+                return False
             p.unlink(missing_ok=True)
+        return True
     except (OSError, ValueError):
-        pass
+        return False
 
 
-def delete(path, project_root) -> bool:
+def delete(path, project_root, *, expected_revision: int | None = None,
+           expected_exists: bool | None = None) -> bool:
     try:
         p = resolve_path(project_root, path, must_exist=True)
         with _lock_for(p):
+            exists, revision = _generation(p, project_root)
+            if not _expected_generation_matches(
+                    exists, revision, expected_revision, expected_exists):
+                return False
             p.unlink()
             try:
                 plan_path(p, project_root).unlink()
@@ -433,15 +567,23 @@ def activity_of(path, project_root, record: dict | None = None) -> dict:
         return {key: 0 for key in ACTIVITY_KEYS}
 
 
-def set_name(path, name: str, project_root) -> None:
+def set_name(path, name: str, project_root, *, expected_revision: int | None = None,
+             expected_exists: bool | None = None) -> bool:
     try:
         p = resolve_path(project_root, path, must_exist=True)
         with _lock_for(p):
             data = _load_data(p, project_root)  # the lock is re-entrant; retain it through replace
+            revision = _record_revision(data, p)
+            if not _expected_generation_matches(
+                    True, revision, expected_revision, expected_exists):
+                return False
             data["name"] = name
+            data["revision"] = revision + 1
+            data["updated"] = time.time()
             _atomic_write(p, json.dumps(data, default=str))
+        return True
     except (OSError, TypeError, ValueError):
-        pass
+        return False
 
 
 def listing(project_root) -> list[tuple[Path, float, str, int, str]]:

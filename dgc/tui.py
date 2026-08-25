@@ -45,6 +45,14 @@ from .commands import command_pairs
 SLASH_COMMANDS: list[tuple[str, str]] = command_pairs("tui")
 
 
+def _session_generation_guard(agent) -> dict:
+    """CAS fields for sidecar changes; test doubles and legacy agents stay unguarded."""
+    if hasattr(agent, "_session_revision") and hasattr(agent, "_session_exists"):
+        return {"expected_revision": agent._session_revision,
+                "expected_exists": agent._session_exists}
+    return {}
+
+
 class SlashCompleter(Completer):
     """A live command palette: while the composer holds just `/word`, offer matching commands
     (name + description) as a dropdown. Filters as you type; picks with ↑/↓ + Enter."""
@@ -2259,16 +2267,19 @@ class TUI:
             session._aux_cancel.set()
             session._autotitle_pending = False
 
-    def _name_session(self, sess, name: str) -> None:
+    def _name_session(self, sess, name: str) -> bool:
         """Apply an explicit name and retire any now-obsolete automatic title request."""
         value = name.strip()
         if not value:
-            return
+            return False
         sess._aux_generation += 1
         sess._aux_cancel.set()
         sess._autotitle_pending = False
         sess._autotitled = True
-        sess.agent.name_session(value)
+        saved = sess.agent.name_session(value) is not False
+        if not saved:
+            self._flash(getattr(sess.agent, "_last_persist_error", "") or "session rename failed")
+        return saved
 
     def _foreground_aux_barrier(self) -> None:
         """Wait until a canceled auxiliary call releases the shared local-model slot."""
@@ -2288,8 +2299,8 @@ class TUI:
         except Exception:
             title = None
         if title and not (cancel and cancel.is_set()) and not self.agent.session_name:
-            self.agent.name_session(title)
-            self._invalidate()
+            if self.agent.name_session(title) is not False:
+                self._invalidate()
 
     def _do_handoff(self, sess) -> None:
         """Background: generate a HANDOFF document from the whole session, save it to a file the user
@@ -2470,14 +2481,25 @@ class TUI:
                                      else (str((association or {}).get("branch", ""))
                                            if kind == "manual" else ""))
             if kind == "managed" and workspace is not None:
-                _sess.save_workspace(agent.session_file, self._fleet_root, kind="managed",
-                                     worktree=workspace.path, branch=workspace.branch,
-                                     metadata=workspace.metadata_path)
+                associated = _sess.save_workspace(
+                    agent.session_file, self._fleet_root, kind="managed",
+                    worktree=workspace.path, branch=workspace.branch,
+                    metadata=workspace.metadata_path, **_session_generation_guard(agent))
             elif kind == "manual":
-                _sess.save_workspace(agent.session_file, self._fleet_root, kind="manual",
-                                     worktree=root, branch=sess.workspace_branch)
+                associated = _sess.save_workspace(
+                    agent.session_file, self._fleet_root, kind="manual",
+                    worktree=root, branch=sess.workspace_branch,
+                    **_session_generation_guard(agent))
             elif session_path:
-                _sess.clear_workspace(agent.session_file, self._fleet_root)
+                associated = _sess.clear_workspace(
+                    agent.session_file, self._fleet_root, **_session_generation_guard(agent))
+            else:
+                associated = True
+            if not associated:
+                if workspace is not None:
+                    workspace.retain("session association changed during startup", [])
+                    workspace = None  # the generic exception cleanup must not delete uncertain work
+                raise RuntimeError("the saved session changed while attaching its workspace")
         except Exception as exc:
             if workspace is not None:
                 workspace.finish("fleet session startup failed")
@@ -2537,16 +2559,35 @@ class TUI:
                 if retain_if_running:
                     workspace.retain(reason, [])
                 return None
+            from . import sessions as _sess
+            guard = _session_generation_guard(sess.agent)
+            if guard and not _sess.generation_matches(
+                    sess.agent.session_file, self._fleet_root, **guard):
+                detail = f"{reason}: session generation changed in another process"
+                error = workspace.retain(detail, []) or ""
+                from .worktree import FleetWorkspaceResult
+                result = FleetWorkspaceResult(
+                    "error" if error else "retained", workspace.path, workspace.branch,
+                    error=error)
+                sess._workspace_finalized = True
+                return result
             result = workspace.finish(reason)
             sess._workspace_finalized = True
-            from . import sessions as _sess
             if result.status == "cleaned":
                 if sess.agent.session_file:
-                    _sess.clear_workspace(sess.agent.session_file, self._fleet_root)
+                    associated = _sess.clear_workspace(
+                        sess.agent.session_file, self._fleet_root,
+                        **_session_generation_guard(sess.agent))
+                    if not associated:
+                        self._flash("workspace cleaned, but the session association changed elsewhere")
             elif sess.agent.session_file:
-                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="managed",
-                                     worktree=workspace.path, branch=workspace.branch,
-                                     metadata=workspace.metadata_path)
+                associated = _sess.save_workspace(
+                    sess.agent.session_file, self._fleet_root, kind="managed",
+                    worktree=workspace.path, branch=workspace.branch,
+                    metadata=workspace.metadata_path,
+                    **_session_generation_guard(sess.agent))
+                if not associated:
+                    self._flash("retained workspace association changed in another process")
             return result
 
     def _close_session(self, idx: int) -> None:
@@ -2702,24 +2743,32 @@ class TUI:
             self._prompt_new_session()
         elif cmd == "name":
             if rest:
-                self._name_session(self.active, rest); self._flash(f"session named: {rest}")
+                if self._name_session(self.active, rest):
+                    self._flash(f"session named: {rest}")
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "goal":
             if rest.lower() in ("clear", "off", "none", "remove"):
-                self.agent.set_goal(""); self._flash("standing goal cleared")
+                self._flash("standing goal cleared" if self.agent.set_goal("") else
+                            (getattr(self.agent, "_last_persist_error", "")
+                             or "goal update was not saved"))
             elif rest.lower() in ("complete", "completed", "done"):
                 self._flash("standing goal → completed" if self.agent.update_goal("completed")
-                            else "no standing goal to complete")
+                            else (getattr(self.agent, "_last_persist_error", "")
+                                  or "no standing goal to complete"))
             elif rest.lower() in ("blocked", "block"):
                 self._flash("standing goal → blocked" if self.agent.update_goal("blocked")
-                            else "no standing goal to block")
+                            else (getattr(self.agent, "_last_persist_error", "")
+                                  or "no standing goal to block"))
             elif rest.lower() in ("resume", "active", "reactivate"):
                 self._flash("standing goal → active" if self.agent.update_goal("active")
-                            else "no standing goal to resume")
+                            else (getattr(self.agent, "_last_persist_error", "")
+                                  or "no standing goal to resume"))
             elif rest:
-                self.agent.set_goal(rest)
-                self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}")
+                self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}"
+                            if self.agent.set_goal(rest) else
+                            (getattr(self.agent, "_last_persist_error", "")
+                             or "goal update was not saved"))
             else:
                 g = getattr(self.agent, "goal", "")
                 if g:
@@ -2923,10 +2972,12 @@ class TUI:
             if sess.workspace_kind == "managed" and sess.workspace is not None:
                 _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="managed",
                                      worktree=sess.workspace.path, branch=sess.workspace.branch,
-                                     metadata=sess.workspace.metadata_path)
+                                     metadata=sess.workspace.metadata_path,
+                                     **_session_generation_guard(sess.agent))
             elif sess.workspace_kind == "manual":
                 _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="manual",
-                                     worktree=sess.workspace_path, branch=sess.workspace_branch)
+                                     worktree=sess.workspace_path, branch=sess.workspace_branch,
+                                     **_session_generation_guard(sess.agent))
             sess.blocks.clear()
             sess._turn_marks = []
             sess._buf = ""
@@ -3401,7 +3452,8 @@ class TUI:
         sess.workspace_branch = branch
         sess._workspace_finalized = False
         _sess.save_workspace(new_agent.session_file, self._fleet_root, kind="manual",
-                             worktree=project_root, branch=branch)
+                             worktree=project_root, branch=branch,
+                             **_session_generation_guard(new_agent))
         self.blocks.clear(); self._buf = ""
         prior = (f" · retained prior {prior_result.branch}" if prior_result is not None
                  and prior_result.status != "cleaned" else "")

@@ -15,6 +15,7 @@ from pathlib import Path
 
 _guard = threading.Lock()
 _workspace_locks: dict[str, "WorkspaceMutationLock"] = {}
+_named_locks: dict[str, "WorkspaceMutationLock"] = {}
 _POLL_SECONDS = 0.05
 
 
@@ -112,8 +113,9 @@ class WorkspaceMutationLock:
     allows a background reader thread to release a lease acquired by its launching thread.
     """
 
-    def __init__(self, key: str):
+    def __init__(self, key: str, label: str = "workspace"):
         self.key = key
+        self.label = label
         self.path: Path | None = None
         self._local = threading.Lock()
         self._state = threading.Lock()
@@ -166,7 +168,7 @@ class WorkspaceMutationLock:
                 time.sleep(remaining)
         except OSError as exc:
             self._set_error(
-                f"workspace lease unavailable ({type(exc).__name__}: {str(exc)[:240]})")
+                f"{self.label} lease unavailable ({type(exc).__name__}: {str(exc)[:240]})")
             return False
         finally:
             with self._state:
@@ -188,7 +190,7 @@ class WorkspaceMutationLock:
             _unlock_os(fd)
         except OSError as exc:
             self._set_error(
-                f"workspace lease release failed ({type(exc).__name__}: {str(exc)[:240]})")
+                f"{self.label} lease release failed ({type(exc).__name__}: {str(exc)[:240]})")
         finally:
             try:
                 os.close(fd)
@@ -207,6 +209,23 @@ def workspace_mutation_lock(project_root) -> WorkspaceMutationLock:
         if lock is None:
             lock = WorkspaceMutationLock(key)
             _workspace_locks[key] = lock
+        return lock
+
+
+def named_process_lock(namespace: str, key: str) -> WorkspaceMutationLock:
+    """Return a crash-released process lock for a non-workspace internal resource."""
+    namespace = str(namespace).strip().lower()
+    if not namespace or not namespace.replace("-", "").replace("_", "").isalnum():
+        raise ValueError("lock namespace must be alphanumeric")
+    normalized = unicodedata.normalize("NFC", os.path.normcase(str(key)))
+    if os.name == "nt" or sys.platform == "darwin":
+        normalized = normalized.casefold()
+    compound = f"{namespace}\0{normalized}"
+    with _guard:
+        lock = _named_locks.get(compound)
+        if lock is None:
+            lock = WorkspaceMutationLock(compound, label=namespace)
+            _named_locks[compound] = lock
         return lock
 
 

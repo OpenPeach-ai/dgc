@@ -703,6 +703,10 @@ class Agent:
         # keeps its transcript in the launch project's session scope so /resume can find it later.
         self.session_root = Path(config.project_root).resolve(strict=False)
         self.session_name = None  # optional user-given name for the current session
+        self._session_persist_lock = threading.RLock()
+        self._session_revision = 0
+        self._session_exists = False
+        self._last_persist_error = ""
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.goal_status = "none"  # none | active | completed | blocked
         self._session_started = False       # SessionStart hook fires once per session
@@ -893,12 +897,15 @@ class Agent:
         """
         if not self.session_file:
             return
-        with self._usage_lock:
-            usage = dict(self.usage_totals)
-            activity = dict(self.activity_totals)
-        from . import sessions
-        sessions.save_metrics(self.session_file, self.session_root,
-                              usage=usage, activity=activity)
+        with self._session_persist_lock:
+            with self._usage_lock:
+                usage = dict(self.usage_totals)
+                activity = dict(self.activity_totals)
+            from . import sessions
+            sessions.save_metrics(
+                self.session_file, self.session_root, usage=usage, activity=activity,
+                expected_revision=self._session_revision,
+                expected_exists=self._session_exists)
 
     def _activate_tool_intents(self, text: str, *, replace: bool = False) -> bool:
         """Activate optional tools from explicit turn/goal intent; return whether it changed."""
@@ -978,6 +985,9 @@ class Agent:
         self.todos.clear()
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.session_name = None
+        self._session_revision = 0
+        self._session_exists = False
+        self._last_persist_error = ""
         self.plan_return_mode = None
         self._pending_images = None
         self.steer_queue.clear()
@@ -1228,33 +1238,84 @@ class Agent:
         finally:
             self._active_tool_intents.clear()
             self._refresh_system()
-            self._persist()
+            saved = self._persist()
+            if not saved and self.depth == 0:
+                self.ui.error(self._last_persist_error or "could not persist this session")
             if self.depth == 0:             # Stop lifecycle hook (turn finished)
                 run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
 
     def _persist(self) -> bool:
-        if self.session_file:
-            from . import sessions
+        if not self.session_file:
+            self._last_persist_error = ""
+            return True
+        from . import sessions
+        with self._session_persist_lock:
             try:
                 checkpoint_state = self.checkpoints.state()
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
+                self._last_persist_error = f"could not persist checkpoint state: {exc}"
                 return False
-            return sessions.save(
+            with self._usage_lock:
+                usage, activity = dict(self.usage_totals), dict(self.activity_totals)
+            saved = sessions.save(
                 self.session_file, self.messages, self.session_root,
                 name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                usage=self.usage_totals, activity=self.activity_totals,
-                checkpoints=checkpoint_state)
-        return True
+                usage=usage, activity=activity, checkpoints=checkpoint_state,
+                expected_revision=self._session_revision,
+                expected_exists=self._session_exists)
+            if saved:
+                self._session_revision += 1
+                self._session_exists = True
+                self._last_persist_error = ""
+                return True
 
-    def name_session(self, name: str) -> None:
+            try:
+                if not self.session_file.is_file():
+                    detail = ("the session was deleted by another process" if self._session_exists else
+                              "the new session path could not be created or was claimed")
+                else:
+                    current = sessions.load_record(self.session_file, self.session_root)
+                    revision = int(current.get("revision", 0))
+                    detail = (f"the session changed in another process (expected revision "
+                              f"{self._session_revision}, found {revision})" if
+                              revision != self._session_revision else
+                              "the current session generation could not be written")
+            except (OSError, TypeError, ValueError):
+                detail = "the session file could not be written or revalidated"
+            self._last_persist_error = (
+                f"Session save stopped because {detail}. This process kept its in-memory state; "
+                "use /new or resume the latest saved session before making more edits.")
+            return False
+
+    def name_session(self, name: str) -> bool:
         """Give the current session a human name (shown in --resume / the session picker)."""
-        self.session_name = name.strip() or None
-        if self.session_file:
-            from . import sessions
-            if not self.session_file.exists():   # a brand-new session with no turns yet
-                self._persist()
+        value = name.strip() or None
+        with self._session_persist_lock:
+            previous = self.session_name
+            self.session_name = value
+            if not self.session_file:
+                self._last_persist_error = ""
+                return True
+            if not self._session_exists:          # a brand-new session with no turns yet
+                saved = self._persist()
             elif self.session_name:
-                sessions.set_name(self.session_file, self.session_name, self.session_root)
+                from . import sessions
+                saved = sessions.set_name(
+                    self.session_file, self.session_name, self.session_root,
+                    expected_revision=self._session_revision,
+                    expected_exists=True)
+                if saved:
+                    self._session_revision += 1
+                    self._last_persist_error = ""
+                else:
+                    self._last_persist_error = (
+                        "Session rename stopped because the saved session changed in another process "
+                        "or could not be written.")
+            else:
+                saved = self._persist()
+            if not saved:
+                self.session_name = previous
+            return saved
 
     def generate_title(self, prompt: str, cancel=None) -> str | None:
         """A short, distinctive 5-10 word session title derived from the first prompt (
@@ -1341,42 +1402,57 @@ class Agent:
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
-        path = sessions.resolve_path(self.session_root, path, must_exist=True)
-        record = sessions.load_record(path, self.session_root)
-        loaded = [m for m in record.get("messages", []) if m.get("role") != "system"]
-        self.session_file = path
-        self.session_name = str(record.get("name") or "").strip() or None
-        with self._usage_lock:
-            self.usage_totals = sessions.usage_of(path, self.session_root, record)
-            self.activity_totals = sessions.activity_of(path, self.session_root, record)
-        self.goal = str(record.get("goal") or "")[:_GOAL_MAX_CHARS]
-        raw_status = str(record.get("goal_status") or "active")
-        self.goal_status = (raw_status if self.goal and raw_status in ("active", "completed", "blocked")
-                            else ("active" if self.goal else "none"))
-        self._active_tool_intents.clear()
-        self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded  # # Goal is in it
-        checkpoint_state = record.get("checkpoints")
-        self.checkpoints = CheckpointManager.from_state(
-            checkpoint_state if isinstance(checkpoint_state, dict) else {}, self.config.project_root,
-            on_change=self._persist, max_message_count=len(self.messages))
-        return len(loaded)
+        with self._session_persist_lock:
+            path = sessions.resolve_path(self.session_root, path, must_exist=True)
+            record = sessions.load_record(path, self.session_root)
+            loaded = [m for m in record.get("messages", []) if m.get("role") != "system"]
+            self.session_file = path
+            self.session_name = str(record.get("name") or "").strip() or None
+            self._session_revision = int(record.get("revision", 0))
+            self._session_exists = True
+            self._last_persist_error = ""
+            with self._usage_lock:
+                self.usage_totals = sessions.usage_of(path, self.session_root, record)
+                self.activity_totals = sessions.activity_of(path, self.session_root, record)
+            self.goal = str(record.get("goal") or "")[:_GOAL_MAX_CHARS]
+            raw_status = str(record.get("goal_status") or "active")
+            self.goal_status = (raw_status if self.goal
+                                and raw_status in ("active", "completed", "blocked")
+                                else ("active" if self.goal else "none"))
+            self._active_tool_intents.clear()
+            self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
+            checkpoint_state = record.get("checkpoints")
+            self.checkpoints = CheckpointManager.from_state(
+                checkpoint_state if isinstance(checkpoint_state, dict) else {},
+                self.config.project_root, on_change=self._persist,
+                max_message_count=len(self.messages))
+            return len(loaded)
 
-    def set_goal(self, text: str, status: str = "active") -> None:
+    def set_goal(self, text: str, status: str = "active") -> bool:
         """Set (or clear) a bounded standing objective and persist it immediately."""
         clean = str(text or "").strip()[:_GOAL_MAX_CHARS]
+        previous = (self.goal, self.goal_status)
         self.goal = clean
         self.goal_status = (status if clean and status in ("active", "completed", "blocked")
                             else ("active" if clean else "none"))
         self._refresh_system()                          # re-emit the system prompt with the # Goal section
-        self._persist()
+        if self._persist():
+            return True
+        self.goal, self.goal_status = previous
+        self._refresh_system()
+        return False
 
     def update_goal(self, status: str) -> bool:
         """Transition an existing goal without deleting its auditable objective."""
         if not self.goal or status not in ("active", "completed", "blocked"):
             return False
+        previous = self.goal_status
         self.goal_status = status
         self._refresh_system()
-        self._persist()
+        if not self._persist():
+            self.goal_status = previous
+            self._refresh_system()
+            return False
         notify = getattr(self.ui, "goal_changed", None)
         if notify:
             notify(self.goal, self.goal_status)
@@ -1400,9 +1476,10 @@ class Agent:
             if blocked:
                 self.ui.error(f"prompt blocked by a UserPromptSubmit hook: {hout}")
                 return
-            self.checkpoints.open(
-                len(self.messages), user_text,
-                [m for m in self.messages if m.get("role") != "system"])
+            if not self.checkpoints.open(
+                    len(self.messages), user_text,
+                    [m for m in self.messages if m.get("role") != "system"]):
+                return  # the finalizer reports the durable-save conflict; never start an unsafe turn
         images = self._pending_images
         self._pending_images = None
         if images:                                 # vision: OpenAI-style multimodal content
@@ -1920,7 +1997,15 @@ class Agent:
                 return "error: the proposed plan is empty. Research the task and present concrete steps."
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
-                sessions.save_plan(self.session_file, plan, self.session_root)
+                with self._session_persist_lock:
+                    saved = sessions.save_plan(
+                        self.session_file, plan, self.session_root,
+                        expected_revision=self._session_revision,
+                        expected_exists=self._session_exists)
+                if not saved:
+                    return ("error: the plan was not saved because this session changed in another "
+                            "process or its storage was unavailable. Resume the latest session and "
+                            "retry before presenting it again.")
             if self.config.get("plan_artifact", True):  # safe plan rendering is separate from arbitrary previews
                 try:
                     from . import artifacts
@@ -1962,7 +2047,8 @@ class Agent:
                 return "error: there is no standing goal to update."
             if status not in ("completed", "blocked"):
                 return "error: status must be 'completed' or 'blocked'."
-            self.update_goal(status)
+            if not self.update_goal(status):
+                return "error: " + (self._last_persist_error or "the goal transition was not saved")
             return (f"Standing goal marked {status}. This transition is visible to the user; now give a "
                     "concise final explanation of the evidence or blocker.")
 

@@ -304,8 +304,15 @@ class ACPServer:
                 found = sessions.find_global(sid)
                 if found:
                     path, root = found
-            if not path or not root or not sessions.delete(path, root):
+            guard = ({"expected_revision": state.agent._session_revision,
+                      "expected_exists": state.agent._session_exists} if state else {})
+            if not path or not root:
                 self.respond(rid, error={"code": -32001, "message": "session not found"})
+                return
+            if not sessions.delete(path, root, **guard):
+                message = ("session changed in another process; refresh before deleting" if
+                           Path(path).is_file() else "session not found")
+                self.respond(rid, error={"code": -32004, "message": message})
                 return
             with self._sessions_lock:
                 self._sessions.pop(sid, None); self._session_roots.pop(sid, None)
@@ -401,10 +408,16 @@ class ACPServer:
             status = str(params.get("status") or "active")
             if not text and status in ("active", "completed", "blocked"):
                 if not state.agent.update_goal(status):
-                    self.respond(rid, error={"code": -32602, "message": "no standing goal to update"})
+                    message = getattr(state.agent, "_last_persist_error", "")
+                    self.respond(rid, error={"code": -32602,
+                                             "message": message or "no standing goal to update"})
                     return
             else:
-                state.agent.set_goal(text, status)
+                if not state.agent.set_goal(text, status):
+                    self.respond(rid, error={"code": -32004,
+                                             "message": state.agent._last_persist_error
+                                             or "goal update was not saved"})
+                    return
             self.respond(rid, {"goal": {"text": state.agent.goal,
                                         "status": state.agent.goal_status}})
 
