@@ -86,6 +86,8 @@ DEFAULTS: dict = {
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)
     "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
+    "language_servers": {},                     # language/ext -> {command, args, env, extensions}
+    "code_intel_timeout": 15,                   # one-shot configured LSP request timeout (max 60s)
     "hooks": {},                                # event -> [{matcher?, command}] lifecycle hooks
     "fallback_model": "",                       # retried if the primary model errors
     "fallback_base_url": "",                    # optional endpoint for the fallback (default: same)

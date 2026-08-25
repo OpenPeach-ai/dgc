@@ -94,6 +94,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
 - **Next-prompt suggestions** — after each turn DGC predicts a sensible follow-up as ghost text; press **Tab / →** to accept it (toggle with the `suggest` config). Title and suggestion generations wait for fleet-wide idle time, run serially with small output/stall caps, and are canceled before the next real prompt so they never compete with foreground local-model work.
 - **Runs tiny local models** — if the endpoint has no native tool-calling, DGC auto-switches to a text tool-call protocol and parses it.
+- **Code intelligence without lock-in** — `repo_map` inventories a project and `code_intel` finds symbols, exact definitions/references, and syntax diagnostics with a bounded built-in fallback. Configure a stdio language server for richer results; DGC starts it only for the query, confines returned paths to the project, and reaps it afterward.
 - **Auto context compaction** — near ~85% of your model's context window (configurable via `compact_threshold`), older turns are summarized so long sessions don't overflow. `/compact` forces it.
 - **Thinking modes** — `/think off|low|medium|high`; `think` / `think hard` / `ultrathink` in a prompt bump it for that turn. `<think>` streams dim.
 - **Memory** — `DGC.md` in your project (and `~/.dgc/DGC.md` personal) load into every session; `#a fact` quick-adds; `/init` writes a project guide.
@@ -110,7 +111,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the live terminal/editor palette.
 - **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
 - **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
-- **Tools** — `read_file` · `repo_map` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
+- **Tools** — `read_file` · `repo_map` · `code_intel` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
 
 ## REPL conveniences
 

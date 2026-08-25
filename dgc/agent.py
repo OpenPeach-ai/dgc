@@ -41,9 +41,9 @@ _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty 
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
                      "add_skill", "save_memory"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
-_PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "web_fetch", "web_search",
+_PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search",
                    "skill", "bash_output"}
-_MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map"}
+_MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel"}
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options"}
 _GOAL_MAX_CHARS = 4000
@@ -553,6 +553,8 @@ class Agent:
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
             "- Read a file before editing it. Make minimal, focused changes to EXISTING content.",
             "- On an unfamiliar multi-file project, use repo_map once to locate relevant files and symbols.",
+            "- Use code_intel for exact definitions, references, symbols, and diagnostics when that is more "
+            "targeted than broad text search.",
             "- Do exactly what was asked — no more. Don't add unrequested features, options, "
             "abstractions, or defensive scaffolding; the simplest change that satisfies the request wins.",
             "- Implementing a stub or writing a new/near-empty file? Write the whole file with "

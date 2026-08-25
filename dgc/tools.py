@@ -21,6 +21,7 @@ from pathlib import Path
 
 import requests
 
+from .codeintel import run_code_intel, symbol_records
 from .workspace import WorkspaceBoundaryError, resolve_path
 
 MAX_READ_LINES = 2000
@@ -100,6 +101,18 @@ TOOL_SCHEMAS = [
         "and language-aware symbol definitions. Use this near the start of unfamiliar multi-file work.",
         {"path": {"type": "string", "description": "Subdirectory to map (default: project root)"},
          "max_files": {"type": "integer", "description": "Maximum files (default 300, max 1000)"}}, []),
+    _fn("code_intel", "Find language-aware symbols, exact definitions/references, or diagnostics. "
+        "Uses a configured language server when available and a bounded dependency-free static "
+        "fallback otherwise. Prefer this over broad grep for code navigation.",
+        {"operation": {"type": "string",
+                       "enum": ["symbols", "definition", "references", "diagnostics"]},
+         "path": {"type": "string", "description": "File or directory (default: project root)"},
+         "symbol": {"type": "string", "description": "Exact identifier for definition/references"},
+         "line": {"type": "integer", "minimum": 1,
+                  "description": "1-based cursor line when symbol is omitted"},
+         "column": {"type": "integer", "minimum": 1,
+                    "description": "1-based cursor column when symbol is omitted"}},
+        ["operation"]),
     _fn("web_fetch", "Fetch a URL and return its text content (HTML stripped).",
         {"url": {"type": "string"}}, ["url"]),
     _fn("web_search", "Search the web for current information (news, docs, versions, facts). Returns titles, "
@@ -1061,36 +1074,10 @@ _MANIFEST_NAMES = {
 
 
 def _symbol_lines(path: Path, text: str) -> list[str]:
-    ext = path.suffix.lower()
-    patterns: list[re.Pattern] = []
-    if ext in (".py", ".pyi"):
-        patterns = [re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)")]
-    elif ext in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte"):
-        patterns = [
-            re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)"),
-            re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>"),
-        ]
-    elif ext == ".go":
-        patterns = [re.compile(r"^\s*(?:func|type)\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)")]
-    elif ext == ".rs":
-        patterns = [re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|trait|type|mod)\s+([A-Za-z_]\w*)")]
-    elif ext in (".java", ".kt", ".kts", ".cs", ".swift", ".scala"):
-        patterns = [re.compile(r"^\s*(?:(?:public|private|protected|internal|static|final|open|abstract|sealed|data)\s+)*(?:class|interface|enum|record|object|struct|protocol|fun)\s+([A-Za-z_]\w*)")]
-    elif ext in (".c", ".h", ".cc", ".cpp", ".cxx", ".hpp"):
-        patterns = [re.compile(r"^\s*(?:class|struct|enum)\s+([A-Za-z_]\w*)"),
-                    re.compile(r"^\s*[A-Za-z_][\w\s:*<>]*\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*\{?\s*$")]
-    if not patterns:
-        return []
-    found: list[str] = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        for rx in patterns:
-            m = rx.match(line)
-            if m:
-                found.append(f"{m.group(1)}@{lineno}")
-                break
-        if len(found) >= 24:
-            found.append("…")
-            break
+    records = symbol_records(path, text)
+    found = [f"{item['name']}@{item['line']}" for item in records[:24]]
+    if len(records) > 24:
+        found.append("…")
     return found
 
 
@@ -1129,6 +1116,22 @@ def repo_map(args: dict, ctx) -> str:
         except OSError:
             continue
     return "\n".join(rows)
+
+
+def code_intel(args: dict, ctx) -> str:
+    target = (_resolve(str(args.get("path", "")), ctx.project_root,
+                       allow_external=_allow_external(args))
+              if args.get("path") else ctx.project_root)
+    return run_code_intel(
+        root=ctx.project_root,
+        target=target,
+        operation=str(args.get("operation") or ""),
+        symbol=str(args.get("symbol") or ""),
+        line=args.get("line", 1),
+        column=args.get("column", 1),
+        config=ctx.config,
+        cancel=getattr(ctx, "cancelled", None),
+    )
 
 
 _TAG = re.compile(r"<[^>]+>")
@@ -1307,7 +1310,8 @@ EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill,
-    "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "web_fetch": web_fetch,
+    "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
+    "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
     "save_memory": save_memory,
 }

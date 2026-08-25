@@ -105,6 +105,8 @@ def unit_tests(tmp: Path):
     eng = PermissionEngine("default", {"allow": [], "ask": [], "deny": []})
     check("default: read allowed", eng.decide("read_file", {"path": "x"})[0] == "allow")
     check("default: repo map allowed", eng.decide("repo_map", {})[0] == "allow")
+    check("default: code intelligence allowed", eng.decide("code_intel", {
+        "operation": "symbols"})[0] == "allow")
     check("default: write asks", eng.decide("write_file", {"path": "x"})[0] == "ask")
     check("default: patch asks", eng.decide("apply_patch", {"path": "x"})[0] == "ask")
     check("default: every bash asks", eng.decide("bash", {"command": "ls"})[0] == "ask")
@@ -137,6 +139,8 @@ def unit_tests(tmp: Path):
         secret.write_text("secret")
         eng = PermissionEngine("default", {"allow": [], "ask": [], "deny": []}, tmp)
         check("external read asks", eng.decide("read_file", {"path": str(secret)})[0] == "ask")
+        check("external code intelligence asks", eng.decide("code_intel", {
+            "operation": "symbols", "path": str(secret)})[0] == "ask")
         eng_plan = PermissionEngine("plan", {"allow": [], "ask": [], "deny": []}, tmp)
         check("plan external read denied", eng_plan.decide("read_file", {"path": str(secret)})[0] == "deny")
         eng_auto = PermissionEngine("auto", {"allow": [], "ask": [], "deny": []}, tmp)
@@ -215,6 +219,29 @@ def unit_tests(tmp: Path):
     out = execute("repo_map", {"max_files": 100}, ctx)
     check("repo_map inventories files, hashes, and symbols",
           "symbols.py" in out and "Alpha@1" in out and "calculate@4" in out, out[:300])
+
+    alpha = tmp / "alpha.py"
+    alpha.write_text("def target(value):\n    return value + 1\n\ndef caller():\n    return target(2)\n")
+    beta = tmp / "beta.py"
+    beta.write_text("from alpha import target\n\nresult = target(3)\n")
+    broken = tmp / "broken.py"
+    broken.write_text("def unfinished(:\n    pass\n")
+    out = execute("code_intel", {"operation": "symbols", "path": "alpha.py"}, ctx)
+    check("code_intel statically inventories language-aware symbols",
+          out.startswith("code intelligence (static) · symbols")
+          and "alpha.py:1:1: function target" in out and "alpha.py:4:1: function caller" in out, out)
+    out = execute("code_intel", {"operation": "definition", "path": "alpha.py",
+                                 "line": 5, "column": 13}, ctx)
+    check("code_intel extracts the cursor identifier and finds its definition",
+          "alpha.py:1:1: function target" in out, out)
+    out = execute("code_intel", {"operation": "references", "symbol": "target"}, ctx)
+    check("code_intel finds bounded project-wide exact references",
+          "alpha.py:1:5:" in out and "alpha.py:5:12:" in out
+          and "beta.py:1:19:" in out and "beta.py:3:10:" in out, out)
+    out = execute("code_intel", {"operation": "diagnostics", "path": "broken.py"}, ctx)
+    check("code_intel reports dependency-free syntax diagnostics",
+          out.startswith("code intelligence (static) · diagnostics")
+          and "broken.py" not in out and "error:" in out and "invalid syntax" in out, out)
 
     out = execute("bash", {"command": "echo hi && pwd"}, ctx)
     check("bash runs", "hi" in out and "exit code: 0" in out)
@@ -1652,6 +1679,254 @@ def test_mcp_protocol():
             check("sandbox network requires an explicit opt-in", host_net in shared)
 
 
+def test_code_intel_lsp():
+    """Configured LSP queries use bounded stdio JSON-RPC, filtered paths, and clean shutdown."""
+    from types import SimpleNamespace
+
+    root = Path(tempfile.mkdtemp())
+    source = root / "alpha.py"
+    source.write_text('def target():\n    return 1\n\nlabel = "🍄"; target()\n')
+    server = root / "mock_lsp.py"
+    stopped = root / "server-stopped"
+    server.write_text(r'''import json
+import os
+import sys
+
+inp = sys.stdin.buffer
+out = sys.stdout.buffer
+document_uri = ""
+
+def read_message():
+    headers = {}
+    while True:
+        line = inp.readline()
+        if not line:
+            return None
+        if line in (b"\r\n", b"\n"):
+            break
+        key, value = line.decode("ascii").split(":", 1)
+        headers[key.lower()] = value.strip()
+    size = int(headers["content-length"])
+    return json.loads(inp.read(size).decode("utf-8"))
+
+def send(message):
+    body = json.dumps(message, separators=(",", ":")).encode("utf-8")
+    out.write(("Content-Length: %d\r\n\r\n" % len(body)).encode("ascii") + body)
+    out.flush()
+
+try:
+    while True:
+        message = read_message()
+        if message is None:
+            break
+        method = message.get("method")
+        request_id = message.get("id")
+        params = message.get("params") or {}
+        if method == "initialize":
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "result": {"capabilities": {"definitionProvider": True,
+                                               "referencesProvider": True,
+                                               "documentSymbolProvider": True,
+                                               "diagnosticProvider": {}}}})
+        elif method == "textDocument/didOpen":
+            document_uri = params["textDocument"]["uri"]
+            send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
+                  "params": {"uri": document_uri, "diagnostics": [
+                      {"range": {"start": {"line": 3, "character": 14},
+                                 "end": {"line": 3, "character": 20}},
+                       "severity": 2, "code": "mock-warning",
+                       "message": "mock diagnostic"}]}})
+        elif method == "textDocument/definition":
+            safe = (params.get("position", {}).get("character") == 14
+                    and "DGC_CODE_INTEL_SECRET" not in os.environ)
+            primary = document_uri if safe else "file:///etc/passwd"
+            send({"jsonrpc": "2.0", "id": request_id, "result": [
+                {"uri": primary, "range": {"start": {"line": 0, "character": 4},
+                                             "end": {"line": 0, "character": 10}}},
+                {"uri": "file:///etc/passwd",
+                 "range": {"start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 1}}}]})
+        elif method == "textDocument/references":
+            send({"jsonrpc": "2.0", "id": request_id, "result": []})
+        elif method == "textDocument/documentSymbol":
+            send({"jsonrpc": "2.0", "id": request_id, "result": [
+                {"name": "target", "kind": 12,
+                 "range": {"start": {"line": 0, "character": 0},
+                           "end": {"line": 1, "character": 12}},
+                 "selectionRange": {"start": {"line": 0, "character": 4},
+                                    "end": {"line": 0, "character": 10}}}]})
+        elif method == "textDocument/diagnostic":
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "error": {"code": -32601, "message": "pull diagnostics unsupported"}})
+        elif method == "shutdown":
+            send({"jsonrpc": "2.0", "id": request_id, "result": None})
+        elif method == "exit":
+            break
+        elif request_id is not None:
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "error": {"code": -32601, "message": "unsupported"}})
+finally:
+    with open(sys.argv[1], "w", encoding="utf-8") as marker:
+        marker.write("stopped")
+''')
+
+    class Cfg:
+        def __init__(self, data):
+            self.data = data
+
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+
+    ctx = SimpleNamespace(
+        project_root=root,
+        config=Cfg({"language_servers": {"python": {
+            "command": sys.executable, "args": [str(server), str(stopped)]}},
+            "code_intel_timeout": 2}),
+        cancelled=threading.Event(),
+    )
+    previous_secret = os.environ.get("DGC_CODE_INTEL_SECRET")
+    os.environ["DGC_CODE_INTEL_SECRET"] = "must-not-reach-child"
+    try:
+        out = execute("code_intel", {"operation": "definition", "path": "alpha.py",
+                                     "line": 4, "column": 14}, ctx)
+    finally:
+        if previous_secret is None:
+            os.environ.pop("DGC_CODE_INTEL_SECRET", None)
+        else:
+            os.environ["DGC_CODE_INTEL_SECRET"] = previous_secret
+    check("code_intel uses configured LSP with UTF-16 cursor positions",
+          out.startswith("code intelligence (lsp) · definition") and "alpha.py:1:5" in out, out)
+    check("code_intel filters language-server locations outside the project",
+          "/etc/passwd" not in out and ".." not in out, out)
+    check("code_intel reaps its one-shot language server",
+          stopped.exists() and stopped.read_text() == "stopped", out)
+
+    stopped.unlink(missing_ok=True)
+    out = execute("code_intel", {"operation": "references", "path": "alpha.py",
+                                 "line": 4, "column": 14}, ctx)
+    check("code_intel keeps an empty authoritative LSP result instead of regex fallback",
+          out == "code intelligence (lsp) · references\nno results"
+          and stopped.exists() and stopped.read_text() == "stopped", out)
+
+    stopped.unlink(missing_ok=True)
+    out = execute("code_intel", {"operation": "diagnostics", "path": "alpha.py"}, ctx)
+    check("code_intel renders configured LSP diagnostics",
+          "code intelligence (lsp) · diagnostics" in out
+          and "alpha.py:4:14: warning: mock diagnostic [mock-warning]" in out, out)
+    check("code_intel reaps the server after diagnostics",
+          stopped.exists() and stopped.read_text() == "stopped", out)
+
+    fallback = SimpleNamespace(
+        project_root=root,
+        config=Cfg({"language_servers": {"python": {
+            "command": str(root / "missing-language-server")}}, "code_intel_timeout": 0.1}),
+        cancelled=threading.Event(),
+    )
+    out = execute("code_intel", {"operation": "definition", "path": "alpha.py",
+                                 "symbol": "target"}, fallback)
+    check("code_intel fails closed to static analysis when configured LSP cannot launch",
+          out.startswith("code intelligence (static) · definition")
+          and "language server unavailable (could not launch (FileNotFoundError))" in out
+          and "alpha.py:1:1: function target" in out, out)
+
+    import time as _time
+    hanging_server = root / "hanging_lsp.py"
+    hanging_pid = root / "hanging-lsp.pid"
+    hanging_server.write_text(
+        "import os, pathlib, subprocess, sys, time\n"
+        "pids = [os.getpid()]\n"
+        "if os.name == 'posix':\n"
+        "    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "    pids.append(child.pid)\n"
+        "pathlib.Path(sys.argv[1]).write_text(' '.join(map(str, pids)))\n"
+        "time.sleep(30)\n")
+    timeout_ctx = SimpleNamespace(
+        project_root=root,
+        config=Cfg({"language_servers": {"python": {
+            "command": sys.executable, "args": [str(hanging_server), str(hanging_pid)]}},
+            "code_intel_timeout": 0.1}),
+        cancelled=threading.Event(),
+    )
+    started = _time.monotonic()
+    out = execute("code_intel", {"operation": "definition", "path": "alpha.py",
+                                 "symbol": "target"}, timeout_ctx)
+    elapsed = _time.monotonic() - started
+    pids = [int(value) for value in hanging_pid.read_text().split()] if hanging_pid.exists() else []
+    alive = list(pids)
+    reap_deadline = _time.monotonic() + 1
+    while alive and _time.monotonic() < reap_deadline:
+        running = []
+        for pid in alive:
+            try:
+                os.kill(pid, 0)
+                proc_stat = Path(f"/proc/{pid}/stat")
+                zombie = proc_stat.exists() and proc_stat.read_text().split()[2] == "Z"
+                if not zombie:
+                    running.append(pid)
+            except (OSError, ProcessLookupError):
+                pass
+        alive = running
+        if alive:
+            _time.sleep(0.05)
+    check("code_intel times out and reaps an unresponsive language server",
+          elapsed < 2 and len(pids) == (2 if os.name == "posix" else 1) and not alive
+          and "language server unavailable" in out
+          and "timed out" in out,
+          f"elapsed={elapsed:.2f}s pids={pids} alive={alive} out={out}")
+
+    large_source = root / "large.py"
+    large_source.write_text("def target():\n    return 1\n# " + "x" * 200_000 + "\n")
+    stalled_server = root / "stalled_writer_lsp.py"
+    stalled_pid = root / "stalled-writer.pid"
+    stalled_server.write_text(r'''import json
+import os
+import pathlib
+import sys
+import time
+
+inp = sys.stdin.buffer
+out = sys.stdout.buffer
+headers = {}
+while True:
+    line = inp.readline()
+    if line in (b"\r\n", b"\n"):
+        break
+    key, value = line.decode("ascii").split(":", 1)
+    headers[key.lower()] = value.strip()
+message = json.loads(inp.read(int(headers["content-length"])).decode("utf-8"))
+body = json.dumps({"jsonrpc": "2.0", "id": message["id"],
+                   "result": {"capabilities": {}}}).encode("utf-8")
+out.write(("Content-Length: %d\r\n\r\n" % len(body)).encode("ascii") + body)
+out.flush()
+pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))
+time.sleep(30)
+''')
+    stalled_ctx = SimpleNamespace(
+        project_root=root,
+        config=Cfg({"language_servers": {"python": {
+            "command": sys.executable, "args": [str(stalled_server), str(stalled_pid)]}},
+            "code_intel_timeout": 0.1}),
+        cancelled=threading.Event(),
+    )
+    started = _time.monotonic()
+    out = execute("code_intel", {"operation": "definition", "path": "large.py",
+                                 "symbol": "target"}, stalled_ctx)
+    elapsed = _time.monotonic() - started
+    pid = int(stalled_pid.read_text()) if stalled_pid.exists() else 0
+    alive = False
+    if pid:
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except (OSError, ProcessLookupError):
+            pass
+    check("code_intel bounds a didOpen write after a server stops reading stdin",
+          elapsed < 2 and pid > 0 and not alive and "stdin stalled" in out
+          and "large.py:1:1: function target" in out,
+          f"elapsed={elapsed:.2f}s pid={pid} alive={alive} out={out}")
+
+
 def test_sessions_and_worktree():
     """Sessions are private/scoped/atomic; git worktrees are created/listed/removed."""
     import os as _os
@@ -2335,7 +2610,7 @@ def test_steering():
     a.config.data["mode"] = "plan"
     _plan_names = {tool["function"]["name"] for tool in a._tool_schemas()}
     check("plan mode exposes a lean read-only tool catalog",
-          "present_plan" in _plan_names and "repo_map" in _plan_names
+          "present_plan" in _plan_names and "repo_map" in _plan_names and "code_intel" in _plan_names
           and not ({"bash", "write_file", "apply_patch", "task"} & _plan_names))
 
 
@@ -3297,6 +3572,7 @@ def main():
         test_context_prune()
         test_supply_chain_guard()
         test_mcp_protocol()
+        test_code_intel_lsp()
         test_sessions_and_worktree()
         test_private_config()
         test_release_script_contract()

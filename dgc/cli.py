@@ -169,7 +169,7 @@ class UI:
 
     @staticmethod
     def _arg_summary(name: str, args: dict) -> str:
-        for key in ("path", "command", "pattern", "url", "name", "memory"):
+        for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
             if key in args:
                 value = str(args[key]).replace("\n", " ")
                 return value[:120] + ("…" if len(value) > 120 else "")

@@ -10,7 +10,8 @@ dgc/
   llm.py           Responses + Chat Completions adapters, streaming, reasoning and tool fallback
   permissions.py   fail-closed modes/rules plus canonical external-directory approval
   workspace.py     canonical project-boundary resolution used by filesystem consumers
-  tools.py         read/map/search, atomic patch/edit/write, process, web, skill and memory tools
+  codeintel.py     bounded static symbols/diagnostics plus optional one-shot stdio LSP queries
+  tools.py         read/map/search/intelligence, atomic patch/edit/write, process, web, skill and memory tools
   agent.py         deterministic tool loop, transcript repair, usage, convergence and compaction
   sessions.py      scoped UUID sessions with atomic private persistence
   headless.py      versioned NDJSON service used by editor clients

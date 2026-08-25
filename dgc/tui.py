@@ -1570,6 +1570,7 @@ class TUI:
 
     _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
                   "edit_file": "Edit", "apply_patch": "Patch", "repo_map": "Map repo",
+                  "code_intel": "Inspect code",
                   "grep": "Search", "glob": "Find", "web_search": "Search",
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
                   "add_skill": "Install skill", "save_memory": "Remember"}
@@ -1577,11 +1578,13 @@ class TUI:
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
                  "write_file": "Writing", "edit_file": "Editing", "apply_patch": "Patching",
-                 "repo_map": "Mapping repo", "grep": "Searching", "glob": "Finding",
+                 "repo_map": "Mapping repo", "code_intel": "Inspecting code",
+                 "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
                  "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
                 "edit_file": "Edited", "apply_patch": "Patched", "repo_map": "Mapped repo",
+                "code_intel": "Inspected code",
                 "grep": "Searched", "glob": "Found", "web_search": "Searched",
                 "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
                 "add_skill": "Installed skill", "save_memory": "Remembered"}
@@ -3479,7 +3482,7 @@ class _ClickControl(FormattedTextControl):
 
 
 def _arg_summary(args: dict) -> str:
-    for k in ("path", "command", "pattern", "url", "name", "description"):
+    for k in ("path", "command", "pattern", "url", "name", "description", "symbol", "operation"):
         if k in args:
             v = str(args[k]).replace("\n", " ")
             return v[:100] + ("…" if len(v) > 100 else "")
