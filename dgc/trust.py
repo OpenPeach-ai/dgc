@@ -4,7 +4,8 @@ directory?" screen.
 DGC can run shell commands and modify files, so the first time it is launched in a
 directory we ask the user to confirm before entering the agent. Trusted directories
 (and their subtrees) are remembered in the config so the prompt only appears once.
-Non-interactive launches (`-p`, pipes) and already-trusted paths skip it.
+Interactive launches show the gate. Non-interactive mutation modes require an explicit
+`--trust`; read-only/default automation can continue and remains permission-gated.
 """
 from __future__ import annotations
 
@@ -46,7 +47,8 @@ def mark_trusted(config, path) -> None:
 
 def confirm_trust(config, project_root) -> bool:
     """Show the full-screen trust gate. Returns True to proceed (remembering the dir),
-    False to quit. Already-trusted or non-interactive → True without prompting."""
+    False to quit. Already-trusted or non-interactive → True without prompting; the CLI
+    separately rejects unsafe non-interactive modes unless `--trust` was explicit."""
     if is_trusted(config, project_root):
         return True
     if not (sys.stdout.isatty() and sys.stdin.isatty()):

@@ -14,6 +14,15 @@ import { JSDOM, VirtualConsole } from "jsdom";
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
 const mainJs = readFileSync(dir + "../media/main.js", "utf8");
+const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
+const contributedSettings = extensionManifest.contributes?.configuration?.properties ?? {};
+assert.equal("dgc.apiKey" in contributedSettings, false, "API keys must not be plaintext VS Code settings");
+assert.equal("dgc.subagentApiKey" in contributedSettings, false, "sub-agent keys must use SecretStorage");
+assert.match(panelSrc, /context:\s*text && !text\.startsWith\("\/"\) \? this\.editorContext\(\) : \[\]/,
+  "editor context must travel as typed protocol data, not prompt-text concatenation");
+assert.match(panelSrc, /set_workspace_roots/, "the editor must declare every multi-root workspace folder");
+assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
+  "approving a plan into auto mode must pass an explicit warning gate");
 
 // Pull the real HTML template out of panel.ts's html() and neutralise the
 // `${nonce}` / `${css}` / `${csp}` interpolations so the markup stays in sync
@@ -127,5 +136,113 @@ test("composer submit posts a prompt and echoes the user bubble", () => {
   assert.equal(prompt.text, "explain this file");
   assert.ok(doc.querySelector(".msg.user .bubble"), "user bubble did not render");
   assert.deepEqual(errors, [], "webview raised JS errors on submit");
+  dom.window.close();
+});
+
+test("auto mode waits for extension-host confirmation before changing the badge", () => {
+  const { dom, posted, send, doc } = makeDom();
+  send({ type: "state", state: { model: "m", mode: "plan", think: "off" } });
+  doc.getElementById("btn-mode").click();
+  doc.querySelector('[data-mode="auto"]').click();
+  assert.equal(posted.at(-1).type, "setMode");
+  assert.equal(posted.at(-1).mode, "auto");
+  assert.equal(doc.getElementById("modelabel").textContent, "plan");
+  send({ type: "state", state: { model: "m", mode: "auto", think: "off" } });
+  assert.equal(doc.getElementById("modelabel").textContent, "auto");
+  dom.window.close();
+});
+
+test("webview correlates failures, returns plan feedback, and clears on backend reset", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "tool_call", name: "bash", call_id: "same-name-2", summary: "false" } });
+  send({ type: "event", event: {
+    type: "tool_result", name: "bash", call_id: "same-name-2", output: "exit code: 1", is_error: true,
+  } });
+  assert.ok(doc.querySelector(".tool .dot.err"), "failed tool must not render as successful");
+
+  send({ type: "event", event: { type: "plan_proposal", id: "plan-1", plan: "1. Change it" } });
+  const plan = [...doc.querySelectorAll(".card")].at(-1);
+  plan.querySelector(".feedback").value = "Keep the public API compatible";
+  plan.querySelector('button[data-d="reject"]').click();
+  const response = posted.find((m) => m.type === "plan_response");
+  assert.equal(response.id, "plan-1");
+  assert.equal(response.decision, "reject");
+  assert.equal(response.feedback, "Keep the public API compatible");
+
+  send({ type: "event", event: { type: "command_rejected", message: "wait for the turn" } });
+  send({ type: "event", event: { type: "request_expired" } });
+  assert.match(doc.getElementById("log").textContent, /wait for the turn/);
+  assert.match(doc.getElementById("log").textContent, /expired/);
+
+  // Clear is acknowledged only after the backend resets model state; the old implementation
+  // removed DOM nodes while silently retaining every prior turn in the model context.
+  assert.match(panelSrc, /case "clear": this\.ensureBackend\(\)\.send\(\{ type: "clear_session" \}\)/);
+  send({ type: "event", event: { type: "session", kind: "cleared" } });
+  assert.equal(doc.getElementById("log").children.length, 0);
+  assert.deepEqual(errors, [], "webview raised JS errors in state/error flows");
+  dom.window.close();
+});
+
+test("backend-driven slash menu routes goal/plan/artifact commands without prompting the model", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: {
+    type: "ready",
+    commands: [
+      { name: "goal", description: "standing objective", action: "goal", accepts_args: true },
+      { name: "view-plan", description: "saved plan", action: "viewPlan" },
+      { name: "artifact", description: "previews", action: "artifacts" },
+    ],
+    custom_commands: ["review-api"],
+  } });
+
+  const input = doc.getElementById("input");
+  input.value = "/goal ship the release";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const goal = posted.find((m) => m.type === "slashText");
+  assert.equal(goal.text, "/goal ship the release");
+  assert.equal(posted.some((m) => m.type === "prompt" && m.text === goal.text), false,
+    "built-in slash commands must not be sent as model prompts");
+
+  doc.getElementById("btn-cmd").click();
+  assert.match(doc.getElementById("pop").textContent, /standing objective/);
+  assert.match(doc.getElementById("pop").textContent, /review-api/);
+
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active" } });
+  send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
+  send({ type: "event", event: { type: "artifacts", items: [
+    { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
+  ] } });
+  assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
+  assert.match(doc.getElementById("log").textContent, /Saved plan/);
+  assert.match(doc.getElementById("log").textContent, /Plan · open/);
+  assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");
+  dom.window.close();
+});
+
+test("provider runtime settings and actual usage round-trip through the webview", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "settings_open", providers: [], models: [] });
+  send({ type: "event", event: {
+    type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
+    mode: "default", think: "low", api_mode: "responses", provider_state: "server",
+    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
+  } });
+  assert.equal(doc.getElementById("s-api_mode").value, "responses");
+  assert.equal(doc.getElementById("s-provider_state").value, "server");
+  assert.equal(doc.getElementById("s-prompt_cache").value, "false");
+  assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
+  doc.getElementById("set-save").click();
+  const saved = posted.find((m) => m.type === "saveSettings");
+  assert.equal(saved.values.provider_state, "server");
+  assert.equal(saved.values.prompt_cache, false);
+
+  send({ type: "event", event: { type: "context", used: 1000, size: 4000,
+    input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,
+    reasoning_tokens: 250, requests: 7 } });
+  assert.equal(doc.getElementById("ctx").textContent, "25%");
+  assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
+  assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
+  assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
   dom.window.close();
 });

@@ -12,7 +12,46 @@ from run_bench import (practice_dir, list_exercises, prep_workdir, make_workdir,
 def examples(exdir: Path):
     cfg = json.loads((exdir / ".meta" / "config.json").read_text())
     f = cfg.get("files", {})
-    return f.get("solution", []), f.get("example", [])
+    solutions = [str(p) for p in f.get("solution", [])]
+    references = [str(p) for p in f.get("example", [])]
+    pairs = []
+    used_solutions: set[str] = set()
+    used_references: set[str] = set()
+
+    # Prefer an exact filename match. This matters for Java exercises whose canonical solution has
+    # extra helper classes: a positional zip would copy Card.java over Poker.java.
+    for reference in references:
+        same_name = next((solution for solution in solutions
+                          if Path(solution).name == Path(reference).name), None)
+        if same_name:
+            pairs.append((same_name, reference))
+            used_solutions.add(same_name); used_references.add(reference)
+
+    # Most tracks call the canonical file `example.<ext>`; match it to the sole remaining solution
+    # with that extension (for example example.py -> affine_cipher.py, example.h -> meetup.h).
+    for reference in references:
+        if reference in used_references:
+            continue
+        candidates = [solution for solution in solutions if solution not in used_solutions
+                      and Path(solution).suffix == Path(reference).suffix]
+        if len(candidates) == 1:
+            pairs.append((candidates[0], reference))
+            used_solutions.add(candidates[0]); used_references.add(reference)
+
+    # Canonical Java references may contain helper classes not declared as student solution files.
+    # Put them beside the primary source so the *official tests* can validate the canonical answer.
+    source_parent = Path(pairs[0][0] if pairs else solutions[0]).parent if solutions else Path()
+    for reference in references:
+        if reference not in used_references:
+            pairs.append((str(source_parent / Path(reference).name), reference))
+
+    # Exercism's Rust track keeps dependencies used by the canonical answer in a separate manifest.
+    # `Cargo.toml` is itself a solution file, but `.meta/config.json` lists only `example.rs`, so a
+    # positional zip silently left the stub manifest in place and made valid references look broken.
+    cargo_example = exdir / ".meta" / "Cargo-example.toml"
+    if "Cargo.toml" in solutions and cargo_example.is_file():
+        pairs.append(("Cargo.toml", ".meta/Cargo-example.toml"))
+    return pairs
 
 def main():
     langs = LANGS if (len(sys.argv) < 2 or sys.argv[1] == "all") else sys.argv[1].split(",")
@@ -22,13 +61,13 @@ def main():
     for lang in langs:
         for ex in list_exercises(lang)[:n]:
             exdir = practice_dir(lang) / ex
-            sol, exmpl = examples(exdir)
+            pairs = examples(exdir)
             work = make_workdir(lang, ex)
             prep_workdir(exdir, work)
-            # copy reference example file(s) over the solution stub(s), by index
-            for i, s in enumerate(sol):
-                src = exdir / exmpl[i] if i < len(exmpl) else None
-                if src and src.exists():
+            # Copy the exact reference source/build inputs over their solution-file counterparts.
+            for s, example in pairs:
+                src = exdir / example
+                if src.exists():
                     (work / s).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy(src, work / s)
             t0 = time.time()

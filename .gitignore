@@ -7,8 +7,7 @@ dist/
 .DS_Store
 dgc.tar.gz
 
-# maintainer-only tooling (kept local, not published)
-scripts/
+# Maintainer/release scripts are source-controlled build inputs. Private notes remain local.
 HANDOFF.md
 OVERNIGHT_PLAN.md
 DGC_HARNESS_IMPROVEMENT_PLAN.md

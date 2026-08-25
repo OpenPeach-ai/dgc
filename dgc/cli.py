@@ -57,6 +57,7 @@ class UI:
         self._work_stop = None  # set while a "working…" spinner is running
         self._tool_count = 0    # tools used in the current turn (for the done marker)
         self.deny_reason = ""   # optional steer captured when the user denies a tool
+        self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
 
     # --------------------------------------------------- working indicator ---
     def start_working(self, label: str = "working") -> None:
@@ -139,14 +140,14 @@ class UI:
             self._thinking = False
 
     # ------------------------------------------------------ tool rendering ---
-    def tool_call(self, name: str, args: dict) -> None:
+    def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self.stop_working()
         self._tool_count += 1
         summary = self._arg_summary(name, args)
         self.console.print(f"\n[bold {BRAND}]{glyphs.tool_icon(name)} {name}[/] "
                            f"[{DIM}]{summary}[/]", highlight=False)
 
-    def tool_result(self, name: str, out: str) -> None:
+    def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -161,7 +162,8 @@ class UI:
                                markup=False, highlight=False)
         self.start_working()                                 # spin again until the next step
 
-    def tool_denied(self, name: str, args: dict, reason: str) -> None:
+    def tool_denied(self, name: str, args: dict, reason: str,
+                    call_id: str | None = None) -> None:
         self.stop_working()
         self.console.print(f"[bold red]✗ {name} denied[/bold red] [{DIM}]{reason}[/]", highlight=False)
 
@@ -174,7 +176,7 @@ class UI:
         return ""
 
     # ---------------------------------------------------------- approvals ---
-    def approve(self, name: str, args: dict) -> str:
+    def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
         """Return 'once' | 'always' | 'no'."""
         self._yield_stdin()
         section(self.console, "permission requested", name)
@@ -203,18 +205,29 @@ class UI:
         section(self.console, "📋 proposed plan")
         self.console.print(render.render_markdown(plan or "(empty plan)"))
         idx = menu_select("Approve this plan?",
-                          ["build in full-auto", "build with acceptEdits", "build in default",
+                          ["build with acceptEdits", "build in default", "build in full-auto",
                            "keep planning"],
-                          ["approve everything", "auto-approve edits", "ask per action",
+                          ["auto-approve edits", "ask per action", "approve everything",
                            "reject & refine"])
-        target = {0: "auto", 1: "acceptEdits", 2: "default"}.get(idx)
+        target = {0: "acceptEdits", 1: "default", 2: "auto"}.get(idx)
+        if target == "auto":
+            auto_warning(self.console)
+            try:
+                confirmed = input("  execute this plan in full-auto? [y/N] › ").strip().lower() in ("y", "yes")
+            except (EOFError, KeyboardInterrupt):
+                confirmed = False
+            if not confirmed:
+                self.plan_feedback = "Full-auto was not confirmed; offer a safer execution mode."
+                return None
         if target:
+            self.plan_feedback = ""
             return target
         try:
-            feedback = input("  feedback for the plan (optional): ").strip()
+            self.plan_feedback = input("  feedback for the plan (optional): ").strip()
         except EOFError:
+            self.plan_feedback = ""
             return None
-        if feedback:
+        if self.plan_feedback:
             self.console.print(f"  [{DIM}]feedback noted — the agent will see your denial[/]")
         return None
 
@@ -244,6 +257,12 @@ class UI:
         for t in todos:
             self.console.print(f"  {marks.get(t['status'], '☐')} {t['content']}", highlight=False)
 
+    def artifact_ready(self, art) -> None:
+        self.info(f"artifact ready: {art.name} · {art.url}")
+
+    def goal_changed(self, goal: str, status: str) -> None:
+        self.info(f"standing goal → {status}: {goal[:120]}")
+
     def info(self, msg: str) -> None:
         self.stop_working()
         self.console.print(f"  [{DIM}]· {msg}[/]", highlight=False)
@@ -269,11 +288,14 @@ HELP = """\
 
 [bold]slash commands[/bold]
   /help                this help
-  /connect P|URL [KEY] connect a preset (ollama, llamacpp, openai, openrouter, groq…) or a raw URL
+  /new                 start a new session
+  /connect P|URL       connect a preset (ollama, llamacpp, openai, openrouter, groq…) or a raw URL
   /models              list models served by the endpoint
   /model [NAME]        show or set the model
   /mode [MODE]         default | acceptEdits | plan | auto   (no arg: cycle)
   /plan                toggle plan mode
+  /view-plan           reopen the most recently proposed plan
+  /goal [TEXT]         inspect/set the standing goal; complete | blocked | resume | clear
   /think [LEVEL]       off | low | medium | high   (keywords 'think', 'think hard',
                        'ultrathink' in a prompt bump it for that turn; reasoning
                        models — o-series, DeepSeek-R1, qwen-thinking — do best on
@@ -284,7 +306,7 @@ HELP = """\
   /skills              list skills (bundled defaults + ~/.dgc/skills + .dgc/skills)
   /skill NAME [ARGS]   invoke a skill directly
   /agents              list named sub-agents (.dgc/agents/*.md) + sub-agent defaults
-  /subagent …          set the sub-agent model/host: model NAME | host URL [KEY] | clear
+  /subagent …          set the sub-agent model/host: model NAME | host URL | clear
   /init                have the agent analyze the project and write DGC.md
   /status              current config
   /context             show context-window usage
@@ -293,10 +315,14 @@ HELP = """\
   /clear               reset the conversation
   /rewind              restore code + conversation to an earlier turn
   /mcp                 list connected MCP servers and their tools
-  /search [P [K|URL]]  web search provider: duckduckgo | brave | tavily | searxng
+  /search [P [URL]]    web search provider: duckduckgo | brave | tavily | searxng
   /resume              resume a past conversation in this project
+  /name [NAME]         show or name the current session
+  /worktree [NAME]     list, create, or remove an isolated git worktree
+  /artifact            list previews; /artifact stop ID
+  /handoff             generate and save a continuation handoff
   /update              update DGC to the latest version
-  /exit                quit
+  /exit, /quit         quit
   (while a turn runs: type a follow-up + Enter to queue it · Esc to interrupt)
 """
 
@@ -410,6 +436,9 @@ class CLI:
             render_help(self.console)
         elif cmd == "connect":
             args = rest.split()
+            if len(args) > 1:
+                self.ui.error("API keys are not accepted inline — use the masked prompt, dgc setup, or DGC_API_KEY")
+                return True
             if not args:
                 from .menu import select
                 pk = list(PROVIDERS)
@@ -419,7 +448,8 @@ class CLI:
                     prov = PROVIDERS[pk[idx]]
                     cfg.set("base_url", prov["base_url"])
                     if prov["needs_key"]:
-                        key = input(f"  API key for {prov['label']} › ").strip()
+                        from getpass import getpass
+                        key = getpass(f"  API key for {prov['label']} › ").strip()
                         cfg.set("api_key", key or prov["api_key"])
                     else:
                         cfg.set("api_key", prov["api_key"])
@@ -430,17 +460,14 @@ class CLI:
                 if target in PROVIDERS:
                     prov = PROVIDERS[target]
                     cfg.set("base_url", prov["base_url"])
-                    if len(args) > 1:
-                        cfg.set("api_key", args[1])
-                    elif prov["needs_key"]:
-                        key = input(f"  API key for {prov['label']} › ").strip()
+                    if prov["needs_key"]:
+                        from getpass import getpass
+                        key = getpass(f"  API key for {prov['label']} › ").strip()
                         cfg.set("api_key", key or prov["api_key"])
                     else:
                         cfg.set("api_key", prov["api_key"])
                 else:
                     cfg.set("base_url", target)
-                    if len(args) > 1:
-                        cfg.set("api_key", args[1])
                 self.agent.refresh_client()
                 self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
         elif cmd == "models":
@@ -481,6 +508,34 @@ class CLI:
             target = "default" if self.agent.mode == "plan" else "plan"
             self.agent.set_mode(target)
             self.ui.info(f"mode → [{MODE_COLOR[target]}]{target}[/] ({MODE_DESCRIPTIONS[target]})")
+        elif cmd in ("view-plan", "plan-view", "viewplan"):
+            plan = (sessions_mod.load_plan(self.agent.session_file, cfg.project_root)
+                    if self.agent.session_file else None)
+            if plan:
+                self.console.print(render.render_markdown(plan))
+            else:
+                self.ui.info("no saved plan yet — /mode plan, then ask for one")
+        elif cmd == "goal":
+            action = rest.strip()
+            low = action.lower()
+            if low in ("clear", "off", "none", "remove"):
+                self.agent.set_goal(""); self.ui.info("standing goal cleared")
+            elif low in ("complete", "completed", "done"):
+                if not self.agent.update_goal("completed"):
+                    self.ui.info("no standing goal to complete")
+            elif low in ("blocked", "block"):
+                if not self.agent.update_goal("blocked"):
+                    self.ui.info("no standing goal to block")
+            elif low in ("resume", "active", "reactivate"):
+                if not self.agent.update_goal("active"):
+                    self.ui.info("no standing goal to resume")
+            elif action:
+                self.agent.set_goal(action); self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+            elif self.agent.goal:
+                self.console.print(render.render_markdown(
+                    f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}"))
+            else:
+                self.ui.info("no standing goal — /goal <objective> to set one")
         elif cmd == "think":
             if not rest:
                 i = THINK_LEVELS.index(cfg.get("thinking", "off"))
@@ -538,9 +593,10 @@ class CLI:
         elif cmd == "compact":
             self.agent.maybe_compact(force=True)
             self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
-        elif cmd == "clear":
+        elif cmd in ("clear", "new"):
             self.agent.reset()
-            self.ui.info("conversation cleared")
+            self.agent.session_file = sessions_mod.new_path(cfg.project_root)
+            self.ui.info("new session started" if cmd == "new" else "conversation cleared")
         elif cmd == "rewind":
             pts = self.agent.checkpoints.listing()
             if not pts:
@@ -555,6 +611,29 @@ class CLI:
             self._search_cmd(rest)
         elif cmd == "resume":
             self._resume_cmd()
+        elif cmd in ("artifact", "artifacts"):
+            from . import artifacts
+            args = rest.split()
+            if len(args) == 2 and args[0] in ("stop", "remove", "rm"):
+                self.ui.info("artifact stopped" if artifacts.stop(args[1]) else f"no artifact {args[1]!r}")
+            else:
+                arts = artifacts.registry()
+                if not arts:
+                    self.ui.info("no project artifacts are running")
+                else:
+                    table = Table("id", "name", "URL", "age")
+                    for art in arts:
+                        table.add_row(art.id, art.name, art.url, art.uptime)
+                    self.console.print(table)
+        elif cmd in ("handoff", "handover"):
+            md = self.agent.generate_handoff()
+            path = cfg.project_root / f"HANDOFF-{time.strftime('%Y%m%d-%H%M%S')}.md"
+            try:
+                path.write_text(md)
+                self.ui.info(f"handoff saved → {path}")
+            except OSError as e:
+                self.ui.error(f"could not save handoff: {e}")
+            self.console.print(render.render_markdown(md))
         elif cmd == "name":
             if rest.strip():
                 self.agent.name_session(rest.strip())
@@ -570,10 +649,10 @@ class CLI:
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"
             self.console.print(f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{sm}[/]  ·  host [{BRAND}]{sh}[/]")
-            self.console.print("[dim]/subagent model NAME  ·  /subagent host URL [KEY]  ·  /subagent clear[/dim]")
+            self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  /subagent clear[/dim]")
             if not defs:
                 self.ui.info("no named agents — add .dgc/agents/<name>.md "
-                             "(frontmatter: model, base_url, api_key, effort)")
+                             "(frontmatter: model, base_url, api_key_env, effort)")
             else:
                 table = Table("agent", "description", "model", "host")
                 for a in defs.values():
@@ -588,16 +667,17 @@ class CLI:
                 cfg.set("subagent_model", args[1])
                 self.ui.info(f"sub-agent model → {args[1]}")
             elif args[0] == "host" and len(args) > 1:
-                cfg.set("subagent_base_url", args[1])
                 if len(args) > 2:
-                    cfg.set("subagent_api_key", args[2])
+                    self.ui.error("API keys are not accepted inline — use DGC_SUBAGENT_API_KEY")
+                    return True
+                cfg.set("subagent_base_url", args[1])
                 self.ui.info(f"sub-agent host → {args[1]}")
             elif args[0] == "clear":
                 for k in ("subagent_model", "subagent_base_url", "subagent_api_key"):
                     cfg.set(k, "")
                 self.ui.info("sub-agent overrides cleared — inherits the main model/host")
             else:
-                self.ui.error("usage: /subagent [model NAME | host URL [KEY] | clear]")
+                self.ui.error("usage: /subagent [model NAME | host URL | clear]")
         else:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)
@@ -623,7 +703,11 @@ class CLI:
         meta = SEARCH_PROVIDERS[p]
         cfg.set("search_provider", p)
         if meta["needs_key"]:
-            key = args[1] if len(args) > 1 else input(f"  API key for {meta['label']} › ").strip()
+            if len(args) > 1:
+                self.ui.error("API keys are not accepted inline — use the masked prompt, dgc setup, or DGC_SEARCH_API_KEY")
+                return
+            from getpass import getpass
+            key = getpass(f"  API key for {meta['label']} › ").strip()
             cfg.set("search_api_key", key)
         if meta["needs_url"]:
             url = args[1] if len(args) > 1 else input(f"  base URL for {meta['label']} › ").strip()
@@ -935,12 +1019,14 @@ def run_setup(config: Config) -> None:
         prov = PROVIDERS[keys[idx]]
         base_url, api_key = prov["base_url"], prov["api_key"]
         if prov["needs_key"]:
-            api_key = input(f"  API key for {prov['label']} › ").strip() or api_key
+            from getpass import getpass
+            api_key = getpass(f"  API key for {prov['label']} › ").strip() or api_key
     else:
         base_url = input("  base URL (…/v1) › ").strip()
         if not base_url:
             c.print("[dim]cancelled[/dim]"); return
-        api_key = input("  API key (blank for local) › ").strip() or "sk-local"
+        from getpass import getpass
+        api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
     config.set("base_url", base_url)
     config.set("api_key", api_key)
     client = LLMClient(config.base_url, config.api_key, config.model)
@@ -967,7 +1053,8 @@ def run_setup(config: Config) -> None:
     config.set("search_provider", sk)
     meta = SEARCH_PROVIDERS[sk]
     if meta["needs_key"]:
-        config.set("search_api_key", input(f"  API key for {meta['label']} › ").strip())
+        from getpass import getpass
+        config.set("search_api_key", getpass(f"  API key for {meta['label']} › ").strip())
     if meta["needs_url"]:
         config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
     c.print(f"\n  [bold green]saved[/bold green] → {USER_CONFIG}")
@@ -989,7 +1076,7 @@ def run_help() -> None:
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
     c.print("  dgc update              update DGC to the latest version")
-    c.print("  dgc --model N --base-url URL --api-key KEY   set + persist a model\n")
+    c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
 
@@ -1018,6 +1105,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     parser = argparse.ArgumentParser(
+        allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
         epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
@@ -1025,7 +1113,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
     parser.add_argument("--model", help="model name (persisted)")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
-    parser.add_argument("--api-key", help="API key for the endpoint (persisted)")
+    parser.add_argument("--api-key-env", metavar="NAME",
+                        help="read the endpoint API key from environment variable NAME without persisting it")
+    parser.add_argument("--trust", action="store_true",
+                        help="trust this workspace for a non-interactive acceptEdits/auto run")
     parser.add_argument("-c", "--continue", dest="cont", action="store_true",
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
@@ -1039,14 +1130,24 @@ def main(argv: list[str] | None = None) -> None:
     config = Config()
     if args.base_url:
         config.set("base_url", args.base_url)
-    if args.api_key:
-        config.set("api_key", args.api_key)
+    if args.api_key_env:
+        if args.api_key_env not in os.environ:
+            parser.error(f"environment variable {args.api_key_env!r} is not set")
+        config.data["api_key"] = os.environ[args.api_key_env]
+        config._env_secret_keys.add("api_key")
     if args.model:
         config.set("model", args.model)
     if args.mode:
         config.data["mode"] = args.mode
     if args.think:
         config.data["thinking"] = args.think
+
+    if args.prompt is not None:
+        from .trust import is_trusted, mark_trusted
+        if args.trust:
+            mark_trusted(config, config.project_root)
+        elif config.data.get("mode") in ("acceptEdits", "auto") and not is_trusted(config, config.project_root):
+            parser.error("non-interactive acceptEdits/auto requires a trusted workspace; review it, then add --trust")
 
     cli = CLI(config)
 
@@ -1127,7 +1228,7 @@ def _print_resume_hint(agent, config) -> None:
         return
     name = None
     try:
-        name = sessions_mod.name_of(sf)
+        name = sessions_mod.name_of(sf, config.project_root)
     except Exception:
         pass
     tty = sys.stdout.isatty()

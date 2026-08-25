@@ -86,8 +86,11 @@ or set one with `/mode`.
   nothing until you approve. See the *Plan mode* page.
 - **auto** — full access, nothing asks. Use only in a sandbox or a throwaway repo.
 
-You can also carve out standing rules with `/permissions` (allow / ask / deny),
-and confine bash to the project + /tmp with `/sandbox on`.
+You can also carve out standing rules with `/permissions` (allow / ask / deny).
+`/sandbox on` makes only the project writable, hides the ambient user home and
+secrets, uses private temporary/runtime directories, and blocks network access by
+default. It does **not** skip normal permission prompts. Enable sandbox networking
+only when needed with `/sandbox network on`.
 """.strip()),
 
     ("Plan mode", "read-only planning, then one-tap approve", """
@@ -101,11 +104,12 @@ anything**.
 When the plan lands you get an approval prompt:
 
 - **Approve** — DGC drops back to your previous edit mode and executes the plan.
-- **Keep planning** — stay read-only and refine.
+- **Keep planning** — give feedback, stay read-only, and receive a revised plan.
 
-DGC keeps the plan inline in the transcript so the whole turn stays one
-scrollable thread — no stray files left in your repo. If you *want* a durable
-copy, ask the agent to write it to a markdown file.
+DGC keeps the plan inline in the transcript, saves a `plan.md` beside the session,
+and (by default) renders a self-contained preview on loopback. `/view-plan` reopens
+the saved copy. The preview never inherits LAN sharing; arbitrary project previews
+remain disabled in plan mode unless `artifact_in_plan` is explicitly enabled.
 """.strip()),
 
     ("Artifacts", "preview what the agent builds on a localhost URL", """
@@ -117,9 +121,9 @@ and serves it, as a rendered page — so you read the steps,
 files and approach in your browser instead of raw markdown scrolling past. The
 agent can also serve any page/app/chart it builds the same way.
 
-- **One server, one port.** Every artifact shares a single local server
-  (`http://127.0.0.1:45000` by default). The page has a **dropdown, top-left**,
-  that lists all your artifacts — pick one to switch.
+- **Project previews share one server and port** (`http://127.0.0.1:45000` by
+  default), with a top-left dropdown. Proposed plans use a separate transient
+  loopback server so a LAN setting can never expose them.
 - DGC prints the URL in the terminal; open it in your browser.
 - Run **/artifact** to see them, open one, **stop** one, or toggle **localhost ⇄
   LAN** with `b`.
@@ -133,8 +137,8 @@ agent can also serve any page/app/chart it builds the same way.
   `artifact_port`, turn off relaunch with `artifact_autostart`).
 
 Artifacts are built with DGC's own design language (the `dgc-design` skill) so
-the frontend looks polished by default. Nothing leaves your machine — the
-preview is bound to localhost only.
+the frontend looks polished by default. They stay on this machine unless you
+explicitly confirm LAN sharing; plan previews always stay private.
 """.strip()),
 
     ("MCP servers", "connect external tools over MCP", """
@@ -200,6 +204,37 @@ Every conversation is a session, saved as you go.
   undoes edits, not just chat.
 """.strip()),
 
+    ("Standing goals", "persistent objectives with an explicit lifecycle", """
+# Standing goals
+
+`/goal <objective>` records a bounded objective in the session and keeps it in
+the model's instructions on every turn until it is completed, blocked, replaced,
+or cleared. It survives `/resume`.
+
+- `/goal` — inspect the full objective and status.
+- `/goal complete` — retain the objective as an auditable completed record.
+- `/goal blocked` — stop automatic progress while an external blocker exists.
+- `/goal resume` — reactivate a completed or blocked goal.
+- `/goal clear` — remove it.
+
+The model can use the visible `update_goal` tool only for genuine whole-goal
+completion or a real blocker. Ending one turn or finishing one milestone is not
+goal completion.
+""".strip()),
+
+    ("Slash commands", "one command catalog plus project prompt templates", """
+# Slash commands
+
+Type `/` to open the searchable command palette. DGC advertises only commands
+that the current surface can execute; core editor actions travel as typed backend
+messages and are never passed to the model as literal slash text.
+
+Add a custom prompt command at `.dgc/commands/<name>.md` (or
+`~/.dgc/commands/<name>.md`). Use `$ARGUMENTS` or `{{args}}` in the template, then
+run `/name optional arguments`. Project commands override personal commands and
+appear in the terminal/editor palette automatically.
+""".strip()),
+
     ("Configuration", "config.json, models, context, providers", """
 # Configuration
 
@@ -209,7 +244,9 @@ file by hand.
 
 Useful keys:
 
-- `base_url`, `api_key`, `model` — the endpoint and model (`/connect`, `/model`).
+- `base_url`, `model` — the endpoint and model (`/connect`, `/model`). Credentials live in
+  owner-only `~/.dgc/secrets.json`, VS Code SecretStorage, or `DGC_API_KEY` / the other
+  `DGC_*_API_KEY` environment references; they are not written into normal config.
 - `mode`, `thinking` — permission mode and reasoning effort. `thinking` is **`off`
   by default** (a coding agent should act, not deliberate at length). DGC sends the
   correct reasoning switch **per provider** automatically — so `off` genuinely turns
@@ -219,6 +256,11 @@ Useful keys:
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
   auto-continues, 0=don't send).
+- `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. Responses defaults to
+  stateless (`store: false`) with local encrypted-reasoning replay and privacy-safe cache routing.
+  Choose `provider_state: server` only when provider-side response storage is acceptable.
+- `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
+  interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — auto-sized to the model; long sessions compact at
   `compact_threshold` of it.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never

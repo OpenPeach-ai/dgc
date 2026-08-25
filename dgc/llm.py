@@ -4,6 +4,7 @@ tool support (common with small local models)."""
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import threading
 import time
@@ -35,6 +36,10 @@ class ContextOverflowError(LLMError):
     """The request exceeded the model's context window. Recoverable: the agent compacts + retries once."""
 
 
+class ToolsUnsupportedError(LLMError):
+    """The endpoint rejected native tools; caller must retry with text-tool instructions."""
+
+
 # Overflow error strings across providers/local servers (adapted from a reference agent's overflow classifier) — so a
 # real window smaller than the configured context_size is RECOVERED (compact+retry) instead of killing
 # the turn. Local servers (llama.cpp/Ollama/LM Studio/vLLM/DS4) each phrase it differently.
@@ -60,6 +65,85 @@ class ChatResult:
     thinking: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = "stop"
+    usage: dict = field(default_factory=dict)
+    response_id: str = ""
+    provider_items: list[dict] = field(default_factory=list)
+
+
+def normalize_usage(usage: dict | None) -> dict[str, int]:
+    """Normalize Chat, Responses, and common compatible-provider usage shapes."""
+    raw = usage or {}
+    input_details = raw.get("input_tokens_details") or raw.get("prompt_tokens_details") or {}
+    output_details = raw.get("output_tokens_details") or raw.get("completion_tokens_details") or {}
+
+    def count(value) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    return {
+        "input_tokens": count(raw.get("input_tokens", raw.get("prompt_tokens", 0))),
+        "output_tokens": count(raw.get("output_tokens", raw.get("completion_tokens", 0))),
+        "cached_input_tokens": count(
+            raw.get("cached_input_tokens", input_details.get("cached_tokens",
+                    raw.get("cache_read_input_tokens", 0)))),
+        "reasoning_tokens": count(
+            raw.get("reasoning_tokens", output_details.get("reasoning_tokens", 0))),
+    }
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Wire-level features an endpoint family is expected to support.
+
+    These are optimistic defaults, not permanent truths. Runtime rejections are cached for a
+    bounded interval per endpoint+model, and users may override any field in config.
+    """
+
+    tools: bool = True
+    reasoning: bool = True
+    responses: bool = False
+    stateful_responses: bool = False
+    prompt_cache_key: bool = False
+    encrypted_reasoning: bool = False
+    usage: bool = True
+    parallel_tools: bool = True
+    max_output_tokens: bool = True
+    sampling: bool = True
+
+
+@dataclass(frozen=True)
+class ProviderAdapter:
+    """Deterministic provider profile selected before a request is constructed."""
+
+    family: str
+    capabilities: ProviderCapabilities
+
+    def with_overrides(self, overrides: dict | None) -> ProviderCapabilities:
+        values = {name: getattr(self.capabilities, name)
+                  for name in ProviderCapabilities.__dataclass_fields__}
+        for name, value in (overrides or {}).items():
+            if name in values and isinstance(value, bool):
+                values[name] = value
+        return ProviderCapabilities(**values)
+
+
+_PROVIDER_ADAPTERS = {
+    "openai": ProviderAdapter("openai", ProviderCapabilities(
+        responses=True, stateful_responses=True, prompt_cache_key=True, encrypted_reasoning=True)),
+    "ollama": ProviderAdapter("ollama", ProviderCapabilities()),
+    "vllm": ProviderAdapter("vllm", ProviderCapabilities()),
+    "deepseek": ProviderAdapter("deepseek", ProviderCapabilities(reasoning=False)),
+    "anthropic": ProviderAdapter("anthropic", ProviderCapabilities()),
+    "openrouter": ProviderAdapter("openrouter", ProviderCapabilities()),
+    "groq": ProviderAdapter("groq", ProviderCapabilities()),
+    "together": ProviderAdapter("together", ProviderCapabilities(reasoning=False)),
+    "mistral": ProviderAdapter("mistral", ProviderCapabilities(reasoning=False)),
+    "llamacpp": ProviderAdapter("llamacpp", ProviderCapabilities()),
+    "lmstudio": ProviderAdapter("lmstudio", ProviderCapabilities()),
+    "compat": ProviderAdapter("compat", ProviderCapabilities()),
+}
 
 
 class _ThinkFilter:
@@ -221,7 +305,8 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
             note = f"(calling {names})" if names else ""
             out.append({"role": "assistant", "content": (f"{text}\n{note}".strip() or "(working)")})
         else:
-            out.append({k: v for k, v in m.items() if k != "tool_calls"})
+            out.append({k: v for k, v in m.items()
+                        if k != "tool_calls" and not str(k).startswith("_")})
     # merge adjacent same-role turns — a run of user/user/user also trips some templates
     merged: list[dict] = []
     for m in out:
@@ -239,7 +324,7 @@ def _repair_for_retry(messages: list[dict]) -> list[dict]:
 # model — omitting forces thinking ON (Ollama routes.go), the bug behind the
 # "200s think, never edits" symptom.
 _REASONING_OFF = {None, "", "off", "none"}
-_REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking")
+_REASONING_KEYS = ("reasoning_effort", "chat_template_kwargs", "thinking", "reasoning")
 _SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p")
 
 
@@ -249,13 +334,30 @@ def _provider_family(base_url: str) -> str:
         return "ollama"
     if "api.openai.com" in u:
         return "openai"
+    if "openrouter.ai" in u:
+        return "openrouter"
+    if "api.groq.com" in u:
+        return "groq"
     if "deepseek.com" in u:
         return "deepseek"
+    if "together.xyz" in u:
+        return "together"
+    if "mistral.ai" in u:
+        return "mistral"
     if "anthropic" in u:
         return "anthropic"
+    if ":8080" in u or "llama.cpp" in u or "llamacpp" in u:
+        return "llamacpp"
+    if ":1234" in u or "lmstudio" in u or "lm-studio" in u:
+        return "lmstudio"
     if ":8000" in u or ":30000" in u or "vllm" in u or "sglang" in u:
         return "vllm"
     return "compat"                 # LM Studio, llama.cpp, or any other OpenAI-compatible host
+
+
+def provider_adapter(base_url: str) -> ProviderAdapter:
+    """Return the stable profile for an endpoint; runtime negotiation happens in LLMClient."""
+    return _PROVIDER_ADAPTERS[_provider_family(base_url)]
 
 
 def _openai_reasoning_model(model: str) -> bool:
@@ -287,6 +389,12 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
         return {"reasoning_effort": "low" if off else level}
     if family == "deepseek":                            # reasoning is selected by the model id
         return {}
+    if family == "openrouter":                          # gateway-normalized control across model vendors
+        return {"reasoning": {"effort": "none" if off else level}}
+    if family == "groq":                                # supported Qwen/GPT-OSS models negotiate this field
+        return {"reasoning_effort": "none" if off else level}
+    if family in ("together", "mistral"):
+        return {}                                        # no universal per-model switch; respect model defaults
     if family == "anthropic":
         if off:
             return {}
@@ -299,20 +407,89 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
 
 
 class LLMClient:
+    _capability_rejections: dict[tuple[str, str, str], float] = {}
+    _capability_lock = threading.Lock()
+
     def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
                  think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = "",
-                 sampling: dict | None = None):
+                 sampling: dict | None = None, api_mode: str = "auto",
+                 provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
+                 provider_state: str = "stateless", prompt_cache: bool = True,
+                 prompt_cache_key: str = ""):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
-        self.family = _provider_family(self.base_url)   # picks the reasoning wire format
+        self.adapter = provider_adapter(self.base_url)
+        self.family = self.adapter.family                 # picks the reasoning wire format
+        self._capability_overrides = (dict(provider_capabilities)
+                                      if isinstance(provider_capabilities, dict) else {})
+        self.capabilities = self.adapter.with_overrides(self._capability_overrides)
+        self.capability_cache_ttl_s = max(1, int(capability_cache_ttl_s or 0))
         self.read_timeout = read_timeout  # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
         self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
         self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
         self.sampling = dict(sampling or {})            # optional temperature/top_p/top_k/min_p overrides
-        self.tools_supported = True      # flips off on first 400 about tools
-        self.reasoning_supported = True  # flips off if server rejects the param
+        requested_mode = str(api_mode or "auto").lower()
+        self.requested_api_mode = requested_mode
+        self.api_mode = ("responses" if requested_mode == "auto" and self.family == "openai"
+                         else ("chat_completions" if requested_mode == "auto" else requested_mode))
+        if self.api_mode not in ("chat_completions", "responses"):
+            self.api_mode = "chat_completions"
+        self.provider_state = ("server" if str(provider_state).lower() == "server" else "stateless")
+        self.prompt_cache = bool(prompt_cache)
+        self.prompt_cache_key = str(prompt_cache_key or "")
+        self._response_id = ""
+        self._response_cursor = 0
+        self._response_prefix_hash = ""
+        if requested_mode == "auto" and not self._feature_supported("responses"):
+            self.api_mode = "chat_completions"
+
+    def _capability_key(self, feature: str) -> tuple[str, str, str]:
+        return (self.base_url.lower(), self.model, feature)
+
+    def _feature_supported(self, feature: str) -> bool:
+        if not bool(getattr(self.capabilities, feature, False)):
+            return False
+        key = self._capability_key(feature)
+        now = time.monotonic()
+        with self._capability_lock:
+            expiry = self._capability_rejections.get(key, 0)
+            if expiry and expiry <= now:
+                self._capability_rejections.pop(key, None)
+                expiry = 0
+        return not expiry
+
+    def _mark_rejected(self, feature: str) -> None:
+        with self._capability_lock:
+            self._capability_rejections[self._capability_key(feature)] = (
+                time.monotonic() + self.capability_cache_ttl_s)
+
+    def invalidate_capabilities(self) -> None:
+        """Forget negotiated rejections for this endpoint+model (e.g. after a server upgrade)."""
+        prefix = (self.base_url.lower(), self.model)
+        with self._capability_lock:
+            for key in list(self._capability_rejections):
+                if key[:2] == prefix:
+                    self._capability_rejections.pop(key, None)
+
+    @property
+    def tools_supported(self) -> bool:
+        return self._feature_supported("tools")
+
+    @property
+    def reasoning_supported(self) -> bool:
+        return self._feature_supported("reasoning")
+
+    def capability_snapshot(self) -> dict[str, bool | str]:
+        return {"provider": self.family,
+                **{name: self._feature_supported(name)
+                   for name in ProviderCapabilities.__dataclass_fields__}}
+
+    def _reset_response_state(self) -> None:
+        self._response_id = ""
+        self._response_cursor = 0
+        self._response_prefix_hash = ""
 
     @property
     def _url(self) -> str:
@@ -335,15 +512,35 @@ class LLMClient:
         on_thinking=None,
         cancel=None,
     ) -> ChatResult:
-        payload: dict = {"model": self.model, "messages": messages, "stream": True}
+        if self.api_mode == "responses":
+            return self._chat_responses(messages, tools, reasoning_effort,
+                                        on_text, on_thinking, cancel)
+        return self._chat_completions(messages, tools, reasoning_effort,
+                                      on_text, on_thinking, cancel)
+
+    def _chat_completions(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        reasoning_effort: str | None = None,
+        on_text=None,
+        on_thinking=None,
+        cancel=None,
+    ) -> ChatResult:
+        # Provider-private continuation metadata belongs only to Responses input items.
+        chat_messages = [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                         for message in messages]
+        payload: dict = {"model": self.model, "messages": chat_messages, "stream": True}
         if tools and self.tools_supported:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+            if self._feature_supported("parallel_tools"):
+                payload["parallel_tool_calls"] = True
         if self.reasoning_supported:        # F1: provider-aware reasoning/thinking control
             payload.update(_reasoning_payload(self.family, self.model, reasoning_effort))
-        if self.max_tokens:                 # F3: output-token backstop (dropped on a 400 if unwanted)
+        if self.max_tokens and self._feature_supported("max_output_tokens"):
             payload["max_tokens"] = self.max_tokens
-        if self.sampling:                   # optional temperature/top_p/top_k/min_p (user override)
+        if self.sampling and self._feature_supported("sampling"):
             payload.update(self.sampling)
         if self.family == "ollama" and self.keep_alive:   # D2: model residency (Ollama honours it on /v1)
             payload["keep_alive"] = self.keep_alive
@@ -399,35 +596,39 @@ class LLMClient:
                     raise ContextOverflowError("context window exceeded: " + body[:200])
                 # only disable a capability when the server actually blames THAT capability —
                 # a 400 about something else must not permanently strip tools/reasoning.
+                if (r.status_code == 400 and "parallel_tool_calls" in payload
+                        and re.search(r"parallel", low)):
+                    self._mark_rejected("parallel_tools")
+                    payload.pop("parallel_tool_calls", None)
+                    continue
                 if (r.status_code == 400 and self.tools_supported and "tools" in payload
                         and re.search(r"tool|function", low)):
-                    self.tools_supported = False
-                    payload.pop("tools"); payload.pop("tool_choice", None)
-                    continue
+                    self._mark_rejected("tools")
+                    raise ToolsUnsupportedError("endpoint rejected native tool calling")
                 if (r.status_code == 400 and self.reasoning_supported
                         and any(k in payload for k in _REASONING_KEYS)
                         and re.search(r"reason|effort|think|template", low)):
-                    self.reasoning_supported = False        # F2: server rejects our reasoning shape →
+                    self._mark_rejected("reasoning")        # F2: server rejects our reasoning shape →
                     for k in _REASONING_KEYS:               # strip every reasoning key, respect its default
                         payload.pop(k, None)
                     continue
                 if (r.status_code == 400 and "max_tokens" in payload
                         and re.search(r"max_tokens|max_completion|max.{0,8}output", low)):
+                    self._mark_rejected("max_output_tokens")
                     payload.pop("max_tokens", None)         # F3: server rejects our cap → drop it, retry
                     continue
                 if (r.status_code == 400 and self.sampling
                         and any(k in payload for k in _SAMPLING_KEYS)
                         and re.search(r"unrecognized|unsupported|unexpected|unknown|invalid|"
                                       r"top_k|top_p|min_p|temperature|sampl", low)):
+                    self._mark_rejected("sampling")
                     for k in _SAMPLING_KEYS:                # server rejects a sampling knob → drop ALL of
                         payload.pop(k, None)                #   them (respect its defaults) and don't re-add,
-                    self.sampling = {}                      #   so a strict endpoint can't brick the session
                     continue
                 # unclear 400 with tools present: fall back to the text protocol (still robust)
                 if r.status_code == 400 and self.tools_supported and "tools" in payload:
-                    self.tools_supported = False
-                    payload.pop("tools"); payload.pop("tool_choice", None)
-                    continue
+                    self._mark_rejected("tools")
+                    raise ToolsUnsupportedError("endpoint rejected native tool calling")
                 raise LLMError(f"{r.status_code} from server: {body}")
             if r.status_code >= 500:
                 # Transient upstream error — retry instead of killing the turn (robust
@@ -461,6 +662,359 @@ class LLMClient:
                 continue
             return res
         raise LLMError(f"request failed repeatedly: {last_err}")
+
+    @staticmethod
+    def _responses_input(messages: list[dict]) -> tuple[str, list[dict]]:
+        """Translate stored Chat-Completions history into Responses API input items."""
+        instructions: list[str] = []
+        items: list[dict] = []
+        for message in messages:
+            role = message.get("role")
+            content = message.get("content")
+            if role == "system":
+                instructions.append(str(content or ""))
+                continue
+            if role == "tool":
+                items.append({"type": "function_call_output",
+                              "call_id": str(message.get("tool_call_id") or ""),
+                              "output": str(content or "")})
+                continue
+            if role not in ("user", "assistant"):
+                continue
+            provider_output = message.get("_responses_output") if role == "assistant" else None
+            if isinstance(provider_output, list) and provider_output:
+                # In stateless mode the exact provider output (including encrypted reasoning) must
+                # be replayed. Do not also reconstruct its visible text/function calls.
+                items.extend(dict(item) for item in provider_output if isinstance(item, dict))
+                continue
+            if isinstance(content, list):
+                converted: list[dict] = []
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") in ("text", "input_text"):
+                        converted.append({"type": "input_text", "text": str(part.get("text", ""))})
+                    elif part.get("type") in ("image_url", "input_image"):
+                        value = part.get("image_url")
+                        url = value.get("url") if isinstance(value, dict) else value
+                        if url:
+                            converted.append({"type": "input_image", "image_url": str(url)})
+                if converted:
+                    items.append({"role": role, "content": converted})
+            elif content:
+                items.append({"role": role, "content": str(content)})
+            if role == "assistant":
+                for call in message.get("tool_calls") or []:
+                    fn = call.get("function") or {}
+                    items.append({"type": "function_call", "call_id": str(call.get("id") or ""),
+                                  "name": str(fn.get("name") or ""),
+                                  "arguments": str(fn.get("arguments") or "{}")})
+        return "\n\n".join(instructions), items
+
+    @staticmethod
+    def _responses_tools(tools: list[dict] | None) -> list[dict]:
+        converted = []
+        for tool in tools or []:
+            fn = tool.get("function") or {}
+            if fn.get("name"):
+                converted.append({"type": "function", "name": fn["name"],
+                                  "description": fn.get("description", ""),
+                                  "parameters": fn.get("parameters") or {"type": "object"}})
+        return converted
+
+    @staticmethod
+    def _messages_hash(messages: list[dict]) -> str:
+        encoded = json.dumps(messages, sort_keys=True, separators=(",", ":"), default=str).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _continued_responses_input(self, messages: list[dict]) -> tuple[bool, list[dict]]:
+        """Return only items added after the stored response, or invalidate stale state.
+
+        DGC stores the response itself in its Chat-style transcript. The Responses service already
+        owns that assistant item, so continuation skips the first assistant message and sends only
+        later user input or function outputs.
+        """
+        if not self._response_id or self._response_cursor > len(messages):
+            return False, []
+        if self._messages_hash(messages[:self._response_cursor]) != self._response_prefix_hash:
+            self._reset_response_state()
+            return False, []
+        tail = messages[self._response_cursor:]
+        if tail and tail[0].get("role") == "assistant":
+            tail = tail[1:]
+        _, items = self._responses_input(tail)
+        return True, items
+
+    def _effective_prompt_cache_key(self, instructions: str) -> str:
+        if self.prompt_cache_key:
+            raw = self.prompt_cache_key
+            if len(raw) <= 64:
+                return raw
+            return "dgc-" + hashlib.sha256(raw.encode()).hexdigest()[:60]
+        material = f"{self.model}\0{instructions}".encode()
+        return "dgc-" + hashlib.sha256(material).hexdigest()[:48]
+
+    def _responses_payload(self, messages, tools, reasoning_effort,
+                           disabled: set[str]) -> tuple[dict, bool]:
+        instructions, full_input = self._responses_input(messages)
+        stateful = ("stateful_responses" not in disabled and self.provider_state == "server"
+                    and self._feature_supported("stateful_responses"))
+        continued, input_items = (self._continued_responses_input(messages)
+                                  if stateful else (False, []))
+        if not continued:
+            input_items = full_input
+        payload: dict = {"model": self.model, "input": input_items, "stream": True,
+                         "store": bool(stateful)}
+        if stateful and continued:
+            payload["previous_response_id"] = self._response_id
+        elif not stateful:
+            self._reset_response_state()
+        # Instructions are deliberately repeated: previous_response_id does not carry them forward.
+        if instructions:
+            payload["instructions"] = instructions
+        converted_tools = self._responses_tools(
+            tools if "tools" not in disabled and self.tools_supported else None)
+        if converted_tools:
+            payload["tools"] = converted_tools
+            payload["tool_choice"] = "auto"
+            if self._feature_supported("parallel_tools"):
+                payload["parallel_tool_calls"] = True
+        if ("reasoning" not in disabled and self.reasoning_supported
+                and _openai_reasoning_model(self.model)):
+            level = "low" if reasoning_effort in _REASONING_OFF else reasoning_effort
+            payload["reasoning"] = {"effort": level, "summary": "auto"}
+        if (self.max_tokens and "max_output_tokens" not in disabled
+                and self._feature_supported("max_output_tokens")):
+            payload["max_output_tokens"] = self.max_tokens
+        if "sampling" not in disabled and self._feature_supported("sampling"):
+            for key in ("temperature", "top_p"):
+                if key in self.sampling:
+                    payload[key] = self.sampling[key]
+        if (self.prompt_cache and "prompt_cache_key" not in disabled
+                and self._feature_supported("prompt_cache_key")):
+            payload["prompt_cache_key"] = self._effective_prompt_cache_key(instructions)
+        if (not stateful and "encrypted_reasoning" not in disabled
+                and _openai_reasoning_model(self.model)
+                and self._feature_supported("encrypted_reasoning")):
+            payload["include"] = ["reasoning.encrypted_content"]
+        return payload, stateful
+
+    def _chat_responses(self, messages, tools, reasoning_effort, on_text, on_thinking,
+                        cancel) -> ChatResult:
+        transient = 0
+        disabled: set[str] = set()
+        for _ in range(10):
+            payload, stateful = self._responses_payload(messages, tools, reasoning_effort, disabled)
+            try:
+                response = requests.post(f"{self.base_url}/responses", headers=self._headers(), json=payload,
+                                         stream=True, timeout=(15, self.read_timeout))
+            except requests.ConnectionError as e:
+                transient += 1
+                if transient < 4:
+                    time.sleep(0.5 * transient); continue
+                raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
+            except requests.Timeout as e:
+                transient += 1
+                if transient < 4:
+                    time.sleep(0.5 * transient); continue
+                raise LLMError(f"Responses API timed out repeatedly: {e}") from e
+            if response.status_code == 404:
+                self._mark_rejected("responses")
+                self._reset_response_state()
+                if self.requested_api_mode == "auto":
+                    # Defensive compatibility for proxies in front of OpenAI-style URLs.
+                    self.api_mode = "chat_completions"
+                    return self._chat_completions(messages, tools, reasoning_effort,
+                                                  on_text, on_thinking, cancel)
+            if response.status_code == 429 or response.status_code >= 500:
+                transient += 1
+                if transient < 4:
+                    delay = 0.5 * transient
+                    if response.status_code == 429:
+                        try:
+                            delay = min(float(response.headers.get("Retry-After") or delay), 10)
+                        except ValueError:
+                            pass
+                    time.sleep(delay); continue
+            if response.status_code in (400, 413):
+                body = response.text[:600]
+                low = body.lower()
+                if _OVERFLOW_RE.search(low):
+                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                if ("parallel_tool_calls" in payload and re.search(r"parallel", low)):
+                    self._mark_rejected("parallel_tools")
+                    disabled.add("parallel_tools")
+                    continue
+                if "tools" in payload and re.search(r"tool|function", low):
+                    self._mark_rejected("tools")
+                    raise ToolsUnsupportedError("endpoint rejected native tool calling")
+                if "reasoning" in payload and re.search(r"reason|effort|summary", low):
+                    self._mark_rejected("reasoning")
+                    disabled.add("reasoning")
+                    continue
+                if "max_output_tokens" in payload and re.search(r"max.{0,12}(?:output|token)", low):
+                    self._mark_rejected("max_output_tokens")
+                    disabled.add("max_output_tokens")
+                    continue
+                if (any(key in payload for key in ("temperature", "top_p"))
+                        and re.search(r"temperature|top_p|sampl|unsupported|unrecognized", low)):
+                    self._mark_rejected("sampling")
+                    disabled.add("sampling")
+                    continue
+                if ("prompt_cache_key" in payload
+                        and re.search(r"prompt.{0,8}cache|cache.{0,8}key", low)):
+                    self._mark_rejected("prompt_cache_key")
+                    disabled.add("prompt_cache_key")
+                    continue
+                if ("include" in payload
+                        and re.search(r"encrypted.{0,12}reason|reasoning.{0,12}encrypted|\binclude\b", low)):
+                    self._mark_rejected("encrypted_reasoning")
+                    disabled.add("encrypted_reasoning")
+                    continue
+                if (stateful and re.search(r"previous_response|previous response|\bstore\b|stored response", low)):
+                    self._mark_rejected("stateful_responses")
+                    disabled.add("stateful_responses")
+                    self._reset_response_state()
+                    continue
+                raise LLMError(f"{response.status_code} from Responses API: {body}")
+            if response.status_code != 200:
+                raise LLMError(f"HTTP {response.status_code} from Responses API: {response.text[:400]}")
+            result = self._consume_responses(response, on_text, on_thinking, cancel)
+            if stateful and result.response_id and result.finish_reason != "cancelled":
+                self._response_id = result.response_id
+                self._response_cursor = len(messages)
+                self._response_prefix_hash = self._messages_hash(messages)
+            elif not stateful:
+                self._reset_response_state()
+            return result
+        raise LLMError("Responses API request failed repeatedly")
+
+    def _consume_responses(self, response: requests.Response, on_text, on_thinking,
+                           cancel=None) -> ChatResult:
+        if "application/json" in response.headers.get("Content-Type", ""):
+            return self._consume_responses_json(response.json(), on_text, on_thinking)
+        result = ChatResult()
+        calls: dict[str, dict] = {}
+        provider_items: dict[str, dict] = {}
+        stop_watch = threading.Event()
+        if cancel is not None:
+            def _watch():
+                while not stop_watch.wait(0.15):
+                    if cancel.is_set():
+                        sock = _raw_socket(response)
+                        if sock is not None:
+                            try:
+                                import socket as _socket
+                                sock.shutdown(_socket.SHUT_RDWR)
+                            except Exception:
+                                pass
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                        return
+            threading.Thread(target=_watch, daemon=True).start()
+        response.encoding = "utf-8"
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if cancel is not None and cancel.is_set():
+                    result.finish_reason = "cancelled"; break
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                typ = str(event.get("type") or "")
+                if typ == "response.output_text.delta":
+                    delta = str(event.get("delta") or "")
+                    result.content += delta
+                    if on_text and delta: on_text(delta)
+                elif "reasoning" in typ and typ.endswith(".delta"):
+                    delta = str(event.get("delta") or "")
+                    result.thinking += delta
+                    if on_thinking and delta: on_thinking(delta)
+                elif typ in ("response.output_item.added", "response.output_item.done"):
+                    item = event.get("item") or {}
+                    if typ == "response.output_item.done" and isinstance(item, dict) and item:
+                        key = str(item.get("id") or event.get("output_index") or len(provider_items))
+                        provider_items[key] = dict(item)
+                    if item.get("type") == "function_call":
+                        key = str(item.get("id") or event.get("output_index") or len(calls))
+                        slot = calls.setdefault(key, {})
+                        slot.update({k: item[k] for k in ("call_id", "name") if item.get(k)})
+                        if item.get("arguments") is not None:
+                            slot["arguments"] = str(item.get("arguments") or "{}")
+                elif typ == "response.function_call_arguments.delta":
+                    key = str(event.get("item_id") or event.get("output_index") or "0")
+                    slot = calls.setdefault(key, {})
+                    slot["arguments"] = slot.get("arguments", "") + str(event.get("delta") or "")
+                elif typ in ("response.completed", "response.incomplete"):
+                    obj = event.get("response") or {}
+                    result.response_id = str(obj.get("id") or "")
+                    result.usage = obj.get("usage") or {}
+                    if typ == "response.incomplete":
+                        reason = (obj.get("incomplete_details") or {}).get("reason", "")
+                        result.finish_reason = "length" if "token" in reason else "max_turn_requests"
+                elif typ in ("error", "response.failed"):
+                    err = event.get("error") or (event.get("response") or {}).get("error") or {}
+                    raise LLMError(str(err.get("message") or err or "Responses API stream failed"))
+        except Exception:
+            if cancel is None or not cancel.is_set():
+                raise
+            result.finish_reason = "cancelled"
+        finally:
+            stop_watch.set()
+        for slot in calls.values():
+            args = _loads_lenient(slot.get("arguments") or "{}")
+            result.tool_calls.append(ToolCall(id=str(slot.get("call_id") or f"call_{len(result.tool_calls)}"),
+                                              name=str(slot.get("name") or ""),
+                                              arguments=args if args is not None else
+                                              {"_unparsed": slot.get("arguments", "")}))
+        result.provider_items = list(provider_items.values())
+        if result.tool_calls and result.finish_reason == "stop":
+            result.finish_reason = "tool_calls"
+        if not result.tool_calls:
+            clean, text_calls = parse_text_tool_calls(result.content)
+            if text_calls:
+                result.content, result.tool_calls = clean, text_calls
+        return result
+
+    def _consume_responses_json(self, obj: dict, on_text, on_thinking) -> ChatResult:
+        output = [dict(item) for item in (obj.get("output") or []) if isinstance(item, dict)]
+        result = ChatResult(response_id=str(obj.get("id") or ""), usage=obj.get("usage") or {},
+                            provider_items=output)
+        if obj.get("status") == "incomplete":
+            reason = (obj.get("incomplete_details") or {}).get("reason", "")
+            result.finish_reason = "length" if "token" in reason else "max_turn_requests"
+        for item in output:
+            if item.get("type") == "message":
+                for content in item.get("content") or []:
+                    if content.get("type") in ("output_text", "text"):
+                        text = str(content.get("text") or "")
+                        result.content += text
+                        if on_text and text: on_text(text)
+            elif item.get("type") == "reasoning":
+                for part in item.get("summary") or []:
+                    text = str(part.get("text") or "")
+                    result.thinking += text
+                    if on_thinking and text: on_thinking(text)
+            elif item.get("type") == "function_call":
+                args = _loads_lenient(item.get("arguments") or "{}")
+                result.tool_calls.append(ToolCall(id=str(item.get("call_id") or item.get("id") or "call_0"),
+                                                  name=str(item.get("name") or ""),
+                                                  arguments=args if args is not None else
+                                                  {"_unparsed": item.get("arguments", "")}))
+        if result.tool_calls and result.finish_reason == "stop":
+            result.finish_reason = "tool_calls"
+        if not result.tool_calls:
+            clean, text_calls = parse_text_tool_calls(result.content)
+            if text_calls:
+                result.content, result.tool_calls = clean, text_calls
+        return result
 
     def _consume(self, r: requests.Response, on_text, on_thinking, cancel=None,
                  think_budget: int = 0) -> ChatResult:
@@ -542,6 +1096,8 @@ class LLMClient:
                 obj = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            if obj.get("usage"):
+                result.usage = obj["usage"]
             choice = (obj.get("choices") or [{}])[0]
             if choice.get("finish_reason"):
                 result.finish_reason = choice["finish_reason"]
@@ -614,6 +1170,7 @@ class LLMClient:
         except ValueError:
             return result
         choice = (obj.get("choices") or [{}])[0]
+        result.usage = obj.get("usage") or {}
         result.finish_reason = choice.get("finish_reason") or "stop"
         msg = choice.get("message") or {}
         reasoning = msg.get("reasoning") or msg.get("reasoning_content")

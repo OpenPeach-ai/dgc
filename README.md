@@ -57,7 +57,7 @@ dgc           # start the interactive agent
 
 ```
 /connect ollama
-/connect openrouter sk-or-...
+/connect openrouter        # securely prompts for the key
 /models                 # list what the endpoint serves
 /model qwen3.6:27b-q8_0
 ```
@@ -68,7 +68,7 @@ Switch live with `/mode` (cycles) or `/mode <name>`, or launch with `--mode`:
 
 | Mode | Behavior |
 |---|---|
-| `default` | reads & known-safe commands auto-run; **writes and other commands ask** |
+| `default` | structured reads auto-run; **every file write and shell command asks** |
 | `acceptEdits` | **file edits auto-approved**; shell commands still ask |
 | `plan` | **read-only** — the agent researches and proposes a plan you approve |
 | `auto` | **full-auto** — everything approved, the agent works unattended until done |
@@ -86,10 +86,11 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ## What's in the box
 
-- **Multiple agents at once** — run a **fleet**: `Ctrl+N` spawns a new agent (even while one is running), `Ctrl+O` cycles, `Ctrl+\` opens the **dashboard** — every agent with its live state (● on screen · ⋮ working · ◆ needs you · ○ idle), where you attach, close, pin, and rename. A background agent that finishes or needs a decision flags itself in the bottom bar. Each agent can use a different model/endpoint.
+- **Multiple agents at once** — run a **fleet**: `Ctrl+N` spawns a new agent (even while one is running), `Ctrl+O` cycles, `Ctrl+\` opens the **dashboard** — every agent with its live state (● on screen · ⋮ working · ◆ needs you · ○ idle), where you attach, close, pin, and rename. A background agent that finishes or needs a decision flags itself in the bottom bar. Each agent owns its model/config/MCP runtime; writes to a shared checkout are serialized, and `/worktree <name>` gives an agent a fully isolated branch.
 - **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a per-phase status timer (`Thinking… 0.4s`), a top-right context-window meter (click it for a usage breakdown), and centered dialogs.
-- **Plan mode** — read-only research → `present_plan` → approve into auto/acceptEdits/default (like ExitPlanMode). The plan is **saved to a `plan.md` beside the session**; reopen it any time with `/view-plan`.
-- **Artifacts** — how the agent proposes something visual on a localhost URL, most often a **plan**: in plan mode DGC renders `plan.md` as a clean page and offers to open it. It also serves any page/app/chart the agent builds. Every artifact shares **one local server on one port** (`127.0.0.1:45000` by default) with a **dropdown, top-left**, to switch between them. The list is **saved**, so it survives a `dgc` restart (`artifact_port` / `artifact_autostart` to tune). `/artifact` lists them; frontends follow the built-in **`dgc-design`** language, so they look intentional by default.
+- **Plan mode** — read-only research → `present_plan` → reject with feedback or approve into acceptEdits/default/auto. Plans are saved beside the session, reopened with `/view-plan`, and rendered by default as a self-contained loopback-only preview. Full-auto approval has a separate warning gate.
+- **Artifacts** — the agent can serve a page/app/chart it builds. Project artifacts share one configurable server and persisted dropdown; proposed plans use a separate private loopback server so a LAN setting can never expose them. `/artifact` lists, opens, and stops both kinds.
+- **Standing goals** — `/goal <objective>` keeps a bounded objective active across turns and resume. `/goal complete`, `/goal blocked`, `/goal resume`, and `/goal clear` make its lifecycle explicit; the CLI, editor backend, and ACP adapter carry typed goal state.
 - **In-app docs** — `/docs` opens a searchable how-to library right in the terminal (getting started, shortcuts, plan mode, artifacts, MCP, skills, sessions…), each page a scrollable reader.
 - **Next-prompt suggestions** — after each turn DGC predicts a sensible follow-up as ghost text; press **Tab / →** to accept it (toggle with the `suggest` config).
 - **Runs tiny local models** — if the endpoint has no native tool-calling, DGC auto-switches to a text tool-call protocol and parses it.
@@ -100,16 +101,16 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one.
 - **Checkpoints & rewind** — every turn is checkpointed; `/rewind` restores both your code and the conversation to an earlier turn.
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
-- **Skills** — ships **11 built-in skills** (`code-review`, `debug`, `deep-research`, `doctor`, `verify`, `batch`, `dataviz`, `loop`, `fewer-permission-prompts`, `providers`, `dgc-design`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`. `dgc-design` encodes DGC's frontend design language and stays off for normal coding — artifacts load it automatically.
-- **Sub-agents** — the `task` tool hands a self-contained job to a fresh autonomous sub-agent (its own context, the same tools). Sub-agents can run on a *different* local model/host than the main loop — set `subagent_model` / `subagent_base_url` / `subagent_api_key` globally, or define named agents in `.dgc/agents/<name>.md` (frontmatter: name, description, model, base_url, api_key, effort) and pick one with the task tool's `agent` argument. `/agents` lists them; `/subagent` sets the defaults.
+- **Skills** — ships **16 built-in skills** (`batch`, `code-review`, `dataviz`, `debug`, `deep-research`, `dgc-design`, `handoff`, `loop`, `onboard`, `plan`, `refactor`, `security-review`, `setup`, `ship`, `verify`, `write-tests`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`. `dgc-design` encodes DGC's frontend design language and stays off for normal coding — artifacts load it automatically.
+- **Sub-agents** — the `task` tool hands a self-contained job to a fresh autonomous sub-agent (its own context, the same tools). Sub-agents can run on a *different* local model/host than the main loop — set `subagent_model` / `subagent_base_url` globally (with the key in `DGC_SUBAGENT_API_KEY`), or define named agents in `.dgc/agents/<name>.md` (frontmatter: name, description, model, base_url, `api_key_env`, effort) and pick one with the task tool's `agent` argument. `/agents` lists them; `/subagent` sets the defaults.
 - **MCP servers** — connect stdio MCP servers (configured in `~/.dgc/config.json` → `mcp_servers`) and their tools join DGC's own; `/mcp` lists what's connected.
 - **Lifecycle hooks** — run your own shell commands on `PreToolUse` / `PostToolUse` / `UserPromptSubmit` (config → `hooks`).
 - **Vision input** — attach an image with `@path/to/image.png` for models that can see.
 - **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors.
-- **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`.
+- **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the live terminal/editor palette.
 - **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension; `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
 - **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
-- **Tools** — `read_file` · `write_file` · `edit_file` · `bash` · `bash_output` · `bash_kill` · `glob` · `grep` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options`.
+- **Tools** — `read_file` · `repo_map` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
 
 ## REPL conveniences
 
@@ -123,6 +124,7 @@ Tab / →              accept the ghost-text next-prompt suggestion
 /docs                in-app how-to guides
 /artifact            open / stop localhost artifact previews
 /view-plan           reopen the plan saved in plan mode
+/goal <objective>    persistent objective · complete | blocked | resume | clear
 /dashboard           session roster — open, switch, start, or delete sessions
 ```
 
@@ -138,14 +140,16 @@ dgc update           update DGC to the latest version
 dgc serve            headless JSON backend (NDJSON over stdio) for editor extensions
 dgc acp              Agent Client Protocol backend (stdio) for Zed / Neovim / …
 dgc -p "fix the bug in auth.py" --mode auto    one-shot, non-interactive
-dgc --model NAME --base-url URL --api-key KEY   override + persist
+DGC_API_KEY=... dgc --model NAME --base-url URL  use an environment credential
 ```
 
 ## Manual install
 
 ```bash
 git clone <your-repo-or-tarball> dgc && cd dgc
-python3 -m venv .venv && .venv/bin/pip install -e .
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install --no-deps -e .
 .venv/bin/dgc setup
 # optional: ln -sf "$PWD/.venv/bin/dgc" ~/.local/bin/dgc
 ```
@@ -158,18 +162,26 @@ Paste this to any coding agent:
 
 ## Configuration
 
-`~/.dgc/config.json` (created on first change):
+`~/.dgc/config.json` (created on first change; credentials are stored separately in owner-only
+`~/.dgc/secrets.json`):
 
 ```json
 {
   "base_url": "http://localhost:11434/v1",
-  "api_key": "ollama",
   "model": "qwen3:8b",
+  "api_mode": "auto",
+  "provider_state": "stateless",
+  "prompt_cache": true,
+  "capability_cache_ttl_s": 300,
   "mode": "default",
   "thinking": "off",
   "context_size": 32768,
-  "max_turns": 40,
+  "max_turns": 80,
   "bash_timeout": 120,
+  "sandbox": false,
+  "sandbox_network": false,
+  "plan_artifact": true,
+  "artifact_in_plan": false,
   "compact_threshold": 0.85,
   "search_provider": "duckduckgo",
   "permissions": {"allow": ["Bash(git status:*)"], "ask": [], "deny": ["Bash(rm -rf *)"]}
@@ -178,13 +190,23 @@ Paste this to any coding agent:
 
 Set `context_size` to your model's real context window — compaction timing depends on it.
 
+For OpenAI Responses, DGC defaults to `store: false`, locally preserves encrypted reasoning items
+needed for tool-loop continuity, and uses a hashed cache-routing key when supported. Set
+`provider_state` to `"server"` only if you intentionally want provider-side response storage and
+`previous_response_id` continuation. `provider_capabilities` can explicitly override feature flags
+for a compatible endpoint; rejected features are retried after `capability_cache_ttl_s` rather than
+being disabled forever.
+
 ## Development
 
 ```bash
 .venv/bin/python tests/run_tests.py   # units + end-to-end against a mock LLM server
+./scripts/preflight.sh                # complete local release gate
 ```
 
-See [AGENTS.md](AGENTS.md) for the layout and conventions.
+See [AGENTS.md](AGENTS.md) for the layout and conventions, the
+[frontier audit and roadmap](docs/FRONTIER_AUDIT_AND_ROADMAP.md) for the evidence-backed delivery
+plan, and [bench/README.md](bench/README.md) for the controlled six-harness protocol.
 
 ## Security
 
@@ -193,9 +215,10 @@ DGC is a coding agent that runs shell commands and edits files on your machine. 
 - **Ask-by-default.** In the shipped `default` mode, reads are automatic but **every file write and shell command asks first**. Only `auto` mode runs unattended — and DGC warns you before entering it. Use `default` / `acceptEdits` for anything you care about.
 - **Your model, your machine.** Code and prompts stay local unless you point DGC at a cloud model (then they go to that provider, with your key).
 - **Deny-rules** apply in every mode, including auto — add your own hard blocks: `/permissions deny Bash(rm -rf *)`, `/permissions deny Read(**/.env)`.
-- **Prompt injection.** Like any coding agent, pointing it at untrusted content (a web page via `web_fetch`, a hostile file) in `auto` mode could trick the model into running commands — `default` mode's approval prompts are the mitigation.
-- **The installer** is non-root (touches only `~/.local/bin` and `~/dgc`) and verifies the download against a published SHA-256.
+- **Prompt injection.** Web content is marked as untrusted data and private/link-local fetch targets are blocked. A hostile page or repository can still influence a model, so use `default` mode for untrusted work.
+- **Optional OS confinement.** `/sandbox on` gives shell commands a private home/tmp/environment and blocks network by default on supported systems; normal approval prompts still apply. Use `/sandbox network on` only for a command that needs it.
+- **The installer** is non-root (touches only `~/.local/bin` and `~/dgc`) and requires a matching published SHA-256. Tagged GitHub builds also carry build-provenance attestations.
 
 ## License
 
-MIT © 2026 Mohit Kalra.
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 Mohit Kalra. Commercial licensing is available from the author.

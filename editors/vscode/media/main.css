@@ -108,6 +108,9 @@ body {
 .card .q b { color: var(--text-strong); }
 .card pre { margin: 4px 0 10px; font: 400 11.5px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; background: var(--code); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; }
 .card .btns { display: flex; gap: 7px; flex-wrap: wrap; }
+.card .feedback { box-sizing: border-box; width: 100%; margin: 0 0 10px; padding: 7px 9px;
+  resize: vertical; color: var(--text); background: var(--input-background); border: 1px solid var(--border-strong);
+  border-radius: 6px; font: 12px/1.4 var(--sans); }
 button.act { font: 600 12px/1.35 var(--sans); cursor: pointer; border: 1px solid var(--border-strong); border-radius: 7px; padding: 7px 12px; background: var(--surface2); color: var(--text); text-align: left; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 /* recommended = accent bar + soft tint, NOT a solid-purple fill (that was white-on-#7C5CFF ≈ 4.3:1, unreadable) */
 button.act.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--text-strong); box-shadow: inset 2px 0 0 var(--accent); }

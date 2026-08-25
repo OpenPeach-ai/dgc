@@ -29,7 +29,8 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string 
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
-  private state = { model: "", mode: "default", think: "off", baseUrl: "" };
+  private state = { model: "", mode: "default", think: "off", baseUrl: "", workspaceTrusted: false,
+                    goal: { text: "", status: "none" } };
   private _installPrompted = false;
   private sb: vscode.StatusBarItem;
 
@@ -44,49 +45,59 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
   }
 
-  /**
-   * A compact `<editor-context>` block describing what the user is looking at:
-   * the focused file (path + language), the open file tabs, and the current
-   * selection (truncated to ~2KB). Prepended to each prompt on the host side, so
-   * the DGC backend needs no change. Returns "" when there's nothing to say.
-   */
-  private editorContext(): string {
+  /** Structured resources describing what the user is looking at. The backend
+   * bounds and labels these as untrusted data instead of concatenating HTML-ish
+   * text in the webview or extension host. */
+  private editorContext(): any[] {
     try {
-      const lines: string[] = [];
+      const resources: any[] = [];
+      const describe = (uri: vscode.Uri) => {
+        const folder = vscode.workspace.getWorkspaceFolder(uri);
+        return { uri: uri.toString(), path: uri.fsPath,
+                 relative_path: folder ? vscode.workspace.asRelativePath(uri, false) : uri.fsPath,
+                 workspace: folder?.name || "" };
+      };
       const ed = vscode.window.activeTextEditor;
-      const active = ed && ed.document.uri.scheme === "file"
-        ? vscode.workspace.asRelativePath(ed.document.uri) : "";
-      if (active && ed) { lines.push(`active file: ${active} (${ed.document.languageId})`); }
+      const activeUri = ed && ed.document.uri.scheme === "file" ? ed.document.uri : undefined;
+      if (activeUri && ed) {
+        resources.push({ type: "active_file", ...describe(activeUri), language: ed.document.languageId });
+      }
 
-      const open: string[] = [];
+      const open = new Set<string>();
       for (const group of vscode.window.tabGroups.all) {
         for (const tab of group.tabs) {
           const input: any = tab.input;
           const uri: vscode.Uri | undefined = input && input.uri;
-          if (uri && uri.scheme === "file") {
-            const rel = vscode.workspace.asRelativePath(uri);
-            if (!open.includes(rel)) { open.push(rel); }
+          if (uri && uri.scheme === "file" && !open.has(uri.toString())) {
+            open.add(uri.toString());
+            resources.push({ type: "open_file", ...describe(uri) });
           }
         }
       }
-      if (open.length) { lines.push(`open tabs: ${open.slice(0, 12).join(", ")}`); }
 
-      if (ed && !ed.selection.isEmpty && ed.document.uri.scheme === "file") {
+      if (ed && activeUri && !ed.selection.isEmpty) {
         const a = ed.selection.start.line + 1, b = ed.selection.end.line + 1;
-        const CAP = 2048;
+        const CAP = 8192;
         let sel = ed.document.getText(ed.selection);
-        const cut = sel.length > CAP;
-        if (cut) { sel = sel.slice(0, CAP); }
-        lines.push(`selection (${active || "file"}:${a}-${b})${cut ? " [truncated]" : ""}:`);
-        lines.push("```" + (ed.document.languageId || ""));
-        lines.push(sel);
-        lines.push("```");
+        if (sel.length > CAP) { sel = sel.slice(0, CAP); }
+        resources.push({ type: "selection", ...describe(activeUri), language: ed.document.languageId,
+                         range: { start_line: a, end_line: b }, text: sel });
       }
 
-      if (!lines.length) { return ""; }
-      return `<editor-context>\n${lines.join("\n")}\n</editor-context>\n\n`;
+      if (activeUri) {
+        const diagnostics = vscode.languages.getDiagnostics(activeUri).slice(0, 50).map((d) => ({
+          severity: vscode.DiagnosticSeverity[d.severity], message: d.message.slice(0, 2000),
+          source: d.source || "", code: typeof d.code === "object" ? d.code.value : d.code,
+          range: { start_line: d.range.start.line + 1, start_character: d.range.start.character + 1,
+                   end_line: d.range.end.line + 1, end_character: d.range.end.character + 1 },
+        }));
+        if (diagnostics.length) {
+          resources.push({ type: "diagnostics", ...describe(activeUri), diagnostics });
+        }
+      }
+      return resources.slice(0, 64);
     } catch {
-      return "";
+      return [];
     }
   }
 
@@ -116,8 +127,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onEvent(ev: DgcEvent): void {
     switch (ev.type) {
       case "ready":
-        this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url };
+        this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
+                       workspaceTrusted: ev.workspace_trusted === true,
+                       goal: ev.goal || { text: "", status: "none" } };
         this.postState();
+        this.backend?.send({ type: "set_workspace_roots",
+                             roots: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath) });
         this.applyNativeSettings();   // let explicitly-set VS Code settings override the CLI config
         break;
       case "model_changed":
@@ -127,10 +142,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "mode_changed":
         this.state.mode = ev.mode;
+        if (typeof ev.workspace_trusted === "boolean") {
+          this.state.workspaceTrusted = ev.workspace_trusted;
+        }
         this.postState();
         break;
       case "think_changed":
         this.state.think = ev.think;
+        this.postState();
+        break;
+      case "goal_changed":
+        this.state.goal = { text: String(ev.goal || ""), status: String(ev.status || "none") };
         this.postState();
         break;
     }
@@ -191,26 +213,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.view?.show?.(true);
   }
 
-  private onMessage(msg: any): void {
+  private async onMessage(msg: any): Promise<void> {
     const be = this.ensureBackend();
     switch (msg.type) {
       case "prompt": {
         let text = String(msg.text ?? "");
-        // Prepend the editor's context (focused file, open tabs, selection) so the
-        // agent grounds on what you're looking at. Skip for `/command` prompts — the
-        // backend keys custom slash-commands off a leading "/". No DGC-Python change.
-        if (text && !text.startsWith("/")) {
-          const ctx = this.editorContext();
-          if (ctx) { text = ctx + text; }
-        }
-        be.send({ type: "prompt", text, images: msg.images });
+        // Slash commands remain pure command text. Normal prompts carry typed resources
+        // separately so display/history and model input cannot be confused.
+        be.send({ type: "prompt", text, images: msg.images,
+                  context: text && !text.startsWith("/") ? this.editorContext() : [] });
         break;
       }
       case "permission_response":
         be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule });
         break;
       case "plan_response":
-        be.send({ type: "plan_response", id: msg.id, decision: msg.decision });
+        if (msg.decision === "auto") {
+          const confirm = await vscode.window.showWarningMessage(
+            "Full-auto will execute every plan write and shell command without another prompt.",
+            { modal: true }, "Enable full-auto");
+          if (confirm !== "Enable full-auto") {
+            be.send({ type: "plan_response", id: msg.id, decision: "reject",
+                      feedback: msg.feedback || "Full-auto was not confirmed; offer a safer execution mode." });
+            break;
+          }
+        }
+        be.send({ type: "plan_response", id: msg.id, decision: msg.decision,
+                  feedback: msg.feedback });
         break;
       case "options_response":
         be.send({ type: "options_response", id: msg.id, choice: msg.choice });
@@ -231,7 +260,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.connect();
         break;
       case "setMode":
-        this.ensureBackend().send({ type: "set_mode", mode: msg.mode });
+        void this.requestMode(String(msg.mode));
         break;
       case "setThink":
         this.ensureBackend().send({ type: "set_think", level: msg.level });
@@ -272,6 +301,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "slash":
         this.slash(msg.action);
         break;
+      case "slashText":
+        void this.slashText(String(msg.text || ""));
+        break;
     }
   }
 
@@ -304,12 +336,59 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "resume": this.resume(); break;
       case "new": this.newSession(); break;
       case "compact": this.ensureBackend().send({ type: "compact" }); break;
-      case "clear": this.post({ type: "cleared" }); break;
+      case "clear": this.ensureBackend().send({ type: "clear_session" }); break;
       case "rewind": this.rewind(); break;
       case "subagent": vscode.commands.executeCommand("workbench.action.openSettings", "dgc.subagent"); break;
       case "settings": vscode.commands.executeCommand("workbench.action.openSettings", "@ext:vibedgc.dgc"); break;
       case "bug": vscode.env.openExternal(vscode.Uri.parse("https://github.com/OpenPeach-ai/dgc/issues")); break;
+      case "viewPlan": this.ensureBackend().send({ type: "get_plan" }); break;
+      case "artifacts": this.ensureBackend().send({ type: "list_artifacts" }); break;
+      case "status": this.ensureBackend().send({ type: "status" }); break;
+      case "goal": this.ensureBackend().send({ type: "get_goal" }); break;
     }
+  }
+
+  private async slashText(raw: string): Promise<void> {
+    const text = raw.trim();
+    const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+    if (!match) { return; }
+    const name = match[1].toLowerCase(), rest = (match[2] || "").trim();
+    const be = this.ensureBackend();
+    if (name === "goal") {
+      const low = rest.toLowerCase();
+      if (!rest) { be.send({ type: "get_goal" }); }
+      else if (["clear", "off", "none", "remove"].includes(low)) {
+        be.send({ type: "set_goal", text: "", status: "none" });
+      } else if (["complete", "completed", "done"].includes(low)) {
+        be.send({ type: "set_goal", status: "completed" });
+      } else if (["blocked", "block"].includes(low)) {
+        be.send({ type: "set_goal", status: "blocked" });
+      } else if (["resume", "active", "reactivate"].includes(low)) {
+        be.send({ type: "set_goal", status: "active" });
+      } else { be.send({ type: "set_goal", text: rest, status: "active" }); }
+      return;
+    }
+    if (name === "model") {
+      if (rest) { be.send({ type: "set_model", model: rest }); } else { await this.selectModel(); }
+      return;
+    }
+    if (name === "mode") {
+      if (rest) { await this.requestMode(rest); } else { await this.setMode(); }
+      return;
+    }
+    if (name === "think") {
+      if (["off", "low", "medium", "high"].includes(rest)) {
+        be.send({ type: "set_think", level: rest });
+      } else { await this.setThinking(); }
+      return;
+    }
+    const direct: Record<string, string> = {
+      "view-plan": "viewPlan", artifact: "artifacts", status: "status", compact: "compact",
+      clear: "clear", new: "new", resume: "resume", rewind: "rewind", connect: "connect",
+      subagent: "subagent", settings: "settings", bug: "bug",
+    };
+    if (direct[name]) { this.slash(direct[name]); return; }
+    be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error
   }
 
   async resume(): Promise<void> {
@@ -371,9 +450,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- model listing --------------------------------------------------------
+  private async storedSecret(id: "apiKey" | "subagentApiKey"): Promise<string> {
+    const key = `dgc.${id}`;
+    const saved = await this.context.secrets.get(key);
+    const config = vscode.workspace.getConfiguration("dgc");
+    const legacy = config.get<string>(id, "");
+    if (!saved && legacy) { await this.context.secrets.store(key, legacy); }
+
+    // One-way compatibility migration from the old plaintext settings. Remove
+    // every scope after the value is safely in SecretStorage so it cannot linger
+    // in settings.json, workspace files, sync, or configuration exports.
+    const inspected = config.inspect<string>(id);
+    const oldScopes: Array<[string | undefined, vscode.ConfigurationTarget]> = [
+      [inspected?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
+      [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
+      [inspected?.globalValue, vscode.ConfigurationTarget.Global],
+    ];
+    for (const [value, target] of oldScopes) {
+      if (value !== undefined) { await config.update(id, undefined, target); }
+    }
+    return saved || legacy;
+  }
+
   private async fetchModels(): Promise<string[]> {
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
-    const res = await fetch(base.replace(/\/$/, "") + "/models");
+    const key = await this.storedSecret("apiKey");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(base.replace(/\/$/, "") + "/models", {
+      headers: key ? { Authorization: `Bearer ${key}` } : {}, signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) { throw new Error(`model endpoint returned HTTP ${res.status}`); }
     const data: any = await res.json();
     return (data?.data ?? []).map((m: any) => m.id).sort();
   }
@@ -390,11 +497,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- native VS Code settings → backend (only explicitly-set values override the CLI config) ---
-  applyNativeSettings(): void {
+  async applyNativeSettings(): Promise<void> {
     const be = this.backend;
     if (!be) { return; }
     const c = vscode.workspace.getConfiguration("dgc");
-    const baseUrl = c.get<string>("baseUrl", ""), apiKey = c.get<string>("apiKey", ""), model = c.get<string>("model", "");
+    const baseUrl = c.get<string>("baseUrl", ""), apiKey = await this.storedSecret("apiKey"), model = c.get<string>("model", "");
     if (baseUrl || apiKey || model) {
       be.send({ type: "set_model", base_url: baseUrl || undefined, api_key: apiKey || undefined, model: model || undefined });
     }
@@ -402,7 +509,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };
     put("subagent_model", "subagentModel");
     put("subagent_base_url", "subagentBaseUrl");
-    put("subagent_api_key", "subagentApiKey");
+    const subagentKey = await this.storedSecret("subagentApiKey");
+    if (subagentKey) { values.subagent_api_key = subagentKey; }
     put("fallback_model", "fallbackModel");
     put("fallback_base_url", "fallbackBaseUrl");
     const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
@@ -422,18 +530,28 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   async saveSettings(v: any): Promise<void> {
     const be = this.ensureBackend();
+    if (v.api_key) { await this.context.secrets.store("dgc.apiKey", String(v.api_key)); }
+    if (v.subagent_api_key) {
+      await this.context.secrets.store("dgc.subagentApiKey", String(v.subagent_api_key));
+    }
     if (v.base_url || v.api_key || v.model) {
       be.send({ type: "set_model", base_url: v.base_url || undefined,
                 api_key: v.api_key || undefined, model: v.model || undefined });
     }
-    if (v.mode) { be.send({ type: "set_mode", mode: v.mode }); }
+    if (v.mode) { await this.requestMode(String(v.mode)); }
     if (v.think) { be.send({ type: "set_think", level: v.think }); }
     const values: any = {
       subagent_model: v.subagent_model || "", subagent_base_url: v.subagent_base_url || "",
-      subagent_api_key: v.subagent_api_key || "", fallback_model: v.fallback_model || "",
+      fallback_model: v.fallback_model || "",
       fallback_base_url: v.fallback_base_url || "",
+      api_mode: v.api_mode || "auto", provider_state: v.provider_state || "stateless",
+      prompt_cache: v.prompt_cache !== false,
     };
+    if (v.subagent_api_key) { values.subagent_api_key = v.subagent_api_key; }
     if (v.context_size) { values.context_size = Number(v.context_size); }
+    if (v.capability_cache_ttl_s) {
+      values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
+    }
     be.send({ type: "set_config", values });
     vscode.window.showInformationMessage("DGC settings saved.");
   }
@@ -488,36 +606,52 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     let key: string | undefined;
     if (needsKey) {
       key = await vscode.window.showInputBox({ prompt: `API key for ${pick.label}`, password: true });
+      if (key) { await this.context.secrets.store("dgc.apiKey", key); }
     }
     be.send({ type: "set_model", base_url: url, api_key: key });
     setTimeout(() => this.selectModel(), 400);
   }
 
   async setMode(): Promise<void> {
-    const be = this.ensureBackend();
     const pick = await vscode.window.showQuickPick(
       MODES.map((m) => ({ label: m.label, detail: m.detail, description: m.id === this.state.mode ? "current" : "", id: m.id })),
       { placeHolder: "Permission mode" });
     if (!pick) {
       return;
     }
-    if (pick.id === "auto") {
-      const ok = await vscode.window.showWarningMessage(
-        "Full-auto approves every file write and shell command with no prompts. Continue?",
-        { modal: true }, "Enable auto");
-      if (ok !== "Enable auto") {
-        return;
-      }
-    }
-    be.send({ type: "set_mode", mode: pick.id });
+    await this.requestMode(pick.id);
   }
 
-  cycleMode(): void {
-    const be = this.ensureBackend();
+  private async requestMode(mode: string): Promise<boolean> {
+    if (!MODES.some((m) => m.id === mode)) { return false; }
+    const mutationMode = mode === "acceptEdits" || mode === "auto";
+    const needsTrust = mutationMode && !this.state.workspaceTrusted;
+    const needsAutoWarning = mode === "auto" && this.state.mode !== "auto";
+    if (needsTrust || needsAutoWarning) {
+      const message = needsTrust
+        ? (mode === "auto"
+          ? "This workspace is not trusted. Full-auto will run every file write and shell command without prompts. Trust it and continue?"
+          : "This workspace is not trusted. acceptEdits will apply file changes without prompting. Trust it and continue?")
+        : "Full-auto approves every file write and shell command with no prompts. Continue?";
+      const action = needsTrust ? "Trust and enable" : "Enable auto";
+      const ok = await vscode.window.showWarningMessage(
+        message, { modal: true }, action);
+      if (ok !== action) {
+        this.postState();
+        return false;
+      }
+    }
+    this.ensureBackend().send({ type: "set_mode", mode,
+                                acknowledge_workspace_trust: needsTrust });
+    return true;
+  }
+
+  async cycleMode(): Promise<void> {
     const order = ["default", "acceptEdits", "plan", "auto"];
     const next = order[(order.indexOf(this.state.mode) + 1) % order.length];
-    be.send({ type: "set_mode", mode: next });
-    vscode.window.setStatusBarMessage(`DGC mode → ${next}`, 1500);
+    if (await this.requestMode(next)) {
+      vscode.window.setStatusBarMessage(`DGC mode → ${next}`, 1500);
+    }
   }
 
   async setThinking(): Promise<void> {
@@ -583,6 +717,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <input id="s-api_key" type="password" spellcheck="false" placeholder="(dummy for local)"></label>
     <label>Model
       <span class="set-row"><input id="s-model" type="text" spellcheck="false" placeholder="model id" list="s-models"><datalist id="s-models"></datalist></span></label>
+
+    <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
+    <label>API transport
+      <select id="s-api_mode"><option value="auto">auto</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+    <label>Responses state
+      <select id="s-provider_state"><option value="stateless">stateless (private default)</option><option value="server">server stored</option></select></label>
+    <label>Prompt cache routing
+      <select id="s-prompt_cache"><option value="true">enabled</option><option value="false">disabled</option></select></label>
+    <label>Capability retry TTL (seconds)
+      <input id="s-capability_cache_ttl_s" type="number" min="1" step="1" placeholder="300"></label>
 
     <div class="set-group">Sub-agents <span class="set-hint">run <code>task</code> sub-agents on a different model / host — blank = inherit main</span></div>
     <label>Sub-agent model

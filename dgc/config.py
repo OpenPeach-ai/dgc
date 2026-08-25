@@ -3,20 +3,56 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 APP = "dgc"
 USER_HOME = Path.home() / ".dgc"
 USER_CONFIG = USER_HOME / "config.json"
+USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
 USER_AGENTS = USER_HOME / "agents"
 BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
+SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key"})
+SECRET_ENV = {"api_key": "DGC_API_KEY", "search_api_key": "DGC_SEARCH_API_KEY",
+              "subagent_api_key": "DGC_SUBAGENT_API_KEY"}
+
+
+def _write_private_json(path: Path, payload: dict) -> None:
+    """Atomically persist user configuration with owner-only permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            Path(tmp).unlink()
+        except OSError:
+            pass
 
 DEFAULTS: dict = {
     "base_url": "http://localhost:11434/v1",   # any OpenAI-compatible endpoint
     "api_key": "ollama",                        # dummy key works for ollama/lm-studio
     "model": "qwen3:8b",
+    "api_mode": "auto",                         # auto | chat_completions | responses (OpenAI Responses API)
+    "provider_state": "stateless",              # stateless | server; server permits provider-side storage
+    "prompt_cache": True,                        # send a privacy-safe stable cache-routing key when supported
+    "prompt_cache_key": "",                     # optional explicit key (never derived from prompt text verbatim)
+    "provider_capabilities": {},                 # explicit feature -> bool overrides for compatible endpoints
+    "capability_cache_ttl_s": 300,               # retry a rejected endpoint/model feature after this interval
     "mode": "default",                          # default | acceptEdits | plan | auto
     "thinking": "off",                          # off | low | medium | high
     "think_budget_tokens": 8000,                # over-thinking watchdog: abort+retry-with-less if a
@@ -43,6 +79,7 @@ DEFAULTS: dict = {
     "verify_command": "",                       #   feed failures back once. e.g. "npm test" / "pytest -q"
     "bash_timeout": 120,
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
+    "approval_timeout_s": 300,                  # abandoned IDE permission prompts fail closed
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily
@@ -62,10 +99,13 @@ DEFAULTS: dict = {
     "artifact_bind": "localhost",               # localhost (127.0.0.1 only) | lan (0.0.0.0 — your local network)
     "artifact_hostname": "",                    # optional public host/URL (Tailscale MagicDNS, a reverse-proxy
     #                                             domain) shown alongside LAN + Tailscale in /artifact
-    "artifact_in_plan": False,                  # plan mode may also serve a visual (the plan page + existing
-    #                                             .html files) — off by default so plan mode stays read-only
+    "plan_artifact": True,                      # render every proposed plan as a sanitized loopback-only page
+    "artifact_in_plan": False,                  # expose the arbitrary project artifact tool in read-only plan
+    #                                             mode; independent of the safe automatic plan page
     "background": "inherit",                    # inherit (never repaint — respect the terminal) | auto | dark
-    "sandbox": False,                           # confine bash to project dir + /tmp (bwrap/sandbox-exec)
+    "sandbox": False,                           # OS-confine bash; approval policy remains independent
+    "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
+    "sandbox_env_allow": [],                    # extra parent env-var names deliberately passed through
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
 }
 
@@ -133,6 +173,8 @@ class Config:
         self.project_root = project_root or find_project_root()
         self.project_dir = self.project_root / ".dgc"
         self.data: dict = dict(DEFAULTS)
+        self._stored_secrets: dict = {}
+        self._env_secret_keys: set[str] = set()
         self.permissions: dict[str, list[str]] = {"allow": [], "ask": [], "deny": []}
         self.load()
 
@@ -143,8 +185,26 @@ class Config:
                 raw = json.loads(USER_CONFIG.read_text())
             except json.JSONDecodeError:
                 raw = {}
+        secrets: dict = {}
+        if USER_SECRETS.exists():
+            try:
+                value = json.loads(USER_SECRETS.read_text())
+                secrets = value if isinstance(value, dict) else {}
+            except (OSError, json.JSONDecodeError):
+                secrets = {}
+        migrated = False
+        for key in SECRET_KEYS:                 # migrate legacy keys out of config.json on first load
+            if key in raw:
+                secrets[key] = raw.pop(key)
+                migrated = True
         perms = raw.pop("permissions", {})
         self.data.update(raw)
+        self._stored_secrets = {k: secrets[k] for k in SECRET_KEYS if k in secrets}
+        self.data.update(self._stored_secrets)
+        for key, env_name in SECRET_ENV.items():
+            if env_name in os.environ:
+                self.data[key] = os.environ[env_name]
+                self._env_secret_keys.add(key)
         for action in ("allow", "ask", "deny"):
             self.permissions[action] = list(perms.get(action, []))
         # project-level permission rules merge in (never persisted back to global)
@@ -156,12 +216,19 @@ class Config:
                     self.permissions[action] += list(pp.get(action, []))
             except json.JSONDecodeError:
                 pass
+        if migrated:
+            self.save()
 
     def save(self) -> None:
-        USER_HOME.mkdir(parents=True, exist_ok=True)
-        payload = dict(self.data)
+        payload = {k: v for k, v in self.data.items() if k not in SECRET_KEYS}
         payload["permissions"] = self.permissions
-        USER_CONFIG.write_text(json.dumps(payload, indent=2) + "\n")
+        _write_private_json(USER_CONFIG, payload)
+        # Environment-provided credentials are ephemeral references. A harmless settings change
+        # must never copy a CI/process secret into ~/.dgc/secrets.json.
+        secrets = {k: (self._stored_secrets.get(k, "") if k in self._env_secret_keys
+                       else self.data.get(k, "")) for k in SECRET_KEYS}
+        self._stored_secrets = dict(secrets)
+        _write_private_json(USER_SECRETS, secrets)
 
     def get(self, key: str, default=None):
         return self.data.get(key, default)

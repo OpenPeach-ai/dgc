@@ -19,7 +19,9 @@ file(s), and we score by running the official tests:
   (`dgc -c`), fed the exact failing output; we re-test.
 - **pass@1** = solved after round 1 · **pass@2** = solved by end of round 2.
 
-We also record wall-time, tool-call/turn counts, and `edit_file` failure counts.
+We also record wall-time, tool-call/turn counts, `edit_file` failure counts, and provider-reported
+input/output/reasoning tokens. Each exercise gets its own private HOME; round two reuses only that
+exercise's real harness session.
 
 ## Setup
 
@@ -29,11 +31,16 @@ mkdir -p data && git clone https://github.com/Aider-AI/polyglot-benchmark data/p
 
 # 2. language toolchains (to compile + run the tests)
 #    Python(pytest), Go, Rust(cargo), JDK 17+(for gradle); C++(g++/cmake) + Node/npm.
-#    run_bench.py expects them under /home/fungigb10/bench-tools/ (edit the paths at
-#    the top of run_bench.py for your machine), or on PATH.
+#    run_bench.py checks ~/bench-tools/ and PATH. Set BENCH_TOOLS to use another
+#    hermetic toolchain directory.
+#    For C++ `gigasecond`/`meetup`, install Boost date-time development files or
+#    extract them under $BENCH_TOOLS/boost/usr/{include,lib}; the runner discovers that prefix.
 
-# 3. sanity-check the grader: reference solutions must all PASS
-python3 validate_harness.py all 1
+# 3. install the pinned peer harnesses into ~/bench-tools/harnesses
+bash install_harnesses.sh
+
+# 4. validate the grader against all 225 reference solutions
+python3 validate_harness.py all 999
 ```
 
 ## Run
@@ -45,12 +52,63 @@ python3 run_bench.py --model qwen3.8:27b-q4km \
 
 # the full 225, two-round protocol
 python3 run_bench.py --model <model> --base-url <openai-compatible-url> \
-  --api-key <key> --langs all --rounds 2 --out results/ --tag run1
+  --langs all --rounds 2 --out results/ --tag run1
+
+# publishable same-model league (validates references, then runs all six harnesses)
+export DGC_BENCH_MODEL_DIGEST=<immutable-model-digest>
+export DGC_BENCH_HARDWARE=<stable-machine-label>
+export DGC_BENCH_ACCELERATOR=<gpu-or-accelerator-description>
+bash run_league.sh <model> <openai-compatible-url> run1
+
+# one-task protocol canary (explicitly non-publishable)
+export DGC_BENCH_ALLOW_DIRTY=1 DGC_BENCH_ALLOW_PARTIAL=1
+export DGC_BENCH_SKIP_REFERENCE_VALIDATION=1
+export DGC_BENCH_LANGS=python DGC_BENCH_EXERCISES=proverb DGC_BENCH_ROUNDS=1
+bash run_league.sh <model> <openai-compatible-url> canary1
 ```
 
-Results append to `results/results-<model>-<tag>.jsonl` as each exercise
+For a keyed endpoint, set `DGC_BENCH_API_KEY` in the environment. To use a
+different variable, pass its name with `--api-key-env NAME`. DGC deliberately
+does not accept a literal key on the command line, keeping it out of process listings.
+
+Results append to `results/results-<engine>-<model>-<tag>.jsonl` as each exercise
 finishes, so a run is **resumable** — re-run the same command and it skips
 exercises already recorded (`--redo` forces a re-run).
+
+DGC tool calls and successful/failed file-edit counts come from monotonic counters persisted in
+the session plus an atomic lightweight `.metrics` journal updated after every completed model
+request and tool call. They remain valid across context compaction, `--continue`, and an external
+wall-time SIGKILL that bypasses the full-transcript finalizer. Schema-v4 and older DGC sessions use
+a transcript-derived compatibility fallback and must not be mixed into a newly published controlled
+run.
+
+Each run first preflights the selected harness, language toolchains, dataset, and C++ Boost
+dependency. It then writes a schema-v3 manifest with executable/toolchain hashes and versions,
+exact settings, runner/dataset commits, hardware, and a deterministic run ID. Set
+`DGC_BENCH_MODEL_DIGEST`, `DGC_BENCH_CAPABILITIES`, `DGC_BENCH_HARDWARE`, and
+`DGC_BENCH_ACCELERATOR` to make controlled-run provenance complete. Bounded,
+credential-redacted stdout/stderr traces survive non-zero exits and wall timeouts. Official tests
+run in a fresh fixture containing only the agent's submitted solution files, so edits to tests,
+build manifests, or added files cannot weaken grading.
+
+DGC's internal turn deadline is set 15 seconds before the external process-group timeout (scaled
+down for very short diagnostics). This reserves time for cancellation, snapshot restoration, and
+atomic session persistence; the `.metrics` journal remains the crash-safe fallback if hard
+termination still wins the race.
+
+`run_league.sh` requires clean DGC and dataset checkouts, runs DGC, Aider, Codex, Goose, OpenCode,
+and Pi sequentially, then writes a task-set/provenance-checked comparison with Wilson 95% confidence
+intervals. By default it starts a loopback provider proxy that enforces reasoning off at the actual
+Ollama/OpenAI transport, drains final usage events, and records request metadata/usage without
+prompts or responses. `DGC_BENCH_NORMALIZE_THINKING=0` disables it only for a documented diagnostic.
+
+Without `DGC_BENCH_ALLOW_PARTIAL=1`, comparison rejects anything except all six engines, all 225
+tasks, a clean runner and dataset revision, immutable model digest, hardware label, transport
+normalization, and synchronized provider usage for every model round. `DGC_BENCH_ENGINES`,
+`DGC_BENCH_LANGS`, `DGC_BENCH_LIMIT`, and `DGC_BENCH_EXERCISES` are trial controls, not shortcuts to
+a publishable claim. `install_harnesses.sh` pins Aider, Codex, Goose, OpenCode, and Pi in the
+user-owned benchmark toolchain; explicit `AIDER`, `CODEX`, `GOOSE`, `OPENCODE`, or `PI` environment
+variables still override those binaries.
 
 ## Read the results
 

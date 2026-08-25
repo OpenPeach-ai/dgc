@@ -25,7 +25,9 @@
     $("modeicon").className = "codicon codicon-" + MODES[m].icon; $("modelabel").textContent = m;
     $("btn-mode").title = MODES[m].desc + " — Shift+Tab to cycle";
   }
-  function setMode(m) { applyMode(m); vscode.postMessage({ type: "setMode", mode: m }); hideModeMenu(); }
+  // The extension host owns the auto-mode confirmation. Update only when the backend
+  // echoes mode_changed/state so cancelling the modal cannot leave a false "auto" badge.
+  function setMode(m) { vscode.postMessage({ type: "setMode", mode: m }); hideModeMenu(); }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
   function hideModeMenu() { $("modemenu").hidden = true; }
   function toggleModeMenu() {
@@ -66,21 +68,20 @@
     + '<path class="s3" d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>';
   // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
   const GLYPH = {
-    read_file: "→", glob: "→",
-    write_file: "✎", edit_file: "✎", save_memory: "✎",
+    read_file: "→", glob: "→", repo_map: "→",
+    write_file: "✎", edit_file: "✎", apply_patch: "✎", save_memory: "✎",
     bash: "$", bash_output: "$", bash_kill: "$",
     grep: "✱", web_search: "✱", web_fetch: "✱",
     present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
   };
   const glyphFor = (name) => GLYPH[name] || "▸";
-  const SLASH = [
-    ["/model", "pick the model", "pickModel"], ["/connect", "provider or a custom LAN host", "connect"],
-    ["/subagent", "sub-agent model + host", "subagent"],
-    ["/mode", "permission mode", "pickMode"], ["/think", "how hard the model reasons", "pickThink"],
-    ["/resume", "resume a past session (or delete one)", "resume"], ["/new", "new session", "new"],
-    ["/rewind", "undo to an earlier checkpoint", "rewind"],
-    ["/compact", "summarize context now", "compact"], ["/clear", "clear the view", "clear"],
-    ["/settings", "open DGC settings", "settings"], ["/bug", "report a bug / request a feature", "bug"],
+  let builtinCommands = [
+    { name: "model", description: "pick the model", action: "pickModel" },
+    { name: "connect", description: "provider or a custom LAN host", action: "connect" },
+    { name: "mode", description: "permission mode", action: "pickMode" },
+    { name: "think", description: "how hard the model reasons", action: "pickThink" },
+    { name: "goal", description: "inspect/set/complete/block the standing objective", action: "goal", accepts_args: true },
+    { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
   let streaming = false, turn = null;
@@ -88,7 +89,9 @@
   let files = [];              // workspace files for @-mentions
   let popMode = null, popItems = [], popIdx = 0, popStart = 0;
 
-  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
 
   // minimal, streaming-safe markdown
   function md(s) {
@@ -136,7 +139,7 @@
     c.innerHTML = `<div class="head"><span class="glyph">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></div><div class="body"><pre></pre></div>`;
     const head = c.querySelector(".head");
     head.onclick = () => c.classList.toggle("open");
-    if (["read_file", "write_file", "edit_file"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
+    if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     head.appendChild(el("span", "dot run"));
     head.appendChild(el("span", "badge"));
     turn.block.appendChild(c); breakText(); scroll(); return c;
@@ -161,14 +164,32 @@
   function onEvent(ev) {
     const stick = atBottom();
     switch (ev.type) {
-      case "ready": customCommands = ev.commands || []; break;
+      case "ready": {
+        if (Array.isArray(ev.commands) && ev.commands.length
+            && ev.commands.every((c) => c && typeof c === "object")) {
+          builtinCommands = ev.commands;
+        }
+        customCommands = Array.isArray(ev.custom_commands) ? ev.custom_commands
+          : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
+        break;
+      }
       case "context": {
         const pct = ev.size ? Math.min(100, Math.round((ev.used / ev.size) * 100)) : 0;
         $("ctx").textContent = pct + "%";
         $("btn-ctx").classList.toggle("warn", pct >= 85);
+        const fmt = (n) => Number(n || 0).toLocaleString();
+        $("btn-ctx").title = `Context ${fmt(ev.used)} / ${fmt(ev.size)} estimated tokens · ` +
+          `provider ${fmt(ev.input_tokens)} in / ${fmt(ev.output_tokens)} out · ` +
+          `${fmt(ev.cached_input_tokens)} cached · ${fmt(ev.reasoning_tokens)} reasoning · ` +
+          `${fmt(ev.requests)} requests · click to compact`;
         break;
       }
       case "history": renderHistory(ev.items || []); break;
+      case "session":
+        if (ev.kind === "cleared" || ev.kind === "new") {
+          log.innerHTML = ""; turn = null; queuedCount = 0; renderQueued(); setSending(false);
+        }
+        break;
       case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
@@ -191,7 +212,11 @@
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
       }
-      case "tool_denied": { ensureTurn(); toolCard({ name: ev.name, summary: ev.reason }).querySelector(".dot").className = "dot deny"; break; }
+      case "tool_denied": {
+        ensureTurn();
+        const c = (turn._tools && turn._tools[ev.call_id]) || toolCard({ name: ev.name, summary: ev.reason });
+        c.querySelector(".dot").className = "dot deny"; break;
+      }
       case "permission_request": {
         ensureTurn();
         const cmd = ev.command ? `<pre>$ ${esc(ev.command)}</pre>` : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
@@ -201,8 +226,8 @@
       }
       case "plan_proposal": {
         ensureTurn();
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><div class="btns"><button class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button class="act" data-d="auto">auto</button><button class="act" data-d="default">default</button><button class="act" data-d="reject">Keep planning</button></div>`);
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d }); resolveCard(c); });
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button class="act" data-d="auto">auto</button><button class="act" data-d="default">default</button><button class="act" data-d="reject">Keep planning</button></div>`);
+        c.querySelectorAll("button").forEach((b) => b.onclick = () => { const feedback = c.querySelector(".feedback").value.trim(); vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback }); resolveCard(c); });
         break;
       }
       case "options_request": {
@@ -240,9 +265,38 @@
         turn.block.appendChild(c); breakText(); scroll();
         break;
       }
-      case "artifacts": break;   // reserved: a future artifacts manager panel
+      case "artifacts": {
+        const items = ev.items || [];
+        if (!items.length) { sysLine("No artifact previews are running."); break; }
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-preview"></span> Artifacts</div><div class="artifact-list"></div>`);
+        const list = c.querySelector(".artifact-list");
+        items.forEach((a) => {
+          const row = el("div", "abtns");
+          const open = el("button", "abtn primary", `${a.name} · open`);
+          open.onclick = () => vscode.postMessage({ type: "openExternal", url: a.url });
+          const stop = el("button", "abtn", "Stop");
+          stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: a.id }); row.remove(); };
+          row.appendChild(open); row.appendChild(stop); list.appendChild(row);
+        });
+        break;
+      }
+      case "saved_plan":
+        if (ev.exists) decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Saved plan</div><pre>${esc(ev.plan)}</pre>`);
+        else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
+        break;
+      case "goal_changed": {
+        const text = String(ev.goal || "");
+        sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");
+        break;
+      }
+      case "status":
+        sysLine(`${ev.model} · ${ev.mode} · thinking ${ev.think} · context ${ev.context_used}/${ev.context_size}`
+          + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
+        break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
+      case "command_rejected": sysLine(ev.message || "Command unavailable while a turn is running", true); break;
+      case "request_expired": sysLine("Approval request expired; the action was denied.", true); break;
       case "compacted": sysLine("context compacted"); break;
       case "error": sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
       case "turn_end": endTurn(); setSending(false); break;
@@ -259,6 +313,16 @@
     const textAtts = attachments.filter((a) => !a.img);
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
     const full = textAtts.map((a) => a.text).join("\n") + (textAtts.length ? "\n" : "") + text;
+    if (text.startsWith("/") && !attachments.length) {
+      const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
+      const custom = customCommands.includes(name);
+      if (custom) {
+        const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+        m.appendChild(el("div", "bubble", esc(text))); log.appendChild(m); setSending(true);
+      }
+      vscode.postMessage({ type: "slashText", text });
+      input.value = ""; input.style.height = "auto"; scroll(); return;
+    }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
     vscode.postMessage({ type: "prompt", text: full, images: imgs.length ? imgs : undefined });   // backend queues it if a turn is running
@@ -286,7 +350,7 @@
       renderAtts();
       input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
     } else if (popMode === "/") {
-      if (it.action && it.action.indexOf("custom:") === 0) {
+      if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
         input.value = it.label + " ";       // custom command — let the user add args, then Enter
         hidePop(); input.focus(); return;
       }
@@ -302,8 +366,10 @@
     const at = upto.lastIndexOf("@"), sl = upto.startsWith("/") ? 0 : -1;
     if (sl === 0 && !/\s/.test(v)) {
       popMode = "/"; popStart = 0;
-      const all = SLASH.concat(customCommands.map((c) => ["/" + c, "custom command", "custom:" + c]));
-      showPop(all.filter((c) => c[0].startsWith(v)).map((c) => ({ label: c[0], detail: c[1], action: c[2] })));
+      const all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
+        action: c.action, acceptsArgs: c.accepts_args === true }))
+        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "custom command", action: "custom:" + c, acceptsArgs: true })));
+      showPop(all.filter((c) => c.label.startsWith(v)));
     }
     else if (at !== -1 && !/\s/.test(upto.slice(at))) {
       popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();
@@ -362,13 +428,17 @@
 
   // ---- settings page ----
   const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
-    "subagent_api_key", "fallback_model", "fallback_base_url", "mode", "think", "context_size"];
+    "subagent_api_key", "fallback_model", "fallback_base_url", "api_mode", "provider_state",
+    "prompt_cache", "capability_cache_ttl_s", "mode", "think", "context_size"];
   function fillSettings(cfg) {
     const map = {
       base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
       subagent_model: cfg.subagent_model, subagent_base_url: cfg.subagent_base_url,
-      subagent_api_key: cfg.subagent_api_key, fallback_model: cfg.fallback_model,
+      subagent_api_key: "", fallback_model: cfg.fallback_model,
       fallback_base_url: cfg.fallback_base_url, context_size: cfg.context_size,
+      api_mode: cfg.api_mode, provider_state: cfg.provider_state,
+      prompt_cache: String(cfg.prompt_cache !== false),
+      capability_cache_ttl_s: cfg.capability_cache_ttl_s,
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
   }
@@ -383,6 +453,7 @@
   function collectSettings() {
     const v = {};
     SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
+    v.prompt_cache = v.prompt_cache !== "false";
     return v;
   }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });

@@ -10,18 +10,79 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from pathlib import Path
 
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
-from .commands import discover_commands, render_command
+from .commands import discover_commands, editor_command_metadata, render_command
 from .config import Config
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
 from .tools import TOOL_SCHEMAS
-from .ui import arg_summary, split_diff
+from .ui import arg_summary, split_diff, tool_output_is_error
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
+_BUSY_MUTATIONS = {
+    "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
+    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
+}
+_EDITOR_CONTEXT_LIMIT = 64_000
+
+
+def _format_editor_context(resources) -> str:
+    """Bound and frame typed editor resources as untrusted reference data for the model."""
+    if not isinstance(resources, list):
+        return ""
+    allowed = {"type", "uri", "path", "relative_path", "workspace", "language", "range",
+               "text", "diagnostics"}
+    clean: list[dict] = []
+    used = 0
+    def bounded(value, depth=0):
+        if depth > 4:
+            return None
+        if isinstance(value, str):
+            return value[:2_000]
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        if isinstance(value, list):
+            return [bounded(part, depth + 1) for part in value[:50]]
+        if isinstance(value, dict):
+            return {str(k)[:80]: bounded(v, depth + 1) for k, v in list(value.items())[:50]}
+        return None
+    for item in resources[:64]:
+        if not isinstance(item, dict):
+            continue
+        resource = {}
+        for key in allowed:
+            value = item.get(key)
+            if value is None:
+                continue
+            if key == "diagnostics" and isinstance(value, list):
+                value = bounded(value)
+            elif isinstance(value, str):
+                value = value[:16_000]
+            elif isinstance(value, (dict, list, int, float, bool)):
+                value = bounded(value)
+            else:
+                continue
+            resource[key] = value
+        encoded = json.dumps(resource, ensure_ascii=False, separators=(",", ":"))
+        if used + len(encoded.encode("utf-8")) > _EDITOR_CONTEXT_LIMIT:
+            break
+        clean.append(resource)
+        used += len(encoded.encode("utf-8"))
+    if not clean:
+        return ""
+    payload = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
+    return ("<editor-context-json trust=\"untrusted-reference-data\">\n" + payload
+            + "\n</editor-context-json>\n\n")
+
+
+def _strip_editor_context(text: str) -> str:
+    if text.startswith("<editor-context-json ") and "</editor-context-json>\n\n" in text:
+        return text.split("</editor-context-json>\n\n", 1)[1]
+    return text
 
 
 class _Shutdown(Exception):
@@ -31,11 +92,14 @@ class _Shutdown(Exception):
 class HeadlessUI:
     """The AgentUI seam, realized as NDJSON events + blocking request round-trips."""
 
-    def __init__(self, emitter: Emitter, pending: PendingRequests):
+    def __init__(self, emitter: Emitter, pending: PendingRequests,
+                 approval_timeout_s: float = 300.0):
         self.em = emitter
         self.pending = pending
+        self.approval_timeout_s = max(0.01, float(approval_timeout_s))
         self._rule_hook = None          # set by Backend to persist an allow rule
         self._rule_override: dict = {}   # tool -> explicit rule string the IDE dictated
+        self.plan_feedback = ""         # one-shot feedback consumed by Agent after rejection
 
     # streaming ----------------------------------------------------------------
     def on_text(self, chunk: str) -> None:
@@ -48,21 +112,27 @@ class HeadlessUI:
         self.em.emit("stream_end")
 
     # tools --------------------------------------------------------------------
-    def tool_call(self, name: str, args: dict) -> None:
-        self.em.emit("tool_call", name=name, args=args, summary=arg_summary(name, args))
+    def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
+        self.em.emit("tool_call", call_id=call_id, name=name, args=args,
+                     summary=arg_summary(name, args))
 
-    def tool_result(self, name: str, out: str) -> None:
+    def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         is_diff, diff = split_diff(out)
-        self.em.emit("tool_result", name=name, output=out, is_diff=is_diff, diff=diff)
+        self.em.emit("tool_result", call_id=call_id, name=name, output=out,
+                     is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
 
-    def tool_denied(self, name: str, args: dict, reason: str) -> None:
-        self.em.emit("tool_denied", name=name, args=args, reason=reason)
+    def tool_denied(self, name: str, args: dict, reason: str,
+                    call_id: str | None = None) -> None:
+        self.em.emit("tool_denied", call_id=call_id, name=name, args=args, reason=reason)
 
     def on_todo(self, todos: list) -> None:
         self.em.emit("todos", todos=todos)
 
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
+
+    def goal_changed(self, goal: str, status: str) -> None:
+        self.em.emit("goal_changed", goal=goal, status=status)
 
     # notices ------------------------------------------------------------------
     def info(self, message: str) -> None:
@@ -72,14 +142,20 @@ class HeadlessUI:
         self.em.emit("error", message=message)
 
     # blocking decisions -------------------------------------------------------
-    def approve(self, name: str, args: dict) -> str:
+    def _await(self, rid: str, ev: threading.Event):
+        if not ev.wait(self.approval_timeout_s):
+            self.pending.value(rid)  # discard it so a late response cannot affect another request
+            self.em.emit("request_expired", id=rid)
+            return None
+        return self.pending.value(rid)
+
+    def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
         rid, ev = self.pending.register()
-        self.em.emit("permission_request", id=rid, name=name, args=args,
+        self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
                      command=(args.get("command") if name == "bash" else None),
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
-        ev.wait()
-        payload = self.pending.value(rid) or {}
+        payload = self._await(rid, ev) or {}
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
         return {"once": "once", "always": "always",
@@ -95,18 +171,17 @@ class HeadlessUI:
         rid, ev = self.pending.register()
         self.em.emit("plan_proposal", id=rid, plan=plan,
                      choices=["auto", "acceptEdits", "default", "reject"])
-        ev.wait()
-        payload = self.pending.value(rid) or {}
-        if payload.get("feedback"):
-            self.em.emit("info", message=str(payload["feedback"]))
+        payload = self._await(rid, ev) or {}
+        self.plan_feedback = str(payload.get("feedback") or "").strip()
         decision = payload.get("decision")
+        if decision in _PLAN_MODES:
+            self.plan_feedback = ""
         return decision if decision in _PLAN_MODES else None
 
     def propose_options(self, question: str, options: list) -> str:
         rid, ev = self.pending.register()
         self.em.emit("options_request", id=rid, question=question, options=options)
-        ev.wait()
-        payload = self.pending.value(rid) or {}
+        payload = self._await(rid, ev) or {}
         choice = payload.get("choice")
         if isinstance(choice, int) and 1 <= choice <= len(options):
             return options[choice - 1]
@@ -117,16 +192,21 @@ class HeadlessUI:
 
 class Backend:
     def __init__(self, config: Config):
+        from .trust import is_trusted
+        self.workspace_trusted = is_trusted(config, config.project_root)
+        if not self.workspace_trusted and config.mode in ("acceptEdits", "auto"):
+            config.data["mode"] = "default"  # do not persist a downgrade of the user's global preference
         self.config = config
         self.em = Emitter(sys.stdout)
         self.pending = PendingRequests()
-        self.ui = HeadlessUI(self.em, self.pending)
+        self.ui = HeadlessUI(self.em, self.pending,
+                             float(config.get("approval_timeout_s", 300) or 300))
         self.agent = Agent(config, self.ui)
         self.ui._rule_hook = self._add_rule
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._turn_n = 0
-        self._queue: list[str] = []   # prompts queued while a turn is running
+        self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
 
     def _add_rule(self, rule_text: str) -> None:
         try:
@@ -138,30 +218,39 @@ class Backend:
 
     def start(self) -> None:
         self.em.emit(
-            "ready", version=__version__, model=self.config.model, mode=self.agent.mode,
+            "ready", version=__version__, protocol_version=2,
+            capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
+                          "goal_state": True, "saved_plan": True, "command_registry": True},
+            model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             project_root=str(self.config.project_root),
+            workspace_trusted=self.workspace_trusted,
             session_id=self.agent.session_file.stem if self.agent.session_file else None,
             tools_supported=self.agent.client.tools_supported,
+            provider=self.agent.client.family,
+            provider_capabilities=self.agent.client.capability_snapshot(),
             tools=[t["function"]["name"] for t in TOOL_SCHEMAS],
             skills=[s.name for s in self.agent.skills.values()],
-            commands=list(discover_commands(self.config.project_root)),
+            commands=editor_command_metadata(),
+            custom_commands=list(discover_commands(self.config.project_root)),
+            goal={"text": self.agent.goal, "status": self.agent.goal_status},
             context_size=int(self.config.get("context_size", 32768)))
         self._emit_context()
 
     def _busy(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
 
-    def _start_turn(self, text: str, images=None) -> None:
+    def _start_turn(self, text: str, images=None, context=None) -> None:
         self._turn_n += 1
         tid = f"t{self._turn_n}"
         self.agent._pending_images = images
+        model_text = _format_editor_context(context) + text
 
         def run():
             self.em.emit("turn_start", turn_id=tid, prompt=text)
             failed = False
             try:
-                self.agent.run_turn(text)
+                self.agent.run_turn(model_text)
             except Exception as e:                 # a model/endpoint failure must NOT kill the turn silently
                 failed = True                      # (unreachable base_url, model not pulled, HTTP error, …)
                 import traceback
@@ -177,9 +266,9 @@ class Backend:
                          reason="cancelled" if cancelled else ("error" if failed else "completed"),
                          token_estimate=est)
             self._emit_context()
-            if self._queue and not cancelled and not failed:   # drain a queued follow-up
+            if self._queue and not cancelled:   # preserve prompt order even if the prior turn failed
                 nxt = self._queue.pop(0)
-                self._start_turn(nxt[0], nxt[1])
+                self._start_turn(nxt[0], nxt[1], nxt[2])
 
         self._worker = threading.Thread(target=run, daemon=True)
         self._worker.start()
@@ -189,7 +278,13 @@ class Backend:
             used = self.agent.estimate_tokens()
         except Exception:
             used = 0
-        self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)))
+        totals = getattr(self.agent, "usage_totals", {})
+        self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)),
+                     input_tokens=int(totals.get("input_tokens", 0)),
+                     output_tokens=int(totals.get("output_tokens", 0)),
+                     cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
+                     reasoning_tokens=int(totals.get("reasoning_tokens", 0)),
+                     requests=int(totals.get("requests", 0)))
 
     def _emit_artifacts(self) -> None:
         from . import artifacts
@@ -201,13 +296,26 @@ class Backend:
         c = self.config
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      think=c.get("thinking", "off"), base_url=c.base_url,
+                     api_mode=c.get("api_mode", "auto"),
+                     provider_state=c.get("provider_state", "stateless"),
+                     prompt_cache=bool(c.get("prompt_cache", True)),
+                     capability_cache_ttl_s=int(c.get("capability_cache_ttl_s", 300)),
+                     provider_capabilities=(self.agent.client.capability_snapshot()
+                                            if hasattr(getattr(self.agent, "client", None),
+                                                       "capability_snapshot") else {}),
                      project_root=str(c.project_root), search=c.get("search_provider"),
                      subagent_model=c.get("subagent_model", ""),
                      subagent_base_url=c.get("subagent_base_url", ""),
-                     subagent_api_key=c.get("subagent_api_key", ""),
+                     subagent_api_key_set=bool(c.get("subagent_api_key", "")),
                      fallback_model=c.get("fallback_model", ""),
                      fallback_base_url=c.get("fallback_base_url", ""),
-                     context_size=c.get("context_size", 32768))
+                     context_size=c.get("context_size", 32768),
+                     goal={"text": getattr(self.agent, "goal", ""),
+                           "status": getattr(self.agent, "goal_status", "none")})
+
+    def _emit_goal(self) -> None:
+        self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
+                     status=getattr(self.agent, "goal_status", "none"))
 
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
@@ -222,7 +330,7 @@ class Backend:
                     text = " ".join(p.get("text", "") for p in content
                                     if isinstance(p, dict) and p.get("type") == "text") + " 📷"
                 else:
-                    text = str(content)
+                    text = _strip_editor_context(str(content))
                 if text.startswith("<tool_results>"):
                     continue
                 items.append({"role": "user", "text": text})
@@ -234,19 +342,55 @@ class Backend:
     def dispatch(self, cmd: dict) -> None:
         t = cmd.get("type")
 
+        if self._busy() and t in _BUSY_MUTATIONS:
+            self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                         message=f"'{t}' is unavailable while a turn is running; cancel or wait")
+            return
+
         if t == "prompt":
             text = str(cmd.get("text", ""))
             images = cmd.get("images")             # list of data: URIs (vision models)
+            context = cmd.get("context")            # typed editor resources; bounded in _start_turn
             if text.startswith("/"):               # render a custom slash-command template
                 parts = text[1:].split(None, 1)
                 custom = discover_commands(self.config.project_root)
                 if parts and parts[0] in custom:
                     text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "") or text
             if self._busy():                       # queue follow-ups sent mid-turn
-                self._queue.append((text, images))
+                self._queue.append((text, images, context))
                 self.em.emit("queued", count=len(self._queue), text=text)
                 return
-            self._start_turn(text, images)
+            self._start_turn(text, images, context)
+
+        elif t == "slash_command":
+            text = str(cmd.get("text") or "").strip()
+            parts = text[1:].split(None, 1) if text.startswith("/") else []
+            custom = discover_commands(self.config.project_root)
+            if not parts or parts[0] not in custom:
+                self.em.emit("error", message=f"unknown command: {text or '/'}")
+                return
+            rendered = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "")
+            if not rendered:
+                self.em.emit("error", message=f"custom command /{parts[0]} is empty")
+            elif self._busy():
+                self._queue.append((rendered, None, None))
+                self.em.emit("queued", count=len(self._queue), text=text)
+            else:
+                self._start_turn(rendered)
+
+        elif t == "set_workspace_roots":
+            from .workspace import is_within
+            roots = []
+            for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
+                try:
+                    path = Path(str(raw)).resolve(strict=True)
+                except (OSError, RuntimeError):
+                    continue
+                if path.is_dir() and not is_within(path, self.config.project_root) and path not in roots:
+                    roots.append(path)
+            self.config.session_permissions = {
+                "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
+            self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])])
 
         elif t == "permission_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule")})
@@ -261,13 +405,27 @@ class Backend:
             self._queue.clear()
 
         elif t == "set_mode":
-            self.agent.set_mode(cmd.get("mode", "default"))
-            self.em.emit("mode_changed", mode=self.agent.mode)
+            mode = cmd.get("mode", "default")
+            if mode in ("acceptEdits", "auto") and not self.workspace_trusted:
+                if cmd.get("acknowledge_workspace_trust") is not True:
+                    self.em.emit("command_rejected", command=t, reason="workspace_untrusted",
+                                 message="review this workspace and explicitly acknowledge trust before enabling mutations")
+                    return
+                from .trust import mark_trusted
+                mark_trusted(self.config, self.config.project_root)
+                self.workspace_trusted = True
+            self.agent.set_mode(mode)
+            self.em.emit("mode_changed", mode=self.agent.mode,
+                         workspace_trusted=self.workspace_trusted)
         elif t == "set_model":
             if cmd.get("base_url"):
                 self.config.set("base_url", cmd["base_url"])
             if cmd.get("api_key"):
-                self.config.set("api_key", cmd["api_key"])
+                # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
+                # a later non-secret config save preserves any existing CLI secret instead of
+                # duplicating the editor key into ~/.dgc/secrets.json.
+                self.config.data["api_key"] = cmd["api_key"]
+                self.config._env_secret_keys.add("api_key")
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
@@ -275,12 +433,41 @@ class Backend:
         elif t == "set_think":
             self.config.set("thinking", cmd.get("level", "off"))   # persisted
             self.em.emit("think_changed", think=self.config.get("thinking", "off"))
+        elif t == "set_goal":
+            status = str(cmd.get("status") or "active")
+            text = str(cmd.get("text") or "")
+            if status == "none" or (not text and status == "active"):
+                self.agent.set_goal("")
+            elif text:
+                self.agent.set_goal(text, status if status in ("active", "completed", "blocked") else "active")
+            elif not self.agent.update_goal(status):
+                self.em.emit("error", message="no standing goal to update")
+                return
+            self._emit_goal()
+        elif t == "get_goal":
+            self._emit_goal()
+        elif t == "get_plan":
+            plan = (sessions_mod.load_plan(self.agent.session_file, self.config.project_root)
+                    if self.agent.session_file else None)
+            self.em.emit("saved_plan", plan=plan or "", exists=bool(plan))
 
         elif t == "new_session":
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem)
+            self._emit_goal()
+        elif t == "clear_session":
+            # Archive the prior persisted transcript and start an actually empty model context.
+            # The old webview implementation only removed DOM nodes while the model retained every
+            # prior turn, which made `/clear` misleading and potentially leaked stale context.
+            self.agent.reset()
+            self.agent.session_file = sessions_mod.new_path(self.config.project_root)
+            self.em.emit("session", kind="cleared", message_count=0,
+                         session_id=self.agent.session_file.stem)
+            self.em.emit("history", items=[])
+            self._emit_context()
+            self._emit_goal()
         elif t == "resume_session":
             path = cmd.get("path")
             if not path and cmd.get("latest"):
@@ -291,6 +478,7 @@ class Backend:
                 self.em.emit("session", kind="resumed", message_count=n, path=str(path))
                 self.em.emit("history", items=self._history())
                 self._emit_context()
+                self._emit_goal()
             else:
                 self.em.emit("error", message="no session to resume")
         elif t == "list_sessions":
@@ -300,7 +488,7 @@ class Backend:
             self.em.emit("sessions", items=items)
         elif t == "delete_session":
             path = cmd.get("path")
-            ok = bool(path) and sessions_mod.delete(path)
+            ok = bool(path) and sessions_mod.delete(path, self.config.project_root)
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}
                      for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
@@ -323,14 +511,33 @@ class Backend:
             artifacts.stop(str(cmd.get("id", "")))
             self._emit_artifacts()
         elif t == "set_config":
-            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
+            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key", "api_mode",
+                       "provider_state", "prompt_cache", "prompt_cache_key",
+                       "provider_capabilities", "capability_cache_ttl_s",
                        "fallback_model", "fallback_base_url", "context_size", "search_provider")
+            refresh = False
             for k, v in (cmd.get("values") or {}).items():
                 if k in allowed:
-                    self.config.set(k, v)
+                    if k == "subagent_api_key":
+                        self.config.data[k] = v
+                        self.config._env_secret_keys.add(k)
+                    else:
+                        self.config.set(k, v)
+                    refresh = refresh or k in {"api_mode", "provider_state", "prompt_cache",
+                                               "prompt_cache_key", "provider_capabilities",
+                                               "capability_cache_ttl_s"}
+            if refresh:
+                self.agent.refresh_client()
             self._emit_config()
-        elif t in ("get_config", "status"):
+        elif t == "get_config":
             self._emit_config()
+        elif t == "status":
+            self.em.emit("status", model=self.config.model, mode=self.agent.mode,
+                         think=self.config.get("thinking", "off"), base_url=self.config.base_url,
+                         goal={"text": getattr(self.agent, "goal", ""),
+                               "status": getattr(self.agent, "goal_status", "none")},
+                         context_used=self.agent.estimate_tokens(),
+                         context_size=int(self.config.get("context_size", 32768)))
         elif t == "shutdown":
             raise _Shutdown()
         else:

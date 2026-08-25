@@ -28,56 +28,17 @@ from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, H
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
 from rich.console import Console
 
 from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
 from .update import cached_update
 from .agent import Agent
+from .commands import command_pairs
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
-SLASH_COMMANDS: list[tuple[str, str]] = [
-    ("help", "list every command"),
-    ("keys", "keyboard shortcuts cheatsheet"),
-    ("docs", "in-app how-to guides"),
-    ("new", "start a new session"),
-    ("resume", "reopen a past session · ^D deletes one"),
-    ("history", "search & recall a past prompt"),
-    ("jump", "jump the transcript to a past turn"),
-    ("rewind", "restore code + conversation to a past turn"),
-    ("model", "switch the model"),
-    ("connect", "pick a provider or a custom LAN host"),
-    ("subagent", "set the sub-agent model + host"),
-    ("mode", "permission mode: default · acceptEdits · plan · auto"),
-    ("view-plan", "reopen the plan saved in plan mode"),
-    ("think", "how hard the model reasons: off · low · medium · high"),
-    ("thoughts", "show or hide the model's thinking in the transcript"),
-    ("expand", "expand the last collapsed tool output (/expandall for all)"),
-    ("copy", "select & copy text — releases the mouse to your terminal"),
-    ("worktree", "isolate edits in a git worktree"),
-    ("sandbox", "confine bash to the project + /tmp"),
-    ("bg", "terminal background: auto · dark · inherit"),
-    ("theme", "colour theme: auto · dark · light"),
-    ("context", "context-window usage"),
-    ("artifact", "open / stop localhost artifact previews"),
-    ("compact", "summarise the older turns now"),
-    ("status", "model · host · mode · context"),
-    ("dashboard", "session roster — open, switch, start, or delete sessions"),
-    ("name", "name this session"),
-    ("goal", "set a standing objective the agent keeps working toward · /goal clear"),
-    ("set", "tune a setting live: /set temperature 0.7 · top_p · top_k · min_p · max_tokens"),
-    ("settings", "browse & edit all settings in a menu (model, sampling, display, artifacts)"),
-    ("handoff", "write a full handoff doc (objective, done, next steps) to give another agent"),
-    ("mcp", "MCP servers — /mcp add to connect one, /mcp remove <name>"),
-    ("agents", "sub-agent configuration"),
-    ("skills", "installed skills"),
-    ("memory", "view the project DGC.md"),
-    ("permissions", "allow · ask · deny rules"),
-    ("bug", "report a bug / request a feature"),
-    ("update", "update DGC to the latest version"),
-    ("clear", "clear the transcript"),
-    ("quit", "exit dgc"),
-]
+SLASH_COMMANDS: list[tuple[str, str]] = command_pairs("tui")
 
 
 class SlashCompleter(Completer):
@@ -103,6 +64,8 @@ class _NextSuggest(AutoSuggest):
         self._tui = tui
 
     def get_suggestion(self, buffer, document):
+        if self._tui._input is not None and self._tui._input.get("secret"):
+            return None
         sug = self._tui._suggestion
         if not sug:
             return None
@@ -124,6 +87,7 @@ class AgentSession:
     def __init__(self, config, ui, agent=None):
         AgentSession._counter += 1
         self.id = f"s{AgentSession._counter}"
+        self.config = agent.config if agent is not None else config
         self.agent = agent or Agent(config, ui)
         self.blocks: list = []             # rendered ANSI blocks (this session's transcript)
         self._buf = ""                     # streaming assistant text
@@ -202,6 +166,7 @@ class TUI:
     _AUTO_COMPACT_ROWS = 20
 
     # per-session state → delegated to the active AgentSession (multi-agent fleet)
+    config = _active_prop("config")
     agent = _active_prop("agent")
     blocks = _active_prop("blocks")
     _buf = _active_prop("_buf")
@@ -244,6 +209,7 @@ class TUI:
 
         self._start = time.monotonic()
         self.deny_reason = ""              # set when the user denies a tool "with a reason"
+        self.plan_feedback = ""            # one-shot steer after "Keep planning"
         self.app: Application | None = None
         import shutil
         _sz = shutil.get_terminal_size((100, 30))
@@ -292,7 +258,12 @@ class TUI:
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
         def rebuild(ov):
             q = self.input_buf.text.lstrip("/").strip().lower()
-            rows = [(n, d) for n, d in SLASH_COMMANDS if not q or q in n.lower() or q in d.lower()]
+            rows = list(SLASH_COMMANDS)
+            from .commands import discover_commands
+            builtins = {name for name, _ in rows}
+            rows += [(name, "custom prompt command")
+                     for name in discover_commands(self.config.project_root) if name not in builtins]
+            rows = [(n, d) for n, d in rows if not q or q in n.lower() or q in d.lower()]
             if q:   # rank: exact name, then name-prefix, then name-substring, then description-only
                 rows.sort(key=lambda nd: (nd[0].lower() != q, not nd[0].lower().startswith(q),
                                           q not in nd[0].lower(), nd[0]))
@@ -332,7 +303,7 @@ class TUI:
                lambda s: s.config.get("background", "auto")),
         "theme": ([("Auto — match the terminal", "auto"), ("Dark", "dark"), ("Light", "light")],
                   lambda s: s.config.get("theme", "auto")),
-        "sandbox": ([("On — confine bash", "on"), ("Off", "off")],
+        "sandbox": ([("On — project only, no network", "on"), ("Off", "off")],
                     lambda s: "on" if s.config.get("sandbox") else "off"),
     }
 
@@ -359,6 +330,11 @@ class TUI:
     _SETTINGS = {
         "Model & sampling": [
             ("model", "Model", "str"), ("base_url", "Endpoint URL", "str"),
+            ("api_mode", "API transport", "enum", ["auto", "chat_completions", "responses"]),
+            ("provider_state", "Responses state", "enum", ["stateless", "server"]),
+            ("prompt_cache", "Prompt cache routing", "bool"),
+            ("prompt_cache_key", "Prompt cache key", "str"),
+            ("capability_cache_ttl_s", "Capability retry TTL (s)", "int"),
             ("thinking", "Thinking effort", "enum", ["off", "low", "medium", "high"]),
             ("temperature", "Temperature", "float"), ("top_p", "Top-p", "float"),
             ("top_k", "Top-k", "int"), ("min_p", "Min-p", "float"),
@@ -370,6 +346,7 @@ class TUI:
             ("verify_before_done", "Verify before finishing", "bool"),
             ("verify_command", "Verify command", "str"), ("suggest", "Ghost-text suggestions", "bool"),
             ("sandbox", "Confine bash (sandbox)", "bool"),
+            ("sandbox_network", "Sandbox network access", "bool"),
         ],
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
@@ -380,10 +357,12 @@ class TUI:
             ("artifact_bind", "Reach", "enum", ["localhost", "lan"]),
             ("artifact_port", "Port", "int"), ("artifact_autostart", "Autostart server", "bool"),
             ("artifact_hostname", "Public hostname", "str"),
-            ("artifact_in_plan", "Allow in plan mode", "bool"),
+            ("plan_artifact", "Automatic plan preview (loopback)", "bool"),
+            ("artifact_in_plan", "Allow arbitrary project previews in plan mode", "bool"),
         ],
     }
-    _CLIENT_KEYS = {"model", "base_url", "api_key", "temperature", "top_p", "top_k", "min_p",
+    _CLIENT_KEYS = {"model", "base_url", "api_key", "api_mode", "provider_state", "prompt_cache",
+                    "prompt_cache_key", "capability_cache_ttl_s", "temperature", "top_p", "top_k", "min_p",
                     "max_tokens", "context_size", "thinking", "request_timeout", "ollama_keep_alive"}
 
     def _open_settings(self) -> None:
@@ -437,7 +416,8 @@ class TUI:
         except ValueError:
             self._flash(f"'{raw}' isn't a valid value for {key}"); self._open_settings_cat(cat); return
         if key == "mode":
-            self.agent.set_mode(str(val))
+            self._request_mode(str(val), after=lambda: self._open_settings_cat(cat))
+            return
         elif key == "theme":
             self._handle_slash(f"/theme {val}")
         else:
@@ -691,8 +671,8 @@ class TUI:
                       padding=(0, 1), width=W)
         return ANSI(self._rich(Padding(panel, (0, 0, 0, lpad))))
 
-    def _ask_input(self, prompt: str, cb) -> None:
-        self._input = {"cb": cb, "prompt": prompt}
+    def _ask_input(self, prompt: str, cb, secret: bool = False) -> None:
+        self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
     def _flash(self, msg: str) -> None:
@@ -1186,7 +1166,8 @@ class TUI:
     def _open_plan_view(self) -> None:
         """/view-plan — reopen the plan saved during the last plan-mode turn."""
         from . import sessions
-        md = sessions.load_plan(self.agent.session_file) if self.agent.session_file else None
+        md = (sessions.load_plan(self.agent.session_file, self.config.project_root)
+              if self.agent.session_file else None)
         if not md:
             self._flash("no saved plan yet — /mode plan, then ask for one")
             return
@@ -1278,7 +1259,7 @@ class TUI:
                 if kind == "switch" and v in self._sessions:
                     self._close_session(self._sessions.index(v)); self._open_dashboard()
                 elif kind == "open":
-                    sessions.delete(v); self._flash("deleted"); self._open_dashboard()
+                    sessions.delete(v, self.config.project_root); self._flash("deleted"); self._open_dashboard()
             elif key == "p" and kind == "switch":
                 v.pinned = not v.pinned; self._open_dashboard()
             elif key == "r" and kind == "switch":
@@ -1568,21 +1549,24 @@ class TUI:
         self._cur_tool = None
 
     _TOOL_VERB = {"bash": "Run", "bash_output": "Read output", "read_file": "Read", "write_file": "Write",
-                  "edit_file": "Edit", "grep": "Search", "glob": "Find", "web_search": "Search",
+                  "edit_file": "Edit", "apply_patch": "Patch", "repo_map": "Map repo",
+                  "grep": "Search", "glob": "Find", "web_search": "Search",
                   "web_fetch": "Fetch", "task": "Delegate", "todo": "Plan", "skill": "Load skill",
                   "add_skill": "Install skill", "save_memory": "Remember"}
 
     # tense-aware verbs: present-progressive while running → past when done.
     _TOOL_ING = {"bash": "Running", "bash_output": "Reading output", "read_file": "Reading",
-                 "write_file": "Writing", "edit_file": "Editing", "grep": "Searching", "glob": "Finding",
+                 "write_file": "Writing", "edit_file": "Editing", "apply_patch": "Patching",
+                 "repo_map": "Mapping repo", "grep": "Searching", "glob": "Finding",
                  "web_search": "Searching", "web_fetch": "Fetching", "task": "Delegating", "todo": "Planning",
                  "skill": "Loading skill", "add_skill": "Installing skill", "save_memory": "Remembering"}
     _TOOL_ED = {"bash": "Ran", "bash_output": "Read output", "read_file": "Read", "write_file": "Wrote",
-                "edit_file": "Edited", "grep": "Searched", "glob": "Found", "web_search": "Searched",
+                "edit_file": "Edited", "apply_patch": "Patched", "repo_map": "Mapped repo",
+                "grep": "Searched", "glob": "Found", "web_search": "Searched",
                 "web_fetch": "Fetched", "task": "Delegated", "todo": "Planned", "skill": "Loaded skill",
                 "add_skill": "Installed skill", "save_memory": "Remembered"}
 
-    def tool_call(self, name: str, args: dict) -> None:
+    def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self._flush_text()
         self._tool_count += 1
         summary = _arg_summary(args)
@@ -1590,26 +1574,30 @@ class TUI:
         self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
         # ONE stateful block for the whole step: header + result together, live accent rail while
         # it runs. tool_result fills it in. `running` drives the wave; `out`/`diff` are attached on finish.
-        self.blocks.append({"kind": "tool", "name": name, "summary": summary, "running": True,
+        self.blocks.append({"kind": "tool", "name": name, "call_id": call_id,
+                            "summary": summary, "running": True,
                             "error": False, "out": None, "diff": None, "exp": False})
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
 
-    def _live_tool_block(self, name: str):
+    def _live_tool_block(self, name: str, call_id: str | None = None):
         """The most recent still-running tool block for `name` (this session's transcript)."""
         for blk in reversed(self.blocks):
-            if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running") and blk.get("name") == name:
+            if (isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running")
+                    and blk.get("name") == name and (call_id is None or blk.get("call_id") == call_id)):
                 return blk
         return None
 
-    def tool_result(self, name: str, out: str) -> None:
+    def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
         self._cur_tool = None
-        blk = self._live_tool_block(name)
+        blk = self._live_tool_block(name, call_id)
         if blk is None:                                 # defensive: no matching open block → start one
-            blk = {"kind": "tool", "name": name, "summary": "", "exp": False}
+            blk = {"kind": "tool", "name": name, "call_id": call_id, "summary": "", "exp": False}
             self.blocks.append(blk)
         blk["running"] = False
+        from .ui import tool_output_is_error
+        blk["error"] = tool_output_is_error(out)
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -1629,7 +1617,8 @@ class TUI:
             if isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running"):
                 blk["running"] = False
 
-    def tool_denied(self, name: str, args: dict, reason: str) -> None:
+    def tool_denied(self, name: str, args: dict, reason: str,
+                    call_id: str | None = None) -> None:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.err}]{glyphs.CROSS} {name} denied[/] [{th.faint}]{reason}[/]"))
 
@@ -1670,6 +1659,9 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {_esc(msg)}[/]"))
 
+    def goal_changed(self, goal: str, status: str) -> None:
+        self._flash(f"standing goal → {status}: {goal[:70]}")
+
     def artifact_ready(self, art) -> None:
         """Propose opening a freshly-served localhost artifact, right in the transcript."""
         from rich.text import Text
@@ -1700,8 +1692,8 @@ class TUI:
         from . import artifacts
         arts = artifacts.registry()
         lan = str(self.config.get("artifact_bind", "localhost")).lower() == "lan"
-        plan_on = bool(self.config.get("artifact_in_plan", False))
-        title = f"Artifacts · {'shared on LAN' if lan else 'private (this machine)'} · plan-artifact: {'on' if plan_on else 'off'}"
+        plan_on = bool(self.config.get("plan_artifact", True))
+        title = f"Artifacts · {'shared on LAN' if lan else 'private (this machine)'} · plan preview: {'on' if plan_on else 'off'}"
         foot = ("Enter open · x remove · " + ("b → make private" if lan else "b → share on LAN")
                 + " · p plan-artifact · Esc close")
         if arts:
@@ -1745,12 +1737,11 @@ class TUI:
             else:
                 self._confirm_lan_share()                # network exposure (no auth) → confirm first
             return
-        if key == "p":                                   # toggle plan-mode artifacts (item: plan settings)
-            on = not bool(self.config.get("artifact_in_plan", False))
-            self.config.set("artifact_in_plan", on)
-            self.agent._refresh_system()                 # re-emit the system prompt with the new plan rules
-            self._flash("plan mode can now serve artifacts (plan page + existing .html files)"
-                        if on else "plan mode is read-only again — no artifacts")
+        if key == "p":                                   # toggle the sanitized automatic plan preview
+            on = not bool(self.config.get("plan_artifact", True))
+            self.config.set("plan_artifact", on)
+            self._flash("automatic plan previews on (always private to this machine)"
+                        if on else "automatic plan previews off")
             self._open_artifacts()
             return
         if row and row.get("value") and key in ("x", "space"):
@@ -1858,6 +1849,7 @@ class TUI:
         else:
             self._flash(f"◆ {sess.name or 'agent'} needs you — ^\\ to answer")
         self._invalidate()
+
         sess._req_event.wait()
         sess._req = None
         if sess is self.active and self._overlay is not None:
@@ -1865,7 +1857,7 @@ class TUI:
         self._invalidate()
         return sess._req_answer
 
-    def approve(self, name: str, args: dict) -> str:
+    def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
         from rich.text import Text
         self._flush_text()
         th = style_mod.theme()
@@ -1908,9 +1900,25 @@ class TUI:
         self._append(self._rich(f"[bold {th.accent}]{glyphs.BULLET} proposed plan[/]\n"
                                 + self._rich(self._md(plan or "(empty plan)"))))
         ans = self._ask({"kind": "plan",
-                         "options": ["Build it (auto)", "Build (accept edits)", "Build (default)", "Keep planning"],
+                         "options": ["Build (accept edits)", "Build (default)", "Build it (auto)", "Keep planning"],
                          "footer": "↑↓ · Enter build · Esc keep planning"})
-        return {0: "auto", 1: "acceptEdits", 2: "default"}.get(ans)
+        target = {0: "acceptEdits", 1: "default", 2: "auto"}.get(ans)
+        if target == "auto":
+            from rich.text import Text
+            th = style_mod.theme()
+            confirm = self._ask({"kind": "plan-auto",
+                                 "header": [Text("Full-auto executes every plan write and shell command "
+                                                 "without another prompt.", style=th.warn)],
+                                 "options": ["Enable full-auto and build", "Keep planning"],
+                                 "footer": "Enter confirm · Esc keep planning"})
+            if confirm != 0:
+                self.plan_feedback = "Full-auto was not confirmed; offer a safer execution mode."
+                return None
+        if target:
+            self.plan_feedback = ""
+            return target
+        self.plan_feedback = self._ask_text("what should change in the plan (optional):")
+        return None
 
     def propose_options(self, question: str, options: list[str]) -> str:
         from rich.text import Text
@@ -1930,7 +1938,11 @@ class TUI:
                             height=Dimension(weight=1))   # scroll is driven by the cursor marker (_cursor_ft)
         self._transcript_win = transcript
         status = Window(FormattedTextControl(self._status), height=1, style="class:status")
-        composer = Window(BufferControl(self.input_buf, focus_on_click=True),
+        secret_input = Condition(lambda: self._input is not None and self._input.get("secret") is True)
+        composer = Window(BufferControl(
+                              self.input_buf, focus_on_click=True,
+                              input_processors=[ConditionalProcessor(
+                                  PasswordProcessor(char="•"), filter=secret_input)]),
                           get_line_prefix=self._line_prefix, wrap_lines=True,
                           height=self._composer_height, style="class:composer")
         side = lambda: f"fg:{self._border_color()}"          # noqa: E731
@@ -2086,15 +2098,19 @@ class TUI:
         """SPAWN a new agent into the fleet and switch to it. The previous session keeps running
         in the background (it doesn't reset) — reach it again via /dashboard."""
         from . import sessions as _sess
-        sess = AgentSession(self.config, self)
-        sess.agent.session_file = _sess.new_path(self.config.project_root)
+        from .config import Config as _Config
+        # Each session owns a Config/Agent/MCP runtime. Settings remain globally persisted,
+        # but changing one session's workspace can no longer retarget other running agents.
+        session_config = _Config(self.config.project_root)
+        sess = AgentSession(session_config, self)
+        sess.agent.session_file = _sess.new_path(session_config.project_root)
         if name:
             sess.agent.name_session(name)
             sess._autotitled = True                  # a manual name skips auto-titling
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
-        self._flash(f"new agent{f': {name}' if name else ''}  ·  {len(self._sessions)} running")
+        self._flash(f"new agent{f': {name}' if name else ''}  ·  {len(self._sessions)} running · shared-checkout writes serialized")
 
     def _switch_to(self, idx: int) -> None:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
@@ -2118,6 +2134,7 @@ class TUI:
         sess = self._sessions.pop(idx)
         try:
             sess.agent.cancelled.set()                   # stop its turn if one is running
+            sess.agent.mcp.stop_all()
         except Exception:
             pass
         if self._active_idx >= len(self._sessions):
@@ -2129,9 +2146,34 @@ class TUI:
     def _cycle_mode(self) -> None:
         order = ["default", "acceptEdits", "plan", "auto"]
         cur = order.index(self.agent.mode) if self.agent.mode in order else 0
-        self.agent.set_mode(order[(cur + 1) % len(order)])
-        self._flash(f"mode → {self.agent.mode}")
-        self._invalidate()
+        self._request_mode(order[(cur + 1) % len(order)])
+
+    def _request_mode(self, mode: str, after=None) -> None:
+        """Apply a permission mode, with a modal acknowledgement before full auto."""
+        def commit() -> None:
+            self.agent.set_mode(mode)
+            self._flash(f"mode → {mode}")
+            self._invalidate()
+            if after:
+                after()
+
+        if mode != "auto" or self.agent.mode == "auto":
+            commit()
+            return
+        from rich.text import Text
+        th = style_mod.theme()
+        header = [Text.from_markup("[bold]Enable full-auto mode?[/]"),
+                  Text.from_markup(f"[{th.warn}]Every file write and shell command will run without a prompt.[/]"),
+                  Text.from_markup(f"[{th.muted}]Use this only in a trusted sandbox or disposable worktree.[/]")]
+        rows = [{"label": f"{glyphs.CHECK}  Enable auto", "value": "yes"},
+                {"label": f"{glyphs.CROSS}  Keep current mode", "value": "no"}]
+        def picked(row) -> None:
+            if row["value"] == "yes":
+                commit()
+            elif after:
+                after()
+        self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
+                           on_pick=picked)
 
     def _menu_hover(self, position) -> None:
         """Welcome-menu row hover + the top-right context chip hover (→ morph to a bar + %)."""
@@ -2168,7 +2210,7 @@ class TUI:
             return True
         return False
 
-    # ---- slash commands (a focused subset; the classic REPL has the full set) ----
+    # ---- slash commands (the canonical terminal catalog; custom commands are merged at runtime) ----
     def _handle_slash(self, text: str) -> bool:
         parts = text[1:].split(maxsplit=1)
         cmd = parts[0].lower() if parts else ""
@@ -2226,13 +2268,27 @@ class TUI:
         elif cmd == "goal":
             if rest.lower() in ("clear", "off", "none", "remove"):
                 self.agent.set_goal(""); self._flash("standing goal cleared")
+            elif rest.lower() in ("complete", "completed", "done"):
+                self._flash("standing goal → completed" if self.agent.update_goal("completed")
+                            else "no standing goal to complete")
+            elif rest.lower() in ("blocked", "block"):
+                self._flash("standing goal → blocked" if self.agent.update_goal("blocked")
+                            else "no standing goal to block")
+            elif rest.lower() in ("resume", "active", "reactivate"):
+                self._flash("standing goal → active" if self.agent.update_goal("active")
+                            else "no standing goal to resume")
             elif rest:
                 self.agent.set_goal(rest)
                 self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}")
             else:
                 g = getattr(self.agent, "goal", "")
-                self._flash((f"goal: {g[:70]}  · /goal clear to remove") if g
-                            else "no goal set — /goal <objective> to set one")
+                if g:
+                    self._open_reader(
+                        f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{g}\n\n"
+                        "`/goal complete` · `/goal blocked` · `/goal resume` · `/goal clear`",
+                        footer="the standing objective · ↑↓ scroll · Esc close")
+                else:
+                    self._flash("no goal set — /goal <objective> to set one")
         elif cmd == "set":
             from .config import DEFAULTS
             tunable = ("temperature", "top_p", "top_k", "min_p", "max_tokens", "context_size",
@@ -2248,7 +2304,7 @@ class TUI:
                     self._flash(f"can't set '{key}' here — /set is for scalar settings (try /settings)")
                 elif key == "mode":                          # route through the mode validator
                     if val in ("default", "acceptEdits", "plan", "auto"):
-                        self.agent.set_mode(val); self._flash(f"mode = {val}")
+                        self._request_mode(val)
                     else:
                         self._flash("mode must be one of: default · acceptEdits · plan · auto")
                 elif key == "theme":                         # route through /theme (repaints)
@@ -2314,14 +2370,21 @@ class TUI:
                 val = rest.strip().lower()
                 if val in ("on", "true", "1"):
                     cfg.set("sandbox", True)
-                    self._flash("sandbox ON — bash confined to the project + /tmp, auto-approved")
+                    self._flash("sandbox ON — project writable, private home/tmp, network blocked; approvals unchanged")
                 elif val in ("off", "false", "0"):
                     cfg.set("sandbox", False); self._flash("sandbox OFF")
+                elif val in ("network on", "net on"):
+                    cfg.set("sandbox_network", True)
+                    self._flash("sandbox network ON — commands still require normal approval")
+                elif val in ("network off", "net off"):
+                    cfg.set("sandbox_network", False)
+                    self._flash("sandbox network OFF")
                 else:
-                    self._flash(f"sandbox: {'on' if cfg.get('sandbox') else 'off'} — /sandbox on|off")
+                    net = "on" if cfg.get("sandbox_network", False) else "off"
+                    self._flash(f"sandbox: {'on' if cfg.get('sandbox') else 'off'}, network: {net} — /sandbox on|off|network on|network off")
         elif cmd == "mode":
             if rest in ("default", "acceptEdits", "plan", "auto"):
-                self.agent.set_mode(rest); self._flash(f"mode → {rest}")
+                self._request_mode(rest)
             else:
                 self._cycle_mode()
         elif cmd == "think":
@@ -2354,7 +2417,10 @@ class TUI:
                 servers = dict(cfg.get("mcp_servers", {}) or {})
                 if servers.pop(sub[1], None) is not None:
                     cfg.set("mcp_servers", servers)
-                    self.agent.mcp.servers.pop(sub[1], None)
+                    live = self.agent.mcp.servers.pop(sub[1], None)
+                    if live:
+                        live.stop()
+                    self.agent.mcp._rebuild_routes()
                     self._flash(f"removed MCP server '{sub[1]}'")
                 else:
                     self._flash(f"no MCP server named '{sub[1]}'")
@@ -2375,6 +2441,23 @@ class TUI:
             self._append(self._rich(f"[bold {th.accent}]DGC.md[/]\n[{th.faint}]{_esc(body)}[/]"))
         elif cmd == "permissions":
             perms = getattr(cfg, "permissions", {}) or {}
+            spec = rest.strip().split(maxsplit=1)
+            if spec:
+                if len(spec) != 2 or spec[0] not in ("allow", "ask", "deny"):
+                    self._flash("usage: /permissions allow|ask|deny Tool(pattern)")
+                    return True
+                from .permissions import Rule
+                action, rule_text = spec
+                try:
+                    rule = Rule.parse(rule_text, action)
+                except ValueError as e:
+                    self._flash(str(e)); return True
+                rendered = rule.render()
+                if rendered not in cfg.permissions.setdefault(action, []):
+                    cfg.permissions[action].append(rendered)
+                    cfg.save()
+                self._flash(f"permission {action}: {rendered}")
+                return True
             lines = [f"  [{th.accent}]{a}[/]  [{th.faint}]{_esc(', '.join(perms.get(a, [])) or '—')}[/]"
                      for a in ("allow", "ask", "deny")]
             self._append(self._rich(f"[bold {th.accent}]permission rules[/]\n" + "\n".join(lines)))
@@ -2383,7 +2466,21 @@ class TUI:
                                     f"  [{th.text}]https://github.com/OpenPeach-ai/dgc/issues[/]  "
                                     f"[{th.faint}](include your `dgc --version`)[/]"))
         elif cmd == "clear":
-            self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._flash("cleared")
+            from . import sessions as _sess
+            sess = self.active
+            sess.agent.reset()
+            sess.agent.session_file = _sess.new_path(self.config.project_root)
+            sess.blocks.clear()
+            sess._turn_marks = []
+            sess._buf = ""
+            sess._think = ""
+            sess._tool_count = 0
+            sess._suggestion = None
+            sess._todos = []
+            sess._scroll_off = 0
+            sess._follow = True
+            sess._autotitled = False
+            self._flash("conversation cleared")
         elif cmd == "update":
             # exit the full-screen app cleanly, THEN run the installer on the raw terminal
             # (curl | bash needs a normal TTY; it can't run inside the alt-screen app).
@@ -2509,7 +2606,7 @@ class TUI:
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
         def dele(i):
-            sessions.delete(items[i][0])
+            sessions.delete(items[i][0], self.config.project_root)
             self._flash("session deleted")
             self._resume_flow()             # re-show the updated list
         self._show_picker("Resume a session", labels, pick, delete_cb=dele)
@@ -2547,7 +2644,10 @@ class TUI:
                     servers = dict(self.config.get("mcp_servers", {}) or {}); servers.pop(name, None)
                     self.config.set("mcp_servers", servers)
                     if getattr(self.agent, "mcp", None):
-                        self.agent.mcp.servers.pop(name, None)
+                        live = self.agent.mcp.servers.pop(name, None)
+                        if live:
+                            live.stop()
+                        self.agent.mcp._rebuild_routes()
                 else:
                     import shutil
                     from .config import USER_SKILLS
@@ -2658,15 +2758,34 @@ class TUI:
         bk = "subagent_base_url" if subagent else "base_url"
         kk = "subagent_api_key" if subagent else "api_key"
         who = "sub-agent host" if subagent else "endpoint"
+
+        def selected_provider(prov) -> None:
+            def finish(key: str = "") -> None:
+                if prov["needs_key"]:
+                    if not key:
+                        env_name = "DGC_SUBAGENT_API_KEY" if subagent else "DGC_API_KEY"
+                        self._flash(f"cancelled — use dgc setup or {env_name} instead")
+                        return
+                self.config.set(bk, prov["base_url"])
+                self.config.set(kk, key if prov["needs_key"] else prov["api_key"])
+                if not subagent:
+                    self.agent.refresh_client()
+                self._flash(f"{who} → {prov['base_url']}")
+
+            if prov["needs_key"]:
+                self._ask_input(f"API key for {prov['label']} (masked) then Enter", finish, secret=True)
+            else:
+                finish()
+
         if rest:                                       # /connect <preset|url>
             if rest in PROVIDERS:
-                prov = PROVIDERS[rest]
-                self.config.set(bk, prov["base_url"]); self.config.set(kk, prov["api_key"])
+                selected_provider(PROVIDERS[rest])
             else:
                 self.config.set(bk, rest)
-            if not subagent:
-                self.agent.refresh_client()
-            self._flash(f"{who} → {self.config.get(bk)}"); return
+                if not subagent:
+                    self.agent.refresh_client()
+                self._flash(f"{who} → {self.config.get(bk)}")
+            return
         keys = list(PROVIDERS)
         labels = [f"{PROVIDERS[k]['label']}  ({PROVIDERS[k]['base_url']})" for k in keys]
         labels.append("Custom host — enter a URL (e.g. a machine on your LAN)")
@@ -2676,11 +2795,7 @@ class TUI:
                 self._ask_input("host URL (e.g. http://192.168.1.50:11434/v1) then Enter",
                                 lambda url: self._set_host(url.strip(), subagent))
                 return
-            prov = PROVIDERS[keys[i]]
-            self.config.set(bk, prov["base_url"]); self.config.set(kk, prov["api_key"])
-            if not subagent:
-                self.agent.refresh_client()
-            self._flash(f"{who} → {prov['base_url']}")
+            selected_provider(PROVIDERS[keys[i]])
         self._show_picker(f"Connect a {who}", labels, pick)
 
     def _set_host(self, url: str, subagent: bool) -> None:
@@ -2742,17 +2857,23 @@ class TUI:
         if err:
             self._append(self._rich(f"[{th.err}]{_esc(err)}[/]"))
             return
-        import os as _os
+        # Never chdir the whole process: other fleet workers may still be running. Replace only
+        # this slot's runtime with one rooted in the isolated worktree.
+        from .config import Config as _Config
+        sess = self.active
+        old_agent = sess.agent
+        new_config = _Config(wt_path)
+        new_agent = Agent(new_config, self)
         try:
-            _os.chdir(wt_path)
-        except OSError:
+            old_agent.mcp.stop_all()
+        except Exception:
             pass
-        self.config.project_root = wt_path
-        self.agent.ctx.project_root = wt_path
-        self.agent.reset()
+        sess.config = new_config
+        sess.agent = new_agent
+        sess._cancel = new_agent.cancelled
         from . import sessions as _sess
-        self.agent.session_file = _sess.new_path(wt_path)
-        self.agent.session_name = f"worktree {branch}"
+        new_agent.session_file = _sess.new_path(wt_path)
+        new_agent.session_name = f"worktree {branch}"
         self.blocks.clear(); self._buf = ""
         self._flash(f"worktree {branch} — switched, fresh session")
 
@@ -3168,7 +3289,7 @@ def _tui_help() -> str:
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),
-                      ("/sandbox on|off", "confine bash to project + /tmp (auto-approves it)"),
+                      ("/sandbox on|off", "project-only shell sandbox; private home/tmp, network off by default"),
                       ("/context", "context usage"), ("/compact", "summarise old turns now")]),
         ("inspect", [("/status", "model · host · mode · context · session"),
                      ("/agents", "sub-agent defaults"), ("/skills", "installed skills"),

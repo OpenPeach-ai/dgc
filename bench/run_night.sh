@@ -35,8 +35,8 @@ fi
 mkdir -p results
 LOG="results/${TAG}.log"
 echo "   launching → $LOG   (tail -f to watch; resumable if interrupted)"
-nohup python3 run_bench.py \
-  --model "$MODEL" --base-url "$BASE" --api-key "$KEY" \
+DGC_BENCH_API_KEY="$KEY" nohup python3 run_bench.py \
+  --model "$MODEL" --base-url "$BASE" \
   --langs all --rounds 2 --dgc-timeout "$TIMEOUT" --test-timeout 300 \
   --out results/ --tag "$TAG" > "$LOG" 2>&1 &
 echo "   pid $!  — full 225 running in the background."

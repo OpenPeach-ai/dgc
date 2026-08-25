@@ -193,11 +193,6 @@
           "default": "",
           "description": "Main model host \u2014 any OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
-        "dgc.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key / bearer token for the main host. Blank = unchanged. For local endpoints a dummy value like \"ollama\" is fine."
-        },
         "dgc.model": {
           "type": "string",
           "default": "",
@@ -212,11 +207,6 @@
           "type": "string",
           "default": "",
           "description": "Host for `task` sub-agents \u2014 run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
-        },
-        "dgc.subagentApiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for the sub-agent host. Blank = inherit the main key."
         },
         "dgc.fallbackModel": {
           "type": "string",
@@ -282,8 +272,10 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.84.0",
-    "esbuild": "^0.23.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
+    "ovsx": "1.1.1",
     "typescript": "^5.4.0"
   }
 }

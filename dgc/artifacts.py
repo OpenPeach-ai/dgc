@@ -1,11 +1,12 @@
-"""Localhost artifact previews — ONE persistent server hosting every artifact, with a
+"""Artifact previews — one persistent server hosting every artifact, with a
 frontend dropdown to switch between them.
 
 One fixed port, one URL. Each artifact is a directory (or an .html file's directory)
 served under `/a/<id>/`. The root `/` is a dgc-design *shell*: a top-left dropdown that
 lists every artifact and an iframe showing the selected one. The registry is saved to
 `~/.dgc/artifacts.json`, so it survives `dgc` restarts and reloads on launch (when
-`artifact_autostart` is on). Bound to 127.0.0.1 only — nothing is ever exposed off the box.
+`artifact_autostart` is on). It binds to loopback by default; an explicit LAN setting can expose
+ordinary project artifacts to the local network. Automatically rendered plans always use loopback.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .config import USER_HOME
+from .config import USER_HOME, _write_private_json
 
 STATE_FILE = USER_HOME / "artifacts.json"
 DEFAULT_PORT = 45000
@@ -54,6 +55,7 @@ class Artifact:
     directory: str          # absolute served root
     entry: str              # "" for a directory index, else the file to open
     created: float = field(default_factory=time.time)
+    temporary: bool = False # generated preview directory; safe to remove with the registry entry
 
     @property
     def path(self) -> str:
@@ -62,7 +64,8 @@ class Artifact:
     @property
     def url(self) -> str:
         """The single-port shell URL, with this artifact pre-selected in the dropdown."""
-        return f"http://{_SRV.host}:{_SRV.port}/?a={self.id}" if _SRV.port else f"/?a={self.id}"
+        owner = getattr(self, "_owner", _SRV)
+        return f"http://{owner.host}:{owner.port}/?a={self.id}" if owner.port else f"/?a={self.id}"
 
     @property
     def rel(self) -> str:
@@ -159,7 +162,9 @@ def reachable_urls(port: int, hostname: str = "") -> list[tuple[str, str]]:
 class _Server:
     """The single shared artifact server + registry (module singleton)."""
 
-    def __init__(self):
+    def __init__(self, *, persistent: bool = True, id_prefix: str = "a"):
+        self.persistent = persistent
+        self.id_prefix = id_prefix
         self.port: int | None = None
         self.host = "127.0.0.1"     # the host shown in URLs (LAN IP when bound to 0.0.0.0)
         self.lan = False
@@ -168,7 +173,8 @@ class _Server:
         self.counter = 0
         self.artifacts: dict[str, Artifact] = {}
         self.lock = threading.Lock()
-        self._load()
+        if persistent:
+            self._load()
 
     # ---- persistence -----------------------------------------------------
     def _load(self):
@@ -181,18 +187,23 @@ class _Server:
         for a in data.get("artifacts", []):
             try:
                 if Path(a["directory"]).exists():          # drop artifacts whose files are gone
-                    self.artifacts[a["id"]] = Artifact(
+                    art = Artifact(
                         id=a["id"], name=_clean_name(a["name"]), directory=a["directory"],
-                        entry=a.get("entry", ""), created=float(a.get("created", time.time())))
+                        entry=a.get("entry", ""), created=float(a.get("created", time.time())),
+                        temporary=False)  # never delete paths resurrected from persisted state
+                    art._owner = self
+                    self.artifacts[a["id"]] = art
             except (KeyError, TypeError, ValueError):
                 continue
 
     def _save(self):
+        if not self.persistent:
+            return
         try:
-            USER_HOME.mkdir(parents=True, exist_ok=True)
-            STATE_FILE.write_text(json.dumps(
+            _write_private_json(
+                STATE_FILE,
                 {"port": self.port, "counter": self.counter,
-                 "artifacts": [asdict(a) for a in self.artifacts.values()]}))
+                 "artifacts": [asdict(a) for a in self.artifacts.values()]})
         except OSError:
             pass
 
@@ -233,8 +244,9 @@ class _Server:
     # ---- registry --------------------------------------------------------
     def add(self, path: str, project_root, name: str = "", preferred_port: int | None = None,
             lan: bool = False) -> Artifact:
+        from .workspace import resolve_path
         root = Path(project_root)
-        target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+        target = resolve_path(path, root)
         if not target.exists():
             raise FileNotFoundError(f"{path} does not exist")
         if target.is_dir():
@@ -248,19 +260,29 @@ class _Server:
         self.ensure_started(preferred_port, lan)
         with self.lock:
             self.counter += 1
-            aid = f"a{self.counter}"
+            aid = f"{self.id_prefix}{self.counter}"
             art = Artifact(id=aid, name=(_clean_name(name) or target.stem or f"artifact {self.counter}"),
                            directory=str(directory), entry=entry)
+            art._owner = self
             self.artifacts[aid] = art
             self._save()
         return art
 
     def remove(self, aid: str) -> bool:
         with self.lock:
-            gone = self.artifacts.pop(aid, None) is not None
-            if gone:
+            art = self.artifacts.pop(aid, None)
+            if art:
                 self._save()
-            return gone
+        if art and art.temporary:
+            import shutil, tempfile
+            try:
+                directory = Path(art.directory).resolve(strict=True)
+                temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+                if directory.parent == temp_root and directory.name.startswith("dgc-plan-"):
+                    shutil.rmtree(directory)
+            except OSError:
+                pass
+        return art is not None
 
     def base_url(self) -> str:
         return f"http://{self.host}:{self.port}" if self.port else ""
@@ -295,6 +317,7 @@ class _Server:
 
 
 _SRV = _Server()
+_PLAN_SRV = _Server(persistent=False, id_prefix="p")  # can never inherit the optional LAN bind
 
 # ---- render a plan (markdown) as a fancy dgc-design page served on localhost --------
 def _md_inline(t: str) -> str:
@@ -349,8 +372,6 @@ def render_plan_html(md: str, title: str = "Plan") -> str:
     body = _md_to_html(md)
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>{_esc(title)}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{{--bg:#0B0B0C;--surface:#141416;--surface2:#1A1A1D;--code:#0E0E10;--border:#232326;--border-strong:#303034;
     --text:#F5F5F5;--text-strong:#FFFFFF;--muted:#9A9A9E;--faint:#6A6A6E;--accent:#7C5CFF;--lav:#A78BFA;
@@ -388,11 +409,13 @@ def render_plan_html(md: str, title: str = "Plan") -> str:
 
 def serve_plan(md: str, project_root, name: str = "Plan", preferred_port: int | None = None,
                lan: bool = False) -> Artifact:
-    """Render `md` as a dgc-design page and serve it as an artifact on localhost."""
+    """Render `md` as a dgc-design page on a dedicated loopback-only server."""
     import tempfile
     d = Path(tempfile.mkdtemp(prefix="dgc-plan-"))
     (d / "index.html").write_text(render_plan_html(md, name), encoding="utf-8")
-    return _SRV.add("index.html", d, name, preferred_port, lan)
+    art = _PLAN_SRV.add("index.html", d, name, preferred_port, False)
+    art.temporary = True
+    return art
 
 
 
@@ -410,19 +433,22 @@ def serve(path: str, project_root, name: str = "", preferred_port: int | None = 
 
 
 def registry() -> list[Artifact]:
-    return _SRV.list()
+    return sorted([*_PLAN_SRV.list(), *_SRV.list()], key=lambda a: a.created, reverse=True)
 
 
 def get(aid: str) -> Artifact | None:
-    return _SRV.artifacts.get(aid)
+    return _PLAN_SRV.artifacts.get(aid) or _SRV.artifacts.get(aid)
 
 
 def stop(aid: str) -> bool:
-    return _SRV.remove(aid)
+    return _PLAN_SRV.remove(aid) or _SRV.remove(aid)
 
 
 def stop_all() -> None:
     _SRV.shutdown()
+    _PLAN_SRV.shutdown()
+    for aid in list(_PLAN_SRV.artifacts):
+        _PLAN_SRV.remove(aid)
 
 
 def base_url() -> str:
@@ -472,6 +498,10 @@ def _make_handler(server: "_Server"):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Cross-Origin-Resource-Policy", "same-origin")
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -597,7 +627,7 @@ def _shell_html(server: "_Server", selected: str) -> str:
   const sel = document.getElementById('sel'), frame = document.getElementById('frame'),
         open = document.getElementById('open'), stop = document.getElementById('stop'),
         count = document.getElementById('count');
-  let items = {json.dumps([{ "id": a.id, "name": a.name, "path": a.path } for a in arts])};
+  let items = {_script_json([{ "id": a.id, "name": a.name, "path": a.path } for a in arts])};
   function pathFor(id){{ const it = items.find(x=>x.id===id); return it ? it.path : ''; }}
   function show(id){{ const p = pathFor(id); if(!p) return; frame.src = p; open.href = p;
     history.replaceState(null,'', '/?a='+id); }}
@@ -616,7 +646,10 @@ def _shell_html(server: "_Server", selected: str) -> str:
     try{{ const r = await fetch('/_list'); const d = await r.json();
       items = d.artifacts.map(a=>({{id:a.id,name:a.name,path:a.path}}));
       const cur = sel.value;
-      sel.innerHTML = items.map(a=>`<option value="${{a.id}}">${{a.name.replace(/</g,'&lt;')}}</option>`).join('');
+      sel.replaceChildren(...items.map(a=>{{
+        const option = document.createElement('option'); option.value = a.id; option.textContent = a.name;
+        return option;
+      }}));
       if(items.find(x=>x.id===cur)) sel.value = cur;
       render();
     }}catch(e){{}}
@@ -629,3 +662,10 @@ def _shell_html(server: "_Server", selected: str) -> str:
 
 def _esc(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _script_json(value) -> str:
+    """JSON safe to embed in an inline script, including hostile `</script>` names."""
+    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
