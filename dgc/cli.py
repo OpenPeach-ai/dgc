@@ -447,6 +447,7 @@ class CLI:
                 if idx is not None:
                     prov = PROVIDERS[pk[idx]]
                     cfg.set("base_url", prov["base_url"])
+                    cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
                         from getpass import getpass
                         key = getpass(f"  API key for {prov['label']} › ").strip()
@@ -460,6 +461,7 @@ class CLI:
                 if target in PROVIDERS:
                     prov = PROVIDERS[target]
                     cfg.set("base_url", prov["base_url"])
+                    cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
                         from getpass import getpass
                         key = getpass(f"  API key for {prov['label']} › ").strip()
@@ -983,7 +985,8 @@ def run_doctor(config: Config) -> None:
     c.print(f"  mode          {config.data.get('mode', 'default')}")
     c.print(f"  context_size  {config.get('context_size')}")
     c.print(f"  config file   {USER_CONFIG}\n")
-    client = LLMClient(config.base_url, config.api_key, config.model)
+    client = LLMClient(config.base_url, config.api_key, config.model,
+                       api_mode=str(config.get("api_mode", "auto")))
     try:
         models = client.list_models()
     except Exception as e:
@@ -1028,8 +1031,11 @@ def run_setup(config: Config) -> None:
         from getpass import getpass
         api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
     config.set("base_url", base_url)
+    if idx < len(keys):
+        config.set("api_mode", "auto")
     config.set("api_key", api_key)
-    client = LLMClient(config.base_url, config.api_key, config.model)
+    client = LLMClient(config.base_url, config.api_key, config.model,
+                       api_mode=str(config.get("api_mode", "auto")))
     try:
         models = client.list_models()
     except Exception as e:

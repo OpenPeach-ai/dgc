@@ -47,7 +47,7 @@ DEFAULTS: dict = {
     "base_url": "http://localhost:11434/v1",   # any OpenAI-compatible endpoint
     "api_key": "ollama",                        # dummy key works for ollama/lm-studio
     "model": "qwen3:8b",
-    "api_mode": "auto",                         # auto | chat_completions | responses (OpenAI Responses API)
+    "api_mode": "auto",                         # auto | ollama | chat_completions | responses
     "provider_state": "stateless",              # stateless | server; server permits provider-side storage
     "prompt_cache": True,                        # send a privacy-safe stable cache-routing key when supported
     "prompt_cache_key": "",                     # optional explicit key (never derived from prompt text verbatim)

@@ -256,9 +256,12 @@ Useful keys:
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
   auto-continues, 0=don't send).
-- `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. Responses defaults to
-  stateless (`store: false`) with local encrypted-reasoning replay and privacy-safe cache routing.
-  Choose `provider_state: server` only when provider-side response storage is acceptable.
+- `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. `auto` selects native
+  Ollama chat for detected Ollama endpoints, OpenAI Responses for OpenAI, and Chat Completions for
+  compatible servers. Use `api_mode: ollama` for an Ollama proxy whose URL cannot be detected.
+  Responses defaults to stateless (`store: false`) with local encrypted-reasoning replay and
+  privacy-safe cache routing. Choose `provider_state: server` only when provider-side response
+  storage is acceptable.
 - `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
   interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — auto-sized to the model; long sessions compact at

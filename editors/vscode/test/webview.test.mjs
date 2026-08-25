@@ -249,7 +249,9 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
 
 test("provider runtime settings and actual usage round-trip through the webview", () => {
   const { dom, errors, posted, send, doc } = makeDom();
-  send({ type: "settings_open", providers: [], models: [] });
+  send({ type: "settings_open", providers: [
+    { id: "ollama", label: "Ollama", url: "http://localhost:11434/v1", needsKey: false },
+  ], models: [] });
   send({ type: "event", event: {
     type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
     mode: "default", think: "low", api_mode: "responses", provider_state: "server",
@@ -263,6 +265,10 @@ test("provider runtime settings and actual usage round-trip through the webview"
   const saved = posted.find((m) => m.type === "saveSettings");
   assert.equal(saved.values.provider_state, "server");
   assert.equal(saved.values.prompt_cache, false);
+  doc.getElementById("s-provider").value = "ollama";
+  doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(doc.getElementById("s-api_mode").value, "auto",
+    "a provider preset must not retain an incompatible forced transport");
 
   send({ type: "event", event: { type: "context", used: 1000, size: 4000,
     input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,

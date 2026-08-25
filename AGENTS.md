@@ -37,7 +37,8 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 
 - No new runtime dependencies without good reason — the three-dep footprint is a feature.
 - Keep provider-specific wire behavior in the provider layer. Official OpenAI uses Responses by
-  default; compatible/local endpoints use Chat Completions unless configured otherwise.
+  default, detected Ollama endpoints use native chat, and other compatible/local endpoints use
+  Chat Completions unless configured otherwise.
 - Permission decisions are evaluated **deny → ask → allow**; never weaken that ordering.
 - Every filesystem tool must resolve through `workspace.py`; an external path requires its own approval.
 - Arbitrary shell is never intrinsically read-only. Do not add command-string allowlists that can be

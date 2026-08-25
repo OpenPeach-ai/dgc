@@ -464,7 +464,10 @@
   $("set-save").onclick = () => { vscode.postMessage({ type: "saveSettings", values: collectSettings() }); $("settings").hidden = true; };
   $("s-provider").onchange = () => {
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
-    if (p) { $("s-base_url").value = p.url; if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama"; }
+    if (p) {
+      $("s-base_url").value = p.url; $("s-api_mode").value = "auto";
+      if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
+    }
   };
 
   function renderHistory(items) {

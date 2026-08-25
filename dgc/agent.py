@@ -390,7 +390,8 @@ class Agent:
                          capability_cache_ttl_s=int(self.config.get("capability_cache_ttl_s", 300)),
                          provider_state=str(self.config.get("provider_state", "stateless")),
                          prompt_cache=bool(self.config.get("prompt_cache", True)),
-                         prompt_cache_key=str(self.config.get("prompt_cache_key", "")))
+                         prompt_cache_key=str(self.config.get("prompt_cache_key", "")),
+                         context_size=int(self.config.get("context_size", 0)))
 
     def refresh_client(self) -> None:
         self.client = self._new_client(self.config.base_url, self.config.api_key, self.config.model)
@@ -1020,6 +1021,8 @@ class Agent:
             assistant: dict = {"role": "assistant", "content": result.content}
             if result.provider_items:
                 assistant["_responses_output"] = result.provider_items
+            if result.provider_message:
+                assistant["_provider_message"] = result.provider_message
             if native:
                 assistant["tool_calls"] = [
                     {"id": c.id, "type": "function",
@@ -1537,7 +1540,21 @@ class Agent:
 
     # ---------------------------------------------------------- compaction ---
     def estimate_tokens(self) -> int:
-        return sum(len(json.dumps(m, default=str)) for m in self.messages) // 4
+        messages = self.messages
+        if isinstance(self.client, LLMClient):
+            # Provider-private continuation data can duplicate canonical display text and calls in
+            # storage. Estimate the transcript shape that is actually sent so native continuation
+            # does not trigger compaction early merely because DGC preserved it faithfully.
+            if self.client.api_mode == "ollama":
+                wire = self.client._ollama_messages(messages)
+            elif self.client.api_mode == "responses":
+                instructions, items = self.client._responses_input(messages)
+                wire = {"instructions": instructions, "input": items}
+            else:
+                wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                        for message in messages]
+            return len(json.dumps(wire, default=str)) // 4
+        return sum(len(json.dumps(m, default=str)) for m in messages) // 4
 
     def _mechanical_prune(self, aggressive: bool = False) -> bool:
         """Tier-1 context relief (no LLM): cap stale tool-result bodies so a few huge outputs

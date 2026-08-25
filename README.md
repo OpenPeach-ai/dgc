@@ -190,6 +190,12 @@ Paste this to any coding agent:
 
 Set `context_size` to your model's real context window — compaction timing depends on it.
 
+With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat` and
+`/api/tags` contracts; DGC carries native thinking, tool history, `tool_name`, context/output
+limits, sampling, keep-alive, multimodal data, and provider token counts without an OpenAI
+translation layer. Set `api_mode` to `"ollama"` when Ollama sits behind a URL that cannot be
+detected (for example, a loopback proxy), or to `"chat_completions"` to force compatibility mode.
+
 For OpenAI Responses, DGC defaults to `store: false`, locally preserves encrypted reasoning items
 needed for tool-loop continuity, and uses a hashed cache-routing key when supported. Set
 `provider_state` to `"server"` only if you intentionally want provider-side response storage and

@@ -628,6 +628,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       key = await vscode.window.showInputBox({ prompt: `API key for ${pick.label}`, password: true });
       if (key) { await this.context.secrets.store("dgc.apiKey", key); }
     }
+    if (pick.label !== "custom") {
+      be.send({ type: "set_config", values: { api_mode: "auto" } });
+    }
     be.send({ type: "set_model", base_url: url, api_key: key });
     setTimeout(() => this.selectModel(), 400);
   }
@@ -747,7 +750,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
     <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
     <label>API transport
-      <select id="s-api_mode"><option value="auto">auto</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+      <select id="s-api_mode"><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Responses state
       <select id="s-provider_state"><option value="stateless">stateless (private default)</option><option value="server">server stored</option></select></label>
     <label>Prompt cache routing

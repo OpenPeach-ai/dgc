@@ -68,6 +68,7 @@ class ChatResult:
     usage: dict = field(default_factory=dict)
     response_id: str = ""
     provider_items: list[dict] = field(default_factory=list)
+    provider_message: dict = field(default_factory=dict)
 
 
 def normalize_usage(usage: dict | None) -> dict[str, int]:
@@ -105,6 +106,7 @@ class ProviderCapabilities:
     reasoning: bool = True
     responses: bool = False
     stateful_responses: bool = False
+    native_chat: bool = False
     prompt_cache_key: bool = False
     encrypted_reasoning: bool = False
     usage: bool = True
@@ -132,7 +134,7 @@ class ProviderAdapter:
 _PROVIDER_ADAPTERS = {
     "openai": ProviderAdapter("openai", ProviderCapabilities(
         responses=True, stateful_responses=True, prompt_cache_key=True, encrypted_reasoning=True)),
-    "ollama": ProviderAdapter("ollama", ProviderCapabilities()),
+    "ollama": ProviderAdapter("ollama", ProviderCapabilities(native_chat=True)),
     "vllm": ProviderAdapter("vllm", ProviderCapabilities()),
     "deepseek": ProviderAdapter("deepseek", ProviderCapabilities(reasoning=False)),
     "anthropic": ProviderAdapter("anthropic", ProviderCapabilities()),
@@ -415,7 +417,7 @@ class LLMClient:
                  sampling: dict | None = None, api_mode: str = "auto",
                  provider_capabilities: dict | None = None, capability_cache_ttl_s: int = 300,
                  provider_state: str = "stateless", prompt_cache: bool = True,
-                 prompt_cache_key: str = ""):
+                 prompt_cache_key: str = "", context_size: int = 0):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -428,13 +430,21 @@ class LLMClient:
         self.read_timeout = read_timeout  # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
         self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
+        self.context_size = max(0, int(context_size or 0))
         self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
         self.sampling = dict(sampling or {})            # optional temperature/top_p/top_k/min_p overrides
         requested_mode = str(api_mode or "auto").lower()
         self.requested_api_mode = requested_mode
-        self.api_mode = ("responses" if requested_mode == "auto" and self.family == "openai"
-                         else ("chat_completions" if requested_mode == "auto" else requested_mode))
-        if self.api_mode not in ("chat_completions", "responses"):
+        if requested_mode == "auto":
+            if self.family == "openai":
+                self.api_mode = "responses"
+            elif self.family == "ollama":
+                self.api_mode = "ollama"
+            else:
+                self.api_mode = "chat_completions"
+        else:
+            self.api_mode = requested_mode
+        if self.api_mode not in ("chat_completions", "responses", "ollama"):
             self.api_mode = "chat_completions"
         self.provider_state = ("server" if str(provider_state).lower() == "server" else "stateless")
         self.prompt_cache = bool(prompt_cache)
@@ -442,7 +452,12 @@ class LLMClient:
         self._response_id = ""
         self._response_cursor = 0
         self._response_prefix_hash = ""
+        self._native_call_seq = 0
         if requested_mode == "auto" and not self._feature_supported("responses"):
+            if self.api_mode == "responses":
+                self.api_mode = "chat_completions"
+        if (requested_mode == "auto" and self.api_mode == "ollama"
+                and not self._feature_supported("native_chat")):
             self.api_mode = "chat_completions"
 
     def _capability_key(self, feature: str) -> tuple[str, str, str]:
@@ -482,9 +497,12 @@ class LLMClient:
         return self._feature_supported("reasoning")
 
     def capability_snapshot(self) -> dict[str, bool | str]:
-        return {"provider": self.family,
-                **{name: self._feature_supported(name)
-                   for name in ProviderCapabilities.__dataclass_fields__}}
+        snapshot = {name: self._feature_supported(name)
+                    for name in ProviderCapabilities.__dataclass_fields__}
+        # An explicit native transport can intentionally sit behind a generic loopback proxy whose
+        # URL cannot identify Ollama. Report the transport actually in use, not only URL inference.
+        snapshot["native_chat"] = self.api_mode == "ollama" or snapshot["native_chat"]
+        return {"provider": self.family, **snapshot}
 
     def _reset_response_state(self) -> None:
         self._response_id = ""
@@ -495,10 +513,31 @@ class LLMClient:
     def _url(self) -> str:
         return f"{self.base_url}/chat/completions"
 
+    @property
+    def _ollama_root(self) -> str:
+        base = self.base_url.rstrip("/")
+        for suffix in ("/v1", "/api"):
+            if base.lower().endswith(suffix):
+                return base[:-len(suffix)].rstrip("/")
+        return base
+
+    @property
+    def _ollama_url(self) -> str:
+        return f"{self._ollama_root}/api/chat"
+
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
     def list_models(self) -> list[str]:
+        if self.api_mode == "ollama":
+            r = requests.get(f"{self._ollama_root}/api/tags", headers=self._headers(), timeout=10)
+            if r.status_code == 200:
+                return sorted(str(m.get("model") or m.get("name") or "?")
+                              for m in r.json().get("models", []))
+            if self.requested_api_mode != "auto" or r.status_code not in (404, 405, 501):
+                r.raise_for_status()
+            self._mark_rejected("native_chat")
+            self.api_mode = "chat_completions"
         r = requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=10)
         r.raise_for_status()
         return sorted(m.get("id", "?") for m in r.json().get("data", []))
@@ -515,8 +554,403 @@ class LLMClient:
         if self.api_mode == "responses":
             return self._chat_responses(messages, tools, reasoning_effort,
                                         on_text, on_thinking, cancel)
+        if self.api_mode == "ollama":
+            return self._chat_ollama(messages, tools, reasoning_effort,
+                                     on_text, on_thinking, cancel)
         return self._chat_completions(messages, tools, reasoning_effort,
                                       on_text, on_thinking, cancel)
+
+    @staticmethod
+    def _ollama_content(content) -> tuple[str, list[str]]:
+        """Translate OpenAI-style text/image content into one native Ollama message."""
+        if isinstance(content, str):
+            return content, []
+        if not isinstance(content, list):
+            return str(content or ""), []
+        text: list[str] = []
+        images: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in ("text", "input_text"):
+                text.append(str(part.get("text") or ""))
+            elif part.get("type") in ("image_url", "input_image"):
+                value = part.get("image_url") or part.get("image") or ""
+                if isinstance(value, dict):
+                    value = value.get("url") or ""
+                value = str(value)
+                if value.startswith("data:") and "," in value:
+                    value = value.split(",", 1)[1]
+                if value:
+                    images.append(value)
+        return "\n".join(part for part in text if part), images
+
+    @classmethod
+    def _ollama_messages(cls, messages: list[dict]) -> list[dict]:
+        """Map DGC's canonical transcript to Ollama's native chat/tool history."""
+        out: list[dict] = []
+        call_names: dict[str, str] = {}
+        for source in messages:
+            if not isinstance(source, dict):
+                continue
+            role = str(source.get("role") or "")
+            if role not in ("system", "user", "assistant", "tool"):
+                continue
+            content, images = cls._ollama_content(source.get("content", ""))
+            provider_message = source.get("_provider_message") or {}
+            if (role == "assistant" and provider_message.get("provider") == "ollama"):
+                # The canonical content may include a deterministic DGC tool preamble. Replay the
+                # provider's exact assistant message, including its required thinking continuation.
+                content = str(provider_message.get("content") or "")
+            message: dict = {"role": role, "content": content}
+            if (role == "assistant" and provider_message.get("provider") == "ollama"):
+                thinking = str(provider_message.get("thinking") or "")
+                if thinking:
+                    message["thinking"] = thinking
+            if images:
+                message["images"] = images
+            canonical_calls = source.get("tool_calls") or []
+            provider_calls = (provider_message.get("tool_calls")
+                              if provider_message.get("provider") == "ollama" else None)
+            if role == "assistant" and (canonical_calls or provider_calls):
+                # Ollama's streaming contract requires the complete accumulated assistant
+                # message on the next request. Prefer the exact native calls captured from that
+                # stream; canonical calls remain the portable fallback (and carry DGC's local IDs).
+                native_calls = [dict(call) for call in provider_calls
+                                if isinstance(call, dict)] if isinstance(provider_calls, list) else []
+                have_native_calls = bool(native_calls)
+                for call in canonical_calls:
+                    if not isinstance(call, dict):
+                        continue
+                    fn = call.get("function") or {}
+                    name = str(fn.get("name") or "")
+                    if not name:
+                        continue
+                    raw_args = fn.get("arguments")
+                    args = raw_args if isinstance(raw_args, dict) else _loads_lenient(str(raw_args or "{}"))
+                    if not isinstance(args, dict):
+                        args = {"_unparsed": str(raw_args or "")}
+                    if not have_native_calls:
+                        native_calls.append({"function": {"name": name, "arguments": args}})
+                    call_id = str(call.get("id") or "")
+                    if call_id:
+                        call_names[call_id] = name
+                if native_calls:
+                    message["tool_calls"] = native_calls
+            elif role == "tool":
+                call_id = str(source.get("tool_call_id") or "")
+                tool_name = str(source.get("name") or call_names.get(call_id) or "")
+                if tool_name:
+                    message["tool_name"] = tool_name
+            out.append(message)
+        return out
+
+    def _ollama_think(self, level):
+        # GPT-OSS does not accept booleans and cannot fully disable reasoning. Honor an off request
+        # with its lowest supported level rather than sending false, which that model ignores.
+        if "gpt-oss" in self.model.lower():
+            value = str(level).lower()
+            if level in _REASONING_OFF:
+                return "low"
+            return value if value in ("low", "medium", "high") else "high"
+        if level in _REASONING_OFF:
+            return False
+        value = str(level).lower()
+        return value if value in ("low", "medium", "high", "max") else True
+
+    def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
+                        think_budget: int = 0) -> ChatResult:
+        """Consume native Ollama JSON/NDJSON without translating it through SSE semantics."""
+        result = ChatResult()
+        filt = _ThinkFilter()
+        produced = False
+        native_content = ""
+        native_thinking = ""
+        native_calls: list[dict] = []
+
+        def consume(obj: dict) -> None:
+            nonlocal produced, native_content, native_thinking
+            if obj.get("error"):
+                raise LLMError(f"Ollama stream error: {str(obj['error'])[:400]}")
+            message = obj.get("message") or {}
+            if not isinstance(message, dict):
+                raise LLMError("Ollama emitted a non-object message")
+            reasoning = str(message.get("thinking") or "")
+            if reasoning:
+                native_thinking += reasoning
+                result.thinking += reasoning
+                if on_thinking:
+                    on_thinking(reasoning)
+            content = str(message.get("content") or "")
+            if content:
+                native_content += content
+                for kind, chunk in filt.feed(content):
+                    if kind == "think":
+                        result.thinking += chunk
+                        if on_thinking:
+                            on_thinking(chunk)
+                    else:
+                        result.content += chunk
+                        if on_text:
+                            on_text(chunk)
+                produced = True
+            calls = message.get("tool_calls") or []
+            if not isinstance(calls, list):
+                raise LLMError("Ollama emitted non-list tool_calls")
+            for call in calls:
+                if not isinstance(call, dict):
+                    raise LLMError("Ollama emitted a non-object tool call")
+                fn = call.get("function") or {}
+                if not isinstance(fn, dict):
+                    raise LLMError("Ollama emitted a non-object tool function")
+                name = str(fn.get("name") or "")
+                raw_args = fn.get("arguments")
+                args = raw_args if isinstance(raw_args, dict) else _loads_lenient(str(raw_args or "{}"))
+                if not name or not isinstance(args, dict):
+                    raise LLMError("Ollama emitted an invalid native tool call")
+                # Native Ollama emits each complete tool-call object in the stream. Calls must be
+                # extended across chunks (not merged by each chunk's zero-based array position).
+                native_call = {k: v for k, v in call.items() if k != "function"}
+                native_fn = {k: v for k, v in fn.items() if k != "arguments"}
+                native_fn["arguments"] = args
+                native_call["function"] = native_fn
+                native_calls.append(native_call)
+                produced = True
+            if obj.get("done"):
+                result.finish_reason = str(obj.get("done_reason") or result.finish_reason)
+                result.usage = {
+                    "input_tokens": int(obj.get("prompt_eval_count", 0) or 0),
+                    "output_tokens": int(obj.get("eval_count", 0) or 0),
+                    "cached_input_tokens": 0,
+                    "reasoning_tokens": 0,
+                }
+
+        stop_watch = threading.Event()
+        if cancel is not None:
+            def _watch(resp=r, ev=stop_watch, cx=cancel):
+                while not ev.wait(0.15):
+                    if cx.is_set():
+                        sock = _raw_socket(resp)
+                        if sock is not None:
+                            try:
+                                import socket as _socket
+                                sock.shutdown(_socket.SHUT_RDWR)
+                            except Exception:
+                                pass
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+            threading.Thread(target=_watch, daemon=True).start()
+
+        try:
+            ctype = r.headers.get("Content-Type", "").lower()
+            if "application/json" in ctype and "ndjson" not in ctype:
+                try:
+                    obj = r.json()
+                except ValueError as exc:
+                    raise LLMError("Ollama emitted malformed JSON") from exc
+                if not isinstance(obj, dict):
+                    raise LLMError("Ollama emitted a non-object JSON response")
+                consume(obj)
+            else:
+                r.encoding = "utf-8"
+                lines = r.iter_lines(decode_unicode=True)
+                while True:
+                    try:
+                        line = next(lines)
+                    except StopIteration:
+                        break
+                    except Exception:
+                        if cancel is not None and cancel.is_set():
+                            result.finish_reason = "cancelled"
+                            break
+                        raise
+                    if cancel is not None and cancel.is_set():
+                        result.finish_reason = "cancelled"
+                        break
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", "replace")
+                    line = str(line or "").strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise LLMError("Ollama emitted malformed NDJSON") from exc
+                    if not isinstance(obj, dict):
+                        raise LLMError("Ollama emitted a non-object stream event")
+                    consume(obj)
+                    if think_budget and not produced and len(result.thinking) > think_budget:
+                        result.finish_reason = "overthink"
+                        try:
+                            r.close()
+                        except Exception:
+                            pass
+                        break
+        finally:
+            stop_watch.set()
+
+        for kind, chunk in filt.flush():
+            if kind == "think":
+                result.thinking += chunk
+                if on_thinking:
+                    on_thinking(chunk)
+            else:
+                result.content += chunk
+                if on_text:
+                    on_text(chunk)
+        for call in native_calls:
+            fn = call["function"]
+            self._native_call_seq += 1
+            result.tool_calls.append(ToolCall(
+                id=str(call.get("id") or f"ollama_call_{self._native_call_seq}"),
+                name=str(fn["name"]), arguments=dict(fn["arguments"])))
+        if result.tool_calls and result.finish_reason == "stop":
+            result.finish_reason = "tool_calls"
+        if not result.tool_calls:
+            clean, text_calls = parse_text_tool_calls(result.content)
+            if text_calls:
+                result.content, result.tool_calls = clean, text_calls
+        result.provider_message = {
+            "provider": "ollama", "content": native_content, "thinking": native_thinking,
+        }
+        if native_calls:
+            result.provider_message["tool_calls"] = native_calls
+        return result
+
+    def _chat_ollama(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        reasoning_effort: str | None = None,
+        on_text=None,
+        on_thinking=None,
+        cancel=None,
+    ) -> ChatResult:
+        payload: dict = {"model": self.model, "messages": self._ollama_messages(messages),
+                         "stream": True}
+        if tools and self.tools_supported:
+            payload["tools"] = tools
+        if self.reasoning_supported:
+            payload["think"] = self._ollama_think(reasoning_effort)
+        options: dict = {}
+        if self.max_tokens and self._feature_supported("max_output_tokens"):
+            options["num_predict"] = self.max_tokens
+        if self.context_size:
+            options["num_ctx"] = self.context_size
+        if self.sampling and self._feature_supported("sampling"):
+            options.update(self.sampling)
+        if options:
+            payload["options"] = options
+        if self.keep_alive:
+            payload["keep_alive"] = self.keep_alive
+
+        last_err = ""
+        transient = 0
+        repaired = False
+        overthink = 0
+        level = reasoning_effort
+        lower = {"high": "medium", "medium": "low", "low": "off",
+                 "none": "off", "off": "off"}
+        for _ in range(8):
+            if cancel is not None and cancel.is_set():
+                return ChatResult(finish_reason="cancelled")
+            try:
+                r = requests.post(self._ollama_url, headers=self._headers(), json=payload,
+                                  stream=True, timeout=(15, self.read_timeout))
+            except requests.ConnectionError as exc:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
+                transient += 1
+                last_err = f"connection: {exc}"
+                if transient < 4:
+                    time.sleep(0.5 * transient)
+                    continue
+                raise LLMError(
+                    f"cannot connect to {self._ollama_root} — is Ollama running? "
+                    f"(/connect <url> to change it)\n{exc}") from exc
+            except requests.Timeout as exc:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
+                transient += 1
+                last_err = f"timeout: {exc}"
+                if transient < 4:
+                    time.sleep(0.5 * transient)
+                    continue
+                raise LLMError(f"request timed out repeatedly: {last_err}") from exc
+
+            if r.status_code in (404, 405, 501) and self.requested_api_mode == "auto":
+                self._mark_rejected("native_chat")
+                self.api_mode = "chat_completions"
+                return self._chat_completions(messages, tools, reasoning_effort,
+                                              on_text, on_thinking, cancel)
+            if r.status_code == 429:
+                transient += 1
+                last_err = f"429 rate limited: {r.text[:200]}"
+                if transient < 4:
+                    try:
+                        delay = float(r.headers.get("Retry-After") or 0.5 * transient)
+                    except ValueError:
+                        delay = 0.5 * transient
+                    time.sleep(min(delay, 10))
+                    continue
+                raise LLMError(f"rate limited (429) after {transient} tries: {last_err}")
+            if r.status_code in (400, 413):
+                body = r.text[:600]
+                low = body.lower()
+                last_err = body
+                if _OVERFLOW_RE.search(low):
+                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                if (r.status_code == 400 and self.tools_supported and "tools" in payload
+                        and re.search(r"tool|function", low)):
+                    self._mark_rejected("tools")
+                    raise ToolsUnsupportedError("Ollama rejected native tool calling")
+                if (r.status_code == 400 and "think" in payload
+                        and re.search(r"think|reason", low)):
+                    self._mark_rejected("reasoning")
+                    payload.pop("think", None)
+                    continue
+                native_options = payload.get("options") or {}
+                if ("num_predict" in native_options
+                        and re.search(r"num_predict|max.{0,8}(?:token|output)", low)):
+                    self._mark_rejected("max_output_tokens")
+                    native_options.pop("num_predict", None)
+                    continue
+                if ("num_ctx" in native_options and re.search(r"num_ctx|context", low)):
+                    native_options.pop("num_ctx", None)
+                    continue
+                if (self.sampling and any(k in native_options for k in _SAMPLING_KEYS)
+                        and re.search(r"top_k|top_p|min_p|temperature|sampl", low)):
+                    self._mark_rejected("sampling")
+                    for key in _SAMPLING_KEYS:
+                        native_options.pop(key, None)
+                    continue
+                raise LLMError(f"{r.status_code} from Ollama: {body}")
+            if r.status_code >= 500:
+                transient += 1
+                last_err = f"HTTP {r.status_code}: {r.text[:300]}"
+                if transient < 4:
+                    if transient >= 2 and not repaired:
+                        payload["messages"] = self._ollama_messages(_repair_for_retry(messages))
+                        repaired = True
+                    time.sleep(0.5 * transient)
+                    continue
+                raise LLMError(
+                    f"HTTP {r.status_code} from {self._ollama_url} after {transient} tries: {r.text[:400]}")
+            if r.status_code != 200:
+                raise LLMError(f"HTTP {r.status_code} from {self._ollama_url}: {r.text[:400]}")
+            budget = 0 if overthink > 2 else self.think_budget_chars
+            result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
+            if result.finish_reason == "overthink":
+                overthink += 1
+                level = lower.get(str(level or "off"), "off")
+                if self.reasoning_supported:
+                    payload["think"] = self._ollama_think(level)
+                continue
+            return result
+        raise LLMError(f"Ollama request failed repeatedly: {last_err}")
 
     def _chat_completions(
         self,

@@ -2370,6 +2370,37 @@ class MockHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class NativeOllamaMockHandler(BaseHTTPRequestHandler):
+    requests = []
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        req = json.loads(self.rfile.read(length) or b"{}")
+        NativeOllamaMockHandler.requests.append(req)
+        has_tool_result = any(m.get("role") == "tool" for m in req.get("messages", []))
+        if not has_tool_result:
+            events = [
+                {"message": {"role": "assistant", "thinking": "native thought "}, "done": False},
+                {"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {
+                    "name": "write_file", "arguments": {
+                        "path": "native.txt", "content": "native transport\n"}}}]},
+                 "done": True, "done_reason": "stop", "prompt_eval_count": 20, "eval_count": 5},
+            ]
+        else:
+            events = [{"message": {"role": "assistant", "content": "Native file created."},
+                       "done": True, "done_reason": "stop",
+                       "prompt_eval_count": 30, "eval_count": 4}]
+        body = ("\n".join(json.dumps(event) for event in events) + "\n").encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def e2e(port: int, native: bool, expect_file: str, tmp: Path,
         mode: str = "auto", scenario: str = "write", stdin: str = "") -> bool:
     MockHandler.native_tools = native
@@ -2389,6 +2420,39 @@ def e2e(port: int, native: bool, expect_file: str, tmp: Path,
         print("  --- stdout ---\n", proc.stdout[-2000:])
         print("  --- stderr ---\n", proc.stderr[-2000:])
     return ok
+
+
+def e2e_native_ollama(port: int, tmp: Path) -> bool:
+    """The real Agent loop must round-trip native thinking/tool history, not only parse one reply."""
+    NativeOllamaMockHandler.requests = []
+    home = tmp / "home_ollama_native"; work = tmp / "work_ollama_native"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    cfg_dir = home / ".dgc"; cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(json.dumps({
+        "api_mode": "ollama", "thinking": "high", "suggest": False,
+        "logo_animation": False, "artifact_autostart": False,
+    }))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    proc = subprocess.run(
+        [sys.executable, "-m", "dgc", "-p", "create the native file",
+         "--mode", "auto", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1",
+         "--model", "native-mock"],
+        cwd=str(work), env=env, capture_output=True, text=True, timeout=120)
+    requests_seen = NativeOllamaMockHandler.requests
+    if proc.returncode != 0 or not (work / "native.txt").exists() or len(requests_seen) != 2:
+        print("  --- native stdout ---\n", proc.stdout[-2000:])
+        print("  --- native stderr ---\n", proc.stderr[-2000:])
+        return False
+    followup = requests_seen[1]["messages"]
+    assistant = next((m for m in followup if m.get("role") == "assistant"
+                      and m.get("tool_calls")), {})
+    tool_result = next((m for m in followup if m.get("role") == "tool"), {})
+    return (requests_seen[0].get("think") == "high"
+            and assistant.get("thinking") == "native thought "
+            and assistant.get("content") == ""
+            and "I’ve got" not in str(assistant)
+            and tool_result.get("tool_name") == "write_file"
+            and "native.txt" in tool_result.get("content", ""))
 
 
 def e2e_loop(port: int, tmp: Path) -> bool:
@@ -2515,6 +2579,237 @@ def test_provider_capabilities():
     check("provider usage exposes cached input and reasoning tokens",
           normalized == {"input_tokens": 30, "output_tokens": 12,
                          "cached_input_tokens": 21, "reasoning_tokens": 5})
+
+
+def test_ollama_adapter():
+    """Native Ollama preserves its real chat/tool/thinking/options contract end to end."""
+    import dgc.llm as _llm
+    from dgc.llm import LLMClient
+
+    auto = LLMClient("http://localhost:11434/v1", "ollama", "native-auto-contract")
+    auto.invalidate_capabilities()
+    check("direct Ollama endpoints auto-select the native chat transport",
+          auto.api_mode == "ollama" and auto.capability_snapshot()["native_chat"] is True
+          and auto._ollama_url == "http://localhost:11434/api/chat")
+    gpt_oss = LLMClient("http://localhost:11434/v1", "ollama", "gpt-oss:20b")
+    check("native Ollama maps impossible GPT-OSS off/max controls to supported levels",
+          gpt_oss._ollama_think("off") == "low" and gpt_oss._ollama_think("max") == "high")
+
+    messages = [
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "inspect the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+        ]},
+        {"role": "assistant", "content": "", "tool_calls": [{
+            "id": "old-call", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"old.py"}'},
+        }]},
+        {"role": "tool", "tool_call_id": "old-call", "content": "old contents"},
+        {"role": "user", "content": "continue"},
+    ]
+    converted = LLMClient._ollama_messages(messages)
+    check("Ollama history maps images, object arguments, and correlated tool names",
+          converted[1]["content"] == "inspect the image" and converted[1]["images"] == ["QUJD"]
+          and converted[2]["tool_calls"][0]["function"]["arguments"] == {"path": "old.py"}
+          and converted[3]["tool_name"] == "read_file")
+
+    class _NativeResponse:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "application/x-ndjson"}
+        encoding = ""
+        closed = False
+
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"message": {"role": "assistant", "thinking": "checking "}, "done": False},
+                {"message": {"role": "assistant", "content": "I'll inspect it. "}, "done": False},
+                {"message": {"role": "assistant", "tool_calls": [{"function": {
+                    "index": 0, "name": "read_file", "arguments": {"path": "next.py"}}}]},
+                 "done": False},
+                # Native calls in later chunks are complete objects too. Their local list index
+                # starts at zero again, so an adapter must extend rather than merge by enumerate().
+                {"message": {"role": "assistant", "tool_calls": [{"function": {
+                    "index": 1, "name": "read_file", "arguments": {"path": "second.py"}}}]},
+                 "done": False},
+                {"message": {"role": "assistant", "content": ""}, "done": True,
+                 "done_reason": "stop", "prompt_eval_count": 31, "eval_count": 9},
+            ]
+            for event in events:
+                yield json.dumps(event)
+
+        def close(self):
+            self.closed = True
+
+    posted = []
+    original_post = _llm.requests.post
+    def _native_post(url, **kwargs):
+        posted.append((url, kwargs["json"]))
+        return _NativeResponse()
+    text_chunks, thinking_chunks = [], []
+    try:
+        _llm.requests.post = _native_post
+        native = LLMClient(
+            "http://127.0.0.1:19999/v1", "k", "explicit-native", api_mode="ollama",
+            max_tokens=2048, context_size=40960, ollama_keep_alive="30m",
+            sampling={"temperature": 0.7, "top_k": 20})
+        native_result = native.chat(
+            messages, tools=[{"type": "function", "function": {"name": "read_file",
+                              "description": "read", "parameters": {"type": "object"}}}],
+            reasoning_effort="off", on_text=text_chunks.append,
+            on_thinking=thinking_chunks.append)
+    finally:
+        _llm.requests.post = original_post
+    url, payload = posted[0]
+    check("native Ollama requests carry exact thinking, options, keep-alive, and tool history",
+          url == "http://127.0.0.1:19999/api/chat" and payload["think"] is False
+          and payload["keep_alive"] == "30m"
+          and payload["options"] == {"num_predict": 2048, "num_ctx": 40960,
+                                     "temperature": 0.7, "top_k": 20}
+          and payload["messages"][3]["tool_name"] == "read_file"
+          and "tool_choice" not in payload)
+    check("native Ollama NDJSON preserves streamed thinking, tools, finish state, and usage",
+          native_result.content == "I'll inspect it. " and native_result.thinking == "checking "
+          and text_chunks == ["I'll inspect it. "] and thinking_chunks == ["checking "]
+          and native_result.finish_reason == "tool_calls"
+          and [call.name for call in native_result.tool_calls] == ["read_file", "read_file"]
+          and native_result.tool_calls[0].arguments == {"path": "next.py"}
+          and native_result.tool_calls[1].arguments == {"path": "second.py"}
+          and native_result.usage == {"input_tokens": 31, "output_tokens": 9,
+                                      "cached_input_tokens": 0, "reasoning_tokens": 0}
+          and native_result.provider_message == {
+              "provider": "ollama", "content": "I'll inspect it. ", "thinking": "checking ",
+              "tool_calls": [
+                  {"function": {"index": 0, "name": "read_file",
+                                "arguments": {"path": "next.py"}}},
+                  {"function": {"index": 1, "name": "read_file",
+                                "arguments": {"path": "second.py"}}},
+              ]})
+    replay = LLMClient._ollama_messages([{
+        "role": "assistant", "content": "DGC display-only tool preamble",
+        "_provider_message": native_result.provider_message,
+        "tool_calls": [{"id": native_result.tool_calls[0].id, "type": "function",
+                        "function": {"name": "read_file", "arguments": '{"path":"next.py"}'}}],
+    }])
+    check("native Ollama continuation replays provider thinking instead of display-only text",
+          replay[0]["content"] == "I'll inspect it. " and replay[0]["thinking"] == "checking "
+          and replay[0]["tool_calls"] == native_result.provider_message["tool_calls"])
+    from dgc.agent import Agent as _Agent
+    estimate_agent = object.__new__(_Agent)
+    estimate_agent.client = native
+    estimate_agent.messages = [{
+        "role": "assistant", "content": "DGC display-only tool preamble",
+        "_provider_message": native_result.provider_message,
+        "tool_calls": [{"id": call.id, "type": "function", "function": {
+            "name": call.name, "arguments": json.dumps(call.arguments)}}
+                       for call in native_result.tool_calls],
+    }]
+    expected_wire_chars = len(json.dumps(native._ollama_messages(estimate_agent.messages)))
+    check("context estimation counts the native wire transcript without stored-display duplication",
+          estimate_agent.estimate_tokens() == expected_wire_chars // 4)
+
+    class _TaggedResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant",
+                                           "content": "<think>tagged</think>visible"},
+                              "done": True, "done_reason": "stop"})
+    tagged = native._consume_ollama(_TaggedResponse(), None, None)
+    check("native continuation preserves raw provider fields while display filtering stays local",
+          tagged.content == "visible" and tagged.thinking == "tagged"
+          and tagged.provider_message == {
+              "provider": "ollama", "content": "<think>tagged</think>visible", "thinking": ""})
+
+    class _StalledResponse(_NativeResponse):
+        def __init__(self):
+            self.released = threading.Event()
+        def iter_lines(self, decode_unicode=True):
+            self.released.wait(5)
+            raise OSError("closed")
+            yield  # pragma: no cover - keep this a generator
+        def close(self):
+            self.released.set()
+    stalled = _StalledResponse(); stopped = threading.Event()
+    threading.Timer(0.1, stopped.set).start()
+    started = __import__("time").monotonic()
+    cancelled = native._consume_ollama(stalled, None, None, cancel=stopped)
+    elapsed = __import__("time").monotonic() - started
+    check("native Ollama cancellation interrupts a stalled response stream",
+          cancelled.finish_reason == "cancelled" and elapsed < 1 and stalled.released.is_set())
+
+    class _MalformedResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield "{not-json"
+    try:
+        native._consume_ollama(_MalformedResponse(), None, None)
+        malformed_failed_closed = False
+    except _llm.LLMError:
+        malformed_failed_closed = True
+    check("native Ollama malformed streams fail closed", malformed_failed_closed)
+
+    class _ThinkRejected:
+        status_code = 400
+        text = 'unknown field "think"'
+        headers = {"Content-Type": "application/json"}
+    negotiation_posts = []
+    def _negotiation_post(url, **kwargs):
+        negotiation_posts.append(json.loads(json.dumps(kwargs["json"])))
+        return _ThinkRejected() if len(negotiation_posts) == 1 else _NativeResponse()
+    negotiated = LLMClient("http://localhost:11434/v1", "k", "native-think-negotiation")
+    negotiated.invalidate_capabilities()
+    try:
+        _llm.requests.post = _negotiation_post
+        negotiated_result = negotiated.chat(messages, reasoning_effort="high")
+    finally:
+        _llm.requests.post = original_post
+    check("native Ollama negotiates a rejected thinking field without abandoning native chat",
+          len(negotiation_posts) == 2 and negotiation_posts[0]["think"] == "high"
+          and "think" not in negotiation_posts[1] and negotiated.api_mode == "ollama"
+          and not negotiated.reasoning_supported and len(negotiated_result.tool_calls) == 2)
+
+    class _TagsResponse:
+        status_code = 200
+        def json(self): return {"models": [{"name": "z:latest"}, {"model": "a:7b"}]}
+        def raise_for_status(self): raise AssertionError("unexpected status check")
+    original_get = _llm.requests.get
+    got = []
+    try:
+        _llm.requests.get = lambda url, **kwargs: (got.append(url) or _TagsResponse())
+        models = LLMClient("http://localhost:11434/v1", "k", "tags-contract").list_models()
+    finally:
+        _llm.requests.get = original_get
+    check("native Ollama model discovery uses the tags contract",
+          got == ["http://localhost:11434/api/tags"] and models == ["a:7b", "z:latest"])
+
+    class _MissingNative:
+        status_code = 404
+        text = "not found"
+        headers = {}
+    class _CompatResponse:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "application/json"}
+        def json(self):
+            return {"choices": [{"message": {"content": "compat fallback"},
+                                  "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2}}
+    fallback_posts = []
+    def _fallback_post(url, **kwargs):
+        fallback_posts.append(url)
+        return _MissingNative() if len(fallback_posts) == 1 else _CompatResponse()
+    fallback = LLMClient("http://localhost:11434/v1", "k", "native-fallback-contract")
+    fallback.invalidate_capabilities()
+    try:
+        _llm.requests.post = _fallback_post
+        fallback_result = fallback.chat([{"role": "user", "content": "hello"}],
+                                        reasoning_effort="off")
+    finally:
+        _llm.requests.post = original_post
+    check("auto mode falls back safely when the native Ollama route is unavailable",
+          fallback_posts == ["http://localhost:11434/api/chat",
+                             "http://localhost:11434/v1/chat/completions"]
+          and fallback.api_mode == "chat_completions"
+          and fallback_result.content == "compat fallback")
 
 
 def test_responses_adapter():
@@ -2716,12 +3011,14 @@ def test_responses_adapter():
         _llm.requests.post = _chat_post
         chat_fallback = LLMClient("http://localhost:1234/v1", "k", "chat-strip")
         chat_fallback.chat([{"role": "assistant", "content": "visible",
-                             "_responses_output": [encrypted]}])
+                             "_responses_output": [encrypted],
+                             "_provider_message": {"provider": "ollama", "thinking": "private"}}])
     finally:
         _llm.requests.post = original_post
-    check("Chat Completions never receives Responses-private transcript metadata",
+    check("Chat Completions never receives provider-private transcript metadata",
           len(stripped_calls) == 1
-          and "_responses_output" not in stripped_calls[0]["messages"][0])
+          and "_responses_output" not in stripped_calls[0]["messages"][0]
+          and "_provider_message" not in stripped_calls[0]["messages"][0])
 
 
 def test_overthink_watchdog():
@@ -2855,6 +3152,7 @@ def main():
         test_toolcall_recovery()
         test_reasoning_payload()
         test_provider_capabilities()
+        test_ollama_adapter()
         test_responses_adapter()
         test_overthink_watchdog()
         test_multi_edit()
@@ -2875,6 +3173,15 @@ def main():
             check("e2e tests pass → immediate summary-only response", e2e_verify(port, tmp))
         finally:
             server.shutdown()
+
+        native_server = HTTPServer(("127.0.0.1", 0), NativeOllamaMockHandler)
+        native_port = native_server.server_address[1]
+        threading.Thread(target=native_server.serve_forever, daemon=True).start()
+        try:
+            check("e2e native Ollama thinking + tool continuation",
+                  e2e_native_ollama(native_port, tmp))
+        finally:
+            native_server.shutdown()
 
     print(f"\n{sum(PASS)}/{len(PASS)} checks passed")
     sys.exit(0 if all(PASS) else 1)

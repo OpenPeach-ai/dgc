@@ -330,7 +330,7 @@ class TUI:
     _SETTINGS = {
         "Model & sampling": [
             ("model", "Model", "str"), ("base_url", "Endpoint URL", "str"),
-            ("api_mode", "API transport", "enum", ["auto", "chat_completions", "responses"]),
+            ("api_mode", "API transport", "enum", ["auto", "ollama", "chat_completions", "responses"]),
             ("provider_state", "Responses state", "enum", ["stateless", "server"]),
             ("prompt_cache", "Prompt cache routing", "bool"),
             ("prompt_cache_key", "Prompt cache key", "str"),
@@ -2769,6 +2769,7 @@ class TUI:
                 self.config.set(bk, prov["base_url"])
                 self.config.set(kk, key if prov["needs_key"] else prov["api_key"])
                 if not subagent:
+                    self.config.set("api_mode", "auto")
                     self.agent.refresh_client()
                 self._flash(f"{who} → {prov['base_url']}")
 
