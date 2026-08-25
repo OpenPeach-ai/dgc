@@ -321,6 +321,86 @@ def _loads_lenient(s):
         return None
 
 
+def _merge_stream_token(current: str, incoming) -> str:
+    """Merge an identifier/name sent as fragments, repeats, or cumulative snapshots."""
+    fragment = str(incoming or "")
+    if not fragment:
+        return current
+    if not current:
+        return fragment
+    if fragment.startswith(current):
+        return fragment
+    if current.startswith(fragment):
+        return current
+    return current + fragment
+
+
+def _merge_stream_arguments(current, incoming):
+    """Merge spec-compliant argument fragments plus common compatible-server variants."""
+    if incoming is None or incoming == "":
+        return current
+    if isinstance(incoming, dict):
+        return dict(incoming)
+    if not isinstance(incoming, str):
+        return incoming
+    if isinstance(current, dict):
+        parsed = _loads_lenient(incoming)
+        return parsed if isinstance(parsed, dict) else current
+    if not isinstance(current, str):
+        parsed = _loads_lenient(incoming)
+        return parsed if isinstance(parsed, dict) else current
+
+    fragment = str(incoming)
+    if not current:
+        return fragment
+    # OpenAI sends disjoint fragments. Several local gateways instead repeat the full value or
+    # send a growing JSON snapshot each event. Prefix replacement supports both without turning
+    # `{"pa` + `{"path":"x"}` into invalid concatenated JSON.
+    if fragment.startswith(current):
+        return fragment
+    if current.startswith(fragment):
+        return current
+    return current + fragment
+
+
+def _tool_arguments(raw) -> dict:
+    """Normalize a provider's complete tool arguments to DGC's always-dict contract."""
+    if raw is None or raw == "":
+        return {}
+    parsed = _loads_lenient(raw)
+    if isinstance(parsed, dict):
+        return dict(parsed)
+    if isinstance(raw, str):
+        text = raw
+    else:
+        try:
+            text = json.dumps(raw, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            text = str(raw)
+    return {"_unparsed": text[:4000]}
+
+
+def _tool_call_index(raw) -> int | None:
+    """Accept non-negative integer indices, including strings emitted by local gateways."""
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, str) and re.fullmatch(r"\d+", raw.strip()):
+        return int(raw.strip())
+    return None
+
+
+def _wire_key(identifier, index, fallback) -> str:
+    """Choose a provider item key without treating the valid numeric index zero as absent."""
+    value = identifier
+    if value is None or value == "":
+        value = index
+    if value is None or value == "":
+        value = fallback
+    return str(value)
+
+
 # Fenced ```tool_call / ```tool_code / ```json blocks, and two XML shapes local models emit.
 _FENCE = re.compile(r"```+[ \t]*(tool_call|tool_code|json)?[ \t]*\n(.*?)\n?```+", re.S)
 _XML_TOOLCALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.S)
@@ -1512,18 +1592,31 @@ class LLMClient:
                 elif typ in ("response.output_item.added", "response.output_item.done"):
                     item = event.get("item") or {}
                     if typ == "response.output_item.done" and isinstance(item, dict) and item:
-                        key = str(item.get("id") or event.get("output_index") or len(provider_items))
+                        key = _wire_key(item.get("id"), event.get("output_index"), len(provider_items))
                         provider_items[key] = dict(item)
                     if item.get("type") == "function_call":
-                        key = str(item.get("id") or event.get("output_index") or len(calls))
+                        key = _wire_key(item.get("id"), event.get("output_index"), len(calls))
                         slot = calls.setdefault(key, {})
+                        output_index = _tool_call_index(event.get("output_index"))
+                        if output_index is not None:
+                            slot["_output_index"] = output_index
                         slot.update({k: item[k] for k in ("call_id", "name") if item.get(k)})
                         if item.get("arguments") is not None:
-                            slot["arguments"] = str(item.get("arguments") or "{}")
+                            raw_arguments = item.get("arguments")
+                            # `added` commonly carries an empty prefix before delta events; treating
+                            # that as the complete string "{}" corrupts every following fragment.
+                            # `done`, by contrast, is authoritative and may legitimately be empty.
+                            slot["arguments"] = ((raw_arguments if raw_arguments != "" else "{}")
+                                                 if typ == "response.output_item.done"
+                                                 else raw_arguments)
                 elif typ == "response.function_call_arguments.delta":
-                    key = str(event.get("item_id") or event.get("output_index") or "0")
+                    key = _wire_key(event.get("item_id"), event.get("output_index"), 0)
                     slot = calls.setdefault(key, {})
-                    slot["arguments"] = slot.get("arguments", "") + str(event.get("delta") or "")
+                    output_index = _tool_call_index(event.get("output_index"))
+                    if output_index is not None:
+                        slot["_output_index"] = output_index
+                    slot["arguments"] = _merge_stream_arguments(
+                        slot.get("arguments", ""), event.get("delta"))
                 elif typ in ("response.completed", "response.incomplete"):
                     obj = event.get("response") or {}
                     result.response_id = str(obj.get("id") or "")
@@ -1540,12 +1633,13 @@ class LLMClient:
             result.finish_reason = "cancelled"
         finally:
             stop_watch.set()
-        for slot in calls.values():
-            args = _loads_lenient(slot.get("arguments") or "{}")
+        ordered_calls = sorted(
+            calls.values(),
+            key=lambda slot: (slot.get("_output_index") is None, slot.get("_output_index", 0)))
+        for slot in ordered_calls:
             result.tool_calls.append(ToolCall(id=str(slot.get("call_id") or f"call_{len(result.tool_calls)}"),
                                               name=str(slot.get("name") or ""),
-                                              arguments=args if args is not None else
-                                              {"_unparsed": slot.get("arguments", "")}))
+                                              arguments=_tool_arguments(slot.get("arguments"))))
         result.provider_items = list(provider_items.values())
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
@@ -1575,11 +1669,9 @@ class LLMClient:
                     result.thinking += text
                     if on_thinking and text: on_thinking(text)
             elif item.get("type") == "function_call":
-                args = _loads_lenient(item.get("arguments") or "{}")
                 result.tool_calls.append(ToolCall(id=str(item.get("call_id") or item.get("id") or "call_0"),
                                                   name=str(item.get("name") or ""),
-                                                  arguments=args if args is not None else
-                                                  {"_unparsed": item.get("arguments", "")}))
+                                                  arguments=_tool_arguments(item.get("arguments"))))
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:
@@ -1599,6 +1691,7 @@ class LLMClient:
         partial: dict[int, dict] = {}  # index -> accumulated native tool call
         noidx = -1                     # fallback slot cursor when a server omits tool_call 'index'
         idmap: dict[str, int] = {}     # tool-call id -> slot, so repeated ids don't split a call
+        last_idx: int | None = None    # best-effort continuation when a gateway omits both id + index
 
         def emit(events):
             for kind, chunk in events:
@@ -1687,26 +1780,37 @@ class LLMClient:
                 produced = True
             for tc in delta.get("tool_calls") or []:
                 produced = True
-                if "index" in tc:
-                    idx = tc["index"]
-                else:                          # server omitted index — infer slots from ids
-                    tcid = tc.get("id")
-                    if tcid and tcid in idmap:
-                        idx = idmap[tcid]
-                    elif tcid:
-                        noidx += 1; idmap[tcid] = noidx; idx = noidx
-                    elif not partial:
-                        noidx += 1; idx = noidx
-                    else:
-                        idx = noidx if noidx >= 0 else 0
+                if not isinstance(tc, dict):
+                    continue
+                tcid = str(tc.get("id") or "")
+                idx = _tool_call_index(tc.get("index"))
+                if idx is None and tcid and tcid in idmap:
+                    idx = idmap[tcid]
+                elif idx is None and tcid:
+                    noidx += 1
+                    while noidx in partial:
+                        noidx += 1
+                    idx = noidx
+                elif idx is None and last_idx is not None:
+                    idx = last_idx
+                elif idx is None:
+                    noidx += 1
+                    while noidx in partial:
+                        noidx += 1
+                    idx = noidx
+                if tcid:
+                    idmap[tcid] = idx
+                last_idx = idx
                 slot = partial.setdefault(idx, {"id": "", "name": "", "args": ""})
-                if tc.get("id"):
-                    slot["id"] += tc["id"]
+                if tcid:
+                    slot["id"] = _merge_stream_token(slot["id"], tcid)
                 fn = tc.get("function") or {}
+                if not isinstance(fn, dict):
+                    continue
                 if fn.get("name"):
-                    slot["name"] += fn["name"]
-                if fn.get("arguments"):
-                    slot["args"] += fn["arguments"]
+                    slot["name"] = _merge_stream_token(slot["name"], fn["name"])
+                if fn.get("arguments") is not None:
+                    slot["args"] = _merge_stream_arguments(slot["args"], fn["arguments"])
 
             if think_budget and not produced and len(result.thinking) > think_budget:
                 result.finish_reason = "overthink"     # F4: reasoning ran away before any output
@@ -1721,11 +1825,9 @@ class LLMClient:
 
         for idx in sorted(partial):
             slot = partial[idx]
-            args = _loads_lenient(slot["args"]) if slot["args"] else {}
-            if args is None:                   # repair (trailing comma etc.) before giving up
-                args = {"_unparsed": slot["args"]}
             result.tool_calls.append(ToolCall(
-                id=slot["id"] or f"call_{idx}", name=slot["name"], arguments=args))
+                id=slot["id"] or f"call_{idx}", name=slot["name"],
+                arguments=_tool_arguments(slot["args"])))
 
         # fallback: model emitted tool calls as text despite native support
         if not result.tool_calls:
@@ -1764,11 +1866,9 @@ class LLMClient:
                     on_text(chunk)
         for tc in msg.get("tool_calls") or []:
             fn = tc.get("function") or {}
-            args = _loads_lenient(fn.get("arguments") or "{}")
-            if args is None:
-                args = {"_unparsed": fn.get("arguments")}
             result.tool_calls.append(ToolCall(id=tc.get("id") or f"call_{len(result.tool_calls)}",
-                                              name=fn.get("name", ""), arguments=args))
+                                              name=fn.get("name", ""),
+                                              arguments=_tool_arguments(fn.get("arguments"))))
         if not result.tool_calls:
             clean, text_calls = parse_text_tool_calls(result.content)
             if text_calls:

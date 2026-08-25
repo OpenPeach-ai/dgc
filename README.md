@@ -206,6 +206,10 @@ With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/a
 limits, sampling, keep-alive, multimodal data, and provider token counts without an OpenAI
 translation layer. Set `api_mode` to `"ollama"` when Ollama sits behind a URL that cannot be
 detected (for example, a loopback proxy), or to `"chat_completions"` to force compatibility mode.
+OpenAI-compatible tool streams preserve normal fragmented calls while also tolerating repeated or
+cumulative ID/name/argument snapshots, string or omitted indices, and direct argument objects from
+local gateways. Invalid non-object arguments are returned to the model for repair instead of
+crashing the agent or executing a corrupted call.
 
 For OpenAI Responses, DGC defaults to `store: false`, locally preserves encrypted reasoning items
 needed for tool-loop continuity, and uses a hashed cache-routing key when supported. Set

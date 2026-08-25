@@ -5202,6 +5202,140 @@ def test_provider_retry_lifecycle():
           parser_failed and broken.closed)
 
 
+def test_compatible_tool_deltas():
+    """Compatible-provider tool variants normalize without corrupting executable calls."""
+    from dgc.llm import LLMClient
+
+    client = LLMClient("http://localhost:1234/v1", "k", "tool-wire-compat")
+
+    class _ChatStream:
+        headers = {"Content-Type": "text/event-stream"}
+        encoding = ""
+
+        def __init__(self, deltas):
+            self.deltas = deltas
+
+        def iter_lines(self, decode_unicode=True):
+            for delta in self.deltas:
+                yield "data: " + json.dumps({
+                    "choices": [{"delta": delta, "finish_reason": None}]})
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}'
+            yield "data: [DONE]"
+
+        def close(self):
+            pass
+
+    def consume(deltas):
+        return client._consume(_ChatStream(deltas), None, None)
+
+    repeated = consume([
+        {"tool_calls": [{"index": "0", "id": "call_repeat", "function": {
+            "name": "read_file", "arguments": '{"pa'}}]},
+        {"tool_calls": [{"index": "0", "id": "call_repeat", "function": {
+            "name": "read_file", "arguments": '{"path":"a.py"}'}}]},
+    ])
+    check("Chat tool deltas deduplicate repeated IDs/names and accept cumulative arguments",
+          len(repeated.tool_calls) == 1
+          and repeated.tool_calls[0].id == "call_repeat"
+          and repeated.tool_calls[0].name == "read_file"
+          and repeated.tool_calls[0].arguments == {"path": "a.py"})
+
+    object_args = consume([{"tool_calls": [{
+        "index": 0, "id": "call_object", "function": {
+            "name": "write_file", "arguments": {"path": "x.py", "content": "ok"}}}]}])
+    check("Chat tool deltas accept direct argument objects from local gateways",
+          len(object_args.tool_calls) == 1
+          and object_args.tool_calls[0].arguments == {"path": "x.py", "content": "ok"})
+
+    fragmented = consume([
+        {"tool_calls": [{"index": 0, "id": "call_", "function": {
+            "name": "read_", "arguments": '{"pa'}}]},
+        {"tool_calls": [{"index": 0, "id": "fragment", "function": {
+            "name": "file", "arguments": 'th":"b.py"}'}}]},
+    ])
+    check("Chat tool normalization preserves genuine identifier/name/argument fragments",
+          len(fragmented.tool_calls) == 1
+          and fragmented.tool_calls[0].id == "call_fragment"
+          and fragmented.tool_calls[0].name == "read_file"
+          and fragmented.tool_calls[0].arguments == {"path": "b.py"})
+
+    unindexed = consume([
+        {"tool_calls": [
+            {"id": "call_a", "function": {"name": "read_file", "arguments": ""}},
+            {"id": "call_b", "function": {"name": "grep", "arguments": ""}},
+        ]},
+        {"tool_calls": [
+            {"id": "call_a", "function": {"arguments": {"path": "a.py"}}},
+            {"id": "call_b", "function": {"arguments": '{"pattern":"needle"}'}},
+        ]},
+    ])
+    check("missing Chat indices remain correlated by repeated call ID",
+          [(call.id, call.name, call.arguments) for call in unindexed.tool_calls] == [
+              ("call_a", "read_file", {"path": "a.py"}),
+              ("call_b", "grep", {"pattern": "needle"}),
+          ])
+
+    invalid = consume([{"tool_calls": [{
+        "index": 0, "id": "call_invalid", "function": {
+            "name": "read_file", "arguments": ["not", "an", "object"]}}]}])
+    check("non-object tool arguments fail into the normal repair path without a decoder crash",
+          isinstance(invalid.tool_calls[0].arguments, dict)
+          and "_unparsed" in invalid.tool_calls[0].arguments)
+
+    class _ResponsesStream:
+        headers = {"Content-Type": "text/event-stream"}
+        encoding = ""
+
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "response.output_item.added", "output_index": 0,
+                 "item": {"type": "function_call", "id": "item-1",
+                          "call_id": "response_call", "name": "read_file", "arguments": ""}},
+                {"type": "response.function_call_arguments.delta", "item_id": "item-1",
+                 "delta": '{"pa'},
+                {"type": "response.function_call_arguments.delta", "item_id": "item-1",
+                 "delta": '{"path":"response.py"}'},
+                {"type": "response.completed", "response": {"id": "resp-wire", "usage": {}}},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+            yield "data: [DONE]"
+
+        def close(self):
+            pass
+
+    responses = client._consume_responses(_ResponsesStream(), None, None)
+    check("Responses cumulative argument deltas normalize when a proxy omits output_item.done",
+          len(responses.tool_calls) == 1
+          and responses.tool_calls[0].id == "response_call"
+          and responses.tool_calls[0].name == "read_file"
+          and responses.tool_calls[0].arguments == {"path": "response.py"})
+
+    class _OutOfOrderResponses(_ResponsesStream):
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "response.output_item.added", "output_index": 1,
+                 "item": {"type": "function_call", "call_id": "call_one",
+                          "name": "grep", "arguments": {"pattern": "x"}}},
+                {"type": "response.output_item.added", "output_index": 0,
+                 "item": {"type": "function_call", "call_id": "call_zero",
+                          "name": "read_file", "arguments": {"path": "zero.py"}}},
+                {"type": "response.completed", "response": {"id": "resp-indices", "usage": {}}},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+            yield "data: [DONE]"
+
+    indexed = client._consume_responses(_OutOfOrderResponses(), None, None)
+    indexed_calls = {call.id: (call.name, call.arguments) for call in indexed.tool_calls}
+    check("Responses preserves zero/out-of-order indices when item IDs are omitted",
+          [call.id for call in indexed.tool_calls] == ["call_zero", "call_one"]
+          and indexed_calls == {
+              "call_zero": ("read_file", {"path": "zero.py"}),
+              "call_one": ("grep", {"pattern": "x"}),
+          })
+
+
 def test_ollama_adapter():
     """Native Ollama preserves its real chat/tool/thinking/options contract end to end."""
     import dgc.llm as _llm
@@ -5778,6 +5912,7 @@ def main():
         test_reasoning_payload()
         test_provider_capabilities()
         test_provider_retry_lifecycle()
+        test_compatible_tool_deltas()
         test_ollama_adapter()
         test_responses_adapter()
         test_overthink_watchdog()
