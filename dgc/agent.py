@@ -1209,10 +1209,13 @@ class Agent:
         return True
 
     # ------------------------------------------------------------- main loop ---
-    def run_turn(self, user_text: str) -> None:
-        if self.depth == 0:                 # only a fresh top-level turn clears the cancel flag — a
-            self.cancelled.clear()          #   sub-agent SHARES the parent's Event, so clearing it here
-            #                                   would wipe a cancel that arrived during sub construction.
+    def run_turn(self, user_text: str, *, reset_cancel: bool = True) -> None:
+        # A sub-agent shares the parent's Event, so only a top-level frontend may clear stale state.
+        # Serialized frontends clear it at their own dequeue boundary and pass reset_cancel=False,
+        # preventing a cancel that arrives during turn startup from being swallowed here.
+        if self.depth == 0:
+            if reset_cancel:
+                self.cancelled.clear()
             if not self._session_started:   # SessionStart lifecycle hook (fires once per session)
                 self._session_started = True
                 run_hooks("SessionStart", {"project": str(self.config.project_root)},

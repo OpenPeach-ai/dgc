@@ -111,7 +111,8 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors. Put another host's credential in `DGC_FALLBACK_API_KEY`; DGC never forwards the main provider key there, auto-detects its transport, and honors a `fallback_api_mode` override.
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the live terminal/editor palette.
 - **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension through a generated protocol-v3 command/event contract with bounded frames and strict wire ordering. Permission, plan, option, and MCP decisions are exactly ID-correlated and first-response-wins; control frames bypass prompt backpressure, while expired, duplicate, mismatched, and post-restart responses fail closed. Live multi-root changes are acknowledged and coalesced across active turns so added folders gain access and removed folders lose their session grant; editor context and `@file` mentions keep visible labels separate from typed canonical paths across roots. `dgc acp` speaks the Agent Client Protocol (JSON-RPC over stdio) for Zed, Neovim and other ACP clients.
-- **Mid-turn queueing** — type a follow-up while a turn runs to queue it, or press Esc to interrupt.
+- **Mid-turn queueing** — type follow-ups while a turn runs and DGC executes up to 32 in FIFO order;
+  overflow is rejected visibly, and a prompt sent while a cancelled turn unwinds is not stranded.
 - **Tools** — `read_file` · `repo_map` · `code_intel` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
 
 ## REPL conveniences

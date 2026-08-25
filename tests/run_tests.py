@@ -439,18 +439,62 @@ def unit_tests(tmp: Path):
     from dgc.headless import Backend
     import threading as _th
     class _Em:
-        def __init__(self): self.evs = []
-        def emit(self, t, **k): self.evs.append(t)
+        def __init__(self): self.evs, self.done = [], _th.Event()
+        def emit(self, t, **k):
+            self.evs.append(t)
+            if t == "turn_end": self.done.set()
     class _StubAgent:
         cancelled = _th.Event()
-        def run_turn(self, text): raise RuntimeError("cannot connect to the model endpoint")
+        def run_turn(self, text, *, reset_cancel=True):
+            raise RuntimeError("cannot connect to the model endpoint")
         def estimate_tokens(self): return 0
     b = object.__new__(Backend)
     b.em, b.agent, b._queue, b._turn_n, b._emit_context = _Em(), _StubAgent(), [], 0, lambda: None
     b._start_turn("Hi")
-    b._worker.join(timeout=5)
+    b.em.done.wait(5)
     check("headless failing turn emits error", "error" in b.em.evs)
     check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
+
+    # One locked FIFO owns the complete busy -> idle transition. A follow-up sent after Cancel but
+    # before the cancelled call unwinds must run next; the old per-turn handoff stranded this prompt.
+    class _QueuedAgent:
+        def __init__(self):
+            self.cancelled = _th.Event(); self.calls = []
+            self.started = _th.Event(); self.release = _th.Event(); self.finished = _th.Event()
+        def run_turn(self, text, *, reset_cancel=True):
+            if text == "first":
+                self.calls.append(text); self.started.set()
+                self.cancelled.wait(2); self.release.wait(2)
+            else:
+                self.calls.append(text); self.finished.set()
+        def estimate_tokens(self): return 0
+    from dgc.protocol import PendingRequests
+    _queue_agent = _QueuedAgent(); _queue_cap = _Em(); _queue_backend = object.__new__(Backend)
+    _queue_backend.em, _queue_backend.agent = _queue_cap, _queue_agent
+    _queue_backend.pending = PendingRequests(); _queue_backend._queue = []
+    _queue_backend._turn_n = 0; _queue_backend._emit_context = lambda: None
+    _queue_backend._start_turn("first"); _queue_agent.started.wait(2)
+    _queue_backend.dispatch({"type": "cancel"})
+    _queue_backend.dispatch({"type": "prompt", "text": "after cancel"})
+    _queue_agent.release.set(); _queue_agent.finished.wait(2)
+    check("headless FIFO runs a new prompt submitted while a cancelled turn unwinds",
+          _queue_agent.calls == ["first", "after cancel"]
+          and any(e == "queued" for e in _queue_cap.evs))
+
+    from dgc.headless import _MAX_QUEUED_TURNS
+    _full_cap = type("QueueCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    _full_backend = object.__new__(Backend)
+    _full_backend.em = _full_cap; _full_backend._worker = object()
+    _full_backend._queue = [("queued", None, None)] * _MAX_QUEUED_TURNS
+    _full_backend.dispatch({"type": "prompt", "text": "one too many"})
+    check("headless follow-up queue is bounded and rejects overflow explicitly",
+          len(_full_backend._queue) == _MAX_QUEUED_TURNS
+          and _full_cap.events[-1].get("type") == "command_rejected"
+          and _full_cap.events[-1].get("reason") == "queue_full"
+          and _full_cap.events[-1].get("count") == _MAX_QUEUED_TURNS)
 
     # Generated protocol artifacts and both runtime validators share one Python source of truth.
     import ast as _ast
@@ -1034,12 +1078,17 @@ def unit_tests(tmp: Path):
         def __getattr__(self, n): return lambda *a, **k: None
     _p = _Ag(_Cfg(), _AgUI()); _sub = _Ag(_Cfg(), _AgUI())
     _sub.depth = _p.depth + 1; _sub.cancelled = _p.cancelled
-    _p.cancelled.set()
-    if _sub.depth == 0: _sub.cancelled.clear()          # mirrors run_turn's guarded clear
-    check("sub-agent does not clear a shared parent cancel", _p.cancelled.is_set())
-    _p.cancelled.set()
-    if _p.depth == 0: _p.cancelled.clear()
-    check("top-level turn still clears its own stale cancel", not _p.cancelled.is_set())
+    _seen_cancel = []
+    _sub._run_turn = lambda text: _seen_cancel.append(_sub.cancelled.is_set())
+    _p.cancelled.set(); _sub.run_turn("sub probe")
+    check("sub-agent does not clear a shared parent cancel", _seen_cancel == [True])
+    _seen_cancel.clear(); _p._run_turn = lambda text: _seen_cancel.append(_p.cancelled.is_set())
+    _p.cancelled.set(); _p.run_turn("top probe")
+    check("top-level turn still clears its own stale cancel",
+          _seen_cancel == [False] and not _p.cancelled.is_set())
+    _p.cancelled.set(); _p.run_turn("managed probe", reset_cancel=False)
+    check("a serialized frontend can preserve a cancel that races with turn startup",
+          _seen_cancel[-1:] == [True] and _p.cancelled.is_set())
 
     # --- plan contract + Codex-style cadence: feedback round-trips, state transitions stay scoped,
     #     and a bare-tool local model still narrates BEFORE its tool card.

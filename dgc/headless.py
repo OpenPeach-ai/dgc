@@ -25,6 +25,7 @@ from .tools import TOOL_SCHEMAS
 from .ui import arg_summary, split_diff, tool_output_is_error
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
+_MAX_QUEUED_TURNS = 32
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
@@ -271,6 +272,7 @@ class Backend:
         self.ui._rule_hook = self._add_rule
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
+        self._turn_lock = threading.RLock()
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
         self._model_list_lock = threading.Lock()
@@ -308,40 +310,82 @@ class Backend:
         self._emit_context()
 
     def _busy(self) -> bool:
-        return bool(self._worker and self._worker.is_alive())
+        lock = self._turn_state_lock()
+        with lock:
+            # The queue worker clears this reference atomically only after it has observed an
+            # empty FIFO.  Do not use Thread.is_alive(): a prompt can otherwise arrive after the
+            # worker's final queue check but before the thread has technically exited and become
+            # stranded forever.
+            return self._worker is not None
 
-    def _start_turn(self, text: str, images=None, context=None) -> None:
-        self._turn_n += 1
-        tid = f"t{self._turn_n}"
-        self.agent._pending_images = images
-        model_text = _format_editor_context(context) + text
+    def _turn_state_lock(self) -> threading.RLock:
+        """Return the queue lock (lazy only for small object.__new__ protocol fixtures)."""
+        lock = getattr(self, "_turn_lock", None)
+        if lock is None:
+            lock = self._turn_lock = threading.RLock()
+        return lock
 
-        def run():
-            self.em.emit("turn_start", turn_id=tid, prompt=text)
-            failed = False
-            try:
-                self.agent.run_turn(model_text)
-            except Exception as e:                 # a model/endpoint failure must NOT kill the turn silently
-                failed = True                      # (unreachable base_url, model not pulled, HTTP error, …)
-                import traceback
-                detail = str(e).strip() or e.__class__.__name__
-                self.em.emit("error", message=f"Turn failed — {detail}")
-                sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
-            cancelled = self.agent.cancelled.is_set()
-            try:
-                est = self.agent.estimate_tokens()
-            except Exception:
-                est = 0
-            self.em.emit("turn_end", turn_id=tid,
-                         reason="cancelled" if cancelled else ("error" if failed else "completed"),
-                         token_estimate=est)
-            self._emit_context()
-            if self._queue and not cancelled:   # preserve prompt order even if the prior turn failed
-                nxt = self._queue.pop(0)
-                self._start_turn(nxt[0], nxt[1], nxt[2])
+    def _start_turn(self, text: str, images=None, context=None) -> tuple[str, int]:
+        """Start or queue one turn atomically; return (started|queued|full, pending count)."""
+        lock = self._turn_state_lock()
+        with lock:
+            if getattr(self, "_worker", None) is not None:
+                if len(self._queue) >= _MAX_QUEUED_TURNS:
+                    return "full", len(self._queue)
+                self._queue.append((text, images, context))
+                return "queued", len(self._queue)
+            self._queue.append((text, images, context))
+            worker = threading.Thread(target=self._run_turn_queue, daemon=True,
+                                      name="dgc-headless-turns")
+            self._worker = worker
+            worker.start()
+            return "started", 0
 
-        self._worker = threading.Thread(target=run, daemon=True)
-        self._worker.start()
+    def _run_turn_queue(self) -> None:
+        """Drain the prompt FIFO in one worker so completion and enqueue cannot race."""
+        current = threading.current_thread()
+        try:
+            while True:
+                lock = self._turn_state_lock()
+                with lock:
+                    if not self._queue:
+                        self._worker = None
+                        return
+                    text, images, context = self._queue.pop(0)
+                    self._turn_n += 1
+                    tid = f"t{self._turn_n}"
+                    # Clear only stale cancellation while dequeue is serialized. A concurrent
+                    # cancel that wins this lock either removes this item first, or sets the Event
+                    # after this clear; Agent must not clear it again at entry.
+                    self.agent.cancelled.clear()
+
+                self.agent._pending_images = images
+                model_text = _format_editor_context(context) + text
+                self.em.emit("turn_start", turn_id=tid, prompt=text)
+                failed = False
+                try:
+                    self.agent.run_turn(model_text, reset_cancel=False)
+                except Exception as e:             # a model/endpoint failure must NOT kill the turn silently
+                    failed = True                  # (unreachable base_url, model not pulled, HTTP error, …)
+                    import traceback
+                    detail = str(e).strip() or e.__class__.__name__
+                    self.em.emit("error", message=f"Turn failed — {detail}")
+                    sys.stderr.write(traceback.format_exc())  # full trace → extension stderr channel
+                cancelled = self.agent.cancelled.is_set()
+                try:
+                    est = self.agent.estimate_tokens()
+                except Exception:
+                    est = 0
+                self.em.emit("turn_end", turn_id=tid,
+                             reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                             token_estimate=est)
+                self._emit_context()
+        finally:
+            # A broken output stream or unexpected fixture/runtime exception must not leave the
+            # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
+            with self._turn_state_lock():
+                if self._worker is current:
+                    self._worker = None
 
     def _emit_context(self) -> None:
         try:
@@ -439,11 +483,13 @@ class Backend:
                 custom = discover_commands(self.config.project_root)
                 if parts and parts[0] in custom:
                     text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "") or text
-            if self._busy():                       # queue follow-ups sent mid-turn
-                self._queue.append((text, images, context))
-                self.em.emit("queued", count=len(self._queue), text=text)
-                return
-            self._start_turn(text, images, context)
+            state, count = self._start_turn(text, images, context)
+            if state == "queued":
+                self.em.emit("queued", count=count, text=text)
+            elif state == "full":
+                self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
+                             message=(f"follow-up queue is full ({_MAX_QUEUED_TURNS}); "
+                                      "cancel it or wait for a turn to finish"))
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
@@ -455,11 +501,14 @@ class Backend:
             rendered = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "")
             if not rendered:
                 self.em.emit("error", message=f"custom command /{parts[0]} is empty")
-            elif self._busy():
-                self._queue.append((rendered, None, None))
-                self.em.emit("queued", count=len(self._queue), text=text)
             else:
-                self._start_turn(rendered)
+                state, count = self._start_turn(rendered)
+                if state == "queued":
+                    self.em.emit("queued", count=count, text=text)
+                elif state == "full":
+                    self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
+                                 message=(f"follow-up queue is full ({_MAX_QUEUED_TURNS}); "
+                                          "cancel it or wait for a turn to finish"))
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
@@ -486,12 +535,13 @@ class Backend:
                                                   "content": cmd.get("content")})
 
         elif t in ("cancel", "interrupt"):
-            self.agent.cancelled.set()
+            with self._turn_state_lock():
+                self.agent.cancelled.set()
+                self._queue.clear()
             expired = self.pending.cancel_all(
                 {"decision": "no", "choice": None, "action": "cancel"})
             for rid in expired:
                 self.em.emit("request_expired", id=rid)
-            self._queue.clear()
 
         elif t == "set_mode":
             mode = cmd.get("mode", "default")
