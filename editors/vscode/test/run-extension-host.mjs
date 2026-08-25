@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,14 @@ const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-host-"));
 const resultPath = join(scratch, "result.json");
 const backendPath = join(scratch, "dgc-fixture");
 const backendLogPath = join(scratch, "backend.ndjson");
+const secondaryWorkspace = join(scratch, "secondary-workspace");
+const workspaceFile = join(scratch, "multi-root.code-workspace");
+
+mkdirSync(secondaryWorkspace);
+writeFileSync(workspaceFile, JSON.stringify({ folders: [
+  { path: workspacePath },
+  { path: secondaryWorkspace },
+] }));
 
 writeFileSync(backendPath, `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -58,7 +66,7 @@ const args = [
 if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
   args.push("--ozone-platform=headless");
 }
-args.push(workspacePath);
+args.push(workspaceFile);
 
 try {
   const env = { ...process.env };
@@ -73,6 +81,8 @@ try {
   env.DGC_EXTENSION_TEST_RESULT = resultPath;
   env.DGC_EXTENSION_TEST_BACKEND = backendPath;
   env.DGC_EXTENSION_TEST_BACKEND_LOG = backendLogPath;
+  env.DGC_EXTENSION_TEST_PRIMARY_ROOT = workspacePath;
+  env.DGC_EXTENSION_TEST_SECONDARY_ROOT = secondaryWorkspace;
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
     env,
@@ -90,10 +100,11 @@ try {
   }
   const evidence = JSON.parse(readFileSync(resultPath, "utf8"));
   if (evidence.activated !== true || evidence.handshake !== true
+      || evidence.multiRootLifecycle !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1) {
     throw new Error("VS Code extension-host test evidence was incomplete");
   }
-  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + webview handshake)\n`);
+  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root lifecycle)\n`);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

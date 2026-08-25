@@ -44,7 +44,7 @@ the editor registries: those are external release actions that require a reviewe
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
-| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, bounded startup/backpressure queues with priority decision/cancel frames, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Installed-host SecretStorage/multi-root/decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
+| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, acknowledged live multi-root grant reconciliation (including active-turn deferral and removal), accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, bounded startup/backpressure queues with priority decision/cancel frames, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake and live multi-root lifecycle evidence, and automated keyboard/ARIA/reduced-motion coverage | Installed-host SecretStorage and decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
@@ -530,7 +530,10 @@ Implementation note for step 6: the local `test:host` gate launches the already-
 Electron executable with isolated user/extension directories, updates/telemetry/background networking
 disabled, and no editor download. It proves that the development extension is discovered, activates,
 registers every command declared by its manifest, resolves the real webview, launches a networkless
-local protocol fixture, and completes the workspace-root handshake. The jsdom suite now covers semantic labels,
+local protocol fixture, completes a two-folder workspace-root handshake, and propagates live removal
+and restoration of the secondary root. The extension coalesces root revisions, waits for backend
+acknowledgement, defers mutation during active turns, retries a busy-race rejection at turn end, and
+reconciles removed-folder grants at the next backend-idle boundary. The jsdom suite now covers semantic labels,
 combobox/listbox state, menu arrow/Escape navigation, dialog focus trapping/restoration, attachment
 removal, tool/reasoning disclosures, live status, and reduced-motion CSS. Decision lifecycles are now
 first-writer-wins in the headless registry; cancel emits exact expirations, clears queued prompts,
@@ -539,8 +542,8 @@ response type for an active request, never restarts for a stale control frame, p
 decision/cancel traffic over prompt backpressure, and drops controls that outlive their turn. The
 webview tags every permission/plan/option/MCP card by ID, disables it exactly once on response,
 expiration, teardown, or exit, and prevents double submission. These paths are covered through real
-spawned-child stdin pressure and jsdom interaction races. Installed-Electron SecretStorage,
-multi-root, and decision interaction scenarios plus manual assistive-technology review remain.
+spawned-child stdin pressure and jsdom interaction races. Installed-Electron SecretStorage and
+decision interaction scenarios plus manual assistive-technology review remain.
 
 ### Milestone 4 — build evidence users can trust (P1)
 
@@ -769,6 +772,11 @@ The provider-runtime slice is also implemented and contract-tested:
     and keeps out-of-order calls distinct in canonical index order when proxy item IDs are missing.
     Non-object arguments remain a bounded `_unparsed` repair result and are never executed as a
     malformed type. Seven adversarial wire cases cover these variants without contacting a provider.
+11. The VS Code/Cursor host now reconciles live multi-root add/remove/reorder events with the
+    backend's external-directory grants. Updates are revisioned, acknowledged, coalesced, deferred
+    while a turn is active, and retried after a command/turn-start race; the same 32-external-root
+    protocol bound is enforced on both sides. The installed-VS-Code smoke opens a real two-folder
+    workspace and proves initial propagation, removal, and restoration without a network download.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

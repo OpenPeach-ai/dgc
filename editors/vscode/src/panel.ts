@@ -37,6 +37,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private modelRequest = 0;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
   private mcpUrls = new Map<string, string>();
+  private turnActive = false;
+  private workspaceRootsRevision = 0;
+  private workspaceRootsDirty = true;
+  private workspaceRootsInFlight: number | undefined;
+  private initializingBackend?: DgcBackend;
+  private nativeSettingsReady = false;
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -48,6 +54,52 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // ---- backend lifecycle ---------------------------------------------------
   private cwd(): string {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  }
+
+  /** Keep the backend's external-directory grants identical to the live VS Code
+   * workspace. Root mutations are blocked by `dgc serve` during a turn, so one
+   * acknowledged update is kept in flight and newer changes are coalesced until
+   * the backend is idle. The backend supports the project root plus 32 external
+   * roots; keep the editor side within the same explicit bound. */
+  private workspaceRoots(): string[] {
+    return (vscode.workspace.workspaceFolders || []).slice(0, 33).map((f) => f.uri.fsPath);
+  }
+
+  private syncWorkspaceRoots(be = this.backend, setup = false): void {
+    if (!be || be !== this.backend || this.turnActive || this.workspaceRootsInFlight !== undefined
+        || !this.workspaceRootsDirty || (!setup && !be.ready)) {
+      return;
+    }
+    const revision = this.workspaceRootsRevision;
+    const accepted = setup || this.initializingBackend === be
+      ? be.sendSetup({ type: "set_workspace_roots", roots: this.workspaceRoots() })
+      : be.send({ type: "set_workspace_roots", roots: this.workspaceRoots() });
+    if (accepted) {
+      this.workspaceRootsInFlight = revision;
+      this.maybeCompleteHandshake(be);
+    }
+  }
+
+  /** Release queued user commands only after settings are staged and a setup
+   * frame for the newest workspace revision is already ahead of them on stdin. */
+  private maybeCompleteHandshake(be: DgcBackend): void {
+    if (this.backend !== be || this.initializingBackend !== be || !this.nativeSettingsReady) {
+      return;
+    }
+    if (this.workspaceRootsDirty && this.workspaceRootsInFlight !== this.workspaceRootsRevision) {
+      this.syncWorkspaceRoots(be, true);
+      return;
+    }
+    this.initializingBackend = undefined;
+    this.nativeSettingsReady = false;
+    be.completeHandshake();
+  }
+
+  /** Called by the extension host when folders are added, removed, or reordered. */
+  workspaceRootsChanged(): void {
+    this.workspaceRootsRevision++;
+    this.workspaceRootsDirty = true;
+    this.syncWorkspaceRoots();
   }
 
   /** Structured resources describing what the user is looking at. The backend
@@ -116,6 +168,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
     be.on("exit", (code: number | null) => {
       this.mcpUrls.clear();
+      if (this.backend === be) {
+        this.turnActive = false;
+        this.workspaceRootsInFlight = undefined;
+        this.workspaceRootsDirty = true;
+        this.initializingBackend = undefined;
+        this.nativeSettingsReady = false;
+      }
       this.post({ type: "backend_exit", code });
     });
     be.start();
@@ -127,6 +186,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backend?.dispose();
     this.backend = undefined;
     this.mcpUrls.clear();
+    this.turnActive = false;
+    this.workspaceRootsInFlight = undefined;
+    this.workspaceRootsDirty = true;
+    this.initializingBackend = undefined;
+    this.nativeSettingsReady = false;
     this.ensureBackend();
     this.post({ type: "cleared" });
   }
@@ -134,6 +198,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onEvent(ev: DgcEvent): void {
     switch (ev.type) {
       case "ready":
+        this.turnActive = false;
+        this.workspaceRootsInFlight = undefined;
+        this.workspaceRootsDirty = true;
         this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
                        workspaceTrusted: ev.workspace_trusted === true,
                        goal: ev.goal || { text: "", status: "none" } };
@@ -142,8 +209,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         if (this.backend) {
           const backend = this.backend;
-          backend.sendSetup({ type: "set_workspace_roots",
-                              roots: (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath) });
+          this.initializingBackend = backend;
+          this.nativeSettingsReady = false;
+          this.syncWorkspaceRoots(backend, true);
           // SecretStorage is asynchronous. Keep user prompts queued until roots and all explicit
           // native settings have reached this exact backend instance.
           void this.applyNativeSettings(backend, true)
@@ -152,7 +220,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             } }))
             .finally(() => {
               if (this.backend === backend) {
-                backend.completeHandshake();
+                this.nativeSettingsReady = true;
+                this.maybeCompleteHandshake(backend);
               }
             });
         }
@@ -186,11 +255,36 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           this.mcpUrls.set(String(ev.id), String(ev.payload.url || ""));
         }
         break;
+      case "workspace_roots": {
+        const sentRevision = this.workspaceRootsInFlight;
+        this.workspaceRootsInFlight = undefined;
+        if (sentRevision !== undefined) {
+          this.workspaceRootsDirty = sentRevision !== this.workspaceRootsRevision;
+          this.syncWorkspaceRoots();
+        }
+        break;
+      }
+      case "turn_start":
+        this.turnActive = true;
+        break;
+      case "command_rejected":
+        if (ev.command === "set_workspace_roots" && this.workspaceRootsInFlight !== undefined) {
+          this.workspaceRootsInFlight = undefined;
+          this.workspaceRootsDirty = true;
+          // A custom slash command can start a worker just before its turn_start event
+          // reaches the extension. Preserve the update and retry when that turn ends.
+          if (ev.reason === "turn_in_progress") {
+            this.turnActive = true;
+          }
+        }
+        break;
       case "request_expired":
         this.mcpUrls.delete(String(ev.id));
         break;
       case "turn_end":
         this.mcpUrls.clear();
+        this.turnActive = false;
+        this.syncWorkspaceRoots();
         break;
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
@@ -265,6 +359,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                                    context: [...attached, ...live].slice(0, 64) });
         if (!accepted) {
           this.post({ type: "prompt_rejected" });
+        } else {
+          // Close the small command/turn_start race so a simultaneous folder removal
+          // cannot send a mutation that the backend must reject as newly busy.
+          this.turnActive = true;
         }
         break;
       }

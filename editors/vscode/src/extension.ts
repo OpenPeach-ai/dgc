@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
     }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
   );
 
   checkForUpdates(context).catch(() => { /* never raise into activate */ });

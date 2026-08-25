@@ -12,6 +12,7 @@ import { JSDOM, VirtualConsole } from "jsdom";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
+const extensionSrc = readFileSync(dir + "../src/extension.ts", "utf8");
 const mainJs = readFileSync(dir + "../media/main.js", "utf8");
 const mainCss = readFileSync(dir + "../media/main.css", "utf8");
 const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
@@ -23,6 +24,10 @@ assert.match(panelSrc, /const attached = Array\.isArray\(msg\.context\)/,
 assert.doesNotMatch(panelSrc, /<selection path=/,
   "selected code must never be concatenated into prompt text by the extension host");
 assert.match(panelSrc, /set_workspace_roots/, "the editor must declare every multi-root workspace folder");
+assert.match(extensionSrc, /onDidChangeWorkspaceFolders\(\(\) => provider\.workspaceRootsChanged\(\)\)/,
+  "live workspace-folder changes must be propagated to the backend");
+assert.match(panelSrc, /workspaceRootsInFlight/,
+  "workspace-root grants must stay pending until the backend acknowledges them");
 assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
   "approving a plan into auto mode must pass an explicit warning gate");
 
