@@ -28,6 +28,8 @@ assert.match(extensionSrc, /onDidChangeWorkspaceFolders\(\(\) => provider\.works
   "live workspace-folder changes must be propagated to the backend");
 assert.match(panelSrc, /workspaceRootsInFlight/,
   "workspace-root grants must stay pending until the backend acknowledges them");
+assert.match(panelSrc, /path: uri\.fsPath/,
+  "file mentions must carry canonical filesystem paths separately from display labels");
 assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
   "approving a plan into auto mode must pass an explicit warning gate");
 
@@ -261,6 +263,34 @@ test("selection attachments remain typed untrusted context instead of prompt ins
     "attachment content leaked into the instruction channel");
   assert.match(doc.querySelector(".msg.user .bubble").textContent, /src\/auth\.ts:4-7/);
   assert.deepEqual(errors, [], "typed attachment flow raised JS errors");
+  dom.window.close();
+});
+
+test("multi-root file mentions preserve the selected root's typed absolute path", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const file = {
+    label: "api/src/handler.ts", uri: "file:///tmp/dgc-secondary/src/handler.ts",
+    path: "/tmp/dgc-secondary/src/handler.ts", relative_path: "src/handler.ts", workspace: "api",
+  };
+  send({ type: "files", files: [file] });
+  const input = doc.getElementById("input");
+  input.value = "@handler";
+  input.setSelectionRange(input.value.length, input.value.length);
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  const option = doc.querySelector("#pop .pi");
+  assert.ok(option, "the secondary-root file must appear in @-mention suggestions");
+  assert.equal(option.textContent, file.label);
+  assert.equal(option.textContent.includes("/tmp/dgc-secondary"), false,
+    "absolute host paths must not leak into the visible suggestion label");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+  input.value = "review the attached file";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const prompt = posted.find((message) => message.type === "prompt");
+  assert.equal(JSON.stringify(prompt.context), JSON.stringify([{ type: "file_mention",
+    uri: file.uri, path: file.path, relative_path: file.relative_path, workspace: file.workspace }]));
+  assert.match(doc.querySelector(".msg.user .bubble").textContent, /api\/src\/handler\.ts/);
+  assert.deepEqual(errors, [], "multi-root @-mention flow raised JS errors");
   dom.window.close();
 });
 

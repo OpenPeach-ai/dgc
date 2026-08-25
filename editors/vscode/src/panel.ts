@@ -475,7 +475,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private async sendFiles(): Promise<void> {
     const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,out,.venv,.next}/**", 600);
-    this.post({ type: "files", files: uris.map((u) => vscode.workspace.asRelativePath(u)).sort() });
+    const multiRoot = (vscode.workspace.workspaceFolders?.length || 0) > 1;
+    const files = uris.map((uri) => {
+      const folder = vscode.workspace.getWorkspaceFolder(uri);
+      return {
+        label: vscode.workspace.asRelativePath(uri, multiRoot),
+        uri: uri.toString(),
+        path: uri.fsPath,
+        relative_path: folder ? vscode.workspace.asRelativePath(uri, false) : uri.fsPath,
+        workspace: folder?.name || "",
+      };
+    }).sort((a, b) => a.label.localeCompare(b.label));
+    this.post({ type: "files", files });
   }
 
   private async openFile(path: string, line?: number): Promise<void> {

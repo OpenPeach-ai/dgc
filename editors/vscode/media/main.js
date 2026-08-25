@@ -538,7 +538,8 @@
     const it = popItems[i]; if (!it) return;
     if (popMode === "@") {
       attachments.push({ label: it.label, resource: {
-        type: "file_mention", path: it.label, relative_path: it.label,
+        type: "file_mention", uri: it.uri, path: it.path,
+        relative_path: it.relative_path, workspace: it.workspace,
       } });
       renderAtts();
       input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
@@ -566,7 +567,7 @@
     }
     else if (at !== -1 && !/\s/.test(upto.slice(at))) {
       popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();
-      showPop(files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8).map((f) => ({ label: f })));
+      showPop(files.filter((f) => f.label.toLowerCase().includes(q)).slice(0, 8));
       if (files.length === 0) vscode.postMessage({ type: "reqFiles" });
     } else hidePop();
   }
@@ -725,7 +726,13 @@
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
       attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
     }
-    else if (msg.type === "files") { files = msg.files || []; if (popMode === "@") onInput(); }
+    else if (msg.type === "files") {
+      files = Array.isArray(msg.files) ? msg.files.filter((file) => file
+        && typeof file.label === "string" && typeof file.path === "string"
+        && typeof file.uri === "string" && typeof file.relative_path === "string"
+        && typeof file.workspace === "string").slice(0, 600) : [];
+      if (popMode === "@") onInput();
+    }
     else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
 })();
