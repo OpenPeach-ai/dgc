@@ -1,6 +1,7 @@
-"""Git worktrees for manual sessions and isolated write-capable sub-agents.
+"""Git worktrees for TUI fleets, manual sessions, and write-capable sub-agents.
 
-Manual worktrees are long-lived branches selected with ``/worktree``. Task worktrees are private,
+Managed fleet worktrees are private interactive branches that retain changed work across resume;
+manual worktrees are long-lived branches selected with ``/worktree``. Task worktrees are private,
 unique, short-lived branches populated with the calling checkout's exact tracked/untracked state.
 Only the sub-agent's delta is integrated, after a content-level conflict check; pre-existing dirty
 files are never overwritten automatically.
@@ -24,6 +25,7 @@ _MAX_TASK_BYTES = 64 * 1024 * 1024
 _MAX_RETAINED_METADATA_BYTES = 1024 * 1024
 _GIT_TIMEOUT = 30.0
 _RETAINED_SCHEMA = 2
+_FLEET_SCHEMA = 1
 _RETAINED_LEASE_WAIT_S = 2.0
 
 
@@ -117,22 +119,35 @@ def create(path, name: str) -> tuple[Path | None, str | None, str | None]:
     return wt_path, branch, None
 
 
+def find_worktree(path, name: str) -> dict | None:
+    """Resolve the same exact branch/path/slug forms accepted by ``remove``."""
+    root = repo_root(path)
+    if not root:
+        return None
+    safe = _safe(name)
+    for row in list_worktrees(path):
+        wp = Path(row["path"])
+        if (str(wp) == name or wp.name == name or row.get("branch") == name
+                or wp.name == f"{root.name}-{safe}" or row.get("branch") == f"dgc/{safe}"):
+            return row
+    return None
+
+
 def remove(path, name: str) -> str | None:
-    """Remove a worktree by exact branch, name, or generated slug."""
+    """Remove a clean worktree by exact branch, name, or generated slug.
+
+    Git's ordinary refusal is intentional: a typo in `/worktree remove` must never discard dirty
+    files. Users can inspect/commit the branch and use Git directly for an explicitly destructive
+    removal.
+    """
     root = repo_root(path)
     if not root:
         return "not inside a git repository"
-    safe = _safe(name)
-    target = None
-    for w in list_worktrees(path):
-        wp = Path(w["path"])
-        if (str(wp) == name or wp.name == name or w.get("branch") == name
-                or wp.name == f"{root.name}-{safe}" or w.get("branch") == f"dgc/{safe}"):
-            target = wp
-            break
-    if target is None:
+    row = find_worktree(path, name)
+    if row is None:
         return f"no worktree matching '{name}'"
-    r = _git(["worktree", "remove", "--force", str(target)], root)
+    target = Path(row["path"])
+    r = _git(["worktree", "remove", str(target)], root)
     return None if r.returncode == 0 else (r.stderr or "git worktree remove failed").strip()
 
 
@@ -502,6 +517,263 @@ class TaskWorkspace:
             return TaskIntegration("error", display, error=detail)
         cleanup_error = self.cleanup() or ""
         return TaskIntegration("applied", display, cleanup_error=cleanup_error)
+
+    def cleanup(self) -> str | None:
+        return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)
+
+
+@dataclass
+class FleetWorkspaceResult:
+    status: str                       # cleaned | retained | error
+    path: Path
+    branch: str
+    changed_paths: list[str] = field(default_factory=list)
+    error: str = ""
+
+
+def _fleet_storage_root(storage_root: Path | None) -> Path:
+    if storage_root is None:
+        from .config import USER_HOME
+        storage_root = USER_HOME / "fleet-worktrees"
+    return Path(storage_root).expanduser().resolve(strict=False)
+
+
+@dataclass
+class FleetWorkspace:
+    """Long-lived isolated checkout owned by one TUI fleet conversation.
+
+    Unlike a delegated task, a fleet agent is interactive and may commit or keep working across DGC
+    launches, so its delta is never merged or discarded automatically. Closing removes the checkout
+    only when its complete repository state still matches the exact baseline DGC copied at creation;
+    otherwise the path/branch and owner-private metadata are retained for recovery.
+    """
+    source_root: Path
+    repo: Path
+    project_rel: Path
+    path: Path
+    project_root: Path
+    branch: str
+    base_commit: str
+    baseline: dict[str, dict]
+    metadata_path: Path
+    payload: dict = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def prepare(cls, source_root: Path, name: str, storage_root: Path | None = None
+                ) -> tuple["FleetWorkspace | None", str | None]:
+        """Snapshot a source project into a private fleet worktree.
+
+        The caller must hold the source checkout's mutation lease. This method copies tracked and
+        non-ignored untracked project state and verifies it a second time before returning.
+        """
+        source_root = Path(source_root).resolve(strict=False)
+        repo = repo_root(source_root)
+        if repo is None:
+            return None, "project is not inside a git repository"
+        try:
+            project_rel = source_root.relative_to(repo)
+        except ValueError:
+            return None, "project root is outside its git checkout"
+        base = _git(["rev-parse", "HEAD"], repo)
+        if base.returncode != 0 or not base.stdout.strip():
+            return None, "repository has no committed HEAD"
+        base_commit = base.stdout.strip()
+        token = uuid.uuid4().hex[:10]
+        slug = _bounded_safe(name, 40)
+        branch = f"dgc/fleet-{slug}-{token}"
+        try:
+            storage = _fleet_storage_root(storage_root)
+            if os.path.commonpath((str(repo), str(storage))) == str(repo):
+                return None, "fleet worktree storage must be outside the source repository"
+        except ValueError:
+            storage = _fleet_storage_root(storage_root)
+        except (OSError, RuntimeError) as exc:
+            return None, f"could not resolve fleet worktree storage: {exc}"
+        try:
+            storage.mkdir(parents=True, exist_ok=True)
+            if os.name == "posix":
+                storage.chmod(0o700)
+        except OSError as exc:
+            return None, f"could not create fleet worktree storage: {exc}"
+        ident = f"{_safe(repo.name)[:60]}-fleet-{slug}-{token}"
+        path = storage / ident
+        metadata_path = storage / f"{ident}.json"
+        add = _git(["worktree", "add", "--quiet", "-b", branch, str(path), base_commit], repo)
+        if add.returncode != 0:
+            return None, (add.stderr or "could not create fleet worktree").strip()
+        workspace = cls(source_root, repo, project_rel, path, path / project_rel, branch,
+                        base_commit, {}, metadata_path)
+        try:
+            dirty = _dirty_paths(repo, base_commit, project_rel)
+            if len(dirty) > _MAX_TASK_FILES:
+                raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_FILES} files")
+            total = 0
+            captured: dict[str, _FileState] = {}
+            for repo_path in sorted(dirty):
+                state = _read_state(_checked_target(repo, repo_path))
+                total += len(state.data)
+                if total > _MAX_TASK_BYTES:
+                    raise TaskWorkspaceError(f"dirty baseline exceeds {_MAX_TASK_BYTES} bytes")
+                captured[repo_path] = state
+                workspace.baseline[repo_path] = _state_fingerprint(state)
+                _replace_state(_checked_target(path, repo_path), state)
+            if _dirty_paths(repo, base_commit, project_rel) != dirty:
+                raise TaskWorkspaceError("source file set changed while creating the fleet baseline")
+            for repo_path, expected in captured.items():
+                if _read_state(_checked_target(repo, repo_path)) != expected:
+                    raise TaskWorkspaceError(f"source changed while isolating: {repo_path}")
+            workspace.payload = {
+                "kind": "dgc-fleet-workspace", "schema_version": _FLEET_SCHEMA,
+                "source": str(source_root), "repo": str(repo), "project_rel": str(project_rel),
+                "worktree": str(path), "branch": branch, "base_commit": base_commit,
+                "baseline": workspace.baseline, "status": "active", "reason": "",
+                "changed_paths": [],
+            }
+            error = _write_retained_metadata(metadata_path, workspace.payload)
+            if error:
+                raise TaskWorkspaceError(error)
+            return workspace, None
+        except Exception as exc:
+            cleanup_error = workspace.cleanup()
+            detail = str(exc)
+            if cleanup_error:
+                detail += f"; cleanup failed for {path} on branch {branch}: {cleanup_error}"
+            return None, detail
+
+    @classmethod
+    def attach(cls, source_root: Path, association: dict, storage_root: Path | None = None
+               ) -> tuple["FleetWorkspace | None", str | None]:
+        """Reattach a saved conversation only after validating its private metadata and Git row."""
+        try:
+            source_root = Path(source_root).resolve(strict=False)
+            path = Path(str(association.get("worktree", ""))).resolve(strict=False)
+            metadata_value = association.get("metadata")
+            if not metadata_value:
+                metadata_value = str(_fleet_storage_root(storage_root) / f"{path.name}.json")
+            metadata_path = Path(str(metadata_value)).resolve(strict=False)
+            storage = metadata_path.parent
+            if (path.parent != storage or metadata_path.parent != storage
+                    or metadata_path.name != f"{path.name}.json" or metadata_path.is_symlink()):
+                raise TaskWorkspaceError("fleet association is outside its private storage root")
+            if os.name == "posix":
+                info = storage.stat()
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+                    raise TaskWorkspaceError("fleet workspace storage is not owner-private")
+            payload = _read_retained_metadata(metadata_path)
+            if payload.get("kind") != "dgc-fleet-workspace" or payload.get("schema_version") != _FLEET_SCHEMA:
+                raise TaskWorkspaceError("invalid fleet workspace metadata")
+            if Path(str(payload.get("source", ""))).resolve(strict=False) != source_root:
+                raise TaskWorkspaceError("fleet workspace belongs to another source project")
+            repo = repo_root(source_root)
+            if repo is None or Path(str(payload.get("repo", ""))).resolve(strict=False) != repo:
+                raise TaskWorkspaceError("fleet workspace repository no longer matches")
+            try:
+                if os.path.commonpath((str(repo), str(storage))) == str(repo):
+                    raise TaskWorkspaceError("fleet workspace storage is inside the source repository")
+            except ValueError:
+                pass
+            project_rel = source_root.relative_to(repo)
+            if str(payload.get("project_rel", ".")) != str(project_rel):
+                raise TaskWorkspaceError("fleet workspace project root no longer matches")
+            branch = str(payload.get("branch", ""))
+            if (not re.fullmatch(r"dgc/fleet-[A-Za-z0-9._-]{1,96}-[0-9a-f]{10}", branch)
+                    or branch != str(association.get("branch", branch))):
+                raise TaskWorkspaceError("invalid fleet workspace branch")
+            if Path(str(payload.get("worktree", ""))).resolve(strict=False) != path:
+                raise TaskWorkspaceError("fleet metadata path does not match its association")
+            base_commit = str(payload.get("base_commit", ""))
+            if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_commit):
+                raise TaskWorkspaceError("invalid fleet workspace base commit")
+            raw_baseline = payload.get("baseline", {})
+            if not isinstance(raw_baseline, dict) or len(raw_baseline) > _MAX_TASK_FILES:
+                raise TaskWorkspaceError("invalid fleet baseline")
+            baseline = {}
+            for raw, fingerprint in raw_baseline.items():
+                repo_path = _validate_repo_path(raw)
+                if not _inside_project(repo_path, project_rel):
+                    raise TaskWorkspaceError(f"fleet baseline path is outside the project: {repo_path}")
+                if not (isinstance(fingerprint, dict)
+                        and fingerprint.get("kind") in ("missing", "file", "symlink")
+                        and fingerprint.get("mode") in (0, 0o644, 0o755, 0o777)
+                        and isinstance(fingerprint.get("bytes"), int)
+                        and 0 <= fingerprint["bytes"] <= _MAX_TASK_BYTES
+                        and re.fullmatch(r"[0-9a-f]{64}", str(fingerprint.get("sha256", "")))):
+                    raise TaskWorkspaceError(f"invalid fleet baseline fingerprint: {repo_path}")
+                baseline[repo_path] = fingerprint
+            registered = next((item for item in list_worktrees(repo)
+                               if Path(item.get("path", "")).resolve(strict=False) == path), None)
+            if not path.is_dir() or not registered or registered.get("branch") != branch:
+                raise TaskWorkspaceError("fleet worktree or branch is missing/stale")
+            return cls(source_root, repo, project_rel, path, path / project_rel, branch,
+                       base_commit, baseline, metadata_path, payload), None
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError, TaskWorkspaceError) as exc:
+            return None, str(exc)
+
+    def _display_path(self, repo_path: str) -> str:
+        try:
+            return str(Path(repo_path).relative_to(self.project_rel)) if self.project_rel != Path(".") else repo_path
+        except ValueError:
+            return f"repo:{repo_path}"
+
+    def changed_paths(self) -> list[str]:
+        """Return every repository path changed from this fleet checkout's exact birth state."""
+        candidates = set(self.baseline) | _dirty_paths(self.path, self.base_commit, Path("."))
+        if len(candidates) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError(f"fleet delta exceeds {_MAX_TASK_FILES} files")
+        changed, total = [], 0
+        for repo_path in sorted(candidates):
+            actual = _read_state(_checked_target(self.path, repo_path))
+            if repo_path in self.baseline:
+                same = _fingerprint_matches(actual, self.baseline[repo_path])
+            else:
+                same = actual == _head_state(self.repo, self.base_commit, repo_path)
+            if not same:
+                total += len(actual.data)
+                if total > _MAX_TASK_BYTES:
+                    raise TaskWorkspaceError("fleet delta exceeds its byte limit")
+                changed.append(repo_path)
+        return changed
+
+    def retain(self, reason: str, changed: list[str] | None = None) -> str | None:
+        changed = list(changed or [])[:_MAX_TASK_FILES]
+        head = _git(["rev-parse", "HEAD"], self.path)
+        self.payload.update({
+            "status": "retained", "reason": str(reason)[:2000],
+            "changed_paths": [self._display_path(path) for path in changed],
+            "current_head": head.stdout.strip() if head.returncode == 0 else "",
+        })
+        return _write_retained_metadata(self.metadata_path, self.payload)
+
+    def finish(self, reason: str = "fleet session closed") -> FleetWorkspaceResult:
+        """Clean an untouched checkout, or retain any uncertain/material state without data loss."""
+        from .scheduler import workspace_mutation_lock
+        lease = workspace_mutation_lock(self.project_root)
+        if not lease.acquire(timeout=_RETAINED_LEASE_WAIT_S):
+            detail = lease.last_error or "fleet checkout is still in use"
+            metadata_error = self.retain(f"{reason}: {detail}", [])
+            error = metadata_error or ""
+            return FleetWorkspaceResult("error" if error else "retained", self.path, self.branch,
+                                        error=error)
+        try:
+            changed = self.changed_paths()
+            head = _git(["rev-parse", "HEAD"], self.path)
+            if head.returncode != 0 or not head.stdout.strip():
+                raise TaskWorkspaceError((head.stderr or "could not inspect fleet branch HEAD").strip())
+            if changed or head.stdout.strip() != self.base_commit:
+                error = self.retain(reason, changed)
+                return FleetWorkspaceResult("error" if error else "retained", self.path, self.branch,
+                                            [self._display_path(path) for path in changed], error or "")
+            error = self.cleanup()
+            return FleetWorkspaceResult("error" if error else "cleaned", self.path, self.branch,
+                                        error=error or "")
+        except Exception as exc:
+            detail = str(exc)
+            metadata_error = self.retain(f"{reason}: {detail}", [])
+            if metadata_error:
+                detail += f"; {metadata_error}"
+            return FleetWorkspaceResult("error", self.path, self.branch, error=detail)
+        finally:
+            lease.release()
 
     def cleanup(self) -> str | None:
         return _cleanup_task(self.repo, self.path, self.branch, self.metadata_path)

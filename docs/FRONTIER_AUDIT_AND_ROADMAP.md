@@ -41,7 +41,7 @@ the editor registries: those are external release actions that require a reviewe
 | Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection, explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
-| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, manual fleet worktrees, automatic `task` worktrees with exact dirty baselines, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Automatic worktree provisioning for TUI fleet sessions |
+| Concurrency | Per-session ACP/headless runtimes, busy-state rejection, owner-private crash-safe cross-process checkout leases, pre-edit snapshots captured inside the lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, bounded wire frames/pagination and roots MRTR, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Consent-gated elicitation/sampling, modern subscriptions/cache use, broader MCP/ACP conformance fixtures, published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Broader extension-host interaction/race flows plus manual screen-reader, zoom, forced-colors, and contrast audit |
@@ -244,8 +244,12 @@ listed under “still required.”
    changes can mutate the shared agent while a worker is running. Session paths supplied by the
    webview are not constrained before load/delete.
 
-5. **TUI fleet agents edit the same checkout.** There are no per-file locks or automatic worktrees.
-   Closing a session waiting for approval can leave its worker blocked.
+5. **Resolved in the current implementation: TUI fleet agents previously edited the same checkout.**
+   Additional Git sessions now snapshot the source under its mutation lease into owner-private
+   `dgc/fleet-*` worktrees. Conversation sidecars preserve source-scoped discovery and validate
+   reattachment; close/exit releases approval waits, cancels workers, removes only an unchanged
+   checkout, and retains changed/committed/uncertain/running work with its branch and path. Non-Git
+   projects retain an explicit serialized fallback.
 
 ### P1 — provider and agent quality
 
@@ -315,7 +319,7 @@ listed under “still required.”
 | Safety | String rules plus opt-in broad sandbox | Codex OS-enforced workspace/no-network defaults; OpenCode external-directory permission | Fail closed at canonical filesystem, command, network, environment, and protocol boundaries. |
 | Context | Estimated tokens and summary slicing | Stateful turns, prompt caches, validated compaction trees | Preserve tool groups, use actual usage, cache static context, and support provider compaction/state. |
 | Code intelligence | Repository map, exact static symbols/references/definitions, syntax diagnostics, hash-addressed patching, and optional managed stdio LSP escalation with bounded warm reuse | Aider repo map; OpenCode LSP/apply-patch | Measure cold/warm latency and semantic accuracy across the league; add optional tree-sitter parsing where it materially improves results. |
-| Parallel work | Checkout-leased fleet sessions; automatically isolated `task` sub-agents; bounded same-baseline concurrent fan-out; call-ordered conflict-safe integration; explicit retained-delta recovery | Worktree-isolated agent work | Auto-provision TUI fleet worktrees and measure fan-out latency/throughput across local and remote providers. |
+| Parallel work | Automatically worktree-isolated TUI fleet sessions with validated resume and lossless retention; automatically isolated `task` sub-agents; bounded same-baseline concurrent fan-out; call-ordered conflict-safe integration; explicit retained-delta recovery | Worktree-isolated agent work | Measure fan-out latency/throughput across local and remote providers and run cross-platform crash/reopen soak. |
 | Extensibility | Skills, hooks, minimal MCP | Goose MCP ecosystem; Pi packages/extensions/SDK/RPC | Complete MCP/ACP, version protocols, publish schemas, then add a stable plugin SDK. |
 | Terminal UX | Strong | Competitive already | Preserve; make state, safety, and command behavior consistent. |
 | IDE | Attractive panel, thin protocol | Codex app-server/IDE shared state; OpenCode client/server | Make the backend the authoritative multi-session service and use structured editor context. |
@@ -401,7 +405,16 @@ second content check under the parent lease. Paths dirty before delegation and p
 parent never auto-merge; incomplete/conflicting work is retained with owner-private metadata. Binary,
 mode, symlink, deletion, rollback, cleanup, cancellation, call-ID, rewind, and root-session metric
 paths are contract-tested. Non-Git projects retain the prior shared-checkout behavior with an explicit
-warning. Automatic isolation for manually spawned TUI fleet sessions remains open.
+warning. Manually spawned TUI fleet sessions now use the same source lease to copy the exact tracked
+and non-ignored untracked baseline into an owner-private `dgc/fleet-*` checkout. The launch session
+stays in the selected checkout; every additional Git session has its own config, MCP runtime, branch,
+and write lease. Owner-private conversation sidecars keep resume discovery scoped to the launch
+project and reattach only after metadata/path/branch/repository validation. Close and process exit
+release pending approvals and cancel workers; untouched checkouts and generated branches are removed,
+while changed, committed, uncertain, or still-running work is retained. Manual `/worktree remove`
+also no longer force-discards dirty files. Storage-inside-repository rejection, exact baseline copy,
+reattachment, dirty retention, untouched cleanup, non-force removal, and TUI spawn/close/exit lifecycle are
+regression-tested.
 `/tasks` and the typed editor command now list these records, revalidate a selected delta under the
 checkout lease, apply it into the parent rewind stack, or drop it only after explicit confirmation.
 Versioned metadata stores bounded content fingerprints rather than file contents; legacy records fail

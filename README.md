@@ -86,7 +86,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ## What's in the box
 
-- **Multiple agents at once** — run a **fleet**: `Ctrl+N` spawns a new agent (even while one is running), `Ctrl+O` cycles, `Ctrl+\` opens the **dashboard** — every agent with its live state (● on screen · ⋮ working · ◆ needs you · ○ idle), where you attach, close, pin, and rename. A background agent that finishes or needs a decision flags itself in the bottom bar. Each agent owns its model/config/MCP runtime; crash-safe checkout leases serialize writes across DGC threads and processes, `/worktree <name>` gives a fleet agent an isolated branch, and delegated `task` work is isolated automatically.
+- **Multiple agents at once** — run a **fleet**: `Ctrl+N` spawns a new agent (even while one is running), `Ctrl+O` cycles, `Ctrl+\` opens the **dashboard** — every agent with its live state (● on screen · ⋮ working · ◆ needs you · ○ idle), where you attach, close, pin, and rename. A background agent that finishes or needs a decision flags itself in the bottom bar. The launch agent stays in your selected checkout; every additional agent in a Git project automatically gets an owner-private `dgc/fleet-*` worktree containing the source checkout's exact tracked and non-ignored untracked baseline. Each owns its model/config/MCP runtime and can write concurrently under its own crash-safe lease. Closing an untouched managed checkout cleans it up; changed, committed, uncertain, or still-running work is retained with its branch/path, and reopening the saved conversation safely reattaches to it. Non-Git fleets fall back explicitly to serialized shared-checkout writes. `/worktree <name>` remains available for a deliberately named long-lived branch, while delegated `task` work uses separate automatic task worktrees.
 - **Interactive REPL** — streaming output, live tool-call display, diffs, todos, a highlighted prompt band, collapsible thinking sections, a per-phase status timer (`Thinking… 0.4s`), a top-right context-window meter (click it for a usage breakdown), and centered dialogs.
 - **Plan mode** — read-only research → `present_plan` → reject with feedback or approve into acceptEdits/default/auto. Plans are saved beside the session, reopened with `/view-plan`, and rendered by default as a self-contained loopback-only preview. Full-auto approval has a separate warning gate.
 - **Artifacts** — the agent can serve a page/app/chart it builds. Project artifacts share one configurable server and persisted dropdown; proposed plans use a separate private loopback server so a LAN setting can never expose them. `/artifact` lists, opens, and stops both kinds.
@@ -180,6 +180,7 @@ Paste this to any coding agent:
   "context_size": 32768,
   "max_turns": 80,
   "max_parallel_tasks": 4,
+  "fleet_worktree_root": "",
   "bash_timeout": 120,
   "sandbox": false,
   "sandbox_network": false,
@@ -194,6 +195,9 @@ Paste this to any coding agent:
 Set `context_size` to your model's real context window — compaction timing depends on it.
 Set `subagent_worktree_root` only if private delegated checkouts should live somewhere other than
 `~/.dgc/worktrees`; DGC rejects a task-worktree root inside the source repository.
+Set `fleet_worktree_root` only to move automatically managed TUI checkouts from
+`~/.dgc/fleet-worktrees`; DGC rejects storage inside the source repository. Conversation files stay
+in the source project's private session scope so `/resume` can safely reconnect retained work.
 `max_parallel_tasks` defaults to 4 (bounded to 8); set it to 1 when a local model server should
 process delegated work strictly serially.
 

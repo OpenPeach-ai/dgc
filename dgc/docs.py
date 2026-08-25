@@ -204,9 +204,14 @@ conversation. Kick off a long task on one, spawn another, and keep going.
 New agents use your current model by default; point one at a different model or
 a cloud key with `/model` / `/connect` for true parallelism.
 
-Mutating tools use a crash-safe lease for the canonical checkout, including across
-separate DGC CLI, editor, headless, and ACP processes. Reads remain parallel. Use
-`/worktree <name>` when fleet agents should write concurrently on isolated branches.
+The launch agent stays in the checkout you selected. Every additional agent in a Git project gets
+an owner-private `dgc/fleet-*` worktree containing the source checkout's exact tracked and
+non-ignored untracked baseline. Each checkout has its own crash-safe mutation lease, so fleet writes
+can proceed concurrently. Closing an untouched managed checkout removes it; changed, committed,
+uncertain, or still-running work is retained with its visible branch/path. Reopening that saved
+conversation validates and reattaches to the same checkout. Non-Git projects say when they fall back
+to serialized shared-checkout writes. `/worktree <name>` creates a deliberately named long-lived
+manual branch.
 
 The model's `task` delegation tool isolates itself automatically in Git projects. Its private
 checkout starts with the caller's tracked and non-ignored untracked state. DGC applies only a
@@ -311,6 +316,9 @@ Useful keys:
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
+- `fleet_worktree_root` — optional private storage for automatically isolated TUI agents; empty uses
+  `~/.dgc/fleet-worktrees`. Conversation resume state remains scoped to the source project, and
+  changed managed checkouts are retained rather than force-removed.
 - `max_parallel_tasks` — bounded `task` fan-out (default 4, maximum 8; set 1 to disable). In a
   Git-backed full-auto turn, two or more independent `task` calls emitted together are snapshotted
   from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive

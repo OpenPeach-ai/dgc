@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tempfile
 import threading
 import time
@@ -21,6 +22,8 @@ from .config import USER_HOME
 SESSIONS_DIR = USER_HOME / "sessions"
 SCHEMA_VERSION = 5
 METRICS_SCHEMA_VERSION = 1
+WORKSPACE_SCHEMA_VERSION = 1
+_MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests")
 ACTIVITY_KEYS = ("tool_calls", "edits", "edit_fails")
 _LOCKS_GUARD = threading.Lock()
@@ -241,6 +244,97 @@ def load_plan(session_file, project_root) -> str | None:
         return None
 
 
+def workspace_path(session_file, project_root) -> Path:
+    """Owner-private fleet-workspace association beside a conversation transcript.
+
+    The deliberately non-JSON suffix keeps this implementation sidecar out of session pickers.
+    It records where a saved TUI conversation was working, but never owns or deletes that checkout.
+    """
+    p = resolve_path(project_root, session_file)
+    return p.with_name(p.stem + ".workspace")
+
+
+def save_workspace(session_file, project_root, *, kind: str, worktree, branch: str,
+                   metadata="") -> None:
+    """Atomically associate a saved conversation with a managed/manual worktree."""
+    if kind not in ("managed", "manual"):
+        raise ValueError("workspace kind must be managed or manual")
+    values = {
+        "worktree": str(Path(worktree).resolve(strict=False)),
+        "branch": str(branch)[:256],
+        "metadata": (str(Path(metadata).resolve(strict=False)) if metadata else ""),
+    }
+    payload = {
+        "schema_version": WORKSPACE_SCHEMA_VERSION,
+        "project": str(Path(project_root).resolve(strict=False)),
+        "kind": kind,
+        **values,
+    }
+    encoded = json.dumps(payload, ensure_ascii=True)
+    if len(encoded.encode("ascii")) > _MAX_WORKSPACE_SIDECAR_BYTES:
+        raise ValueError("workspace association is too large")
+    p = workspace_path(session_file, project_root)
+    with _lock_for(p):
+        _atomic_write(p, encoded)
+
+
+def load_workspace(session_file, project_root) -> dict | None:
+    """Load a bounded, non-symlink fleet association for this project only."""
+    fd = None
+    try:
+        p = workspace_path(session_file, project_root)
+        if p.is_symlink():
+            return None
+        with _lock_for(p):
+            flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+            fd = os.open(p, flags)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_WORKSPACE_SIDECAR_BYTES:
+                return None
+            chunks, total = [], 0
+            while True:
+                chunk = os.read(fd, min(65536, _MAX_WORKSPACE_SIDECAR_BYTES + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > _MAX_WORKSPACE_SIDECAR_BYTES:
+                    return None
+            value = json.loads(b"".join(chunks).decode("utf-8"))
+        if not isinstance(value, dict) or value.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+            return None
+        if value.get("kind") not in ("managed", "manual"):
+            return None
+        if Path(str(value.get("project", ""))).resolve(strict=False) != Path(project_root).resolve(strict=False):
+            return None
+        worktree = str(value.get("worktree", ""))
+        branch = str(value.get("branch", ""))
+        metadata = str(value.get("metadata", ""))
+        if (not worktree or len(worktree) > 4096 or len(branch) > 256
+                or len(metadata) > 4096 or "\x00" in worktree + branch + metadata):
+            return None
+        return {"kind": value["kind"], "worktree": worktree,
+                "branch": branch, "metadata": metadata}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def clear_workspace(session_file, project_root) -> None:
+    try:
+        p = workspace_path(session_file, project_root)
+        with _lock_for(p):
+            p.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        pass
+
+
 def delete(path, project_root) -> bool:
     try:
         p = resolve_path(project_root, path, must_exist=True)
@@ -252,6 +346,10 @@ def delete(path, project_root) -> bool:
                 pass
             try:
                 metrics_path(p, project_root).unlink()
+            except OSError:
+                pass
+            try:
+                workspace_path(p, project_root).unlink()
             except OSError:
                 pass
         return True

@@ -17,6 +17,7 @@ import re
 import shlex
 import threading
 import time
+from pathlib import Path
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
@@ -109,6 +110,14 @@ class AgentSession:
         self._aux_cancel = threading.Event()
         self._aux_generation = 0
         self._aux_thread: threading.Thread | None = None
+        self._worker_thread: threading.Thread | None = None
+        self._closing = False
+        self._workspace_lock = threading.Lock()
+        self._workspace_finalized = False
+        self.workspace = None              # managed FleetWorkspace; manual/shared sessions keep None
+        self.workspace_kind = "shared"     # shared | managed | manual
+        self.workspace_path = Path(self.config.project_root).resolve(strict=False)
+        self.workspace_branch = ""
         self._turn_marks: list[tuple[int, str]] = []
         self._suggestion: str | None = None
         self._todos: list = []
@@ -202,6 +211,7 @@ class TUI:
         return self._sessions[self._active_idx]
 
     def __init__(self, config, agent=None):
+        self._fleet_root = Path(config.project_root).resolve(strict=False)
         self.config = config
         style_mod.set_theme(config.get("theme", "dark"))
         # the fleet: one active AgentSession now; /dashboard spawns + switches more. Every
@@ -361,6 +371,7 @@ class TUI:
             ("subagent_api_mode", "Sub-agent transport", "enum",
              ["inherit", "auto", "ollama", "chat_completions", "responses"]),
             ("max_parallel_tasks", "Parallel task workers (1–8)", "int"),
+            ("fleet_worktree_root", "Fleet worktree storage", "str"),
             ("fallback_model", "Fallback model", "str"),
             ("fallback_base_url", "Fallback endpoint", "str"),
             ("fallback_api_mode", "Fallback transport", "enum",
@@ -1000,8 +1011,13 @@ class TUI:
         if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
             import re
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
+            branch = getattr(self.active, "workspace_branch", "")
+            if len(branch) > 34:
+                branch = "…" + branch[-33:]
+            ws = f" · {branch}" if branch else ""
             left = self._rich(f" [bold {th.accent}]Vibe DGC[/] "
-                              f"[{th.faint}]· {self.config.model} · {self.agent.mode}{_esc(nm)}[/]")
+                              f"[{th.faint}]· {self.config.model} · {self.agent.mode}"
+                              f"{_esc(nm)}{_esc(ws)}[/]")
             chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter 
             right = self._rich(chip)
             lw = len(re.sub(r"\x1b\[[0-9;?]*m", "", left))
@@ -1203,7 +1219,8 @@ class TUI:
     def _open_plan_view(self) -> None:
         """/view-plan — reopen the plan saved during the last plan-mode turn."""
         from . import sessions
-        md = (sessions.load_plan(self.agent.session_file, self.config.project_root)
+        md = (sessions.load_plan(self.agent.session_file,
+                                 getattr(self.agent, "session_root", self._fleet_root))
               if self.agent.session_file else None)
         if not md:
             self._flash("no saved plan yet — /mode plan, then ask for one")
@@ -1261,13 +1278,17 @@ class TUI:
             title = (s.name or (preview[:40] if preview else "(new agent)"))[:40]
             pin = "⟐ " if s.pinned else ""
             tools = f" · {s._tool_count} tools" if s._tool_count else ""
-            rows.append({"label": f"{_MARK.get(st, '○')} {pin}{title}", "desc": _DESC.get(st, "idle") + tools,
+            workspace = (f" · isolated {s.workspace_branch}" if getattr(s, "workspace_branch", "")
+                         else " · shared checkout")
+            rows.append({"label": f"{_MARK.get(st, '○')} {pin}{title}",
+                         "desc": _DESC.get(st, "idle") + tools + workspace,
                          "value": ("switch", s), "action": True})
             if s.agent.session_file:
                 open_files.add(str(s.agent.session_file))
         # saved sessions not currently open in the fleet
         now = time.time()
-        for p, ts, prev, n, name in sessions.listing(self.config.project_root)[:30]:
+        fleet_root = getattr(self, "_fleet_root", self.config.project_root)
+        for p, ts, prev, n, name in sessions.listing(fleet_root)[:30]:
             if str(p) in open_files:
                 continue
             title = (name or prev or "(empty)")[:40]
@@ -1281,12 +1302,8 @@ class TUI:
             elif kind == "switch":
                 if v in self._sessions:
                     self._switch_to(self._sessions.index(v))
-            else:                                        # open a saved session into a fresh fleet slot
-                self._new_session()
-                n = self.agent.load_session(v)
-                self.blocks.clear(); self._buf = ""; self._think = ""
-                self._render_history()
-                self._flash(f"opened ({n} messages)")
+            else:                                        # reopen it in its associated isolated workspace
+                self._open_saved_session(v)
 
         def on_action(key, r):
             if not r:
@@ -1296,7 +1313,7 @@ class TUI:
                 if kind == "switch" and v in self._sessions:
                     self._close_session(self._sessions.index(v)); self._open_dashboard()
                 elif kind == "open":
-                    sessions.delete(v, self.config.project_root); self._flash("deleted"); self._open_dashboard()
+                    sessions.delete(v, fleet_root); self._flash("deleted"); self._open_dashboard()
             elif key == "p" and kind == "switch":
                 v.pinned = not v.pinned; self._open_dashboard()
             elif key == "r" and kind == "switch":
@@ -2237,22 +2254,115 @@ class TUI:
             target=work, name=f"dgc-aux-{sess.id}", daemon=True)
         sess._aux_thread.start()
 
-    def _new_session(self, name: str | None = None) -> None:
-        """SPAWN a new agent into the fleet and switch to it. The previous session keeps running
-        in the background (it doesn't reset) — reach it again via /dashboard."""
-        from . import sessions as _sess
+    def _new_session(self, name: str | None = None, session_path=None) -> AgentSession | None:
+        """Spawn/reopen a fleet agent in an automatically isolated Git worktree.
+
+        The initial launch session stays in the checkout the user selected. Every additional Git
+        session receives an exact tracked/non-ignored-untracked snapshot under the source mutation
+        lease. Non-Git projects retain the shared-checkout fallback and say so explicitly.
+        """
+        from . import sessions as _sess, worktree as _wt
         from .config import Config as _Config
-        # Each session owns a Config/Agent/MCP runtime. Settings remain globally persisted,
-        # but changing one session's workspace can no longer retarget other running agents.
-        session_config = _Config(self.config.project_root)
-        sess = AgentSession(session_config, self)
-        sess.agent.session_file = _sess.new_path(session_config.project_root)
+        from .scheduler import workspace_mutation_lock
+
+        source_config = _Config(self._fleet_root)
+        configured = str(source_config.get("fleet_worktree_root", "") or "").strip()
+        storage_root = Path(configured).expanduser() if configured else None
+        workspace = None
+        kind = "shared"
+        root = self._fleet_root
+        association = _sess.load_workspace(session_path, self._fleet_root) if session_path else None
+        attach_error = ""
+
+        if association and association.get("kind") == "managed":
+            workspace, attach_error = _wt.FleetWorkspace.attach(
+                self._fleet_root, association, storage_root)
+            if workspace is not None:
+                kind, root = "managed", workspace.project_root
+        elif association and association.get("kind") == "manual":
+            candidate = Path(association.get("worktree", "")).resolve(strict=False)
+            candidate_repo = _wt.repo_root(candidate) if candidate.is_dir() else None
+            registered = next((row for row in _wt.list_worktrees(self._fleet_root)
+                               if candidate_repo is not None
+                               and Path(row.get("path", "")).resolve(strict=False) == candidate_repo), None)
+            if (candidate.is_dir() and candidate_repo is not None and registered
+                    and registered.get("branch", "") == association.get("branch", "")):
+                kind, root = "manual", candidate
+            else:
+                attach_error = "saved manual worktree is missing or no longer on the recorded branch"
+
+        if kind == "shared":
+            repo = _wt.repo_root(self._fleet_root)
+            if repo is not None:
+                lease = workspace_mutation_lock(self._fleet_root)
+                if not lease.acquire(timeout=10.0):
+                    detail = lease.last_error or "the source checkout stayed busy for 10 seconds"
+                    self._flash(f"couldn't create an isolated agent — {detail}")
+                    return None
+                try:
+                    label = name or (Path(session_path).stem if session_path else f"agent-{len(self._sessions) + 1}")
+                    workspace, error = _wt.FleetWorkspace.prepare(
+                        self._fleet_root, label, storage_root)
+                finally:
+                    lease.release()
+                if workspace is None:
+                    self._flash(f"couldn't create an isolated agent — {error}")
+                    return None
+                kind, root = "managed", workspace.project_root
+            elif attach_error:
+                self._flash(f"{attach_error}; reopening in the shared non-Git project")
+
+        try:
+            session_config = _Config(root)
+            agent = Agent(session_config, self)
+            agent.session_root = self._fleet_root
+            if session_path:
+                agent.load_session(session_path)
+            else:
+                agent.session_file = _sess.new_path(self._fleet_root)
+            sess = AgentSession(session_config, self, agent=agent)
+            sess.workspace = workspace
+            sess.workspace_kind = kind
+            sess.workspace_path = Path(root).resolve(strict=False)
+            sess.workspace_branch = (workspace.branch if workspace is not None
+                                     else (str((association or {}).get("branch", ""))
+                                           if kind == "manual" else ""))
+            if kind == "managed" and workspace is not None:
+                _sess.save_workspace(agent.session_file, self._fleet_root, kind="managed",
+                                     worktree=workspace.path, branch=workspace.branch,
+                                     metadata=workspace.metadata_path)
+            elif kind == "manual":
+                _sess.save_workspace(agent.session_file, self._fleet_root, kind="manual",
+                                     worktree=root, branch=sess.workspace_branch)
+            elif session_path:
+                _sess.clear_workspace(agent.session_file, self._fleet_root)
+        except Exception as exc:
+            if workspace is not None:
+                workspace.finish("fleet session startup failed")
+            self._flash(f"couldn't start agent — {type(exc).__name__}: {exc}")
+            return None
+
         if name:
             self._name_session(sess, name)
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
-        self._flash(f"new agent{f': {name}' if name else ''}  ·  {len(self._sessions)} running · shared-checkout writes serialized")
+        place = (f"isolated {sess.workspace_branch}" if kind != "shared"
+                 else "non-Git shared checkout · writes serialized")
+        note = f" · prior workspace unavailable: {attach_error}" if attach_error else ""
+        self._flash(f"{'opened' if session_path else 'new agent'}{f': {name}' if name else ''}"
+                    f" · {len(self._sessions)} agents · {place}{note}")
+        return sess
+
+    def _open_saved_session(self, path) -> None:
+        sess = self._new_session(session_path=path)
+        if sess is None:
+            return
+        sess.blocks.clear(); sess._buf = ""; sess._think = ""
+        self._render_history()
+        count = max(0, len(sess.agent.messages) - 1)
+        self._flash(f"opened ({count} messages) · "
+                    + (f"isolated {sess.workspace_branch}" if sess.workspace_branch else "shared checkout"))
 
     def _switch_to(self, idx: int) -> None:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
@@ -2269,21 +2379,66 @@ class TUI:
             self._show_req_overlay(self.active)
         self._invalidate()
 
+    def _finalize_session_workspace(self, sess: AgentSession, reason: str,
+                                    *, retain_if_running: bool = False):
+        """Finish one managed checkout exactly once; uncertain/changed state is always retained."""
+        workspace = getattr(sess, "workspace", None)
+        if workspace is None:
+            return None
+        with sess._workspace_lock:
+            if sess._workspace_finalized:
+                return None
+            worker = sess._worker_thread
+            running_elsewhere = bool(worker and worker.is_alive()
+                                     and worker is not threading.current_thread())
+            if running_elsewhere:
+                if retain_if_running:
+                    workspace.retain(reason, [])
+                return None
+            result = workspace.finish(reason)
+            sess._workspace_finalized = True
+            from . import sessions as _sess
+            if result.status == "cleaned":
+                if sess.agent.session_file:
+                    _sess.clear_workspace(sess.agent.session_file, self._fleet_root)
+            elif sess.agent.session_file:
+                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="managed",
+                                     worktree=workspace.path, branch=workspace.branch,
+                                     metadata=workspace.metadata_path)
+            return result
+
     def _close_session(self, idx: int) -> None:
-        """Stop + remove a session (its turn is cancelled). The fleet always keeps at least one."""
+        """Stop + remove a session, safely resolving any DGC-owned checkout."""
         if not (0 <= idx < len(self._sessions)) or len(self._sessions) <= 1:
             self._flash("can't close the only session"); return
         sess = self._sessions.pop(idx)
+        sess._closing = True
+        sess._queue.clear()
         try:
             sess._aux_cancel.set()
             sess.agent.cancelled.set()                   # stop its turn if one is running
+            sess._req_answer = None
+            sess._req_event.set()                        # never strand a worker awaiting approval
             sess.agent.mcp.stop_all()
         except Exception:
             pass
+        worker = sess._worker_thread
+        if worker and worker.is_alive() and worker is not threading.current_thread():
+            worker.join(0.25)
+        result = self._finalize_session_workspace(
+            sess, "fleet session closed", retain_if_running=True)
         if self._active_idx >= len(self._sessions):
             self._active_idx = len(self._sessions) - 1
         elif idx < self._active_idx:
             self._active_idx -= 1
+        if result is not None:
+            if result.status == "cleaned":
+                self._flash(f"closed agent · removed untouched {result.branch}")
+            else:
+                detail = f" · {len(result.changed_paths)} changed path(s)" if result.changed_paths else ""
+                self._flash(f"closed agent · retained {result.branch} at {result.path}{detail}")
+        elif worker and worker.is_alive() and sess.workspace is not None:
+            self._flash(f"agent stopping · isolated work stays at {sess.workspace.path}")
         self._invalidate()
 
     def _cycle_mode(self) -> None:
@@ -2621,7 +2776,15 @@ class TUI:
             sess._aux_cancel.set()
             sess._autotitle_pending = False
             sess.agent.reset()
-            sess.agent.session_file = _sess.new_path(self.config.project_root)
+            sess.agent.session_file = _sess.new_path(
+                getattr(sess.agent, "session_root", self._fleet_root))
+            if sess.workspace_kind == "managed" and sess.workspace is not None:
+                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="managed",
+                                     worktree=sess.workspace.path, branch=sess.workspace.branch,
+                                     metadata=sess.workspace.metadata_path)
+            elif sess.workspace_kind == "manual":
+                _sess.save_workspace(sess.agent.session_file, self._fleet_root, kind="manual",
+                                     worktree=sess.workspace_path, branch=sess.workspace_branch)
             sess.blocks.clear()
             sess._turn_marks = []
             sess._buf = ""
@@ -2666,7 +2829,8 @@ class TUI:
         used, size = self.agent.estimate_tokens(), int(cfg.get("context_size", 32768))
         rows = [("model", cfg.model), ("host", cfg.base_url), ("mode", self.agent.mode),
                 ("thinking", cfg.get("thinking", "off")), ("context", f"{used} / {size} tokens"),
-                ("session", self.agent.session_name or "(unnamed)")]
+                ("session", self.agent.session_name or "(unnamed)"),
+                ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
             f"  [{th.faint}]{k:<9}[/] [{th.text}]{_esc(str(v))}[/]" for k, v in rows)
 
@@ -2748,13 +2912,17 @@ class TUI:
 
     def _resume_flow(self) -> None:
         from . import sessions
-        items = sessions.listing(self.config.project_root)
+        items = sessions.listing(self._fleet_root)
         if not items:
             self._flash("no saved sessions in this directory"); return
         labels = [f"{sessions.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"
                   for (p, ts, prev, cnt, nm) in items[:30]]
 
         def pick(i):
+            association = sessions.load_workspace(items[i][0], self._fleet_root)
+            if association:
+                self._open_saved_session(items[i][0])
+                return
             n = self.agent.load_session(items[i][0])
             self.blocks.clear(); self._buf = ""; self._think = ""
             self._render_history()          # show the loaded conversation, not a blank screen
@@ -2762,7 +2930,7 @@ class TUI:
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
         def dele(i):
-            sessions.delete(items[i][0], self.config.project_root)
+            sessions.delete(items[i][0], self._fleet_root)
             self._flash("session deleted")
             self._resume_flow()             # re-show the updated list
         self._show_picker("Resume a session", labels, pick, delete_cb=dele)
@@ -3019,7 +3187,7 @@ class TUI:
     def _tui_worktree(self, rest: str) -> None:
         from . import worktree as wt
         th = style_mod.theme()
-        root = self.config.project_root
+        root = self._fleet_root
         parts = rest.split()
         if not parts or parts[0] == "list":
             wts = wt.list_worktrees(root)
@@ -3031,8 +3199,20 @@ class TUI:
             self._append(self._rich(f"[{th.faint}]git worktrees[/]\n{rows}"))
             return
         if parts[0] == "remove" and len(parts) > 1:
-            err = wt.remove(root, " ".join(parts[1:]))
+            target = " ".join(parts[1:])
+            target_row = wt.find_worktree(root, target)
+            target_path = (Path(target_row["path"]).resolve(strict=False)
+                           if target_row is not None else None)
+            live = next((s for s in self._sessions if target_path is not None
+                         and wt.repo_root(getattr(s, "workspace_path", root)) == target_path), None)
+            if live is not None:
+                self._flash("that worktree belongs to a live agent — close the agent first")
+                return
+            err = wt.remove(root, target)
             self._flash(err or f"removed worktree {parts[1]}")
+            return
+        if self._turn.is_set():
+            self._flash("stop the current turn before switching its workspace")
             return
         wt_path, branch, err = wt.create(root, rest.strip())
         if err:
@@ -3043,11 +3223,26 @@ class TUI:
         from .config import Config as _Config
         sess = self.active
         old_agent = sess.agent
+        repo = wt.repo_root(root) or root
+        try:
+            project_rel = root.relative_to(repo)
+        except ValueError:
+            project_rel = Path(".")
+        project_root = wt_path / project_rel
+        new_config = _Config(project_root)
+        try:
+            new_agent = Agent(new_config, self)
+        except Exception as exc:
+            cleanup_error = wt.remove(root, str(wt_path))
+            detail = f"; checkout retained at {wt_path}: {cleanup_error}" if cleanup_error else ""
+            self._flash(f"couldn't start agent in {branch}: {type(exc).__name__}: {exc}{detail}")
+            return
+        new_agent.session_root = self._fleet_root
+        prior_result = self._finalize_session_workspace(
+            sess, "agent switched to a manual worktree")
         sess._aux_generation += 1
         sess._aux_cancel.set()
         sess._autotitle_pending = False
-        new_config = _Config(wt_path)
-        new_agent = Agent(new_config, self)
         try:
             old_agent.mcp.stop_all()
         except Exception:
@@ -3056,10 +3251,19 @@ class TUI:
         sess.agent = new_agent
         sess._cancel = new_agent.cancelled
         from . import sessions as _sess
-        new_agent.session_file = _sess.new_path(wt_path)
+        new_agent.session_file = _sess.new_path(self._fleet_root)
         new_agent.session_name = f"worktree {branch}"
+        sess.workspace = None
+        sess.workspace_kind = "manual"
+        sess.workspace_path = project_root.resolve(strict=False)
+        sess.workspace_branch = branch
+        sess._workspace_finalized = False
+        _sess.save_workspace(new_agent.session_file, self._fleet_root, kind="manual",
+                             worktree=project_root, branch=branch)
         self.blocks.clear(); self._buf = ""
-        self._flash(f"worktree {branch} — switched, fresh session")
+        prior = (f" · retained prior {prior_result.branch}" if prior_result is not None
+                 and prior_result.status != "cleaned" else "")
+        self._flash(f"worktree {branch} — switched, fresh session{prior}")
 
     def _tui_tasks(self, rest: str) -> None:
         th = style_mod.theme()
@@ -3480,7 +3684,14 @@ class TUI:
                 if sess is not self.active and not self._cancel.is_set():   # a background agent finished
                     self._flash(f"⧉ {sess.name or 'agent'} finished — ^\\ to view")
                 self._invalidate()
+                if sess._closing:
+                    result = self._finalize_session_workspace(sess, "fleet session stopped")
+                    sess._worker_thread = None
+                    if result is not None and result.status != "cleaned":
+                        self._flash(f"retained {result.branch} at {result.path}")
+                    return
                 if self._queue:
+                    sess._worker_thread = None
                     self._submit(self._queue.pop(0))
                     return
                 title_needed = (not self.agent.session_name and not self._autotitled
@@ -3491,8 +3702,36 @@ class TUI:
                              if m.get("role") == "assistant"), "")
                 self._schedule_auxiliary(
                     sess, text, str(resp), title=title_needed, suggestion=suggestion_needed)
+                sess._worker_thread = None
 
-        threading.Thread(target=work, daemon=True).start()
+        sess._worker_thread = threading.Thread(
+            target=work, name=f"dgc-turn-{sess.id}", daemon=True)
+        sess._worker_thread.start()
+
+    def _shutdown_fleet(self) -> None:
+        """Cancel all workers and preserve every managed checkout before the TUI process exits."""
+        fleet = list(getattr(self, "_sessions", ()))
+        for sess in fleet:
+            sess._closing = True
+            sess._queue.clear()
+            sess._aux_cancel.set()
+            sess._cancel.set()
+            sess._req_answer = None
+            sess._req_event.set()
+            try:
+                sess.agent.mcp.stop_all()
+            except Exception:
+                pass
+        deadline = time.monotonic() + 2.0
+        for sess in fleet:
+            worker = sess._worker_thread
+            if worker and worker.is_alive() and worker is not threading.current_thread():
+                worker.join(max(0.0, deadline - time.monotonic()))
+        for sess in fleet:
+            worker = sess._worker_thread
+            self._finalize_session_workspace(
+                sess, "DGC exited before this fleet agent fully stopped",
+                retain_if_running=bool(worker and worker.is_alive()))
 
     def run(self) -> None:
         # keep the width in sync + drive the idle/turn animation
@@ -3509,6 +3748,7 @@ class TUI:
         try:
             self.app.run()
         finally:
+            self._shutdown_fleet()
             termbg.reset()
         if getattr(self, "_pending_update", False):     # user ran /update — install on the raw TTY
             from .update import run_update
@@ -3526,7 +3766,7 @@ def _tui_help() -> str:
         ("session", [("/new", "start a new session (asks for a name)"),
                      ("/name <name>", "name the current session"),
                      ("/resume", "pick a past session to resume"),
-                     ("/worktree <name>", "create + switch to a git worktree (dgc/<name>)"),
+                     ("/worktree <name>", "list or switch to a named long-lived worktree"),
                      ("/tasks", "inspect/apply/drop retained sub-agent work"),
                      ("/clear", "clear the transcript")]),
         ("model & host", [("/model", "pick a model from the endpoint"),

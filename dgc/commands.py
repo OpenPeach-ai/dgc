@@ -48,7 +48,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("thoughts", "show or hide the model's thinking in the transcript", _T),
     CommandSpec("expand", "expand the last collapsed tool output (/expandall for all)", _T),
     CommandSpec("copy", "select & copy text — releases the mouse to your terminal", _T),
-    CommandSpec("worktree", "isolate edits in a git worktree", _TC),
+    CommandSpec("worktree", "list or switch to a named git worktree", _TC),
     CommandSpec("tasks", "inspect, apply, or drop retained sub-agent work", _TCE,
                 "retainedTasks"),
     CommandSpec("sandbox", "confine bash to the project (private home/tmp, no network)", _T),

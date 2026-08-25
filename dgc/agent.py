@@ -552,6 +552,9 @@ class Agent:
                                 on_todo=getattr(ui, "on_todo", None), cancelled=self.cancelled)
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
+        # Tool execution is rooted at config.project_root. A managed fleet worktree deliberately
+        # keeps its transcript in the launch project's session scope so /resume can find it later.
+        self.session_root = Path(config.project_root).resolve(strict=False)
         self.session_name = None  # optional user-given name for the current session
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.goal_status = "none"  # none | active | completed | blocked
@@ -667,7 +670,7 @@ class Agent:
             usage = dict(self.usage_totals)
             activity = dict(self.activity_totals)
         from . import sessions
-        sessions.save_metrics(self.session_file, self.config.project_root,
+        sessions.save_metrics(self.session_file, self.session_root,
                               usage=usage, activity=activity)
 
     def _activate_tool_intents(self, text: str, *, replace: bool = False) -> bool:
@@ -1002,7 +1005,7 @@ class Agent:
     def _persist(self) -> None:
         if self.session_file:
             from . import sessions
-            sessions.save(self.session_file, self.messages, self.config.project_root,
+            sessions.save(self.session_file, self.messages, self.session_root,
                           name=self.session_name, goal=self.goal, goal_status=self.goal_status,
                           usage=self.usage_totals, activity=self.activity_totals)
 
@@ -1012,10 +1015,10 @@ class Agent:
         if self.session_file:
             from . import sessions
             if not self.session_file.exists():   # a brand-new session with no turns yet
-                sessions.save(self.session_file, self.messages, self.config.project_root,
+                sessions.save(self.session_file, self.messages, self.session_root,
                               name=self.session_name)
             elif self.session_name:
-                sessions.set_name(self.session_file, self.session_name, self.config.project_root)
+                sessions.set_name(self.session_file, self.session_name, self.session_root)
 
     def generate_title(self, prompt: str, cancel=None) -> str | None:
         """A short, distinctive 5-10 word session title derived from the first prompt (
@@ -1102,15 +1105,15 @@ class Agent:
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
         from . import sessions
-        path = sessions.resolve_path(self.config.project_root, path, must_exist=True)
-        loaded = [m for m in sessions.load(path, self.config.project_root) if m.get("role") != "system"]
+        path = sessions.resolve_path(self.session_root, path, must_exist=True)
+        loaded = [m for m in sessions.load(path, self.session_root) if m.get("role") != "system"]
         self.session_file = path
-        self.session_name = sessions.name_of(path, self.config.project_root)
+        self.session_name = sessions.name_of(path, self.session_root)
         with self._usage_lock:
-            self.usage_totals = sessions.usage_of(path, self.config.project_root)
-            self.activity_totals = sessions.activity_of(path, self.config.project_root)
-        self.goal = sessions.goal_of(path, self.config.project_root)  # restore BEFORE building the prompt so the
-        self.goal_status = sessions.goal_status_of(path, self.config.project_root)
+            self.usage_totals = sessions.usage_of(path, self.session_root)
+            self.activity_totals = sessions.activity_of(path, self.session_root)
+        self.goal = sessions.goal_of(path, self.session_root)  # restore BEFORE building the prompt so the
+        self.goal_status = sessions.goal_status_of(path, self.session_root)
         self._active_tool_intents.clear()
         self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded  # # Goal is in it
         return len(loaded)
@@ -1644,7 +1647,7 @@ class Agent:
                 return "error: the proposed plan is empty. Research the task and present concrete steps."
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
-                sessions.save_plan(self.session_file, plan, self.config.project_root)
+                sessions.save_plan(self.session_file, plan, self.session_root)
             if self.config.get("plan_artifact", True):  # safe plan rendering is separate from arbitrary previews
                 try:
                     from . import artifacts

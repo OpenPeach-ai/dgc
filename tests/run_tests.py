@@ -2715,9 +2715,20 @@ def test_sessions_and_worktree():
     sessions.save_plan(sp, "# private plan", d)
     sidecar = sessions.plan_path(sp, d)
     check("session plan sidecar is saved", sidecar.exists())
+    sessions.save_workspace(sp, d, kind="managed", worktree=d / "fleet-wt",
+                            branch="dgc/fleet-demo-0123456789", metadata=d / "fleet.json")
+    workspace_sidecar = sessions.workspace_path(sp, d)
+    check("session fleet association is private, bounded, and scoped",
+          sessions.load_workspace(sp, d) == {
+              "kind": "managed", "worktree": str((d / "fleet-wt").resolve()),
+              "branch": "dgc/fleet-demo-0123456789",
+              "metadata": str((d / "fleet.json").resolve())}
+          and workspace_sidecar.suffix == ".workspace"
+          and (_stat.S_IMODE(workspace_sidecar.stat().st_mode) == 0o600
+               if _os.name == "posix" else True))
     check("session delete removes file and sidecar",
           sessions.delete(sp, d) is True and not sp.exists() and not sidecar.exists()
-          and not metrics.exists())
+          and not metrics.exists() and not workspace_sidecar.exists())
     check("session delete on a missing file is False", sessions.delete(sp, d) is False)
     outside = _P(_tf.mkdtemp()) / "outside.json"
     outside.write_text('{"messages": []}')
@@ -2743,6 +2754,155 @@ def test_sessions_and_worktree():
     check("worktree appears in the list",
           any(w.get("branch") == "dgc/feature-x" for w in worktree.list_worktrees(repo)))
     check("worktree is removable", worktree.remove(repo, "feature x") is None)
+
+    # A manual removal is deliberately non-force: dirty work must survive a mistyped slash command.
+    dirty_path, dirty_branch, dirty_err = worktree.create(repo, "dirty removal")
+    (dirty_path / "keep.txt").write_text("keep me")
+    remove_error = worktree.remove(repo, "dirty removal")
+    check("manual worktree removal refuses dirty state",
+          bool(remove_error) and dirty_path.exists() and (dirty_path / "keep.txt").read_text() == "keep me")
+    (dirty_path / "keep.txt").unlink()
+    check("manual worktree removal succeeds after it is clean",
+          worktree.remove(repo, "dirty removal") is None)
+
+    # Managed TUI fleet workspaces clone the exact source baseline, retain material changes, and
+    # clean only a byte-for-byte/HEAD-identical checkout.
+    (repo / "tracked.txt").write_text("committed\n")
+    _sp.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+    _sp.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"],
+            cwd=repo, check=True)
+    (repo / "tracked.txt").write_text("dirty baseline\n")
+    (repo / "untracked.txt").write_text("untracked baseline\n")
+    fleet_store = _P(_tf.mkdtemp()) / "fleet-store"
+    from dgc.scheduler import workspace_mutation_lock as _workspace_mutation_lock
+    fleet_lease = _workspace_mutation_lock(repo)
+    check("fleet baseline obtains the source mutation lease", fleet_lease.acquire(timeout=2))
+    try:
+        fleet, fleet_error = worktree.FleetWorkspace.prepare(repo, "parallel agent", fleet_store)
+    finally:
+        fleet_lease.release()
+    check("managed fleet worktree sees exact dirty and untracked baseline",
+          fleet_error is None and fleet is not None
+          and (fleet.project_root / "tracked.txt").read_text() == "dirty baseline\n"
+          and (fleet.project_root / "untracked.txt").read_text() == "untracked baseline\n"
+          and fleet.changed_paths() == [], detail=str(fleet_error))
+    if _os.name == "posix":
+        check("managed fleet storage and metadata are owner-private",
+              _stat.S_IMODE(fleet_store.stat().st_mode) == 0o700
+              and _stat.S_IMODE(fleet.metadata_path.stat().st_mode) == 0o600)
+    fleet_session = sessions.new_path(repo)
+    sessions.save_workspace(fleet_session, repo, kind="managed", worktree=fleet.path,
+                            branch=fleet.branch, metadata=fleet.metadata_path)
+    attached, attach_error = worktree.FleetWorkspace.attach(
+        repo, sessions.load_workspace(fleet_session, repo), fleet_store / "new-default")
+    check("saved fleet conversation safely reattaches after the configured storage root changes",
+          attach_error is None and attached is not None and attached.path == fleet.path
+          and attached.branch == fleet.branch, detail=str(attach_error))
+    (fleet.project_root / "tracked.txt").write_text("agent change\n")
+    (fleet.project_root / "agent.txt").write_text("new work\n")
+    retained_result = fleet.finish("test close")
+    retained_payload = json.loads(fleet.metadata_path.read_text())
+    check("changed managed fleet work is retained instead of auto-deleted",
+          retained_result.status == "retained" and fleet.path.exists()
+          and set(retained_result.changed_paths) == {"agent.txt", "tracked.txt"}
+          and retained_payload.get("status") == "retained"
+          and retained_payload.get("reason") == "test close")
+    check("retained managed fleet checkout can be explicitly cleaned by its owner",
+          fleet.cleanup() is None and not fleet.path.exists())
+    sessions.clear_workspace(fleet_session, repo)
+
+    fleet_lease = _workspace_mutation_lock(repo)
+    check("clean fleet baseline reacquires the source mutation lease", fleet_lease.acquire(timeout=2))
+    try:
+        clean_fleet, clean_error = worktree.FleetWorkspace.prepare(repo, "clean close", fleet_store)
+    finally:
+        fleet_lease.release()
+    clean_result = clean_fleet.finish("test clean close") if clean_fleet else None
+    check("untouched managed fleet checkout is removed with its generated branch and metadata",
+          clean_error is None and clean_result is not None and clean_result.status == "cleaned"
+          and not clean_result.path.exists() and not clean_fleet.metadata_path.exists()
+          and not any(row.get("branch") == clean_result.branch for row in worktree.list_worktrees(repo)),
+          detail=str(clean_error))
+    rejected, rejected_error = worktree.FleetWorkspace.prepare(
+        repo, "unsafe storage", repo / ".dgc" / "fleet")
+    check("managed fleet storage inside the source repository is rejected",
+          rejected is None and "outside" in str(rejected_error))
+
+    # TUI lifecycle contract: Ctrl+N-style spawn roots tools in a managed checkout while keeping
+    # sessions under the source project; close retains changed work and removes untouched work.
+    import dgc.config as _config_mod
+    import dgc.tui as _tui_mod
+    old_agent_cls = _tui_mod.Agent
+    old_user_config, old_user_secrets = _config_mod.USER_CONFIG, _config_mod.USER_SECRETS
+    old_sessions_dir = sessions.SESSIONS_DIR
+    isolated_home = _P(_tf.mkdtemp())
+    tui_store = isolated_home / "fleet"
+    _config_mod.USER_CONFIG = isolated_home / "config.json"
+    _config_mod.USER_SECRETS = isolated_home / "secrets.json"
+    sessions.SESSIONS_DIR = isolated_home / "sessions"
+    _config_mod.USER_CONFIG.write_text(json.dumps({"fleet_worktree_root": str(tui_store)}))
+
+    class _FleetMCP:
+        def stop_all(self): pass
+
+    class _FleetAgent:
+        def __init__(self, config, ui):
+            self.config, self.ui = config, ui
+            self.cancelled = __import__("threading").Event()
+            self.mcp = _FleetMCP()
+            self.session_root = config.project_root
+            self.session_file = None
+            self.session_name = None
+            self.messages = [{"role": "system", "content": "test"}]
+        def name_session(self, name): self.session_name = name
+        def load_session(self, path):
+            self.session_file = sessions.resolve_path(self.session_root, path, must_exist=True)
+            self.messages += sessions.load(path, self.session_root)
+            return len(self.messages) - 1
+
+    try:
+        _tui_mod.Agent = _FleetAgent
+        fleet_tui = object.__new__(_tui_mod.TUI)
+        fleet_tui._fleet_root = repo.resolve()
+        initial_config = _config_mod.Config(repo)
+        initial = _tui_mod.AgentSession(initial_config, fleet_tui,
+                                        agent=_FleetAgent(initial_config, fleet_tui))
+        fleet_tui._sessions = [initial]
+        fleet_tui._active_idx = 0
+        fleet_tui._tls = __import__("threading").local()
+        fleet_tui._naming = False
+        fleet_tui._switch_to = lambda index: setattr(fleet_tui, "_active_idx", index)
+        fleet_tui._invalidate = lambda: None
+        fleet_flashes = []
+        fleet_tui._flash = fleet_flashes.append
+
+        managed_session = fleet_tui._new_session()
+        managed_sidecar = sessions.load_workspace(managed_session.agent.session_file, repo)
+        check("TUI new agent auto-provisions an isolated checkout with source-scoped resume",
+              managed_session is not None and managed_session.workspace_kind == "managed"
+              and managed_session.config.project_root != repo
+              and managed_session.agent.session_root == repo.resolve()
+              and managed_sidecar is not None
+              and managed_sidecar["branch"] == managed_session.workspace_branch)
+        changed_path = managed_session.workspace.path
+        (managed_session.workspace.project_root / "tui-change.txt").write_text("preserve")
+        fleet_tui._close_session(1)
+        check("TUI close retains a changed managed checkout and releases the fleet slot",
+              len(fleet_tui._sessions) == 1 and changed_path.exists()
+              and any("retained" in message for message in fleet_flashes))
+        check("TUI retained checkout remains explicitly recoverable",
+              managed_session.workspace.cleanup() is None)
+
+        clean_session = fleet_tui._new_session()
+        clean_path = clean_session.workspace.path
+        clean_session._req_event.clear()
+        fleet_tui._shutdown_fleet()
+        check("TUI shutdown releases pending waits and removes an untouched managed checkout",
+              clean_session._req_event.is_set() and not clean_path.exists())
+    finally:
+        _tui_mod.Agent = old_agent_cls
+        _config_mod.USER_CONFIG, _config_mod.USER_SECRETS = old_user_config, old_user_secrets
+        sessions.SESSIONS_DIR = old_sessions_dir
 
 
 def test_isolated_subagents():
