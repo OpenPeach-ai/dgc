@@ -1,14 +1,18 @@
-"""Bounded static code intelligence with an optional one-shot stdio LSP escalation.
+"""Bounded static code intelligence with an optional managed stdio LSP escalation.
 
 The static path is dependency-free and always available. LSP processes run only when the user has
 explicitly configured one; they receive a minimal environment, no shell, bounded input/output, and
-are terminated after the query so no long-lived server is shared across projects or sessions.
+project-confined locations. Configured servers may be reused within the same project/spec behind a
+serialized, capped, idle-reaped pool; one-shot mode remains available with an idle TTL of zero.
 """
 from __future__ import annotations
 
+import atexit
 import ast
+import hashlib
 import itertools
 import json
+import math
 import os
 import re
 import signal
@@ -39,6 +43,8 @@ _MAX_FILE_BYTES = 2_000_000
 _MAX_FILES = 2_000
 _MAX_RESULTS = 200
 _MAX_LSP_MESSAGE = 8_000_000
+_MAX_LSP_SESSIONS = 4
+_MAX_LSP_DOCUMENTS = 128
 
 _LANGUAGE_IDS = {
     ".py": "python", ".pyi": "python", ".js": "javascript", ".jsx": "javascriptreact",
@@ -249,10 +255,16 @@ class _LSPClient:
         self._pending_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._diagnostics: dict[str, list] = {}
-        self._diagnostic_event = threading.Event()
+        self._diagnostic_events: dict[str, threading.Event] = {}
+        self._diagnostic_lock = threading.Lock()
+        self._documents: dict[str, tuple[int, bytes]] = {}
+        self._opening_documents: set[str] = set()
         self._io_failed = False
         self.position_encoding = "utf-16"
         self.error = ""
+
+    def alive(self) -> bool:
+        return bool(self.proc and self.proc.poll() is None and not self._io_failed)
 
     def start(self) -> bool:
         command = str(self.spec.get("command") or "")
@@ -296,7 +308,10 @@ class _LSPClient:
         encoding = capabilities.get("positionEncoding") if isinstance(capabilities, dict) else None
         if encoding in ("utf-8", "utf-16", "utf-32"):
             self.position_encoding = encoding
-        self.notify("initialized", {})
+        if not self.notify("initialized", {}):
+            self.error = "initialized notification failed"
+            self.stop(graceful=False)
+            return False
         return True
 
     def _send(self, payload: dict) -> bool:
@@ -419,11 +434,11 @@ class _LSPClient:
                 elif message.get("method") == "textDocument/publishDiagnostics":
                     params = message.get("params") or {}
                     if isinstance(params, dict):
+                        uri = str(params.get("uri") or "")
                         diagnostics = params.get("diagnostics") or []
-                        self._diagnostics[str(params.get("uri") or "")] = (
-                            list(diagnostics) if isinstance(diagnostics, list) else [])
-                        self._diagnostic_event.set()
+                        self._record_diagnostics(uri, diagnostics)
         finally:
+            self._io_failed = True
             with self._pending_lock:
                 pending, self._pending = list(self._pending.values()), {}
             for event, holder in pending:
@@ -446,17 +461,75 @@ class _LSPClient:
             return
         self._send({"jsonrpc": "2.0", "id": request_id, "result": result})
 
-    def open_document(self, path: Path, text: str) -> str:
+    def _record_diagnostics(self, uri: str, diagnostics) -> bool:
+        """Accept diagnostics only for the client's bounded active document set."""
+        with self._diagnostic_lock:
+            if not uri or (uri not in self._documents and uri not in self._opening_documents):
+                return False
+            self._diagnostics[uri] = (
+                list(diagnostics[:_MAX_RESULTS]) if isinstance(diagnostics, list) else [])
+            self._diagnostic_events.setdefault(uri, threading.Event()).set()
+            return True
+
+    def _close_document(self, uri: str) -> bool:
+        if not self.notify("textDocument/didClose", {"textDocument": {"uri": uri}}):
+            return False
+        with self._diagnostic_lock:
+            self._documents.pop(uri, None)
+            self._opening_documents.discard(uri)
+            self._diagnostics.pop(uri, None)
+            event = self._diagnostic_events.pop(uri, None)
+        if event is not None:
+            event.set()
+        return True
+
+    def sync_document(self, path: Path, text: str) -> str:
+        """Open a file once and close/reopen it when its on-disk contents change."""
         uri = path.resolve(strict=False).as_uri()
+        digest = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
+        with self._diagnostic_lock:
+            prior = self._documents.get(uri)
+            if prior and prior[1] == digest:
+                # Plain dicts retain insertion order: refresh this URI as the eviction LRU.
+                self._documents.pop(uri, None)
+                self._documents[uri] = prior
+                return uri
+        version = prior[0] + 1 if prior else 1
+        if prior and not self._close_document(uri):
+            return ""
+        if not prior:
+            with self._diagnostic_lock:
+                oldest = (next(iter(self._documents))
+                          if len(self._documents) >= _MAX_LSP_DOCUMENTS else "")
+            if oldest and not self._close_document(oldest):
+                return ""
+        with self._diagnostic_lock:
+            self._diagnostics.pop(uri, None)
+            self._diagnostic_events.setdefault(uri, threading.Event()).clear()
+            self._opening_documents.add(uri)
         sent = self.notify("textDocument/didOpen", {"textDocument": {
             "uri": uri, "languageId": _LANGUAGE_IDS.get(path.suffix.lower(), "plaintext"),
-            "version": 1, "text": text,
+            "version": version, "text": text,
         }})
+        failed_event = None
+        with self._diagnostic_lock:
+            self._opening_documents.discard(uri)
+            if sent:
+                self._documents[uri] = (version, digest)
+            else:
+                self._documents.pop(uri, None)
+                self._diagnostics.pop(uri, None)
+                failed_event = self._diagnostic_events.pop(uri, None)
+        if failed_event is not None:
+            failed_event.set()
         return uri if sent else ""
 
     def published_diagnostics(self, uri: str) -> tuple[bool, list]:
-        self._diagnostic_event.wait(min(self.timeout, 1.0))
-        return uri in self._diagnostics, list(self._diagnostics.get(uri, []))
+        with self._diagnostic_lock:
+            event = self._diagnostic_events.setdefault(uri, threading.Event())
+        event.wait(min(self.timeout, 1.0))
+        with self._diagnostic_lock:
+            return uri in self._diagnostics, list(self._diagnostics.get(uri, []))
 
     def stop(self, graceful: bool = True) -> None:
         proc = self.proc
@@ -507,6 +580,13 @@ class _LSPClient:
             pending, self._pending = list(self._pending.values()), {}
         for event, holder in pending:
             holder["error"] = {"code": -32000}
+            event.set()
+        with self._diagnostic_lock:
+            self._documents.clear()
+            self._opening_documents.clear()
+            self._diagnostics.clear()
+            diagnostic_events, self._diagnostic_events = list(self._diagnostic_events.values()), {}
+        for event in diagnostic_events:
             event.set()
 
 
@@ -661,48 +741,213 @@ def _render_diagnostics(value, root: Path, uri: str,
     return rows
 
 
-def _lsp_query(spec: dict, path: Path, root: Path, operation: str,
-               line: int, column: int, timeout: float, cancel=None) -> tuple[list[str] | None, str]:
+def _lsp_client_query(client: _LSPClient, path: Path, root: Path, operation: str,
+                      line: int, column: int) -> tuple[list[str] | None, str]:
     text = _read_source(path)
     if text is None:
         return None, "target file is unavailable, binary, or larger than 2 MB"
+    if not client.alive():
+        return None, "language server exited"
+    uri = client.sync_document(path, text)
+    if not uri:
+        return None, "language-server stdin stalled"
+    document = {"uri": uri}
+    position = _lsp_position(text, line, column, client.position_encoding)
+    if operation == "definition":
+        result, error = client.request("textDocument/definition", {
+            "textDocument": document, "position": position})
+        return (None, error) if error else (
+            _render_locations(result, root, client.position_encoding), "")
+    if operation == "references":
+        result, error = client.request("textDocument/references", {
+            "textDocument": document, "position": position,
+            "context": {"includeDeclaration": True}})
+        return (None, error) if error else (
+            _render_locations(result, root, client.position_encoding), "")
+    if operation == "symbols":
+        result, error = client.request("textDocument/documentSymbol", {
+            "textDocument": document})
+        return (None, error) if error else (
+            _render_symbols(result, root, uri, client.position_encoding), "")
+    result, error = client.request("textDocument/diagnostic", {
+        "textDocument": document, "identifier": None,
+        "previousResultId": None})
+    if not error and isinstance(result, dict):
+        return _render_diagnostics(result.get("items") or [], root, uri,
+                                   client.position_encoding), ""
+    published_seen, published = client.published_diagnostics(uri)
+    if published_seen or not error:
+        return _render_diagnostics(published, root, uri, client.position_encoding), ""
+    return None, error
+
+
+def _lsp_query(spec: dict, path: Path, root: Path, operation: str,
+               line: int, column: int, timeout: float, cancel=None) -> tuple[list[str] | None, str]:
     client = _LSPClient(spec, root, timeout, cancel)
     if not client.start():
         return None, client.error or "language server failed to start"
     try:
-        uri = client.open_document(path, text)
-        if not uri:
-            return None, "language-server stdin stalled"
-        document = {"uri": uri}
-        position = _lsp_position(text, line, column, client.position_encoding)
-        if operation == "definition":
-            result, error = client.request("textDocument/definition", {
-                "textDocument": document, "position": position})
-            return (None, error) if error else (
-                _render_locations(result, root, client.position_encoding), "")
-        if operation == "references":
-            result, error = client.request("textDocument/references", {
-                "textDocument": document, "position": position,
-                "context": {"includeDeclaration": True}})
-            return (None, error) if error else (
-                _render_locations(result, root, client.position_encoding), "")
-        if operation == "symbols":
-            result, error = client.request("textDocument/documentSymbol", {
-                "textDocument": document})
-            return (None, error) if error else (
-                _render_symbols(result, root, uri, client.position_encoding), "")
-        result, error = client.request("textDocument/diagnostic", {
-            "textDocument": document, "identifier": None,
-            "previousResultId": None})
-        if not error and isinstance(result, dict):
-            return _render_diagnostics(result.get("items") or [], root, uri,
-                                       client.position_encoding), ""
-        published_seen, published = client.published_diagnostics(uri)
-        if published_seen or not error:
-            return _render_diagnostics(published, root, uri, client.position_encoding), ""
-        return None, error
+        return _lsp_client_query(client, path, root, operation, line, column)
     finally:
         client.stop()
+
+
+class _PersistentLSPSession:
+    """One serialized project/spec LSP connection owned by the bounded process pool."""
+
+    def __init__(self, spec: dict, root: Path, idle_s: float):
+        self.spec = dict(spec)
+        self.root = root.resolve(strict=False)
+        self.idle_s = idle_s
+        self.last_used = time.monotonic()
+        self.users = 0  # protected by _LSPPool._lock
+        self.lock = threading.Lock()
+        self.client: _LSPClient | None = None
+
+    def query(self, path: Path, operation: str, line: int, column: int,
+              timeout: float, cancel=None) -> tuple[list[str] | None, str]:
+        deadline = time.monotonic() + max(0.1, min(60.0, timeout))
+        while not self.lock.acquire(timeout=min(0.05, max(0.001, deadline - time.monotonic()))):
+            if cancel is not None and cancel.is_set():
+                return None, "cancelled while waiting for language server"
+            if time.monotonic() >= deadline:
+                return None, "language server busy"
+        try:
+            remaining = max(0.1, deadline - time.monotonic())
+            if self.client is not None and not self.client.alive():
+                self.client.stop(graceful=False)
+                self.client = None
+            if self.client is None:
+                candidate = _LSPClient(self.spec, self.root, remaining, cancel)
+                if not candidate.start():
+                    return None, candidate.error or "language server failed to start"
+                self.client = candidate
+            else:
+                self.client.timeout = remaining
+                self.client.cancel = cancel
+            rows, error = _lsp_client_query(
+                self.client, path, self.root, operation, line, column)
+            if error and (not self.client.alive() or error in {
+                    "stdin unavailable", "timed out", "cancelled", "language server exited",
+                    "language-server stdin stalled"}):
+                self.client.stop(graceful=False)
+                self.client = None
+            return rows, error
+        finally:
+            if self.client is not None:
+                self.client.cancel = None
+            self.lock.release()
+
+    def stop(self) -> None:
+        with self.lock:
+            if self.client is not None:
+                self.client.stop()
+                self.client = None
+
+
+class _LSPPool:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._sessions: dict[tuple[str, str], _PersistentLSPSession] = {}
+        self._wake = threading.Event()
+        self._reaper: threading.Thread | None = None
+
+    @staticmethod
+    def _key(spec: dict, root: Path) -> tuple[str, str]:
+        encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), default=str).encode()
+        return str(root.resolve(strict=False)), hashlib.sha256(encoded).hexdigest()
+
+    def _ensure_reaper_locked(self) -> None:
+        if self._reaper is not None and self._reaper.is_alive():
+            return
+        self._reaper = threading.Thread(
+            target=self._reap_loop, name="dgc-lsp-reaper", daemon=True)
+        self._reaper.start()
+
+    def _reap_loop(self) -> None:
+        while True:
+            self._wake.wait(0.25)
+            self._wake.clear()
+            now = time.monotonic()
+            victims: list[_PersistentLSPSession] = []
+            with self._lock:
+                for key, session in list(self._sessions.items()):
+                    if session.users == 0 and now - session.last_used >= session.idle_s:
+                        self._sessions.pop(key, None)
+                        victims.append(session)
+                finished = not self._sessions
+                if finished:
+                    self._reaper = None
+            for session in victims:
+                session.stop()
+            if finished:
+                return
+
+    def query(self, spec: dict, path: Path, root: Path, operation: str,
+              line: int, column: int, timeout: float, idle_s: float,
+              cancel=None) -> tuple[list[str] | None, str]:
+        key = self._key(spec, root)
+        evicted: list[_PersistentLSPSession] = []
+        session: _PersistentLSPSession | None
+        with self._lock:
+            session = self._sessions.get(key)
+            if session is None:
+                idle = sorted((item for item in self._sessions.items() if item[1].users == 0),
+                              key=lambda item: item[1].last_used)
+                while len(self._sessions) >= _MAX_LSP_SESSIONS and idle:
+                    old_key, old = idle.pop(0)
+                    self._sessions.pop(old_key, None)
+                    evicted.append(old)
+                if len(self._sessions) < _MAX_LSP_SESSIONS:
+                    session = _PersistentLSPSession(spec, root, idle_s)
+                    self._sessions[key] = session
+            if session is not None:
+                session.idle_s = idle_s
+                session.users += 1
+                self._ensure_reaper_locked()
+        for old in evicted:
+            old.stop()
+        if session is None:
+            return _lsp_query(spec, path, root, operation, line, column, timeout, cancel)
+        try:
+            return session.query(path, operation, line, column, timeout, cancel)
+        finally:
+            with self._lock:
+                session.users = max(0, session.users - 1)
+                session.last_used = time.monotonic()
+                self._wake.set()
+
+    def stop_all(self, root: Path | None = None) -> None:
+        wanted = str(root.resolve(strict=False)) if root is not None else None
+        with self._lock:
+            chosen = [(key, session) for key, session in self._sessions.items()
+                      if wanted is None or key[0] == wanted]
+            for key, _ in chosen:
+                self._sessions.pop(key, None)
+            self._wake.set()
+        for _, session in chosen:
+            session.stop()
+
+
+_LSP_POOL = _LSPPool()
+atexit.register(_LSP_POOL.stop_all)
+
+
+def stop_lsp_sessions(root: Path | None = None) -> None:
+    """Stop managed language servers, primarily for explicit runtime/test teardown."""
+    _LSP_POOL.stop_all(root)
+
+
+def _configured_seconds(config, key: str, default: float,
+                        minimum: float, maximum: float) -> float:
+    raw = config.get(key, default) if config is not None else default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(maximum, value))
 
 
 def run_code_intel(*, root: Path, target: Path, operation: str, symbol: str = "",
@@ -738,13 +983,17 @@ def run_code_intel(*, root: Path, target: Path, operation: str, symbol: str = ""
                     if match:
                         query_line, query_column = lineno, match.start() + 1
                         break
-            timeout = config.get("code_intel_timeout", 15) if config is not None else 15
-            try:
-                timeout = float(timeout)
-            except (TypeError, ValueError):
-                timeout = 15.0
-            rows, error = _lsp_query(spec, target, root, operation,
-                                     query_line, query_column, timeout, cancel)
+            timeout = _configured_seconds(config, "code_intel_timeout", 15.0, 0.1, 60.0)
+            idle_s = _configured_seconds(config, "code_intel_lsp_idle_s", 120.0, 0.0, 3600.0)
+            # External files can be explicitly approved for a query, but never remain open in a
+            # project-scoped warm server after that approval context has ended.
+            if idle_s > 0 and _rel(target, root):
+                rows, error = _LSP_POOL.query(
+                    spec, target, root, operation, query_line, query_column,
+                    timeout, idle_s, cancel)
+            else:
+                rows, error = _lsp_query(
+                    spec, target, root, operation, query_line, query_column, timeout, cancel)
             if rows is not None:
                 empty = "no diagnostics" if operation == "diagnostics" else "no results"
                 body = "\n".join(rows) if rows else empty

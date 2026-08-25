@@ -277,11 +277,15 @@ Useful keys:
 - `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
   sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
-- `language_servers`, `code_intel_timeout` — optional stdio LSP commands for richer definitions,
+- `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP
+  commands for richer definitions,
   references, symbols, and diagnostics. Keys may be a language (`python`) or extension (`.py`):
   `{"language_servers":{"python":{"command":"pyright-langserver","args":["--stdio"]}}}`.
   Without one, the bounded dependency-free static analyzer remains available. Configured servers
-  receive a minimal environment, run without a shell, and are stopped after each query.
+  receive a minimal environment, run without a shell, and are serialized per project/server spec.
+  DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle,
+  and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set
+  `code_intel_lsp_idle_s` to `0` for one-shot isolation everywhere.
 """.strip()),
 ]
 

@@ -1852,7 +1852,7 @@ finally:
         project_root=root,
         config=Cfg({"language_servers": {"python": {
             "command": sys.executable, "args": [str(server), str(stopped)]}},
-            "code_intel_timeout": 2}),
+            "code_intel_timeout": 2, "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     previous_secret = os.environ.get("DGC_CODE_INTEL_SECRET")
@@ -1890,7 +1890,8 @@ finally:
     fallback = SimpleNamespace(
         project_root=root,
         config=Cfg({"language_servers": {"python": {
-            "command": str(root / "missing-language-server")}}, "code_intel_timeout": 0.1}),
+            "command": str(root / "missing-language-server")}}, "code_intel_timeout": 0.1,
+            "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     out = execute("code_intel", {"operation": "definition", "path": "alpha.py",
@@ -1916,7 +1917,7 @@ finally:
         project_root=root,
         config=Cfg({"language_servers": {"python": {
             "command": sys.executable, "args": [str(hanging_server), str(hanging_pid)]}},
-            "code_intel_timeout": 0.1}),
+            "code_intel_timeout": 0.1, "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     started = _time.monotonic()
@@ -1977,7 +1978,7 @@ time.sleep(30)
         project_root=root,
         config=Cfg({"language_servers": {"python": {
             "command": sys.executable, "args": [str(stalled_server), str(stalled_pid)]}},
-            "code_intel_timeout": 0.1}),
+            "code_intel_timeout": 0.1, "code_intel_lsp_idle_s": 0}),
         cancelled=threading.Event(),
     )
     started = _time.monotonic()
@@ -1996,6 +1997,229 @@ time.sleep(30)
           elapsed < 2 and pid > 0 and not alive and "stdin stalled" in out
           and "large.py:1:1: function target" in out,
           f"elapsed={elapsed:.2f}s pid={pid} alive={alive} out={out}")
+
+
+def test_code_intel_lsp_pool():
+    """Configured servers are reused safely, synchronized, retired, and idle-reaped."""
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+    import time as _time
+    from dgc.codeintel import (
+        _LSPClient, _MAX_LSP_DOCUMENTS, _MAX_RESULTS, run_code_intel, stop_lsp_sessions,
+    )
+
+    root = Path(tempfile.mkdtemp())
+    source = root / "alpha.py"
+    source.write_text("def target():\n    return 1\n\ntarget()\n")
+    server = root / "persistent_lsp.py"
+    event_log = root / "lsp-events"
+    crash_next = root / "crash-next"
+    server.write_text(r'''import json
+import pathlib
+import sys
+
+inp = sys.stdin.buffer
+out = sys.stdout.buffer
+events = pathlib.Path(sys.argv[1])
+crash_next = pathlib.Path(sys.argv[2])
+document_uri = ""
+
+def log(value):
+    with events.open("a", encoding="utf-8") as handle:
+        handle.write(value + "\n")
+
+def read_message():
+    headers = {}
+    while True:
+        line = inp.readline()
+        if not line:
+            return None
+        if line in (b"\r\n", b"\n"):
+            break
+        key, value = line.decode("ascii").split(":", 1)
+        headers[key.lower()] = value.strip()
+    return json.loads(inp.read(int(headers["content-length"])).decode("utf-8"))
+
+def send(message):
+    body = json.dumps(message, separators=(",", ":")).encode("utf-8")
+    out.write(("Content-Length: %d\r\n\r\n" % len(body)).encode("ascii") + body)
+    out.flush()
+
+log("START")
+try:
+    while True:
+        message = read_message()
+        if message is None:
+            break
+        method = message.get("method")
+        request_id = message.get("id")
+        params = message.get("params") or {}
+        if method == "textDocument/didOpen":
+            document = params["textDocument"]
+            document_uri = document["uri"]
+            log("DIDOPEN %s" % document["version"])
+        elif method == "textDocument/didClose":
+            log("DIDCLOSE")
+        else:
+            log(str(method))
+        if method == "initialize":
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "result": {"capabilities": {"definitionProvider": True,
+                                               "referencesProvider": True,
+                                               "documentSymbolProvider": True}}})
+        elif method == "textDocument/definition":
+            if crash_next.exists():
+                crash_next.unlink()
+                break
+            send({"jsonrpc": "2.0", "id": request_id, "result": {
+                "uri": document_uri,
+                "range": {"start": {"line": 0, "character": 4},
+                          "end": {"line": 0, "character": 10}}}})
+        elif method == "textDocument/references":
+            send({"jsonrpc": "2.0", "id": request_id, "result": []})
+        elif method == "textDocument/documentSymbol":
+            send({"jsonrpc": "2.0", "id": request_id, "result": [{
+                "name": "target", "kind": 12,
+                "range": {"start": {"line": 0, "character": 0},
+                          "end": {"line": 1, "character": 12}},
+                "selectionRange": {"start": {"line": 0, "character": 4},
+                                   "end": {"line": 0, "character": 10}}}]})
+        elif method == "shutdown":
+            send({"jsonrpc": "2.0", "id": request_id, "result": None})
+        elif method == "exit":
+            break
+        elif request_id is not None:
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "error": {"code": -32601, "message": "unsupported"}})
+finally:
+    log("STOP")
+''')
+
+    class Cfg:
+        def __init__(self, data):
+            self.data = data
+
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+
+    def events():
+        return event_log.read_text().splitlines() if event_log.exists() else []
+
+    def wait_for(predicate, timeout=2.0):
+        deadline = _time.monotonic() + timeout
+        while _time.monotonic() < deadline:
+            if predicate():
+                return True
+            _time.sleep(0.02)
+        return predicate()
+
+    tracker = _LSPClient({}, root, 1)
+    notifications = []
+
+    def track_notification(method, _params):
+        notifications.append(method)
+        return True
+
+    tracker.notify = track_notification
+    tracked_paths = [root / f"tracked-{index}.py" for index in range(_MAX_LSP_DOCUMENTS + 1)]
+    for tracked in tracked_paths:
+        tracker.sync_document(tracked, "value = 1\n")
+    check("code_intel bounds the persistent open-document set with LRU close",
+          len(tracker._documents) == _MAX_LSP_DOCUMENTS
+          and tracked_paths[0].as_uri() not in tracker._documents
+          and notifications.count("textDocument/didClose") == 1,
+          f"documents={len(tracker._documents)} closes={notifications.count('textDocument/didClose')}")
+    active_uri = tracked_paths[-1].as_uri()
+    unsolicited_uri = (root / "never-opened.py").as_uri()
+    accepted = tracker._record_diagnostics(
+        active_uri, [{"message": "current"}] * (_MAX_RESULTS + 1))
+    rejected = tracker._record_diagnostics(unsolicited_uri, [{"message": "stale"}])
+    check("code_intel rejects unsolicited diagnostics outside its bounded document set",
+          accepted and not rejected and len(tracker._diagnostics.get(active_uri, [])) == _MAX_RESULTS
+          and unsolicited_uri not in tracker._diagnostics)
+
+    base = {"language_servers": {"python": {
+        "command": sys.executable, "args": [str(server), str(event_log), str(crash_next)]}},
+        "code_intel_timeout": 2, "code_intel_lsp_idle_s": 60}
+    external_root = Path(tempfile.mkdtemp())
+    external_source = external_root / "external.py"
+    external_source.write_text("def target():\n    return 1\n")
+    external_result = run_code_intel(
+        root=root, target=external_source, operation="definition", symbol="target",
+        config=Cfg(base), cancel=threading.Event())
+    external_events = events()
+    check("code_intel never retains an approved external file in a warm project server",
+          external_result == "code intelligence (lsp) · definition\nno results"
+          and external_events.count("START") == 1 and external_events.count("STOP") == 1,
+          f"result={external_result!r} events={external_events!r}")
+    event_log.unlink(missing_ok=True)
+
+    ctx = SimpleNamespace(project_root=root, config=Cfg(base), cancelled=threading.Event())
+    stop_lsp_sessions(root)
+    try:
+        definition = execute("code_intel", {
+            "operation": "definition", "path": "alpha.py", "symbol": "target"}, ctx)
+        references = execute("code_intel", {
+            "operation": "references", "path": "alpha.py", "symbol": "target"}, ctx)
+        first_events = events()
+        check("code_intel reuses one configured server across project queries",
+              definition.startswith("code intelligence (lsp)")
+              and references == "code intelligence (lsp) · references\nno results"
+              and first_events.count("START") == 1 and first_events.count("DIDOPEN 1") == 1,
+              repr(first_events))
+
+        source.write_text("def target():\n    return 2\n\ntarget()\n")
+        symbols = execute("code_intel", {"operation": "symbols", "path": "alpha.py"}, ctx)
+        changed_events = events()
+        check("code_intel resynchronizes changed files without stale duplicate opens",
+              symbols.startswith("code intelligence (lsp)")
+              and changed_events.count("DIDCLOSE") == 1
+              and changed_events.count("DIDOPEN 1") == 1
+              and changed_events.count("DIDOPEN 2") == 1,
+              repr(changed_events))
+
+        def query(_):
+            return execute("code_intel", {
+                "operation": "definition", "path": "alpha.py", "symbol": "target"}, ctx)
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            concurrent = list(pool.map(query, range(4)))
+        concurrent_events = events()
+        check("code_intel serializes concurrent access to one persistent server",
+              all(item.startswith("code intelligence (lsp)") for item in concurrent)
+              and concurrent_events.count("START") == 1
+              and concurrent_events.count("DIDOPEN 2") == 1,
+              repr(concurrent_events))
+
+        crash_next.touch()
+        crashed = query(0)
+        recovered = query(0)
+        recovery_events = events()
+        check("code_intel retires a crashed server and recovers on the next query",
+              crashed.startswith("code intelligence (static)")
+              and recovered.startswith("code intelligence (lsp)")
+              and recovery_events.count("START") == 2
+              and recovery_events.count("STOP") >= 1,
+              f"crashed={crashed!r} recovered={recovered!r} events={recovery_events!r}")
+
+        stop_lsp_sessions(root)
+        explicit = wait_for(lambda: events().count("STOP") == 2)
+        check("code_intel explicit teardown stops the recovered project server",
+              explicit, repr(events()))
+
+        idle_data = dict(base)
+        idle_data["code_intel_lsp_idle_s"] = 0.1
+        idle_ctx = SimpleNamespace(
+            project_root=root, config=Cfg(idle_data), cancelled=threading.Event())
+        idle_result = execute("code_intel", {
+            "operation": "definition", "path": "alpha.py", "symbol": "target"}, idle_ctx)
+        reaped = wait_for(lambda: events().count("STOP") == 3)
+        check("code_intel reaps a persistent session after its bounded idle TTL",
+              idle_result.startswith("code intelligence (lsp)")
+              and events().count("START") == 3 and reaped,
+              repr(events()))
+    finally:
+        stop_lsp_sessions(root)
 
 
 def test_sessions_and_worktree():
@@ -3730,6 +3954,7 @@ def main():
         test_supply_chain_guard()
         test_mcp_protocol()
         test_code_intel_lsp()
+        test_code_intel_lsp_pool()
         test_sessions_and_worktree()
         test_private_config()
         test_release_script_contract()

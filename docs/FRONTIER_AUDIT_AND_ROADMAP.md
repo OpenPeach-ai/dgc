@@ -42,7 +42,7 @@ the editor registries: those are external release actions that require a reviewe
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private/locked sessions, tool-group transcript repair/compaction, immediate text-tool fallback, full process-group cleanup, bounded background output | Optional encrypted transcripts/durable checkpoints and crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, per-checkout mutation leases, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning/merge UX for parallel write agents and cross-process leases |
-| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured one-shot LSP symbols/diagnostics/definitions/references, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, persistent indexed LSP sessions and optional tree-sitter parsing |
+| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Broader extension-host interaction/race flows plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
@@ -314,7 +314,7 @@ listed under “still required.”
 | Provider runtime | Generic Chat Completions adapter | Codex Responses/state; Pi unified provider runtime | Build typed provider adapters with negotiated capabilities and state. |
 | Safety | String rules plus opt-in broad sandbox | Codex OS-enforced workspace/no-network defaults; OpenCode external-directory permission | Fail closed at canonical filesystem, command, network, environment, and protocol boundaries. |
 | Context | Estimated tokens and summary slicing | Stateful turns, prompt caches, validated compaction trees | Preserve tool groups, use actual usage, cache static context, and support provider compaction/state. |
-| Code intelligence | Repository map, exact static symbols/references/definitions, syntax diagnostics, hash-addressed patching, and optional configured stdio LSP escalation | Aider repo map; OpenCode LSP/apply-patch | Measure one-shot startup cost, then add a safe persistent indexed service and optional tree-sitter parsing where it materially improves accuracy. |
+| Code intelligence | Repository map, exact static symbols/references/definitions, syntax diagnostics, hash-addressed patching, and optional managed stdio LSP escalation with bounded warm reuse | Aider repo map; OpenCode LSP/apply-patch | Measure cold/warm latency and semantic accuracy across the league; add optional tree-sitter parsing where it materially improves results. |
 | Parallel work | Fleet/sub-agents on one checkout | Worktree-isolated agent work | Default write-capable parallel agents to isolated worktrees; merge explicitly. |
 | Extensibility | Skills, hooks, minimal MCP | Goose MCP ecosystem; Pi packages/extensions/SDK/RPC | Complete MCP/ACP, version protocols, publish schemas, then add a stable plugin SDK. |
 | Terminal UX | Strong | Competitive already | Preserve; make state, safety, and command behavior consistent. |
@@ -420,9 +420,13 @@ definitions, references, Python/JSON diagnostics, and TOML diagnostics on Python
 explicitly configure a stdio language server for richer results; DGC uses bounded JSON-RPC messages
 and timeouts, UTF-8/16/32 position conversion, a minimal inherited environment without unrelated
 credential variables, no shell, project-confined returned locations, cancellation, static fallback,
-and POSIX process-group cleanup. The one-shot
-design deliberately favors isolation over warm-index latency; a measured persistent service remains
-future work. The complete offline evidence is 488/488 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+and POSIX process-group cleanup. Configured servers now reuse a serialized project/spec session for a
+bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware close/reopen sync,
+failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
+`code_intel_lsp_idle_s: 0` one-shot compatibility.
+Unsolicited or late diagnostics outside the bounded active-document set are discarded.
+The complete offline evidence is 497/497 Python checks, 12/12 editor transport/webview checks, and
+1/1 installed-VS-Code host smoke.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
 activates network and product-specific schemas/instructions only from explicit turn or standing-goal
@@ -586,8 +590,9 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-488/488 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke. Step 6's complete preflight was green before the
-latest timeout-journal change and must be rerun on the next clean candidate, including
+497/497 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
+the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed
 a `pipefail`/SIGPIPE failure in archive membership validation; two subsequent builds were

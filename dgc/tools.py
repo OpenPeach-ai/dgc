@@ -102,8 +102,8 @@ TOOL_SCHEMAS = [
         {"path": {"type": "string", "description": "Subdirectory to map (default: project root)"},
          "max_files": {"type": "integer", "description": "Maximum files (default 300, max 1000)"}}, []),
     _fn("code_intel", "Find language-aware symbols, exact definitions/references, or diagnostics. "
-        "Uses a configured language server when available and a bounded dependency-free static "
-        "fallback otherwise. Prefer this over broad grep for code navigation.",
+        "Uses a managed configured language server when available and a bounded dependency-free "
+        "static fallback otherwise. Prefer this over broad grep for code navigation.",
         {"operation": {"type": "string",
                        "enum": ["symbols", "definition", "references", "diagnostics"]},
          "path": {"type": "string", "description": "File or directory (default: project root)"},
