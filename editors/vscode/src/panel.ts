@@ -813,19 +813,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};`;
-    return `<!doctype html><html><head>
+    return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body>
-<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span><span class="pd" id="pmodel" title="Model — click to change">dgc</span></header>
-<main id="log"></main>
-<div id="settings" hidden>
+<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
+<main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
+<div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
   <div class="set-head">
-    <span class="set-title"><span class="codicon codicon-settings-gear"></span> DGC Settings</span>
-    <button id="set-close" class="fbtn" title="Close"><span class="codicon codicon-close"></span></button>
+    <span id="settings-title" class="set-title"><span class="codicon codicon-settings-gear" aria-hidden="true"></span> DGC Settings</span>
+    <button type="button" id="set-close" class="fbtn" title="Close" aria-label="Close settings"><span class="codicon codicon-close" aria-hidden="true"></span></button>
   </div>
   <div class="set-body">
     <div class="set-group">Connection</div>
@@ -877,31 +879,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"></label>
   </div>
   <div class="set-foot">
-    <button id="set-save" class="csend set-save">Save</button>
-    <button id="set-cancel" class="fbtn">Close</button>
+    <button type="button" id="set-save" class="csend set-save">Save</button>
+    <button type="button" id="set-cancel" class="fbtn">Close</button>
   </div>
 </div>
-<div id="pop" class="pop"></div>
-<div id="queued"></div>
+<div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
+<div id="queued" role="status" aria-live="polite"></div>
 <footer>
-  <div id="attachments"></div>
+  <div id="attachments" aria-label="Attached context"></div>
   <div id="cbox" data-mode="default">
-    <div class="cinput"><span class="pmark">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…"></textarea></div>
+    <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>
     <div id="cfooter">
-      <button id="btn-add" class="fbtn" title="Attach a file (@-mention)"><span class="codicon codicon-add"></span></button>
-      <button id="btn-cmd" class="fbtn" title="Commands (/)"><span class="codicon codicon-terminal"></span></button>
-      <button id="btn-ctx" class="fbtn" title="Context used — click to compact"><span class="codicon codicon-pie-chart"></span> <span id="ctx">0%</span></button>
-      <button id="btn-settings" class="fbtn" title="Settings"><span class="codicon codicon-settings-gear"></span></button>
+      <button type="button" id="btn-add" class="fbtn" title="Attach a file (@-mention)" aria-label="Attach a file"><span class="codicon codicon-add" aria-hidden="true"></span></button>
+      <button type="button" id="btn-cmd" class="fbtn" title="Commands (/)" aria-label="Open commands"><span class="codicon codicon-terminal" aria-hidden="true"></span></button>
+      <button type="button" id="btn-ctx" class="fbtn" title="Context used — click to compact" aria-label="Context used: 0 percent; compact context"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
+      <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
       <span class="cspacer"></span>
       <div class="picker">
-        <button id="btn-model" class="fbtn mode" title="Model — click to change"><span class="codicon codicon-chip"></span> <span id="modelname">dgc</span></button>
-        <div id="modelmenu" class="cmenu" hidden></div>
+        <button type="button" id="btn-model" class="fbtn mode" title="Model — click to change" aria-label="Change model" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-chip" aria-hidden="true"></span> <span id="modelname">dgc</span></button>
+        <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
       </div>
       <div class="picker">
-        <button id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle"><span id="modeicon" class="codicon codicon-shield"></span> <span id="modelabel">default</span></button>
-        <div id="modemenu" class="cmenu" hidden></div>
+        <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
+        <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode and thinking" hidden></div>
       </div>
-      <button id="send" class="csend" data-mode="default" title="Send"><span class="codicon codicon-arrow-up"></span></button>
+      <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
     </div>
   </div>
 </footer>

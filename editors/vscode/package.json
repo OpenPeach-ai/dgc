@@ -279,7 +279,8 @@
     "compile": "npm run check-types && node esbuild.js",
     "check-types": "tsc --noEmit",
     "package": "npm run check-types && node esbuild.js --production",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "test:host": "node test/run-extension-host.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

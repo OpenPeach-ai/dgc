@@ -2,6 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const announcer = $("announcer");
   const queuedEl = $("queued");
   let queuedCount = 0, customCommands = [];
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
@@ -24,40 +25,58 @@
     $("cbox").dataset.mode = m; send.dataset.mode = m;
     $("modeicon").className = "codicon codicon-" + MODES[m].icon; $("modelabel").textContent = m;
     $("btn-mode").title = MODES[m].desc + " — Shift+Tab to cycle";
+    $("btn-mode").setAttribute("aria-label", `Permission mode: ${m}. ${MODES[m].desc}`);
   }
   // The extension host owns the auto-mode confirmation. Update only when the backend
   // echoes mode_changed/state so cancelling the modal cannot leave a false "auto" badge.
   function setMode(m) { vscode.postMessage({ type: "setMode", mode: m }); hideModeMenu(); }
   function cycleMode() { setMode(MODE_ORDER[(MODE_ORDER.indexOf(curMode) + 1) % MODE_ORDER.length]); }
-  function hideModeMenu() { $("modemenu").hidden = true; }
+  function hideModeMenu() { $("modemenu").hidden = true; $("btn-mode").setAttribute("aria-expanded", "false"); }
   function toggleModeMenu() {
     const mm = $("modemenu");
-    if (!mm.hidden) { mm.hidden = true; return; }
+    if (!mm.hidden) { hideModeMenu(); return; }
     hideModelMenu();
     mm.innerHTML =
-      `<div class="mhead"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
-      MODE_ORDER.map((m) => `<div class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></div>`).join("") +
-      `<div class="mdiv"></div><div class="mhead"><span>Thinking</span></div>` +
-      THINK.map((t) => `<div class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb"></span><span>${t}</span></div>`).join("");
+      `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
+      MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
+      `</div><div class="mdiv" role="separator"></div><div role="group" aria-label="Thinking"><div class="mhead" role="presentation"><span>Thinking</span></div>` +
+      THINK.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === curThink}" class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb" aria-hidden="true"></span><span>${t}</span></button>`).join("") + `</div>`;
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
     mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { curThink = r.dataset.think; vscode.postMessage({ type: "setThink", level: curThink }); hideModeMenu(); });
-    mm.hidden = false;
+    mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
+    (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
   }
 
   // in-composer model menu (rendered from the `models` message the extension posts)
-  function hideModelMenu() { $("modelmenu").hidden = true; }
+  function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
   function renderModelMenu(ids, current, err) {
     const mm = $("modelmenu");
     if (err || !ids.length) {
-      mm.innerHTML = `<div class="mrow" data-connect="1"><span class="mi codicon codicon-plug"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></div>`;
+      mm.innerHTML = `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
-      mm.hidden = false; return;
+      mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
     mm.innerHTML = `<div class="mhead"><span>Model</span></div>` +
-      ids.map((id, i) => `<div class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}"></span><span>${esc(id)}</span></div>`).join("");
+      ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
-    mm.hidden = false;
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
+    (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
   }
+
+  function menuKeys(menu, close, trigger, e) {
+    const items = [...menu.querySelectorAll("button[role^='menuitem']")];
+    if (!items.length) return;
+    const current = Math.max(0, items.indexOf(document.activeElement));
+    let next = null;
+    if (e.key === "ArrowDown") next = (current + 1) % items.length;
+    else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
+    if (next !== null) { e.preventDefault(); items[next].focus(); }
+  }
+  $("modemenu").addEventListener("keydown", (e) => menuKeys($("modemenu"), hideModeMenu, $("btn-mode"), e));
+  $("modelmenu").addEventListener("keydown", (e) => menuKeys($("modelmenu"), hideModelMenu, $("btn-model"), e));
 
   // animated DGC mark — the three stripes light up one-by-one, hold all three,
   // then repeat (CSS-driven, ~1.2s loop, single purple). Replaces the old braille
@@ -88,10 +107,12 @@
   const attachments = [];
   let files = [];              // workspace files for @-mentions
   let popMode = null, popItems = [], popIdx = 0, popStart = 0;
+  let disclosureId = 0;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+  function speak(message) { announcer.textContent = String(message || ""); }
 
   // minimal, streaming-safe markdown
   function md(s) {
@@ -111,6 +132,7 @@
 
   // ---- turn lifecycle ----
   function startTurn() {
+    speak("DGC is working");
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
@@ -132,13 +154,23 @@
   function textBlock() { if (!turn.textEl) { turn.textEl = el("div", "text"); turn.block.appendChild(turn.textEl); } return turn.textEl; }
   function breakText() { if (turn) { turn.textEl = null; turn._buf = ""; } }
 
-  function openFileBtn(path, line) { const b = el("button", "link", "⤢ open"); b.onclick = () => vscode.postMessage({ type: "openFile", path, line }); return b; }
+  function openFileBtn(path, line) {
+    const b = el("button", "link", "⤢ open"); b.type = "button";
+    b.setAttribute("aria-label", `Open ${path}${line ? ` at line ${line}` : ""}`);
+    b.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "openFile", path, line }); };
+    return b;
+  }
 
   function toolCard(ev) {
     const c = el("div", "tool");
-    c.innerHTML = `<div class="head"><span class="glyph">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></div><div class="body"><pre></pre></div>`;
+    const bodyId = `tool-output-${++disclosureId}`;
+    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
     const head = c.querySelector(".head");
-    head.onclick = () => c.classList.toggle("open");
+    const toggle = c.querySelector(".tool-toggle");
+    toggle.onclick = () => {
+      const open = c.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+    };
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     head.appendChild(el("span", "dot run"));
     head.appendChild(el("span", "badge"));
@@ -157,9 +189,9 @@
     wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
-  function decisionCard(inner) { const c = el("div", "card"); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
+  function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
   function resolveCard(c) { c.classList.add("resolved"); }
-  function sysLine(msg, isErr) { (turn ? turn.block : log).appendChild(el("div", "sys" + (isErr ? " err" : ""), esc(msg))); scroll(); }
+  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
 
   function onEvent(ev) {
     const stick = atBottom();
@@ -182,6 +214,7 @@
           `provider ${fmt(ev.input_tokens)} in / ${fmt(ev.output_tokens)} out · ` +
           `${fmt(ev.cached_input_tokens)} cached · ${fmt(ev.reasoning_tokens)} reasoning · ` +
           `${fmt(ev.requests)} requests · click to compact`;
+        $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; compact context`);
         break;
       }
       case "history": renderHistory(ev.items || []); break;
@@ -197,8 +230,10 @@
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
         if (!turn.reasonEl) {
-          const d = el("div", "disclosure", "▸ thinking"), r = el("div", "reasoning");
-          d.onclick = () => { r.classList.toggle("show"); d.textContent = (r.classList.contains("show") ? "▾" : "▸") + " thinking"; };
+          const d = el("button", "disclosure", "▸ thinking"), r = el("div", "reasoning");
+          const reasonId = `reasoning-${++disclosureId}`;
+          d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
+          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " thinking"; d.setAttribute("aria-expanded", String(open)); };
           turn.block.appendChild(d); turn.block.appendChild(r); turn.reasonEl = r;
         }
         turn.reasonEl.textContent += ev.text; break;
@@ -219,25 +254,28 @@
       }
       case "permission_request": {
         ensureTurn();
+        speak(`Permission required to run ${ev.name}`);
         const cmd = ev.command ? `<pre>$ ${esc(ev.command)}</pre>` : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button class="act primary" data-d="once">Allow once</button><button class="act" data-d="always">Always allow</button><button class="act" data-d="deny">Deny</button></div>`);
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request");
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d, rule: b.dataset.d === "always" ? ev.suggested_rule : undefined }); resolveCard(c); });
         break;
       }
       case "plan_proposal": {
         ensureTurn();
-        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button class="act" data-d="auto">auto</button><button class="act" data-d="default">default</button><button class="act" data-d="reject">Keep planning</button></div>`);
+        speak("Plan ready for review");
+        const c = decisionCard(`<div class="q"><span class="codicon codicon-checklist" aria-hidden="true"></span> Plan ready</div><pre>${esc(ev.plan)}</pre><textarea class="feedback" rows="2" aria-label="Plan feedback" placeholder="Optional feedback (required changes, constraints, priorities)…"></textarea><div class="btns"><button type="button" class="act primary" data-d="acceptEdits">Approve → acceptEdits</button><button type="button" class="act" data-d="auto">auto</button><button type="button" class="act" data-d="default">default</button><button type="button" class="act" data-d="reject">Keep planning</button></div>`, "Plan approval");
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { const feedback = c.querySelector(".feedback").value.trim(); vscode.postMessage({ type: "plan_response", id: ev.id, decision: b.dataset.d, feedback }); resolveCard(c); });
         break;
       }
       case "options_request": {
         ensureTurn();
+        speak(ev.question);
         // Stacked, numbered, wrapping rows — long options stay fully visible (never overflow
         // the card), and the recommended one is marked with an accent bar, not an unreadable
         // solid-purple fill.
         const opts = ev.options.map((o, i) =>
-          `<button class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
-        const c = decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`);
+          `<button type="button" class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
+        const c = decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`, "Choose an option");
         c.querySelectorAll("button").forEach((b) => b.onclick = () => { vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) }); resolveCard(c); });
         break;
       }
@@ -254,11 +292,11 @@
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact");
-        c.innerHTML = `<div class="ahead"><span class="aico">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><a class="aurl">${esc(ev.url)}</a>`;
+        c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
         const row = el("div", "abtns");
-        const open = el("button", "abtn primary", "Open in browser");
+        const open = el("button", "abtn primary", "Open in browser"); open.type = "button";
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        const stop = el("button", "abtn", "Stop");
+        const stop = el("button", "abtn", "Stop"); stop.type = "button";
         stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: ev.id }); c.classList.add("stopped"); };
         row.appendChild(open); row.appendChild(stop); c.appendChild(row);
         c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
@@ -272,9 +310,9 @@
         const list = c.querySelector(".artifact-list");
         items.forEach((a) => {
           const row = el("div", "abtns");
-          const open = el("button", "abtn primary", `${a.name} · open`);
+          const open = el("button", "abtn primary", `${a.name} · open`); open.type = "button";
           open.onclick = () => vscode.postMessage({ type: "openExternal", url: a.url });
-          const stop = el("button", "abtn", "Stop");
+          const stop = el("button", "abtn", "Stop"); stop.type = "button";
           stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: a.id }); row.remove(); };
           row.appendChild(open); row.appendChild(stop); list.appendChild(row);
         });
@@ -298,14 +336,14 @@
       case "command_rejected": sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired": sysLine("Approval request expired; the action was denied.", true); break;
       case "compacted": sysLine("context compacted"); break;
-      case "error": sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
-      case "turn_end": endTurn(); setSending(false); break;
+      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
+      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(); setSending(false); break;
     }
     if (stick) scroll();
   }
 
   // ---- composer ----
-  function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}"></span>`; send.title = on ? "Stop" : "Send"; }
+  function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   function submit() {
     const text = input.value.trim();
@@ -330,19 +368,24 @@
   }
   function renderAtts() {
     atts.innerHTML = "";
-    attachments.forEach((a, i) => { const chip = el("span", "chip", esc(a.label) + ' <span class="x">×</span>'); chip.querySelector(".x").onclick = () => { attachments.splice(i, 1); renderAtts(); }; atts.appendChild(chip); });
+    attachments.forEach((a, i) => {
+      const chip = el("span", "chip"), label = el("span", "chip-label"), remove = el("button", "x", "×");
+      label.textContent = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
+      remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
+      chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
+    });
   }
 
   // ---- @file / slash popover ----
-  function hidePop() { pop.style.display = "none"; popMode = null; }
+  function hidePop() { pop.style.display = "none"; popMode = null; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
-    pop.innerHTML = items.map((it, i) => `<div class="pi${i === 0 ? " sel" : ""}" data-i="${i}">${esc(it.label)}${it.detail ? ` <span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}">${esc(it.label)}${it.detail ? ` <span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
-    pop.style.display = "block";
+    pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
-  function movePop(d) { if (popMode) { popIdx = (popIdx + d + popItems.length) % popItems.length; [...pop.children].forEach((c, i) => c.className = "pi" + (i === popIdx ? " sel" : "")); } }
+  function movePop(d) { if (popMode) { popIdx = (popIdx + d + popItems.length) % popItems.length; [...pop.children].forEach((c, i) => { const selected = i === popIdx; c.className = "pi" + (selected ? " sel" : ""); c.setAttribute("aria-selected", String(selected)); }); input.setAttribute("aria-activedescendant", `pop-option-${popIdx}`); } }
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
     if (popMode === "@") {
@@ -417,9 +460,9 @@
   $("btn-model").onclick = (e) => {
     e.stopPropagation();
     const mm = $("modelmenu");
-    if (!mm.hidden) { mm.hidden = true; return; }
+    if (!mm.hidden) { hideModelMenu(); return; }
     mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
-    mm.hidden = false; hideModeMenu();
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu();
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
@@ -433,6 +476,7 @@
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
     "capability_cache_ttl_s", "mode", "think", "context_size"];
+  let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
       base_url: cfg.base_url, model: cfg.model, mode: cfg.mode, think: cfg.think,
@@ -453,7 +497,15 @@
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
     $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
     if (lastConfig) fillSettings(lastConfig);
+    settingsReturnFocus = document.activeElement;
     $("settings").hidden = false;
+    $("s-provider").focus();
+  }
+  function closeSettings() {
+    $("settings").hidden = true;
+    const target = settingsReturnFocus && typeof settingsReturnFocus.focus === "function"
+      ? settingsReturnFocus : $("btn-settings");
+    settingsReturnFocus = null; target.focus();
   }
   function collectSettings() {
     const v = {};
@@ -462,9 +514,19 @@
     return v;
   }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
-  $("set-close").onclick = () => { $("settings").hidden = true; };
-  $("set-cancel").onclick = () => { $("settings").hidden = true; };
-  $("set-save").onclick = () => { vscode.postMessage({ type: "saveSettings", values: collectSettings() }); $("settings").hidden = true; };
+  $("set-close").onclick = closeSettings;
+  $("set-cancel").onclick = closeSettings;
+  $("set-save").onclick = () => { vscode.postMessage({ type: "saveSettings", values: collectSettings() }); closeSettings(); };
+  $("settings").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeSettings(); return; }
+    if (e.key !== "Tab") return;
+    const focusable = [...$("settings").querySelectorAll("button, input, select, textarea")]
+      .filter((node) => !node.disabled && node.getAttribute("aria-hidden") !== "true");
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
   $("s-provider").onchange = () => {
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
     if (p) {
@@ -504,7 +566,8 @@
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
       $("modelname").textContent = curModel || "dgc";
       $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change";
-      if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; }
+      $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
+      if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }

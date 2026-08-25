@@ -1,10 +1,9 @@
 // Headless render test for the DGC webview (media/main.js).
 //
-// We can't drive the real editor UI headlessly — VS Code's webview host, the
-// activity-bar panel and the native QuickPicks need a running editor. What we CAN
-// verify here is the webview's own logic in a real DOM: load the exact HTML skeleton
-// that panel.ts ships, eval media/main.js against it, feed it a scripted `dgc serve`
-// event stream, and assert the elements render with zero JS errors.
+// The separate extension-host smoke activates DGC inside an installed VS Code. This suite exercises
+// the webview itself in a real DOM: load the exact HTML skeleton that panel.ts ships, eval
+// media/main.js, feed it a scripted `dgc serve` event stream, and assert the rendered interaction
+// and accessibility contract with zero JS errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,6 +13,7 @@ import { JSDOM, VirtualConsole } from "jsdom";
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
 const mainJs = readFileSync(dir + "../media/main.js", "utf8");
+const mainCss = readFileSync(dir + "../media/main.css", "utf8");
 const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
 const contributedSettings = extensionManifest.contributes?.configuration?.properties ?? {};
 assert.equal("dgc.apiKey" in contributedSettings, false, "API keys must not be plaintext VS Code settings");
@@ -285,5 +285,84 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
   assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
   assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
+  dom.window.close();
+});
+
+test("webview controls expose keyboard, focus, and assistive-technology semantics", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const key = (target, value, extra = {}) => target.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, ...extra }),
+  );
+
+  assert.equal(doc.documentElement.lang, "en");
+  assert.equal(doc.getElementById("log").getAttribute("role"), "log");
+  assert.equal(doc.getElementById("announcer").getAttribute("aria-live"), "polite");
+  assert.equal(doc.getElementById("input").getAttribute("aria-label"), "Message DGC");
+  assert.match(mainCss, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(mainCss, /#phead \.pm \.cur, \.tool \.dot\.run \{ animation: none; \}/);
+  for (const id of ["set-close", "btn-add", "btn-cmd", "btn-ctx", "btn-settings", "send"]) {
+    assert.ok(doc.getElementById(id).getAttribute("aria-label"), `${id} needs an accessible name`);
+  }
+  for (const button of doc.querySelectorAll("button")) {
+    assert.ok(button.getAttribute("aria-label") || button.textContent.trim() || button.title,
+      `button #${button.id || "(dynamic)"} needs an accessible name`);
+  }
+  for (const control of doc.querySelectorAll("input, select, textarea")) {
+    assert.ok(control.getAttribute("aria-label") || control.closest("label"),
+      `control #${control.id || "(dynamic)"} needs a label`);
+  }
+
+  send({ type: "state", state: { model: "qwen", mode: "default", think: "off" } });
+  const mode = doc.getElementById("btn-mode");
+  mode.focus(); mode.click();
+  const modeMenu = doc.getElementById("modemenu");
+  assert.equal(mode.getAttribute("aria-expanded"), "true");
+  assert.equal(modeMenu.getAttribute("role"), "menu");
+  assert.equal(doc.activeElement.dataset.mode, "default");
+  key(doc.activeElement, "ArrowDown");
+  assert.equal(doc.activeElement.dataset.mode, "acceptEdits");
+  key(doc.activeElement, "Escape");
+  assert.equal(modeMenu.hidden, true);
+  assert.equal(doc.activeElement, mode);
+
+  send({ type: "event", event: { type: "ready", commands: [
+    { name: "goal", description: "standing objective", action: "goal", accepts_args: true },
+  ], custom_commands: [] } });
+  doc.getElementById("btn-cmd").click();
+  const input = doc.getElementById("input"), pop = doc.getElementById("pop");
+  assert.equal(input.getAttribute("aria-expanded"), "true");
+  assert.equal(pop.firstElementChild.getAttribute("role"), "option");
+  assert.equal(input.getAttribute("aria-activedescendant"), pop.firstElementChild.id);
+  key(input, "Escape");
+  assert.equal(input.getAttribute("aria-expanded"), "false");
+
+  send({ type: "attach", label: "src/a.ts:1-2", resource: { type: "selection" } });
+  const remove = doc.querySelector("#attachments button.x");
+  assert.match(remove.getAttribute("aria-label"), /Remove attachment/);
+  remove.click();
+  assert.equal(doc.getElementById("attachments").children.length, 0);
+
+  send({ type: "event", event: { type: "turn_start" } });
+  assert.equal(doc.getElementById("announcer").textContent, "DGC is working");
+  send({ type: "event", event: { type: "thinking_delta", text: "inspect" } });
+  const reasoning = doc.querySelector(".disclosure");
+  assert.equal(reasoning.tagName, "BUTTON");
+  reasoning.click();
+  assert.equal(reasoning.getAttribute("aria-expanded"), "true");
+  send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "a.ts", call_id: "a11y" } });
+  const toolToggle = doc.querySelector(".tool-toggle");
+  toolToggle.click();
+  assert.equal(toolToggle.getAttribute("aria-expanded"), "true");
+
+  const settingsButton = doc.getElementById("btn-settings");
+  settingsButton.focus();
+  send({ type: "settings_open", providers: [], models: [] });
+  assert.equal(doc.getElementById("settings").getAttribute("aria-modal"), "true");
+  assert.equal(doc.activeElement, doc.getElementById("s-provider"));
+  key(doc.getElementById("settings"), "Escape");
+  assert.equal(doc.getElementById("settings").hidden, true);
+  assert.equal(doc.activeElement, settingsButton);
+
+  assert.deepEqual(errors, [], "accessible interaction flow raised JS errors");
   dom.window.close();
 });

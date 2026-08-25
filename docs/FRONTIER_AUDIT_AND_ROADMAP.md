@@ -44,7 +44,7 @@ the editor registries: those are external release actions that require a reviewe
 | Concurrency | Per-session ACP/headless runtimes, busy-state rejection, per-checkout mutation leases, background leases held to process exit, separate TUI config/MCP state, manual worktree isolation | Automatic worktree provisioning/merge UX for parallel write agents and cross-process leases |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured one-shot LSP symbols/diagnostics/definitions/references, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, persistent indexed LSP sessions and optional tree-sitter parsing |
 | MCP / ACP | Current MCP protocol negotiation, pagination, typed content/resources, cancellation and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Progress/logging/elicitation UX, broader ACP conformance fixtures, published SDK/schema package |
-| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, and restart-on-next-command recovery | Real VS Code extension-host tests and accessibility audit |
+| Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, typed selection/tab/diagnostic/mention resources, multi-root grants, accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v2 Python/TypeScript/JSON contract, bounded startup/backpressure queue, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake smoke, and automated keyboard/ARIA/reduced-motion coverage | Broader extension-host interaction/race flows plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
@@ -108,7 +108,7 @@ release rehearsal—not another round of unmeasured feature claims.
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
-| Extension tests | 2 / 2 | 11 / 11 | jsdom protocol/render/safety plus real spawned-child handshake, error, backpressure, incompatibility, and restart flows are green; real VS Code extension-host coverage remains. |
+| Extension tests | 2 / 2 | 12 / 12 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
 | Edit microbenchmark | 17,443 / 19,591 | 17,443 / 19,591 | 89.0% accepted and zero wrong-applies; unchanged corpus baseline. |
 | Release preflight | None | Pass | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates pass. |
@@ -422,7 +422,7 @@ and timeouts, UTF-8/16/32 position conversion, a minimal inherited environment w
 credential variables, no shell, project-confined returned locations, cancellation, static fallback,
 and POSIX process-group cleanup. The one-shot
 design deliberately favors isolation over warm-index latency; a measured persistent service remains
-future work. The complete offline evidence is 488/488 Python checks plus 11/11 editor checks.
+future work. The complete offline evidence is 488/488 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
 activates network and product-specific schemas/instructions only from explicit turn or standing-goal
@@ -461,6 +461,15 @@ sequence allocation and NDJSON writes share one lock. The backend bounds binary 
 rejects invalid UTF-8, drains the rejected line, and recovers at the next frame. Generated-artifact
 drift, declared-event coverage, invalid enums/fields, concurrent ordering, and spawned-child failures
 are regression-tested.
+
+Implementation note for step 6: the local `test:host` gate launches the already-installed VS Code
+Electron executable with isolated user/extension directories, updates/telemetry/background networking
+disabled, and no editor download. It proves that the development extension is discovered, activates,
+registers every command declared by its manifest, resolves the real webview, launches a networkless
+local protocol fixture, and completes the workspace-root handshake. The jsdom suite now covers semantic labels,
+combobox/listbox state, menu arrow/Escape navigation, dialog focus trapping/restoration, attachment
+removal, tool/reasoning disclosures, live status, and reduced-motion CSS. SecretStorage, multi-root,
+approval/cancel races, and manual assistive-technology review remain the next extension-host layer.
 
 ### Milestone 4 — build evidence users can trust (P1)
 
@@ -577,7 +586,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-488/488 Python checks and 11/11 editor transport/webview checks. Step 6's complete preflight was green before the
+488/488 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke. Step 6's complete preflight was green before the
 latest timeout-journal change and must be rerun on the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed

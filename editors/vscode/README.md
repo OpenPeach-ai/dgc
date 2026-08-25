@@ -8,9 +8,10 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 ## What it does
 
 - **Chat panel** in the activity bar — streaming responses, a live *thinking* indicator, collapsible tool cards, and inline diffs. The panel matches the DGC CLI's look: a mono, near-black surface with a single purple accent — tool cards lead with the CLI's glyphs (`→` read · `✎` edit · `$` shell · `✱` search · `▸` other), and diffs render **mono + purple**, not green/red.
-- **Editor-aware** — each prompt carries a compact `<editor-context>` block (the focused file + language, your open tabs, and the current selection, truncated) so the agent grounds on what you're looking at.
+- **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics, explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
 - **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: an inline model picker, a mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
-- **In-panel Settings page** (gear icon) — edit provider / host / API key / model, sub-agent model + host + key, fallback model + host, permission mode, thinking level and context size, all live. The provider/host/key/model, sub-agent, fallback and context settings are also exposed as native VS Code settings (Settings UI → **DGC**), which override the CLI config when set.
+- **In-panel Settings page** (gear icon) — edit provider / host / API key / model, sub-agent and fallback routes, permission mode, thinking level and context size, all live. Credentials stay in endpoint-scoped VS Code SecretStorage; non-secret route settings can also be set in Settings UI → **DGC**.
+- **Keyboard and assistive access** — semantic buttons, menus, live status, dialog focus trapping, reduced-motion behavior, and keyboard navigation cover the composer, tool/reasoning disclosures, approvals, attachments, and settings.
 - **Permission prompts** inline — allow once / always-allow (saves a rule) / deny.
 - **Session resume & rewind** — resuming renders the full transcript; rewind restores both your code and the conversation to an earlier turn.
 - **Your model, your machine** — the extension drives the local `dgc` CLI via `dgc serve` over stdio: same models, same config (`~/.dgc/config.json`), local-first. Nothing leaves your machine unless you point DGC at a cloud model.
@@ -25,5 +26,16 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 ## Settings
 
 - `dgc.command` — path to the `dgc` executable (default `dgc`).
+
+## Local verification
+
+```bash
+npm test                 # transport + webview interaction/accessibility checks
+npm run compile          # TypeScript + development bundle
+npm run test:host        # activate DGC and handshake its webview in installed VS Code
+```
+
+`test:host` never downloads or installs VS Code. Set `DGC_VSCODE_EXECUTABLE` to the editor's real
+Electron executable when it is not available at `/usr/share/code/code`.
 
 Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · PolyForm Noncommercial.
