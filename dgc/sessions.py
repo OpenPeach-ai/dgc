@@ -266,10 +266,18 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          checkpoints: dict | None = None, *, expected_revision: int | None = None,
-         expected_exists: bool | None = None) -> bool:
+         expected_exists: bool | None = None,
+         redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
     saved = False
     try:
         path = resolve_path(project_root, path)
+        if redact_secrets is not None:
+            from .redaction import redact_checkpoint_state, redact_messages, redact_text
+            messages = redact_messages(messages, redact_secrets)
+            name = redact_text(name, redact_secrets) if name else name
+            goal = redact_text(goal, redact_secrets) if goal else goal
+            if checkpoints is not None:
+                checkpoints = redact_checkpoint_state(checkpoints, redact_secrets)
         data = {"schema_version": SCHEMA_VERSION, "id": path.stem,
                 "project": str(Path(project_root).resolve()),
                 "updated": time.time(), "messages": messages}
@@ -362,10 +370,14 @@ def plan_path(session_file, project_root) -> Path:
 
 def save_plan(session_file, markdown: str, project_root, *,
               expected_revision: int | None = None,
-              expected_exists: bool | None = None) -> bool:
+              expected_exists: bool | None = None,
+              redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
     try:
         session = resolve_path(project_root, session_file)
         p = plan_path(session, project_root)
+        if redact_secrets is not None:
+            from .redaction import redact_text
+            markdown = redact_text(markdown, redact_secrets)
         with _lock_for(p):
             exists, revision = _generation(session, project_root)
             if not _expected_generation_matches(
@@ -583,9 +595,13 @@ def activity_of(path, project_root, record: dict | None = None) -> dict:
 
 
 def set_name(path, name: str, project_root, *, expected_revision: int | None = None,
-             expected_exists: bool | None = None) -> bool:
+             expected_exists: bool | None = None,
+             redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
     try:
         p = resolve_path(project_root, path, must_exist=True)
+        if redact_secrets is not None:
+            from .redaction import redact_text
+            name = redact_text(name, redact_secrets)
         with _lock_for(p):
             data = _load_data(p, project_root)  # the lock is re-entrant; retain it through replace
             revision = _record_revision(data, p)
@@ -601,25 +617,29 @@ def set_name(path, name: str, project_root, *, expected_revision: int | None = N
         return False
 
 
-def listing(project_root) -> list[tuple[Path, float, str, int, str]]:
+def listing(project_root, *, redact_secrets=()) -> list[tuple[Path, float, str, int, str]]:
     """(path, updated_ts, first-user-message preview, message count, name), newest first."""
+    from .redaction import redact_text
     items: list[tuple[Path, float, str, int, str]] = []
     for p in project_dir(project_root).glob("*.json"):
         try:
             data = json.loads(p.read_text())
             msgs = data.get("messages", [])
             first = next((m.get("content", "") for m in msgs if m.get("role") == "user"), "")
-            preview = re.sub(r"\s+", " ", str(first)).strip()[:56] or "(empty)"
+            preview = re.sub(
+                r"\s+", " ", redact_text(str(first), redact_secrets)).strip()[:56] or "(empty)"
+            name = redact_text(str(data.get("name") or ""), redact_secrets)
             items.append((p, float(data.get("updated", p.stat().st_mtime)), preview,
-                          len(msgs), data.get("name") or ""))
+                          len(msgs), name))
         except (OSError, ValueError):
             continue
     items.sort(key=lambda t: -t[1])
     return items
 
 
-def listing_all() -> list[tuple[Path, Path, float, str, int, str]]:
+def listing_all(*, redact_secrets=()) -> list[tuple[Path, Path, float, str, int, str]]:
     """Private global index used by protocol adapters: path, project, time, preview, count, name."""
+    from .redaction import redact_text
     items: list[tuple[Path, Path, float, str, int, str]] = []
     base = SESSIONS_DIR.resolve(strict=False)
     for candidate in SESSIONS_DIR.glob("*/*.json"):
@@ -637,9 +657,11 @@ def listing_all() -> list[tuple[Path, Path, float, str, int, str]]:
             if not isinstance(msgs, list):
                 continue
             first = next((m.get("content", "") for m in msgs if m.get("role") == "user"), "")
-            preview = re.sub(r"\s+", " ", str(first)).strip()[:56] or "(empty)"
+            preview = re.sub(
+                r"\s+", " ", redact_text(str(first), redact_secrets)).strip()[:56] or "(empty)"
+            name = redact_text(str(data.get("name") or ""), redact_secrets)
             items.append((p, project, float(data.get("updated", p.stat().st_mtime)), preview,
-                          len(msgs), data.get("name") or ""))
+                          len(msgs), name))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             continue
     items.sort(key=lambda item: -item[2])

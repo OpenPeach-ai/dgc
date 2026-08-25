@@ -24,6 +24,8 @@ from .memory import load_memories
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
 from .mcp import MCPInputError, MCPManager
+from .redaction import (StreamingRedactor, contains_secret, redact_messages,
+                        redact_provider_value, redact_text, redact_value, secret_values)
 from .skills import discover_skills
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 
@@ -696,9 +698,15 @@ class Agent:
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.cancelled = threading.Event()  # a front-end sets this to interrupt the turn/tool wait
+        todo_callback = getattr(ui, "on_todo", None)
+        if callable(todo_callback):
+            def safe_todo_callback(todos):
+                todo_callback(redact_value(todos, secret_values(config)))
+        else:
+            safe_todo_callback = None
         self.ctx = AgentContext(project_root=config.project_root, config=config,
                                 skills=self.skills, todos=self.todos,
-                                on_todo=getattr(ui, "on_todo", None), cancelled=self.cancelled)
+                                on_todo=safe_todo_callback, cancelled=self.cancelled)
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         # Tool execution is rooted at config.project_root. A managed fleet worktree deliberately
@@ -827,6 +835,7 @@ class Agent:
         for message in params["messages"]:
             text = "\n".join(block["text"] for block in message["content"])
             messages.append({"role": message["role"], "content": text})
+        messages = redact_messages(messages, self._secret_values())
 
         sample_deadline = time.monotonic() + 120
         sample_cancel = _DeadlineCancel(cancel, sample_deadline)
@@ -841,14 +850,15 @@ class Agent:
             result = sample_client.chat(messages, tools=None, reasoning_effort="off",
                                         on_text=None, on_thinking=None, cancel=sample_cancel)
         except LLMError as exc:
-            raise MCPInputError(f"sampling model failed: {str(exc)[:300]}") from exc
+            raise MCPInputError(
+                f"sampling model failed: {self._safe_text(str(exc))[:300]}") from exc
         self._record_usage(getattr(result, "usage", {}))
         if sample_cancel.is_set():
             reason = "cancelled by user" if cancel.is_set() else "timed out"
             raise MCPInputError(f"sampling request {reason}")
         if getattr(result, "tool_calls", None):
             raise MCPInputError("sampling model attempted an unadvertised tool call")
-        text = str(getattr(result, "content", "") or "")
+        text = self._safe_text(str(getattr(result, "content", "") or ""))
         stop_reason = "endTurn"
         for stop in params.get("stopSequences", []):
             pos = text.find(stop)
@@ -861,7 +871,8 @@ class Agent:
         if finish in ("length", "max_tokens"):
             stop_reason = "maxTokens"
         response = {"role": "assistant", "content": {"type": "text", "text": text},
-                    "model": str(getattr(sample_client, "model", self.config.model))[:256],
+                    "model": self._safe_text(
+                        str(getattr(sample_client, "model", self.config.model)))[:256],
                     "stopReason": stop_reason}
         release = interact(server, "sampling_response", response, cancel=cancel)
         if not isinstance(release, dict) or release.get("action") != "accept":
@@ -950,6 +961,16 @@ class Agent:
                        if tool.get("function", {}).get("name") != "update_goal"]
         return schemas
 
+    def _secret_values(self) -> tuple[str, ...]:
+        """Live credential set used by transcript, tool-output, and stream boundaries."""
+        return secret_values(self.config)
+
+    def _safe_text(self, value) -> str:
+        return redact_text(value, self._secret_values())
+
+    def _safe_value(self, value):
+        return redact_value(value, self._secret_values())
+
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None):
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
@@ -958,13 +979,41 @@ class Agent:
         old_timeout = getattr(self.client, "read_timeout", None)
         if read_timeout is not None and old_timeout is not None:
             self.client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
+        text_stream = StreamingRedactor(self._secret_values)
+        thinking_stream = StreamingRedactor(self._secret_values)
+        safe_messages = redact_messages(self.messages, self._secret_values())
+
+        def emit_text(chunk) -> None:
+            safe = text_stream.feed(chunk)
+            if safe:
+                self.ui.on_text(safe)
+
+        def emit_thinking(chunk) -> None:
+            safe = thinking_stream.feed(chunk)
+            if safe:
+                self.ui.on_thinking(safe)
+
         try:
-            result = self.client.chat(self.messages, tools=tools, reasoning_effort=effort,
-                                      on_text=self.ui.on_text, on_thinking=self.ui.on_thinking,
-                                      cancel=cancel or self.cancelled)
+            try:
+                result = self.client.chat(safe_messages, tools=tools, reasoning_effort=effort,
+                                          on_text=emit_text, on_thinking=emit_thinking,
+                                          cancel=cancel or self.cancelled)
+            finally:
+                final_thinking = thinking_stream.flush()
+                final_text = text_stream.flush()
+                if final_thinking:
+                    self.ui.on_thinking(final_thinking)
+                if final_text:
+                    self.ui.on_text(final_text)
         finally:
             if old_timeout is not None:
                 self.client.read_timeout = old_timeout
+        result.content = self._safe_text(result.content)
+        secrets = self._secret_values()
+        if result.provider_items:
+            result.provider_items = redact_provider_value(result.provider_items, secrets)
+        if result.provider_message:
+            result.provider_message = redact_provider_value(result.provider_message, secrets)
         self._record_usage(result.usage)
         return result
 
@@ -1176,7 +1225,7 @@ class Agent:
 
         if not self.client.tools_supported:
             parts += ["", self._text_protocol_section()]
-        return "\n".join(parts)
+        return self._safe_text("\n".join(parts))
 
     def _text_protocol_section(self) -> str:
         schemas = [{"name": t["function"]["name"],
@@ -1205,7 +1254,7 @@ class Agent:
     def steer(self, text: str) -> None:
         """Queue a message the user typed WHILE a turn is running; it's injected at the next
         tool-loop boundary so the model reads it and adjusts (not a separate later turn)."""
-        self.steer_queue.append(text)
+        self.steer_queue.append(self._safe_text(text))
 
     def _drain_steer(self) -> bool:
         """Fold any mid-turn user messages into the conversation. Returns True if it added any."""
@@ -1308,11 +1357,12 @@ class Agent:
                     run_hooks("SessionStart", {"project": str(self.config.project_root)},
                               self.config, self.config.project_root)
             self.steer_queue.clear()            # drop stale interjections from a prior turn
-            self._activate_tool_intents(user_text, replace=True)
+            safe_user_text = self._safe_text(user_text)
+            self._activate_tool_intents(safe_user_text, replace=True)
             self._refresh_system()
             completed = None
             try:
-                completed = self._run_turn(user_text)
+                completed = self._run_turn(safe_user_text)
             finally:
                 self._active_tool_intents.clear()
                 repaired, changed = _repair_tool_transcript(self.messages)
@@ -1326,7 +1376,8 @@ class Agent:
                                              or "could not persist this session")
                     self.ui.error(self._last_turn_error)
                 if self.depth == 0:             # Stop lifecycle hook (turn finished)
-                    run_hooks("Stop", {"prompt": user_text}, self.config, self.config.project_root)
+                    run_hooks("Stop", {"prompt": safe_user_text},
+                              self.config, self.config.project_root)
             if completed is False and not self._last_turn_error:
                 self._last_turn_error = (self._last_persist_error
                                          or "the turn stopped before it completed")
@@ -1351,12 +1402,15 @@ class Agent:
                     return False
                 with self._usage_lock:
                     usage, activity = dict(self.usage_totals), dict(self.activity_totals)
+                redact_secrets = (self._secret_values()
+                                  if self.config.get("session_redaction", True) else None)
                 saved = sessions.save(
                     self.session_file, self.messages, self.session_root,
                     name=self.session_name, goal=self.goal, goal_status=self.goal_status,
                     usage=usage, activity=activity, checkpoints=checkpoint_state,
                     expected_revision=self._session_revision,
-                    expected_exists=self._session_exists)
+                    expected_exists=self._session_exists,
+                    redact_secrets=redact_secrets)
                 if saved:
                     self._session_revision += 1
                     self._session_exists = True
@@ -1383,7 +1437,7 @@ class Agent:
 
     def name_session(self, name: str) -> bool:
         """Give the current session a human name (shown in --resume / the session picker)."""
-        value = name.strip() or None
+        value = self._safe_text(name).strip() or None
         with self._session_turn_scope() as reserved:
             if not reserved:
                 self._last_persist_error = (
@@ -1402,7 +1456,9 @@ class Agent:
                     saved = reserved and sessions.set_name(
                         self.session_file, self.session_name, self.session_root,
                         expected_revision=self._session_revision,
-                        expected_exists=True)
+                        expected_exists=True,
+                        redact_secrets=(self._secret_values()
+                                        if self.config.get("session_redaction", True) else None))
                     if saved:
                         self._session_revision += 1
                         self._last_persist_error = ""
@@ -1423,8 +1479,9 @@ class Agent:
         sysmsg = ("You generate a session title: a short, distinctive 5-10 word descriptive title "
                   "for a software-engineering session. Super info-dense, no filler, no quotes, no "
                   "trailing punctuation. Output ONLY the title.")
+        safe_prompt = self._safe_text(str(prompt))[:2000]
         msgs = [{"role": "system", "content": sysmsg},
-                {"role": "user", "content": f"<user_query>{str(prompt)[:2000]}</user_query>"}]
+                {"role": "user", "content": f"<user_query>{safe_prompt}</user_query>"}]
         try:
             res = self._aux_client(max_tokens=64, read_timeout=60).chat(
                 msgs, tools=None, reasoning_effort="off",
@@ -1432,7 +1489,7 @@ class Agent:
             self._record_usage(getattr(res, "usage", None))
         except Exception:
             return None
-        title = (getattr(res, "content", "") or "").strip()
+        title = self._safe_text((getattr(res, "content", "") or "").strip())
         title = (title.splitlines()[0] if title else "").strip().strip('"').strip("'")
         title = _re.sub(r"\s+", " ", title).strip()[:60]
         return title or None
@@ -1444,7 +1501,8 @@ class Agent:
         sysmsg = ("Given the last exchange in a coding session, predict ONE short, natural next prompt "
                   "the user is likely to type next. Output ONLY that prompt — imperative, under 12 words, "
                   "no quotes, no trailing punctuation.")
-        ctx = f"User: {str(user_prompt)[:600]}\nAssistant: {str(assistant_response)[:800]}"
+        ctx = (f"User: {self._safe_text(user_prompt)[:600]}\n"
+               f"Assistant: {self._safe_text(assistant_response)[:800]}")
         try:
             res = self._aux_client(max_tokens=48, read_timeout=60).chat(
                 [{"role": "system", "content": sysmsg}, {"role": "user", "content": ctx}],
@@ -1453,7 +1511,7 @@ class Agent:
             self._record_usage(getattr(res, "usage", None))
         except Exception:
             return None
-        s = (getattr(res, "content", "") or "").strip().splitlines()
+        s = self._safe_text((getattr(res, "content", "") or "").strip()).splitlines()
         s = (s[0] if s else "").strip().strip('"').strip("'").rstrip(".")
         s = _re.sub(r"\s+", " ", s)[:120]
         return s or None
@@ -1466,7 +1524,7 @@ class Agent:
             role = m.get("role")
             if role == "system":
                 continue
-            content = str(m.get("content", ""))[:2000]
+            content = self._safe_text(str(m.get("content", "")))[:2000]
             calls = ""
             if m.get("tool_calls"):
                 calls = " [tools: " + ", ".join(c.get("function", {}).get("name", "?")
@@ -1494,9 +1552,10 @@ class Agent:
                                            {"role": "user", "content": "\n\n".join(lines)[:40000]}],
                                           tools=None, reasoning_effort="off", cancel=self.cancelled)
             self._record_usage(getattr(res, "usage", None))
-            return (getattr(res, "content", "") or "").strip() or "# Handoff\n\n(generation returned nothing)"
+            return (self._safe_text((getattr(res, "content", "") or "").strip())
+                    or "# Handoff\n\n(generation returned nothing)")
         except LLMError as e:
-            return f"# Handoff\n\n(generation failed: {e})"
+            return self._safe_text(f"# Handoff\n\n(generation failed: {e})")
 
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""
@@ -1505,8 +1564,15 @@ class Agent:
             path = sessions.resolve_path(self.session_root, path, must_exist=True)
             record = sessions.load_record(path, self.session_root)
             loaded = [m for m in record.get("messages", []) if m.get("role") != "system"]
+            # Resume is a live model/UI boundary even when the optional extra persistence pass is
+            # disabled. Never replay a legacy raw credential into memory or a provider request.
+            from .redaction import redact_checkpoint_state
+            secrets = self._secret_values()
+            loaded = redact_messages(loaded, secrets)
+            if isinstance(record.get("checkpoints"), dict):
+                record["checkpoints"] = redact_checkpoint_state(record["checkpoints"], secrets)
             self.session_file = path
-            self.session_name = str(record.get("name") or "").strip() or None
+            self.session_name = self._safe_text(str(record.get("name") or "")).strip() or None
             self._session_revision = int(record.get("revision", 0))
             self._session_exists = True
             self._last_persist_error = ""
@@ -1514,7 +1580,7 @@ class Agent:
             with self._usage_lock:
                 self.usage_totals = sessions.usage_of(path, self.session_root, record)
                 self.activity_totals = sessions.activity_of(path, self.session_root, record)
-            self.goal = str(record.get("goal") or "")[:_GOAL_MAX_CHARS]
+            self.goal = self._safe_text(str(record.get("goal") or ""))[:_GOAL_MAX_CHARS]
             raw_status = str(record.get("goal_status") or "active")
             self.goal_status = (raw_status if self.goal
                                 and raw_status in ("active", "completed", "blocked")
@@ -1530,7 +1596,7 @@ class Agent:
 
     def set_goal(self, text: str, status: str = "active") -> bool:
         """Set (or clear) a bounded standing objective and persist it immediately."""
-        clean = str(text or "").strip()[:_GOAL_MAX_CHARS]
+        clean = self._safe_text(text).strip()[:_GOAL_MAX_CHARS]
         previous = (self.goal, self.goal_status)
         self.goal = clean
         self.goal_status = (status if clean and status in ("active", "completed", "blocked")
@@ -1570,7 +1636,7 @@ class Agent:
 
     def _fail_turn(self, message: str) -> bool:
         """Record and render one handled terminal failure for every frontend."""
-        self._last_turn_error = str(message or "the turn failed")
+        self._last_turn_error = self._safe_text(message or "the turn failed")
         self.ui.error(self._last_turn_error)
         return False
 
@@ -1684,7 +1750,7 @@ class Agent:
             except LLMError as e:
                 fb = str(self.config.get("fallback_model") or "")
                 if fb and fb != self.client.model:      # retry the turn on a fallback model
-                    self.ui.info(f"⤳ primary model failed; falling back to {fb}")
+                    self.ui.info(self._safe_text(f"⤳ primary model failed; falling back to {fb}"))
                     self.client = self._fallback_client(fb)
                     try:
                         result = self._chat(tools, effort, cancel=chat_cancel,
@@ -1739,7 +1805,8 @@ class Agent:
             if native:
                 assistant["tool_calls"] = [
                     {"id": c.id, "type": "function",
-                     "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
+                     "function": {"name": c.name,
+                                  "arguments": json.dumps(self._safe_value(c.arguments))}}
                     for c in result.tool_calls]
             self.messages.append(assistant)
 
@@ -1805,7 +1872,8 @@ class Agent:
                 if needs_verifier:                                  # E: verify-before-done gate
                     verify_runs += 1
                     cmd = str(self.config.get("verify_command"))
-                    self.ui.info(f"⧗ verify: {cmd}")
+                    safe_cmd = self._safe_text(cmd)
+                    self.ui.info(f"⧗ verify: {safe_cmd}")
                     try:
                         verify_timeout = max(1, int(self.config.get("bash_timeout", 120)))
                     except (TypeError, ValueError):
@@ -1831,10 +1899,11 @@ class Agent:
                     finally:
                         if acquired:
                             lease.release()
+                    verify_out = self._safe_text(verify_out)
                     if not verify_out.startswith("exit code: 0\n"):
                         self.messages.append({"role": "user", "content":
                             "<system-reminder>\nverify_before_done: the configured verifier did not "
-                            f"pass (`{cmd}`). Fix the code or the verifier failure, then finish:\n"
+                            f"pass (`{safe_cmd}`). Fix the code or the verifier failure, then finish:\n"
                             + verify_out[-3000:] + "\n</system-reminder>"})
                         continue
                 return True
@@ -1912,6 +1981,7 @@ class Agent:
                             self._last_task_integrated = False
                         out = self._handle_call(call)
                         task_integrated = call.name == "task" and self._last_task_integrated
+                out = self._safe_text(out)
                 # Compaction may replace old tool messages, but it must never erase observable
                 # activity. Count model-issued calls in native and fenced text-tool modes alike;
                 # a file edit counts only after the tool reports that it landed.
@@ -2093,7 +2163,7 @@ class Agent:
                     or perms.decide(call.name, call.arguments)[0] != ALLOW):
                 return {}
         for call in calls:
-            self.ui.tool_call(call.name, call.arguments, call.id)
+            self.ui.tool_call(call.name, self._safe_value(call.arguments), call.id)
         self.ui.info(f"↯ running {len(calls)} independent reads in parallel")
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -2104,9 +2174,9 @@ class Agent:
             for future in as_completed(pending):
                 i = pending[future]
                 try:
-                    outputs[i] = _clamp(str(future.result()))
+                    outputs[i] = _clamp(self._safe_text(str(future.result())))
                 except Exception as e:
-                    outputs[i] = f"error: {type(e).__name__}: {e}"
+                    outputs[i] = self._safe_text(f"error: {type(e).__name__}: {e}")
         for i, call in enumerate(calls):
             self.ui.tool_result(call.name, outputs[i], call.id)
         return outputs
@@ -2114,6 +2184,8 @@ class Agent:
     def _handle_call(self, call: ToolCall) -> str:
         name, args = call.name, call.arguments
         call_id = call.id
+        secrets = self._secret_values()
+        display_args = redact_value(args, secrets)
         if name == "task":
             # The description and returned summary are model-controlled. Keep mutation/convergence
             # accounting on a private state bit set only by a successful structured integration.
@@ -2125,6 +2197,7 @@ class Agent:
             plan = str(args.get("plan", "")).strip()
             if not plan:
                 return "error: the proposed plan is empty. Research the task and present concrete steps."
+            safe_plan = redact_text(plan, secrets)
             if self.session_file and plan:              # persist it  → /view-plan reopens
                 from . import sessions
                 with self._session_turn_scope() as reserved:
@@ -2133,9 +2206,11 @@ class Agent:
                                 "this session's active turn. Wait or resume a different session.")
                     with self._session_persist_lock:
                         saved = sessions.save_plan(
-                            self.session_file, plan, self.session_root,
+                            self.session_file, safe_plan, self.session_root,
                             expected_revision=self._session_revision,
-                            expected_exists=self._session_exists)
+                            expected_exists=self._session_exists,
+                            redact_secrets=(secrets if self.config.get("session_redaction", True)
+                                            else None))
                 if not saved:
                     return ("error: the plan was not saved because this session changed in another "
                             "process or its storage was unavailable. Resume the latest session and "
@@ -2143,9 +2218,9 @@ class Agent:
             if self.config.get("plan_artifact", True):  # safe plan rendering is separate from arbitrary previews
                 try:
                     from . import artifacts
-                    title = next((ln.lstrip("# ").strip() for ln in plan.splitlines()
+                    title = next((ln.lstrip("# ").strip() for ln in safe_plan.splitlines()
                                   if ln.strip().startswith("# ")), "Plan")
-                    art = artifacts.serve_plan(plan, self.config.project_root, name=title,
+                    art = artifacts.serve_plan(safe_plan, self.config.project_root, name=title,
                                                preferred_port=int(self.config.get("artifact_port", 45000)),
                                                lan=False)              # proposed plans never leave loopback
                     notify = getattr(self.ui, "artifact_ready", None)
@@ -2153,9 +2228,10 @@ class Agent:
                         notify(art)                     # the CLI proposes opening the plan in the browser
                 except Exception:
                     pass
-            choice = self.ui.present_plan(plan)
+            choice = self.ui.present_plan(safe_plan)
             if choice is None:
-                feedback = str(getattr(self.ui, "plan_feedback", "") or "").strip()
+                feedback = redact_text(
+                    str(getattr(self.ui, "plan_feedback", "") or "").strip(), secrets)
                 if hasattr(self.ui, "plan_feedback"):
                     self.ui.plan_feedback = ""             # one-shot: never leak into a later proposal
                 suffix = (f" The user's feedback is: {feedback}" if feedback else
@@ -2166,8 +2242,8 @@ class Agent:
             return f"Plan APPROVED. Plan mode exited; permission mode is now '{target}'. Execute the plan now."
 
         if name == "propose_options":
-            question = str(args.get("question", ""))
-            options = [str(o) for o in (args.get("options") or [])]
+            question = redact_text(str(args.get("question", "")), secrets)
+            options = [redact_text(str(o), secrets) for o in (args.get("options") or [])]
             if not options:
                 return "No options were provided. Ask a normal question or make the call yourself."
             choice = self.ui.propose_options(question, options)
@@ -2191,8 +2267,11 @@ class Agent:
                 return "Plan mode is read-only — don't start a preview yet. Describe it in the plan instead."
             from . import artifacts
             try:
-                art = artifacts.add(str(args.get("path", "")), self.config.project_root,
-                                    str(args.get("name", "") or ""),
+                artifact_path = str(args.get("path", ""))
+                artifact_name = redact_text(
+                    str(args.get("name", "") or Path(artifact_path).stem or "Artifact"), secrets)
+                art = artifacts.add(artifact_path, self.config.project_root,
+                                    artifact_name or "Artifact",
                                     preferred_port=int(self.config.get("artifact_port", 45000)),
                                     lan=(str(self.config.get("artifact_bind", "localhost")).lower() == "lan"))
             except Exception as e:
@@ -2213,12 +2292,12 @@ class Agent:
         external_paths = perms.external_paths(name, args)
         decision, reason = perms.decide(name, args)
         if decision == DENY:
-            self.ui.tool_denied(name, args, reason, call_id)
+            self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
         if decision == ASK:
-            verdict = self.ui.approve(name, args, call_id)
+            verdict = self.ui.approve(name, display_args, call_id)
             if verdict == "no":
-                reason = getattr(self.ui, "deny_reason", "") or ""
+                reason = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets)
                 if hasattr(self.ui, "deny_reason"):
                     self.ui.deny_reason = ""          # consume it
                 if reason:
@@ -2226,7 +2305,9 @@ class Agent:
                             "guidance instead; do not retry the denied action.")
                 return "The user DENIED this action. Do not retry it; ask how to proceed or move on."
             if verdict == "always":
-                if external_paths:
+                if contains_secret(args, secrets):
+                    self.ui.info("credential-bearing approvals are one-time only; no rule was saved")
+                elif external_paths:
                     self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
                 else:
                     self.ui.add_permission_rule(name, perms.canonical_args(name, args))
@@ -2244,7 +2325,7 @@ class Agent:
         needs_lease = ((name in _SERIAL_MUTATIONS and not (name == "bash" and args.get("background")))
                        or name.startswith("mcp__"))
         lease = workspace_mutation_lock(self.config.project_root) if needs_lease else None
-        self.ui.tool_call(name, args, call_id)
+        self.ui.tool_call(name, display_args, call_id)
         if lease is not None and not acquire_cancellable(lease, self.cancelled):
             out = (f"error: {lease.last_error}" if lease.last_error else
                    "error: tool call cancelled while waiting for another agent's workspace write lease")
@@ -2267,7 +2348,7 @@ class Agent:
                     blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
                                               self.config, self.config.project_root)
                     if blocked:
-                        self.ui.tool_denied(name, args, "PreToolUse hook", call_id)
+                        self.ui.tool_denied(name, display_args, "PreToolUse hook", call_id)
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
                                 "Do not retry this exact action.")
                     if name == "task":
@@ -2283,7 +2364,8 @@ class Agent:
                         def on_progress(event):
                             if progress_ui:
                                 progress_ui(
-                                    name, str(event.get("message") or "MCP server is working"),
+                                    name, redact_text(
+                                        str(event.get("message") or "MCP server is working"), secrets),
                                     progress=event.get("progress"), total=event.get("total"),
                                     call_id=call_id)
 
@@ -2291,8 +2373,10 @@ class Agent:
                             if progress_ui:
                                 logger = f" [{event.get('logger')}]" if event.get("logger") else ""
                                 progress_ui(
-                                    name, f"{event.get('level', 'info')}{logger}: "
-                                    f"{event.get('message', '')}", level=str(event.get("level") or "info"),
+                                    name, redact_text(
+                                        f"{event.get('level', 'info')}{logger}: "
+                                        f"{event.get('message', '')}", secrets),
+                                    level=str(event.get("level") or "info"),
                                     call_id=call_id)
 
                         out = self.mcp.call(name, args, self.cancelled,
@@ -2303,11 +2387,11 @@ class Agent:
             finally:
                 if lease is not None:
                     lease.release()
-        out = _clamp(out)                      # central ceiling — MCP + any future tool inherit it
+        out = _clamp(redact_text(out, secrets))  # credential boundary before the central ceiling
         _, post = run_hooks("PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
                             self.config, self.config.project_root)
         if post:
-            out = f"{out}\n[hook] {post}"
+            out = redact_text(f"{out}\n[hook] {post}", secrets)
         self.ui.tool_result(name, out, call_id)
         return out
 
@@ -2531,6 +2615,9 @@ class Agent:
         from .worktree import TaskWorkspace, repo_root
 
         self._last_task_integrated = False
+        description = self._safe_text(description)
+        prompt = self._safe_text(prompt)
+        agent_name = self._safe_text(agent_name)
         adef = self.agent_defs.get(agent_name) if agent_name else None
         tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
         self.ui.info(f"⟳ sub-task: {description}{tag}")
@@ -2559,7 +2646,7 @@ class Agent:
                     f"could not be created: {isolation_error or 'unknown error'}. The parent checkout "
                     "was left unchanged.")
         if workspace is not None:
-            self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
+            self.ui.info(self._safe_text(f"↳ isolated checkout: {workspace.project_root}"))
         else:
             self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
 
@@ -2608,7 +2695,7 @@ class Agent:
             return {}
 
         for call in calls:
-            self.ui.tool_call(call.name, call.arguments, call.id)
+            self.ui.tool_call(call.name, self._safe_value(call.arguments), call.id)
         self.ui.info(f"↯ running {len(calls)} isolated sub-tasks in parallel (max {limit})")
 
         prepared: dict[int, object] = {}
@@ -2619,12 +2706,13 @@ class Agent:
         if not acquire_cancellable(lease, self.cancelled):
             detail = lease.last_error or "cancelled while preparing parallel task worktrees"
             outcomes = {i: _TaskOutcome(
-                f"Sub-task '{str(call.arguments.get('description', ''))}' was not started: {detail}.")
+                f"Sub-task '{self._safe_text(str(call.arguments.get('description', '')))}' "
+                f"was not started: {self._safe_text(detail)}.")
                 for i, call in enumerate(calls)}
         else:
             try:
                 for i, call in enumerate(calls):
-                    description = str(call.arguments.get("description", ""))
+                    description = self._safe_text(str(call.arguments.get("description", "")))
                     if self.cancelled.is_set():
                         outcomes[i] = _TaskOutcome(
                             f"Sub-task '{description}' cancelled before its worktree was prepared.")
@@ -2659,14 +2747,15 @@ class Agent:
                     cleanup = workspace.cleanup()
                     warning = f" Cleanup warning: {cleanup}." if cleanup else ""
                     outcomes[i] = _TaskOutcome(
-                        f"Sub-task '{str(calls[i].arguments.get('description', ''))}' was not started: "
+                        f"Sub-task '{self._safe_text(str(calls[i].arguments.get('description', '')))}' "
+                        "was not started: "
                         f"{detail}.{warning}")
                 prepared = {}
 
         interaction_lock = threading.Lock()
         executions: dict[int, tuple[str, str, str]] = {}
         sub_uis = {i: _SubUI(
-            self.ui, str(calls[i].arguments.get("description", "")), buffered=True,
+            self.ui, self._safe_text(str(calls[i].arguments.get("description", ""))), buffered=True,
             interaction_lock=interaction_lock, cancel=self.cancelled) for i in prepared}
         replay_errors: list[str] = []
         if prepared:
@@ -2677,14 +2766,16 @@ class Agent:
                     pending = {}
                     for i, workspace in prepared.items():
                         args = calls[i].arguments
-                        description = str(args.get("description", ""))
-                        agent_name = str(args.get("agent", ""))
+                        description = self._safe_text(str(args.get("description", "")))
+                        prompt = self._safe_text(str(args.get("prompt", "")))
+                        agent_name = self._safe_text(str(args.get("agent", "")))
                         adef = self.agent_defs.get(agent_name) if agent_name else None
                         tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
                         self.ui.info(f"⟳ sub-task: {description}{tag}")
-                        self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
+                        self.ui.info(self._safe_text(
+                            f"↳ isolated checkout: {workspace.project_root}"))
                         future = pool.submit(
-                            self._execute_prepared_subagent, description, str(args.get("prompt", "")),
+                            self._execute_prepared_subagent, description, prompt,
                             agent_name, workspace, sub_uis[i])
                         pending[future] = i
                     for future in as_completed(pending):
@@ -2700,17 +2791,18 @@ class Agent:
                     executions.setdefault(i, (failure, "", ""))
                     replay_errors.extend(sub_uis[i].replay())
         if replay_errors:
-            self.ui.info("parallel task UI replay warning: " + "; ".join(replay_errors[:4]))
+            self.ui.info(self._safe_text(
+                "parallel task UI replay warning: " + "; ".join(replay_errors[:4])))
 
         # Children cannot observe sibling integrations: every run has stopped before this ordered
         # phase begins. Disjoint deltas land; overlaps retain the later call for explicit /tasks use.
         for i in sorted(prepared):
-            description = str(calls[i].arguments.get("description", ""))
+            description = self._safe_text(str(calls[i].arguments.get("description", "")))
             execution = executions.get(i, ("parallel task worker did not return a result", "", ""))
             outcomes[i] = self._finalize_subagent(description, prepared[i], *execution)
         for i, call in enumerate(calls):
             outcome = outcomes.get(i, _TaskOutcome("Sub-task failed without a result."))
-            outcome = _TaskOutcome(_clamp(outcome.output), outcome.integrated)
+            outcome = _TaskOutcome(_clamp(self._safe_text(outcome.output)), outcome.integrated)
             outcomes[i] = outcome
             self.ui.tool_result(call.name, outcome.output, call.id)
         return outcomes
@@ -2819,7 +2911,7 @@ class Agent:
         middle_start = 1
         m1 = self.messages[1] if len(self.messages) > 1 else {}
         if isinstance(m1.get("content"), str) and m1["content"].startswith(_COMPACT_PREFIX):
-            prior = m1["content"].split("\n", 1)[-1]
+            prior = self._safe_text(m1["content"].split("\n", 1)[-1])
             middle_start = 2
             if (len(self.messages) > 2 and self.messages[2].get("role") == "assistant"
                     and self.messages[2].get("content") == _COMPACT_ACK):
@@ -2828,7 +2920,8 @@ class Agent:
         transcript_lines = []
         for m in middle:
             role = m.get("role", "?")
-            content = _bounded_head_tail(str(m.get("content", "")), 1500)
+            content = _bounded_head_tail(
+                self._safe_text(str(m.get("content", ""))), 1500)
             calls = ""
             if m.get("tool_calls"):
                 rendered_calls = []
@@ -2840,7 +2933,8 @@ class Agent:
                     arguments = fn.get("arguments", "{}")
                     if not isinstance(arguments, str):
                         arguments = json.dumps(arguments, sort_keys=True, default=str)
-                    rendered_calls.append(f"{name}({_bounded_head_tail(arguments, 500)})")
+                    rendered_calls.append(
+                        f"{name}({_bounded_head_tail(self._safe_text(arguments), 500)})")
                 rendered = _bounded_head_tail("; ".join(rendered_calls), 1200)
                 calls = f" [tools: {rendered}]" if rendered else ""
             transcript_lines.append(f"{role}{calls}: {content}")
@@ -2849,7 +2943,7 @@ class Agent:
         # Structured + MERGED summary (pi): a fixed schema, and fold the PREVIOUS brief in rather than
         # restart — so facts established before an earlier compaction aren't lost on the next one.
         source_limit = max(4_000, min(60_000, context_size * 2))
-        source = _compaction_source(prior, transcript_lines, source_limit)
+        source = self._safe_text(_compaction_source(prior, transcript_lines, source_limit))
         prompt = (
             "You are compacting a coding session so the agent can continue with less context. Produce a "
             "compact brief under EXACTLY these headings (omit one only if truly empty):\n"
@@ -2862,7 +2956,7 @@ class Agent:
             "Be terse; use bullets. MERGE the earlier brief below with the new transcript: keep "
             "everything from it that's still true, update what changed, drop nothing established.\n\n"
             + source)
-        fallback = _mechanical_compaction_brief(prior, transcript_lines)
+        fallback = self._safe_text(_mechanical_compaction_brief(prior, transcript_lines))
         now = time.monotonic()
         compact_deadline = min(deadline, now + _COMPACT_TIMEOUT_S) if deadline is not None \
             else now + _COMPACT_TIMEOUT_S
@@ -2877,7 +2971,8 @@ class Agent:
                         [{"role": "user", "content": prompt}], tools=None,
                         reasoning_effort="off", cancel=compact_cancel)
                 self._record_usage(getattr(result, "usage", None))
-                candidate = str(getattr(result, "content", "") or "").strip()
+                candidate = self._safe_text(
+                    str(getattr(result, "content", "") or "").strip())
                 required = ("## Goal", "## Progress", "## Next")
                 if (candidate and not compact_cancel.is_set()
                         and not getattr(result, "tool_calls", None)

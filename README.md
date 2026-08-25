@@ -101,6 +101,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Memory** — `DGC.md` in your project (and `~/.dgc/DGC.md` personal) load into every session; `#a fact` quick-adds; `/init` writes a project guide.
 - **Web search** — the model gets a `web_search` tool. DuckDuckGo works keyless out of the box; add Brave/Tavily (API key) or SearXNG (self-hosted URL) via `dgc setup` or `/search`.
 - **Session persistence** — every conversation is saved per project; `dgc --continue` resumes the most recent, `dgc --resume` picks one.
+- **Credential-safe history and UI** — live DGC/provider credentials plus high-confidence authorization, token, private-key, and password shapes are masked before model context, tool results, terminal/editor/ACP output, saved plans, and session conversation history. Masking survives arbitrary provider stream chunk boundaries and preserves opaque signed/encrypted continuation fields. A credential-bearing approval can run once but can never create a persistent permission rule. Exact file rewind snapshots stay byte-for-byte correct inside the owner-private session; they are not text-redacted.
 - **Durable checkpoints & rewind** — `/rewind` restores the exact pre-turn conversation plus direct file-tool and integrated sub-agent changes, including binary files, executable modes, symlinks, deletions, and new files. Project-root snapshots live atomically inside the private session, so they survive `/resume` and transcript compaction; a direct edit is refused if its pre-edit state cannot be saved. Arbitrary shell writes cannot be enumerated reliably, and explicitly approved external-path snapshots remain current-process only rather than becoming restart-time authority outside the project.
 - **Self-update** — `dgc` checks for a newer version and flags it in the banner; `dgc update` installs it.
 - **Skills** — ships **16 built-in skills** (`batch`, `code-review`, `dataviz`, `debug`, `deep-research`, `dgc-design`, `handoff`, `loop`, `onboard`, `plan`, `refactor`, `security-review`, `setup`, `ship`, `verify`, `write-tests`) plus your own: drop a `SKILL.md` in `.dgc/skills/<name>/` or `~/.dgc/skills/`, and the model invokes it when the description matches (project overrides user overrides bundled). Run one directly with the `skill` tool or `/skill NAME`. `dgc-design` encodes DGC's frontend design language and stays off for normal coding — artifacts load it automatically.
@@ -189,6 +190,7 @@ Paste this to any coding agent:
   "plan_artifact": true,
   "artifact_in_plan": false,
   "compact_threshold": 0.85,
+  "session_redaction": true,
   "search_provider": "duckduckgo",
   "permissions": {"allow": ["Bash(git status:*)"], "ask": [], "deny": ["Bash(rm -rf *)"]}
 }
@@ -202,6 +204,10 @@ Set `fleet_worktree_root` only to move automatically managed TUI checkouts from
 in the source project's private session scope so `/resume` can safely reconnect retained work.
 `max_parallel_tasks` defaults to 4 (bounded to 8); set it to 1 when a local model server should
 process delegated work strictly serially.
+`session_redaction` defaults on and applies an additional credential pass whenever durable
+conversation, checkpoint-message, goal, title, or plan state is written. Live model/tool/wire
+credential masking and one-time-only sensitive approvals remain mandatory. Exact file rewind bytes
+are intentionally unchanged and protected by the session directory's owner-only permissions.
 
 With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat` and
 `/api/tags` contracts; DGC carries native thinking, tool history, `tool_name`, context/output

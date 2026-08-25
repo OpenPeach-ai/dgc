@@ -312,6 +312,10 @@ Useful keys:
   interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — auto-sized to the model; long sessions compact at
   `compact_threshold` of it.
+- `session_redaction` — on by default. Durable transcripts, checkpoint conversation blobs, goals,
+  titles, and plans receive an additional credential-redaction pass. Live provider/tool/editor/ACP
+  masking is always enforced. Exact file rewind snapshots remain byte-for-byte unchanged inside the
+  owner-private session so `/rewind` cannot corrupt a file.
 - `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
   skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
   `full` to expose the whole execution catalog on every model request.

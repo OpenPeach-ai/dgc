@@ -27,6 +27,7 @@ from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
+from .redaction import secret_values
 from .style import ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section
 from .tools import TOOL_SCHEMAS
 
@@ -896,7 +897,8 @@ class CLI:
         self.ui.info(f"web search → {meta['label']}")
 
     def _resume_cmd(self) -> None:
-        items = sessions_mod.listing(self.config.project_root)
+        items = sessions_mod.listing(
+            self.config.project_root, redact_secrets=secret_values(self.config))
         if not items:
             self.ui.info("no saved sessions in this directory")
             return
@@ -1420,7 +1422,8 @@ def main(argv: list[str] | None = None) -> int | None:
             cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
     elif args.resume is not None:                           # `dgc --resume` → pick from a list
-        items = sessions_mod.listing(config.project_root)
+        items = sessions_mod.listing(
+            config.project_root, redact_secrets=secret_values(config))
         if items:
             from .menu import select
             labels = [f"{sessions_mod.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"

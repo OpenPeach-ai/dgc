@@ -84,6 +84,8 @@ DEFAULTS: dict = {
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
     "approval_timeout_s": 300,                  # abandoned IDE permission prompts fail closed
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
+    "session_redaction": True,                  # strip credentials from durable transcript/plan history;
+                                                # exact file rewind snapshots stay private and unchanged
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)

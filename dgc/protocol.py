@@ -13,9 +13,10 @@ import threading
 
 
 class Emitter:
-    def __init__(self, fp, validator=None):
+    def __init__(self, fp, validator=None, sanitizer=None):
         self.fp = fp
         self.validator = validator
+        self.sanitizer = sanitizer
         self._lock = threading.Lock()
         self._seq = itertools.count()
 
@@ -30,6 +31,14 @@ class Emitter:
                 problem = self.validator(obj)
                 if problem:
                     raise ValueError(f"invalid protocol event: {problem}")
+            if self.sanitizer:
+                obj = self.sanitizer(obj)
+                if not isinstance(obj, dict):
+                    raise ValueError("protocol event sanitizer returned a non-object")
+                if self.validator:
+                    problem = self.validator(obj)
+                    if problem:
+                        raise ValueError(f"sanitized protocol event is invalid: {problem}")
             line = json.dumps(obj, default=str, ensure_ascii=False)
             try:
                 self.fp.write(line + "\n")

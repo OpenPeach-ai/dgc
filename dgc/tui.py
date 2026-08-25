@@ -39,6 +39,7 @@ from . import __version__, glyphs, logo as logo_mod, render as render_mod, style
 from .update import cached_update
 from .agent import Agent
 from .commands import command_pairs
+from .redaction import secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
@@ -374,6 +375,7 @@ class TUI:
             ("aux_idle_delay_ms", "Title/suggestion idle delay (ms)", "int"),
             ("sandbox", "Confine bash (sandbox)", "bool"),
             ("sandbox_network", "Sandbox network access", "bool"),
+            ("session_redaction", "Redact credentials from saved sessions", "bool"),
         ],
         "Model routing": [
             ("subagent_model", "Sub-agent model", "str"),
@@ -1301,7 +1303,8 @@ class TUI:
         # saved sessions not currently open in the fleet
         now = time.time()
         fleet_root = getattr(self, "_fleet_root", self.config.project_root)
-        for p, ts, prev, n, name in sessions.listing(fleet_root)[:30]:
+        for p, ts, prev, n, name in sessions.listing(
+                fleet_root, redact_secrets=secret_values(self.config))[:30]:
             if str(p) in open_files:
                 continue
             title = (name or prev or "(empty)")[:40]
@@ -3147,7 +3150,8 @@ class TUI:
 
     def _resume_flow(self) -> None:
         from . import sessions
-        items = sessions.listing(self._fleet_root)
+        items = sessions.listing(
+            self._fleet_root, redact_secrets=secret_values(self.config))
         if not items:
             self._flash("no saved sessions in this directory"); return
         labels = [f"{sessions.when(ts)}  ({cnt} msgs)  {(nm + ' · ' if nm else '')}{prev}"

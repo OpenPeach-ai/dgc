@@ -101,6 +101,50 @@ def unit_tests(tmp: Path):
         cli_key_rc = exc.code
     check("CLI rejects the removed literal API-key flag exactly", cli_key_rc == 2)
 
+    # --- credential redaction is centralized, shape-aware, and safe across stream chunk splits.
+    from dgc.redaction import (REDACTED as _REDACTED, StreamingRedactor as _StreamRedactor,
+                               contains_secret as _contains_secret,
+                               redact_messages as _redact_messages,
+                               redact_text as _redact_text, redact_value as _redact_value)
+    _credential = "sk-proj-fixtureCredential123456"
+    _secret_text = (
+        f"Authorization: Bearer {_credential}\n"
+        f'{{"api_key":"{_credential}"}}\n'
+        f"DGC_API_KEY={_credential}\n"
+        f"tool --access-token {_credential}\n"
+        f"https://user:{_credential}@example.com/v1"
+    )
+    _redacted_text = _redact_text(_secret_text, (_credential,))
+    check("credential redactor removes exact, header, structured, flag, env, and URL secrets",
+          _credential not in _redacted_text and _redacted_text.count(_REDACTED) >= 5,
+          _redacted_text)
+    _ordinary_code = 'api_key = config.get("api_key")\ntoken = response.get("token")'
+    check("credential redactor preserves ordinary credential-variable source code",
+          _redact_text(_ordinary_code) == _ordinary_code)
+    _nested_secret = {"args": {"header": f"Bearer {_credential}"}, "rows": [_credential],
+                      _credential: "credential-shaped dictionary key"}
+    _nested_safe = _redact_value(_nested_secret, (_credential,))
+    check("credential redaction detaches nested values without mutating execution input",
+          _contains_secret(_nested_secret, (_credential,))
+          and _nested_safe["rows"] == [_REDACTED]
+          and _credential not in _nested_safe
+          and _nested_secret["rows"] == [_credential]
+          and _credential in _nested_secret)
+    _stream = _StreamRedactor((_credential,))
+    _streamed = "".join(_stream.feed(part) for part in
+                       ("before ", _credential[:7], _credential[7:19], _credential[19:], " after"))
+    _streamed += _stream.flush()
+    check("streaming redaction catches credentials split across arbitrary provider chunks",
+          _streamed == f"before {_REDACTED} after", _streamed)
+    _opaque_jwe = "eyJheaderFixture.payloadFixture.signatureFixture"
+    _provider_safe = _redact_messages([{
+        "role": "assistant", "content": f"Authorization: Bearer {_credential}",
+        "_responses_output": [{"encrypted_content": _opaque_jwe}],
+    }], (_credential,))[0]
+    check("redaction preserves opaque provider continuation while masking visible content",
+          _provider_safe["_responses_output"][0]["encrypted_content"] == _opaque_jwe
+          and _credential not in _provider_safe["content"])
+
     # --- modes
     eng = PermissionEngine("default", {"allow": [], "ask": [], "deny": []})
     check("default: read allowed", eng.decide("read_file", {"path": "x"})[0] == "allow")
@@ -576,6 +620,18 @@ def unit_tests(tmp: Path):
                             "server": "fixture", "kind": "elicitation", "payload": {}}) is None
           and _event_error({"type": "retained_tasks", "seq": 2, "items": [], "errors": []}) is None
           and "prompt" in _COMMAND_FIELDS)
+
+    from dgc.protocol import Emitter as _ProtocolEmitter
+    _credential_wire = "wireCredential-fixture-123456"
+    _wire = _io2.StringIO()
+    _wire_emitter = _ProtocolEmitter(
+        _wire, validator=_event_error,
+        sanitizer=lambda value: _redact_value(value, (_credential_wire,)))
+    _wire_emitter.emit("info", message=f"Authorization: Bearer {_credential_wire}")
+    _wire_event = _json2.loads(_wire.getvalue())
+    check("validated headless wire events redact credentials before serialization",
+          _credential_wire not in _wire.getvalue()
+          and _wire_event.get("message") == f"Authorization: Bearer {_REDACTED}")
 
     from dgc.headless import _command_lines
     _binary_frames = type("BinaryFrames", (), {"buffer": _io2.BytesIO(
@@ -1333,6 +1389,65 @@ def unit_tests(tmp: Path):
     check("cancelled text-tool batches retain every result produced before cancellation",
           _cancel_text_outcome is True and _handled_text == ["textcall_first"]
           and len(_text_envelopes) == 1 and "durable text result" in _text_envelopes[0])
+
+    class _CredentialUI(_AgUI):
+        def __init__(self):
+            self.text = []
+            self.display_args = []
+            self.rules = []
+            self.notices = []
+            self.results = []
+        def on_text(self, chunk): self.text.append(str(chunk))
+        def approve(self, name, args, call_id=None):
+            self.display_args.append(args)
+            return "always"
+        def add_permission_rule(self, name, args): self.rules.append((name, args))
+        def tool_call(self, name, args, call_id=None): self.display_args.append(args)
+        def tool_result(self, name, out, call_id=None): self.results.append(str(out))
+        def info(self, message): self.notices.append(str(message))
+
+    _agent_secret = "agentCredential-fixture-123456"
+    _credential_cfg = _Cfg(tmp)
+    _credential_cfg.data.update({"api_key": _agent_secret, "mode": "default"})
+    _credential_cfg.permissions = {"allow": [], "ask": [], "deny": []}
+    _credential_ui = _CredentialUI()
+    _credential_agent = _Ag(_credential_cfg, _credential_ui)
+    _credential_result = _credential_agent._handle_call(_ToolCall(
+        "credential-call", "bash", {"command": f"printf done # {_agent_secret}"}))
+    check("credential-bearing tool approvals display masked input and remain one-time",
+          "done" in _credential_result
+          and all(_agent_secret not in json.dumps(args) for args in _credential_ui.display_args)
+          and not _credential_ui.rules
+          and any("one-time only" in notice for notice in _credential_ui.notices))
+
+    _stream_root = Path(tempfile.mkdtemp())
+    _stream_cfg = _Cfg(_stream_root)
+    _stream_cfg.data.update({"api_key": _agent_secret, "session_redaction": True})
+    _stream_ui = _CredentialUI()
+    _stream_agent = _Ag(_stream_cfg, _stream_ui)
+    _stream_agent.session_file = _activity_sessions.new_path(_stream_root)
+    _stream_agent.messages.append(
+        {"role": "user", "content": "legacy resume " + _agent_secret})
+    class _CredentialEchoClient:
+        tools_supported = True
+        def __init__(self): self.seen = []
+        def chat(self, messages, **kwargs):
+            self.seen = json.loads(json.dumps(messages, default=str))
+            on_text = kwargs.get("on_text")
+            if on_text:
+                on_text("answer " + _agent_secret[:9])
+                on_text(_agent_secret[9:])
+            return _ChatResult(content="answer " + _agent_secret)
+    _stream_agent.client = _CredentialEchoClient()
+    _stream_outcome = _stream_agent.run_turn("inspect " + _agent_secret)
+    _stream_record = _activity_sessions.load_record(
+        _stream_agent.session_file, _stream_root)
+    check("agent ingress, split streams, and durable transcripts never expose live credentials",
+          _stream_outcome is True
+          and _agent_secret not in json.dumps(_stream_agent.client.seen)
+          and _agent_secret not in "".join(_stream_ui.text)
+          and "[REDACTED]" in "".join(_stream_ui.text)
+          and _agent_secret not in json.dumps(_stream_record))
     # A supervisor SIGKILL bypasses run_turn's final transcript save. Metrics must already exist
     # after completed activity so the benchmark can still attribute the interrupted round.
     _crash_root = Path(tempfile.mkdtemp())
@@ -3578,6 +3693,53 @@ def test_sessions_and_worktree():
     sessions.save_plan(sp, "# private plan", d)
     sidecar = sessions.plan_path(sp, d)
     check("session plan sidecar is saved", sidecar.exists())
+
+    from dgc.checkpoints import CheckpointManager as _PrivacyCheckpoints
+    import base64 as _base64
+    privacy_secret = "sessionCredential-fixture-123456"
+    privacy_file = d / "privacy-snapshot.txt"
+    privacy_file.write_text(privacy_secret)
+    privacy_points = _PrivacyCheckpoints(d)
+    privacy_points.open(
+        1, f"inspect {privacy_secret}",
+        [{"role": "user", "content": f"Authorization: Bearer {privacy_secret}"}])
+    privacy_points.record_file(str(privacy_file))
+    privacy_session = sessions.new_path(d)
+    privacy_saved = sessions.save(
+        privacy_session,
+        [{"role": "user", "content": f'{{"api_key":"{privacy_secret}"}}'}], d,
+        name=f"session {privacy_secret}", goal=f"remove {privacy_secret}",
+        checkpoints=privacy_points.state(), redact_secrets=(privacy_secret,))
+    privacy_record = sessions.load_record(privacy_session, d)
+    legacy_privacy_session = sessions.new_path(d)
+    sessions.save(
+        legacy_privacy_session,
+        [{"role": "user", "content": "x" * 50 + privacy_secret}], d,
+        name="x" * 50 + privacy_secret)
+    privacy_listing = sessions.listing(d, redact_secrets=(privacy_secret,))
+    privacy_resumed = _PrivacyCheckpoints.from_state(
+        privacy_record.get("checkpoints"), d, max_message_count=2)
+    privacy_conversation = privacy_resumed._conversation(privacy_resumed.points[0])
+    privacy_snapshot = privacy_record["checkpoints"]["points"][0]["files"][
+        "privacy-snapshot.txt"]["data"]
+    check("session redaction rebuilds checkpoint hashes and removes transcript credentials",
+          privacy_saved and privacy_secret not in json.dumps(privacy_record)
+          and privacy_record.get("name") == "session [REDACTED]"
+          and privacy_record.get("goal") == "remove [REDACTED]"
+          and privacy_secret[:8] not in json.dumps(privacy_listing, default=str)
+          and privacy_conversation
+          and privacy_secret not in json.dumps(privacy_conversation)
+          and "[REDACTED]" in json.dumps(privacy_conversation))
+    check("session redaction preserves exact private file rewind snapshots",
+          _base64.b64decode(privacy_snapshot) == privacy_secret.encode())
+    sessions.save_plan(
+        privacy_session, f"# Plan\n\nAuthorization: Bearer {privacy_secret}", d,
+        redact_secrets=(privacy_secret,))
+    check("saved plan sidecars use the same credential redaction boundary",
+          privacy_secret not in sessions.load_plan(privacy_session, d)
+          and "[REDACTED]" in sessions.load_plan(privacy_session, d))
+    sessions.delete(privacy_session, d)
+    sessions.delete(legacy_privacy_session, d)
     sessions.save_workspace(sp, d, kind="managed", worktree=d / "fleet-wt",
                             branch="dgc/fleet-demo-0123456789", metadata=d / "fleet.json")
     workspace_sidecar = sessions.workspace_path(sp, d)
@@ -4008,6 +4170,7 @@ def test_durable_checkpoints():
     from dgc.checkpoints import CheckpointManager as _Checkpoints
     from dgc.config import Config as _Config
     from dgc.llm import ChatResult as _ChatResult, ToolCall as _ToolCall
+    from dgc.redaction import redact_checkpoint_state as _redact_checkpoint_state
 
     root = _P(_tf.mkdtemp()).resolve()
     binary = root / "binary.bin"
@@ -4062,6 +4225,16 @@ def test_durable_checkpoints():
     corrupted["messages"][first_message]["content"] = "tampered"
     check("content-addressed checkpoint corruption fails closed",
           _Checkpoints.from_state(corrupted, root).listing() == [])
+    redacted_corruption = _redact_checkpoint_state(
+        corrupted, ("checkpointCredential-fixture-123456",))
+    check("checkpoint redaction never heals a tampered content-addressed graph",
+          _Checkpoints.from_state(redacted_corruption, root).listing() == [])
+    reordered = _copy.deepcopy(encoded_state)
+    reordered["chains"] = dict(reversed(list(reordered["chains"].items())))
+    redacted_reordered = _redact_checkpoint_state(
+        reordered, ("checkpointCredential-fixture-123456",))
+    check("checkpoint redaction rebuilds valid chains independent of JSON key order",
+          len(_Checkpoints.from_state(redacted_reordered, root).listing()) == 1)
     corrupted_file = _copy.deepcopy(encoded_state)
     first_snapshot = next(iter(corrupted_file["points"][0]["files"].values()))
     first_snapshot["data"] = "ZXZpbA=="
@@ -5212,6 +5385,24 @@ def test_acp_protocol():
     _C.USER_HOME, _C.USER_CONFIG, _C.USER_SECRETS = user, user / "config.json", user / "secrets.json"
     _S.SESSIONS_DIR = user / "sessions"
     try:
+        from contextlib import redirect_stdout as _redirect_stdout
+        from io import StringIO as _StringIO
+        _acp_secret = "acpCredential-fixture-123456"
+        _wire_server = _ACP.ACPServer()
+        _wire_config = type("ACPWireConfig", (), {
+            "get": lambda self, key, default=None: _acp_secret if key == "api_key" else default,
+        })()
+        _wire_server._sessions["fixture"] = type(
+            "ACPWireState", (), {"config": _wire_config})()
+        _acp_wire = _StringIO()
+        with _redirect_stdout(_acp_wire):
+            _wire_server.notify(
+                "session/update", {"sessionId": "fixture",
+                                   "message": f"Authorization: Bearer {_acp_secret}"})
+        check("ACP JSON-RPC output redacts credentials across active session configs",
+              _acp_secret not in _acp_wire.getvalue()
+              and "[REDACTED]" in _acp_wire.getvalue())
+
         server = _ACP.ACPServer(); replies = []; notices = []
         server.respond = lambda rid, result=None, error=None: replies.append(
             {"id": rid, "result": result, "error": error})

@@ -26,6 +26,7 @@ from .agent import Agent
 from .commands import discover_commands
 from .config import Config
 from .permissions import MODE_DESCRIPTIONS, MODES, rule_for
+from .redaction import redact_text, redact_value, secret_values, sensitive_name
 from .ui import arg_summary, split_diff, tool_output_is_error
 
 _KIND = {  # DGC tool -> ACP tool-call kind
@@ -72,7 +73,24 @@ class ACPServer:
         self._initialized = False
 
     # -- json-rpc i/o ----------------------------------------------------------
+    def _redaction_secrets(self) -> tuple[str, ...]:
+        secrets = set(secret_values())
+        sessions_lock = getattr(self, "_sessions_lock", None)
+        if sessions_lock is not None:
+            with sessions_lock:
+                configs = [state.config for state in getattr(self, "_sessions", {}).values()]
+            for config in configs:
+                secrets.update(secret_values(config))
+        return tuple(sorted(secrets, key=lambda value: (-len(value), value)))
+
+    def _safe_value(self, value):
+        return redact_value(value, self._redaction_secrets())
+
+    def _safe_text(self, value) -> str:
+        return redact_text(value, self._redaction_secrets())
+
     def _write(self, obj: dict) -> None:
+        obj = self._safe_value(obj)
         line = json.dumps(obj, ensure_ascii=False)
         with self._lock:
             try:
@@ -152,6 +170,7 @@ class ACPServer:
         config.session_permissions = {"allow": allow, "ask": [], "deny": []}
 
         specs: dict[str, dict] = {}
+        session_secrets: list[str] = []
         for i, spec in enumerate(params.get("mcpServers") or []):
             if not isinstance(spec, dict):
                 raise ValueError(f"mcpServers[{i}] must be an object")
@@ -168,8 +187,12 @@ class ACPServer:
             for row in env_rows:
                 if not isinstance(row, dict) or "name" not in row or "value" not in row:
                     raise ValueError(f"mcpServers[{i}] contains an invalid environment entry")
-                env[str(row["name"])] = str(row["value"])
+                env_name, env_value = str(row["name"]), str(row["value"])
+                env[env_name] = env_value
+                if sensitive_name(env_name):
+                    session_secrets.append(env_value)
             specs[name] = {"command": command, "args": [str(a) for a in args], "env": env}
+        config._session_secret_values = tuple(session_secrets)
         return specs
 
     # -- main loop -------------------------------------------------------------
@@ -277,13 +300,15 @@ class ACPServer:
                                "goal": {"text": agent.goal, "status": agent.goal_status}})
 
         elif method == "session/list":
+            redactions = self._redaction_secrets()
             cwd_value = params.get("cwd")
             if cwd_value:
                 root = Path(str(cwd_value)).expanduser().resolve()
                 rows = [(p, root, ts, preview, count, name)
-                        for p, ts, preview, count, name in sessions.listing(root)]
+                        for p, ts, preview, count, name in sessions.listing(
+                            root, redact_secrets=redactions)]
             else:
-                rows = sessions.listing_all()
+                rows = sessions.listing_all(redact_secrets=redactions)
             result = []
             for path, root, updated, _preview, _count, name in rows:
                 self._session_roots[path.stem] = root
@@ -533,6 +558,7 @@ class _ACPUi:
                       "content": {"type": "text", "text": f"{message}{amount}"}}]})
 
     def tool_result(self, name, out, call_id=None):
+        out = self.s._safe_text(out)
         is_diff, diff = split_diff(out)
         content = [{"type": "content", "content": {"type": "text", "text": out[:8000]}}]
         if is_diff:
@@ -636,6 +662,8 @@ class _ACPUi:
         if kind == "elicitation" and payload.get("mode") != "url":
             return {"action": "cancel"}
         tcid = f"mcp{next(self._tc)}"
+        server = self.s._safe_text(server)
+        safe_payload = self.s._safe_value(payload)
         if kind == "sampling_request":
             title = f"Allow MCP server {server} to ask your model?"
         elif kind == "sampling_response":
@@ -643,13 +671,13 @@ class _ACPUi:
         else:
             title = f"Open URL requested by MCP server {server}?"
         self._update({"sessionUpdate": "tool_call", "toolCallId": tcid, "title": title,
-                      "kind": "other", "status": "pending", "rawInput": payload,
+                      "kind": "other", "status": "pending", "rawInput": safe_payload,
                       "content": [{"type": "content", "content": {"type": "text",
-                      "text": json.dumps(payload, ensure_ascii=False)[:8000]}}]})
+                      "text": json.dumps(safe_payload, ensure_ascii=False)[:8000]}}]})
         res = self.s.request("session/request_permission", {
             "sessionId": self.sid,
             "toolCall": {"toolCallId": tcid, "title": title, "kind": "other",
-                         "rawInput": payload},
+                         "rawInput": safe_payload},
             "options": [
                 {"optionId": "accept", "name": "Approve once", "kind": "allow_once"},
                 {"optionId": "decline", "name": "Decline", "kind": "reject_once"},

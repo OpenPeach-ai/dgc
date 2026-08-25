@@ -21,6 +21,7 @@ from .config import Config
 from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
+from .redaction import redact_value, secret_values
 from .tools import TOOL_SCHEMAS
 from .ui import arg_summary, split_diff, tool_output_is_error
 
@@ -264,7 +265,9 @@ class Backend:
         if not self.workspace_trusted and config.mode in ("acceptEdits", "auto"):
             config.data["mode"] = "default"  # do not persist a downgrade of the user's global preference
         self.config = config
-        self.em = Emitter(sys.stdout, validator=event_error)
+        self.em = Emitter(
+            sys.stdout, validator=event_error,
+            sanitizer=lambda event: redact_value(event, secret_values(self.config)))
         self.pending = PendingRequests()
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
@@ -360,7 +363,10 @@ class Backend:
                     self.agent.cancelled.clear()
 
                 self.agent._pending_images = images
-                model_text = _format_editor_context(context) + text
+                active_config = getattr(
+                    self, "config", getattr(getattr(self, "agent", None), "config", None))
+                safe_context = redact_value(context, secret_values(active_config))
+                model_text = _format_editor_context(safe_context) + text
                 self.em.emit("turn_start", turn_id=tid, prompt=text)
                 failed = False
                 try:
@@ -371,7 +377,11 @@ class Backend:
                     import traceback
                     detail = str(e).strip() or e.__class__.__name__
                     self.em.emit("error", message=f"Turn failed — {detail}")
-                    sys.stderr.write(traceback.format_exc())  # full trace → extension stderr channel
+                    active_config = getattr(
+                        self, "config", getattr(getattr(self, "agent", None), "config", None))
+                    sys.stderr.write(redact_value(
+                        {"traceback": traceback.format_exc()},
+                        secret_values(active_config))["traceback"])
                 cancelled = self.agent.cancelled.is_set()
                 try:
                     est = self.agent.estimate_tokens()
@@ -465,7 +475,9 @@ class Backend:
     def dispatch(self, cmd: dict) -> None:
         problem = command_error(cmd)
         if problem:
-            self.em.emit("command_rejected", command=str(cmd.get("type") or "")[:128],
+            safe_command = redact_value(
+                str(cmd.get("type") or ""), secret_values(getattr(self, "config", None)))
+            self.em.emit("command_rejected", command=safe_command[:128],
                          reason="invalid_command", message=f"invalid command: {problem}")
             return
         t = cmd.get("type")
@@ -579,7 +591,8 @@ class Backend:
             self.agent.refresh_client()
             self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url)
         elif t == "list_models":
-            request_id = str(cmd.get("request_id") or "")[:128]
+            request_id = redact_value(
+                str(cmd.get("request_id") or ""), secret_values(self.config))[:128]
             lock = self._model_list_lock
             if not lock.acquire(blocking=False):
                 self.em.emit("models", request_id=request_id, ids=[],
@@ -593,7 +606,8 @@ class Backend:
                     # transport state. It still shares bounded endpoint+model capability evidence.
                     client = self.agent._new_client(
                         self.config.base_url, self.config.api_key, self.config.model)
-                    ids = [item[:512] for item in client.list_models()[:4096]
+                    ids = [redact_value(item, secret_values(self.config))[:512]
+                           for item in client.list_models()[:4096]
                            if isinstance(item, str)]
                     self.em.emit("models", request_id=request_id, ids=ids,
                                  base_url=self.config.base_url, api_mode=client.api_mode)
