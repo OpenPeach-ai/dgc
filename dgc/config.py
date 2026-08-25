@@ -1,6 +1,7 @@
 """Configuration for dgc: global (~/.dgc/config.json) + project (.dgc/)."""
 from __future__ import annotations
 
+import copy
 import json
 import os
 import tempfile
@@ -99,6 +100,7 @@ DEFAULTS: dict = {
     "subagent_base_url": "",                    # host for sub-agents (empty: inherit main host)
     "subagent_api_key": "",                     # key for another sub-agent endpoint
     "subagent_api_mode": "",                    # transport override; empty=infer for another endpoint
+    "subagent_worktree_root": "",                # private task checkout storage (empty: ~/.dgc/worktrees)
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
     "suggest": True,                            # ghost-text: predict the next prompt after each turn
@@ -181,6 +183,7 @@ class Config:
     def __init__(self, project_root: Path | None = None):
         self.project_root = project_root or find_project_root()
         self.project_dir = self.project_root / ".dgc"
+        self._persist = True
         self.data: dict = dict(DEFAULTS)
         self._stored_secrets: dict = {}
         self._env_secret_keys: set[str] = set()
@@ -229,6 +232,8 @@ class Config:
             self.save()
 
     def save(self) -> None:
+        if not self._persist:
+            return
         payload = {k: v for k, v in self.data.items() if k not in SECRET_KEYS}
         payload["permissions"] = self.permissions
         _write_private_json(USER_CONFIG, payload)
@@ -238,6 +243,26 @@ class Config:
                        else self.data.get(k, "")) for k in SECRET_KEYS}
         self._stored_secrets = dict(secrets)
         _write_private_json(USER_SECRETS, secrets)
+
+    def clone_for_root(self, project_root: Path) -> "Config":
+        """Return a non-persisting configuration view rooted at an isolated checkout.
+
+        Sub-agents must inherit the live provider and permission state, but changing their mode or
+        route must not rewrite the user's global settings. Project-relative permission rules remain
+        valid at the new root; sharing the permission containers also makes a user's live "always"
+        approval visible to both the parent and child for the rest of the session.
+        """
+        clone = object.__new__(Config)
+        clone.project_root = Path(project_root).resolve(strict=False)
+        clone.project_dir = clone.project_root / ".dgc"
+        clone._persist = False
+        clone.data = copy.deepcopy(self.data)
+        clone._stored_secrets = dict(self._stored_secrets)
+        clone._env_secret_keys = set(self._env_secret_keys)
+        clone.permissions = self.permissions
+        if hasattr(self, "session_permissions"):
+            clone.session_permissions = self.session_permissions
+        return clone
 
     def get(self, key: str, default=None):
         return self.data.get(key, default)

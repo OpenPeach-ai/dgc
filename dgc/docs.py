@@ -206,7 +206,13 @@ a cloud key with `/model` / `/connect` for true parallelism.
 
 Mutating tools use a crash-safe lease for the canonical checkout, including across
 separate DGC CLI, editor, headless, and ACP processes. Reads remain parallel. Use
-`/worktree <name>` when agents should write concurrently on isolated branches.
+`/worktree <name>` when fleet agents should write concurrently on isolated branches.
+
+The model's `task` delegation tool isolates itself automatically in Git projects. Its private
+checkout starts with the caller's tracked and non-ignored untracked state. DGC applies only a
+completed child's conflict-free delta; it never overwrites paths that were already dirty, and it
+retains conflicting or incomplete work with a visible worktree path and branch. Integrated edits
+remain part of the parent turn's `/rewind` checkpoint and usage/edit totals.
 """.strip()),
 
     ("Sessions & rewind", "resume, jump, and undo whole turns", """
@@ -297,6 +303,8 @@ Useful keys:
 - `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
   sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
+- `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
+  `~/.dgc/worktrees`. It must be outside the source repository.
 - `language_servers`, `code_intel_timeout`, `code_intel_lsp_idle_s` — optional stdio LSP
   commands for richer definitions,
   references, symbols, and diagnostics. Keys may be a language (`python`) or extension (`.py`):

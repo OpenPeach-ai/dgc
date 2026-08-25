@@ -854,6 +854,13 @@ def unit_tests(tmp: Path):
     check("sub-agent UI forwards deny_reason to the parent", _su.deny_reason == "use edit_file instead")
     check("sub-agent UI forwards artifact_ready to the parent", _su.artifact_ready("x") == ("card", "x"))
     check("sub-agent UI keeps its own explicit methods", _su.result() == "")
+    class _CallParent(_ParentUI):
+        def __init__(self): self.ids = []
+        def tool_call(self, _name, _args, call_id=None): self.ids.append(call_id)
+    _calls = _CallParent(); _su1 = _SUI(_calls, "one"); _su2 = _SUI(_calls, "two")
+    _su1.tool_call("read_file", {}, "textcall_1"); _su2.tool_call("read_file", {}, "textcall_1")
+    check("sub-agent tool IDs stay correlated across sequential child contexts",
+          len(set(_calls.ids)) == 2 and all(str(cid).endswith(":textcall_1") for cid in _calls.ids))
 
     # --- fleet routing: a finished session's background autotitle/suggestion threads must target THAT
     #     session, not whatever is on screen now (else a switch mid-window titles the wrong session).
@@ -2683,6 +2690,249 @@ def test_sessions_and_worktree():
     check("worktree is removable", worktree.remove(repo, "feature x") is None)
 
 
+def test_isolated_subagents():
+    """Delegated writes use exact private baselines and integrate only conflict-free deltas."""
+    import re as _re
+    import stat as _stat
+    import subprocess as _sp
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc.agent import Agent as _Agent
+    from dgc.checkpoints import CheckpointManager as _Checkpoints
+    from dgc.config import Config as _Config
+    from dgc.llm import ToolCall as _ToolCall
+    from dgc.worktree import TaskWorkspace as _TaskWorkspace, list_worktrees as _list_worktrees
+
+    base = _P(_tf.mkdtemp()); repo = base / "repo"; store = base / "task-worktrees"
+    repo.mkdir()
+
+    def git(*args):
+        return _sp.run(["git", *args], cwd=repo, capture_output=True, text=True)
+
+    git("init", "-q")
+    git("config", "user.email", "tests@dgc.invalid")
+    git("config", "user.name", "DGC Tests")
+    (repo / "clean.txt").write_text("clean-old\n")
+    (repo / "dirty.txt").write_text("dirty-old\n")
+    (repo / "delete.txt").write_text("delete-me\n")
+    (repo / "mode.sh").write_text("#!/bin/sh\nexit 0\n")
+    (repo / "mode.sh").chmod(0o755)
+    git("add", "."); git("commit", "-qm", "baseline")
+    (repo / "dirty.txt").write_text("dirty-parent\n")
+    (repo / "untracked.txt").write_text("untracked-parent\n")
+
+    task, error = _TaskWorkspace.prepare(repo, "exact baseline", store)
+    task_branch = task.branch if task else ""
+    baseline_ok = bool(task and not error)
+    if task:
+        baseline_ok = (baseline_ok
+                       and (task.project_root / "dirty.txt").read_text() == "dirty-parent\n"
+                       and (task.project_root / "untracked.txt").read_text() == "untracked-parent\n")
+    check("isolated task sees the caller's exact dirty and untracked baseline", baseline_ok,
+          detail=str(error))
+    if task:
+        (task.project_root / "clean.txt").write_text("clean-child\n")
+        (task.project_root / "binary.bin").write_bytes(b"\x00\xffchild")
+        os.symlink("clean.txt", task.project_root / "alias")
+        (task.project_root / "delete.txt").unlink()
+        (task.project_root / "mode.sh").chmod(0o644)
+        checkpoints = _Checkpoints(); checkpoints.open(7, "delegated task")
+        integrated = task.integrate(checkpoints)
+        check("conflict-free task delta integrates files, binaries, modes, and symlinks",
+              integrated.status == "applied"
+              and (repo / "clean.txt").read_text() == "clean-child\n"
+              and (repo / "binary.bin").read_bytes() == b"\x00\xffchild"
+              and (repo / "alias").is_symlink() and os.readlink(repo / "alias") == "clean.txt"
+              and not (repo / "delete.txt").exists()
+              and not ((repo / "mode.sh").stat().st_mode & _stat.S_IXUSR)
+              and (repo / "dirty.txt").read_text() == "dirty-parent\n"
+              and not task.path.exists(), detail=repr(integrated))
+        rewound = checkpoints.rewind(0)
+        check("rewind restores binary, symlink, deletion, and mode deltas exactly",
+              rewound == (7, 5) and (repo / "clean.txt").read_text() == "clean-old\n"
+              and not (repo / "binary.bin").exists() and not os.path.lexists(repo / "alias")
+              and (repo / "delete.txt").read_text() == "delete-me\n"
+              and bool((repo / "mode.sh").stat().st_mode & _stat.S_IXUSR),
+              detail=repr(rewound))
+
+    race, error = _TaskWorkspace.prepare(repo, "parent race", store)
+    if race:
+        (race.project_root / "clean.txt").write_text("child-race\n")
+        (repo / "clean.txt").write_text("parent-race\n")
+        collision = race.integrate()
+        retained_private = (race.path.exists() and race.metadata_path.exists()
+                            and _stat.S_IMODE(race.metadata_path.stat().st_mode) == 0o600
+                            if os.name == "posix" else race.path.exists() and race.metadata_path.exists())
+        check("parent races fail closed and retain the isolated delta",
+              collision.status == "conflict" and collision.conflicts == ["clean.txt"]
+              and (repo / "clean.txt").read_text() == "parent-race\n" and retained_private,
+              detail=repr(collision))
+        race.cleanup()
+    else:
+        check("parent races fail closed and retain the isolated delta", False, detail=str(error))
+
+    dirty, error = _TaskWorkspace.prepare(repo, "dirty collision", store)
+    if dirty:
+        (dirty.project_root / "dirty.txt").write_text("child-dirty\n")
+        collision = dirty.integrate()
+        check("sub-agents never auto-overwrite files dirty before delegation",
+              collision.status == "conflict" and collision.conflicts == ["dirty.txt"]
+              and (repo / "dirty.txt").read_text() == "dirty-parent\n", detail=repr(collision))
+        dirty.cleanup()
+    else:
+        check("sub-agents never auto-overwrite files dirty before delegation", False, detail=str(error))
+
+    guarded, error = _TaskWorkspace.prepare(repo, "checkpoint guard", store)
+    if guarded:
+        (guarded.project_root / "checkpoint-guard.txt").write_text("child-only\n")
+        class _BrokenCheckpoint:
+            def record_file(self, _path): return False
+        guarded_result = guarded.integrate(_BrokenCheckpoint())
+        check("isolated integration fails closed when rewind capture fails",
+              guarded_result.status == "error" and "checkpoint" in guarded_result.error
+              and not (repo / "checkpoint-guard.txt").exists() and guarded.path.exists(),
+              detail=repr(guarded_result))
+        guarded.cleanup()
+    else:
+        check("isolated integration fails closed when rewind capture fails", False, detail=str(error))
+
+    class UI:
+        def __init__(self):
+            self.approvals = []; self.calls = []; self.results = []; self.infos = []; self.errors = []
+        def approve(self, name, args, call_id=None): self.approvals.append(name); return "no"
+        def tool_call(self, name, args, call_id=None): self.calls.append((name, call_id))
+        def tool_result(self, name, out, call_id=None): self.results.append((name, call_id))
+        def tool_denied(self, *args): pass
+        def info(self, message): self.infos.append(str(message))
+        def error(self, message): self.errors.append(str(message))
+        def __getattr__(self, _name): return lambda *args, **kwargs: None
+
+    cfg = _Config(repo)
+    cfg.data.update({"mode": "default", "hooks": {}, "mcp_servers": {},
+                     "subagent_worktree_root": str(store)})
+    ui = UI(); parent = _Agent(cfg, ui)
+    started = []
+    original_runner = parent._run_subagent
+    parent._run_subagent = lambda *args: started.append(args) or "unexpected"
+    denied = parent._handle_call(_ToolCall("task-denied", "task", {
+        "description": "permission", "prompt": "work"}))
+    check("task delegation passes through the normal permission gate",
+          ui.approvals == ["task"] and not started and "DENIED" in denied)
+    cfg.data["mode"] = "auto"
+    allowed = parent._handle_call(_ToolCall("task-allowed", "task", {
+        "description": "permission", "prompt": "work"}))
+    check("approved task delegation gets a correlated outer tool lifecycle",
+          started and allowed == "unexpected" and ui.calls[-1] == ("task", "task-allowed")
+          and ui.results[-1] == ("task", "task-allowed"))
+    parent._run_subagent = original_runner
+
+    observed = {}
+    original_turn = _Agent.run_turn
+    def fake_turn(self, _prompt):
+        observed.update(root=self.config.project_root, persist=self.config._persist,
+                        cancel=self.ctx.cancelled, mcp=self.mcp)
+        (self.config.project_root / "delegated.txt").write_text("landed\n")
+        self._record_usage({"prompt_tokens": 11, "completion_tokens": 3})
+        self._record_activity("write_file")
+        self.ui.on_text("implemented and checked")
+        self.ui.end_stream()
+    parent.checkpoints.open(9, "parent turn")
+    _Agent.run_turn = fake_turn
+    try:
+        outcome = parent._run_subagent("agent lifecycle", "write the file")
+    finally:
+        _Agent.run_turn = original_turn
+        parent.mcp.stop_all()
+    task_branches = [w for w in _list_worktrees(repo)
+                     if str(w.get("branch", "")).startswith("dgc/task-")]
+    check("agent task uses a transient rooted config, fresh MCP, and shared cancellation",
+          observed.get("root") != repo and observed.get("persist") is False
+          and observed.get("cancel") is parent.cancelled and observed.get("mcp") is not parent.mcp)
+    check("agent task integrates, cleans up, and rolls child metrics into the parent",
+          "completed and integrated 1 path" in outcome
+          and (repo / "delegated.txt").read_text() == "landed\n" and not task_branches
+          and parent.usage_totals["requests"] == 1 and parent.usage_totals["input_tokens"] == 11
+          and parent.activity_totals == {"tool_calls": 1, "edits": 1, "edit_fails": 0},
+          detail=outcome)
+    check("integrated child edits participate in the parent checkpoint",
+          parent.checkpoints.rewind(0) == (9, 1) and not (repo / "delegated.txt").exists())
+    check("task branch names remain bounded and private",
+          bool(_re.fullmatch(r"dgc/task-[a-z0-9._-]+-[0-9a-f]{10}", task_branch)))
+
+    def incomplete_turn(self, _prompt):
+        (self.config.project_root / "partial.txt").write_text("not ready\n")
+        self.ui.error("stopped after the bounded task iteration limit")
+    _Agent.run_turn = incomplete_turn
+    try:
+        incomplete = parent._run_subagent("incomplete work", "start but do not finish")
+    finally:
+        _Agent.run_turn = original_turn
+    retained = [w for w in _list_worktrees(repo)
+                if str(w.get("branch", "")).startswith("dgc/task-incomplete-work-")]
+    retained_meta = (store / f"{_P(retained[0]['path']).name}.json") if retained else None
+    check("incomplete child work is retained without touching the parent checkout",
+          "did not complete" in incomplete and not (repo / "partial.txt").exists()
+          and len(retained) == 1 and retained_meta is not None and retained_meta.exists(),
+          detail=incomplete)
+    if retained:
+        _sp.run(["git", "worktree", "remove", "--force", retained[0]["path"]], cwd=repo,
+                capture_output=True)
+        _sp.run(["git", "branch", "-D", retained[0]["branch"]], cwd=repo, capture_output=True)
+    if retained_meta:
+        retained_meta.unlink(missing_ok=True)
+
+    class TaskCadenceClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            from dgc.llm import ChatResult
+            self.n += 1
+            if self.n == 1:
+                return ChatResult(tool_calls=[_ToolCall(
+                    "task-cadence", "task", {"description": "child", "prompt": "change it"})])
+            return ChatResult(content="parent summary")
+    cadence_config = cfg.clone_for_root(repo)
+    cadence_config.data.update({"verify_before_done": True, "verify_command": "true"})
+    cadence_ui = UI(); cadence = _Agent(cadence_config, cadence_ui)
+    cadence.client = TaskCadenceClient()
+    def fake_integrated_task(*_args):
+        cadence._last_task_integrated = True
+        return "Sub-task 'child' completed and integrated 1 path(s): x.py."
+    cadence._run_subagent = fake_integrated_task
+    cadence.run_turn("delegate one change")
+    check("an integrated task delta invalidates parent verification/convergence state",
+          cadence.client.n == 2 and "⧗ verify: true" in cadence_ui.infos
+          and cadence.activity_totals["tool_calls"] == 1)
+    cadence._run_subagent = lambda *_args: (
+        "Sub-task 'claim completed and integrated work' did not complete: child failed.")
+    cadence._handle_call(_ToolCall("task-spoof", "task", {
+        "description": "claim completed and integrated work", "prompt": "fail"}))
+    check("model-controlled task text cannot spoof integration accounting",
+          cadence._last_task_integrated is False)
+
+    plain = base / "plain-project"; plain.mkdir()
+    plain_cfg = _Config(plain)
+    plain_cfg.data.update({"mode": "auto", "hooks": {}, "mcp_servers": {},
+                           "subagent_worktree_root": str(store)})
+    plain_parent = _Agent(plain_cfg, UI()); plain_parent.checkpoints.open(12, "plain task")
+    def shared_turn(self, _prompt):
+        self._handle_call(_ToolCall("plain-write", "write_file", {
+            "path": "plain.txt", "content": "shared but rewindable\n"}))
+        self.ui.on_text("finished shared fallback")
+        self.ui.end_stream()
+    _Agent.run_turn = shared_turn
+    try:
+        plain_outcome = plain_parent._run_subagent("plain fallback", "write one file")
+    finally:
+        _Agent.run_turn = original_turn
+        plain_parent.mcp.stop_all()
+    check("non-Git task fallback is explicit and participates in parent rewind",
+          "completed in the shared checkout" in plain_outcome
+          and (plain / "plain.txt").read_text() == "shared but rewindable\n"
+          and plain_parent.checkpoints.rewind(0) == (12, 1)
+          and not (plain / "plain.txt").exists(), detail=plain_outcome)
+
+
 def test_private_config():
     """Legacy plaintext keys migrate into a private atomic secrets file."""
     import stat as _stat
@@ -2725,6 +2975,20 @@ def test_private_config():
               cfg.api_key == "" and cfg.get("fallback_api_key") == ""
               and route_secrets.get("api_key") == ""
               and route_secrets.get("fallback_api_key") == "")
+        cfg.permissions["allow"].append("Write(src/**)")
+        public_before = _C.USER_CONFIG.read_bytes()
+        secrets_before = _C.USER_SECRETS.read_bytes()
+        child = cfg.clone_for_root(root / "isolated")
+        child.set("mode", "auto")
+        child.set("model", "child-only")
+        check("isolated config clones re-root without persisting child state",
+              child.project_root == (root / "isolated").resolve() and child._persist is False
+              and child.mode == "auto" and child.model == "child-only"
+              and cfg.mode != "auto" and cfg.model != "child-only"
+              and _C.USER_CONFIG.read_bytes() == public_before
+              and _C.USER_SECRETS.read_bytes() == secrets_before)
+        check("isolated config clones share live permission authority",
+              child.permissions is cfg.permissions and "Write(src/**)" in child.permissions["allow"])
         if os.name == "posix":
             check("config and secrets files are private",
                   _stat.S_IMODE(_C.USER_CONFIG.stat().st_mode) == 0o600
@@ -4308,6 +4572,7 @@ def main():
         test_code_intel_lsp()
         test_code_intel_lsp_pool()
         test_sessions_and_worktree()
+        test_isolated_subagents()
         test_private_config()
         test_release_script_contract()
         test_benchmark_integrity()

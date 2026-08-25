@@ -8,6 +8,7 @@ import re
 import shlex
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -327,6 +328,11 @@ class _SubUI:
         self._label = label
         self._buf: list[str] = []
         self._last = ""
+        self._failure = ""
+        self._call_prefix = f"sub-{uuid.uuid4().hex[:12]}"
+
+    def _call_id(self, call_id):
+        return f"{self._call_prefix}:{call_id}" if call_id else call_id
 
     def on_text(self, chunk):
         self._buf.append(chunk)
@@ -342,21 +348,22 @@ class _SubUI:
         self._parent.end_stream()
 
     def tool_call(self, name, args, call_id=None):
-        self._parent.tool_call(name, args, call_id)
+        self._parent.tool_call(name, args, self._call_id(call_id))
 
     def tool_progress(self, name, message, *, progress=None, total=None, level="", call_id=None):
         callback = getattr(self._parent, "tool_progress", None)
         if callback:
-            callback(name, message, progress=progress, total=total, level=level, call_id=call_id)
+            callback(name, message, progress=progress, total=total, level=level,
+                     call_id=self._call_id(call_id))
 
     def tool_result(self, name, out, call_id=None):
-        self._parent.tool_result(name, out, call_id)
+        self._parent.tool_result(name, out, self._call_id(call_id))
 
     def tool_denied(self, name, args, reason, call_id=None):
-        self._parent.tool_denied(name, args, reason, call_id)
+        self._parent.tool_denied(name, args, reason, self._call_id(call_id))
 
     def approve(self, name, args, call_id=None):
-        return self._parent.approve(name, args, call_id)
+        return self._parent.approve(name, args, self._call_id(call_id))
 
     def add_permission_rule(self, name, args):
         self._parent.add_permission_rule(name, args)
@@ -371,9 +378,13 @@ class _SubUI:
         self._parent.on_todo(todos)
 
     def info(self, msg):
+        text = str(msg)
+        if text == "turn cancelled" or text.startswith("⏱ out of time"):
+            self._failure = text
         self._parent.info(msg)
 
     def error(self, msg):
+        self._failure = str(msg)
         self._parent.error(msg)
 
     @property
@@ -385,12 +396,15 @@ class _SubUI:
         # (deny_reason), artifact cards (artifact_ready) and status flags behave like the main agent's,
         # instead of silently reading "" / None. (Only fires when normal lookup misses; the guard
         # below stops the instance's own attrs from recursing during partial init.)
-        if name in ("_parent", "_label", "_buf", "_last"):
+        if name in ("_parent", "_label", "_buf", "_last", "_failure", "_call_prefix"):
             raise AttributeError(name)
         return getattr(self._parent, name)
 
     def result(self) -> str:
         return (self._last or "".join(self._buf)).strip()
+
+    def failure(self) -> str:
+        return self._failure.strip()
 
 
 class Agent:
@@ -423,6 +437,8 @@ class Agent:
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
         self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
+        self._metrics_parent: Agent | None = None  # isolated child counters roll into the root session
+        self._last_task_integrated = False         # structured convergence signal; never infer from model text
         self._usage_lock = threading.Lock()       # title/suggestion work may finish off the main thread
         self.reset()
 
@@ -496,6 +512,20 @@ class Agent:
                 self.usage_totals[key] += usage[key]
             self.usage_totals["requests"] += 1
         self._persist_metrics()
+        parent = getattr(self, "_metrics_parent", None)
+        if parent is not None and parent is not self:
+            parent._record_usage(usage)
+
+    def _record_activity(self, name: str, edit_failed: bool = False) -> None:
+        with self._usage_lock:
+            self.activity_totals["tool_calls"] += 1
+            if name in _FILE_EDIT_CALLS:
+                key = "edit_fails" if edit_failed else "edits"
+                self.activity_totals[key] += 1
+        self._persist_metrics()
+        parent = getattr(self, "_metrics_parent", None)
+        if parent is not None and parent is not self:
+            parent._record_activity(name, edit_failed)
 
     def _persist_metrics(self) -> None:
         """Crash-safe lightweight checkpoint for counters updated inside a running turn.
@@ -1242,6 +1272,7 @@ class Agent:
             batch_verified = False          # did a test/build command pass in THIS batch?
             batch_verify_index = -1         # an edit after the pass invalidates this batch's evidence
             batch_edit_index = -1
+            batch_task_edit = False         # a delegated delta integrated into this checkout
             parallel_outputs = self._parallel_read_outputs(result.tool_calls, sig_count)
             for call_index, call in enumerate(result.tool_calls):
                 if self.cancelled.is_set():     # honour a mid-batch cancel between tool calls
@@ -1268,12 +1299,7 @@ class Agent:
                 # a file edit counts only after the tool reports that it landed.
                 edit_failed = (call.name in _FILE_EDIT_CALLS
                                and out.lstrip().lower().startswith("error"))
-                with self._usage_lock:
-                    self.activity_totals["tool_calls"] += 1
-                    if call.name in _FILE_EDIT_CALLS:
-                        key = "edit_fails" if edit_failed else "edits"
-                        self.activity_totals[key] += 1
-                self._persist_metrics()
+                self._record_activity(call.name, edit_failed)
                 if call.name == "bash" and out.startswith("exit code: "):   # grind guard
                     head, _, body = out.partition("\n")
                     if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
@@ -1295,8 +1321,11 @@ class Agent:
                         edit_fail_streak = 0
                 elif call.name == "write_file" and not out.lstrip().lower().startswith("error"):
                     edit_fail_streak, edit_grind_nudged = 0, False   # the recommended recovery landed
-                if (call.name in ("write_file", "edit_file", "multi_edit", "apply_patch")
-                        and not out.lstrip().lower().startswith("error")):
+                landed_file_edit = (call.name in _FILE_EDIT_CALLS
+                                    and not out.lstrip().lower().startswith("error"))
+                landed_task_edit = call.name == "task" and self._last_task_integrated
+                if landed_file_edit or landed_task_edit:
+                    batch_task_edit |= landed_task_edit
                     batch_edit_index = call_index
                     # A landed mutation is progress relative to earlier varied command failures.
                     # Let the next verification establish a fresh streak, but deliberately retain
@@ -1360,9 +1389,9 @@ class Agent:
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
             mutating_total += sum(1 for c in result.tool_calls
-                                  if c.name in ("write_file", "edit_file", "multi_edit", "apply_patch", "bash"))
+                                  if c.name in (*_FILE_EDIT_CALLS, "bash")) + int(batch_task_edit)
             edited_total += sum(1 for c in result.tool_calls
-                                if c.name in ("write_file", "edit_file", "multi_edit", "apply_patch"))
+                                if c.name in _FILE_EDIT_CALLS) + int(batch_task_edit)
             reminders: list[str] = []
             if fail_streak >= _FAIL_SOFT and not fail_nudged:   # grind guard: nudge a rethink
                 fail_nudged = True
@@ -1375,8 +1404,7 @@ class Agent:
                                  "STOP editing — read the file once, then write the ENTIRE corrected file "
                                  "in ONE write_file call (it always succeeds). Don't keep tweaking old_string.")
             # finish-when-verified: a test/build passed and the model kept tooling without editing → nudge
-            made_edit = any(c.name in ("write_file", "edit_file", "multi_edit", "apply_patch")
-                            for c in result.tool_calls)
+            made_edit = (batch_task_edit or any(c.name in _FILE_EDIT_CALLS for c in result.tool_calls))
             if verified and not made_edit and not verify_nudged:
                 verify_nudged = True
                 reminders.append("A test/build command passed and you haven't changed the code since. If "
@@ -1463,6 +1491,10 @@ class Agent:
     def _handle_call(self, call: ToolCall) -> str:
         name, args = call.name, call.arguments
         call_id = call.id
+        if name == "task":
+            # The description and returned summary are model-controlled. Keep mutation/convergence
+            # accounting on a private state bit set only by a successful structured integration.
+            self._last_task_integrated = False
 
         if name == "present_plan":
             if self.mode != "plan":
@@ -1517,12 +1549,6 @@ class Agent:
             self.update_goal(status)
             return (f"Standing goal marked {status}. This transition is visible to the user; now give a "
                     "concise final explanation of the evidence or blocker.")
-
-        if name == "task":
-            if self.depth >= 3:
-                return "Max sub-agent depth reached — handle this sub-task directly instead."
-            return self._run_subagent(str(args.get("description", "")), str(args.get("prompt", "")),
-                                      str(args.get("agent", "")))
 
         if name == "artifact":
             if self.mode == "plan" and not self.config.get("artifact_in_plan", False):
@@ -1606,7 +1632,14 @@ class Agent:
                         self.ui.tool_denied(name, args, "PreToolUse hook", call_id)
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
                                 "Do not retry this exact action.")
-                    if name.startswith("mcp__"):
+                    if name == "task":
+                        if self.depth >= 3:
+                            out = "Max sub-agent depth reached — handle this sub-task directly instead."
+                        else:
+                            out = self._run_subagent(
+                                str(args.get("description", "")), str(args.get("prompt", "")),
+                                str(args.get("agent", "")))
+                    elif name.startswith("mcp__"):
                         progress_ui = getattr(self.ui, "tool_progress", None)
 
                         def on_progress(event):
@@ -1666,28 +1699,141 @@ class Agent:
         return Agent._new_client(self, base, key, model, api_mode=api_mode)
 
     def _run_subagent(self, description: str, prompt: str, agent_name: str = "") -> str:
+        from .worktree import TaskWorkspace, repo_root
+
+        self._last_task_integrated = False
         adef = self.agent_defs.get(agent_name) if agent_name else None
         tag = f" [{agent_name}]" if adef else (f" [{agent_name}?]" if agent_name else "")
         self.ui.info(f"⟳ sub-task: {description}{tag}")
         sub_ui = _SubUI(self.ui, description)
-        sub = Agent(self.config, sub_ui, mcp=self.mcp)   # fresh context, shared config + MCP servers
-        sub.depth = self.depth + 1
-        sub.cancelled = self.cancelled                    # parent Esc/cancel reaches the sub-agent too
-        #                                                   (else a long sub-task was uninterruptible)
-        override = self._subagent_client(adef)
-        if override is not None:
-            sub.client = override                         # its own model/host
-        if adef and adef.effort:
-            sub._effort_override = adef.effort
         task_prompt = (adef.body + "\n\n---\n\nTask: " + prompt) if (adef and adef.body) else prompt
-        if self.cancelled.is_set():                       # cancel arrived during sub construction → bail
+        if self.cancelled.is_set():
             return f"Sub-task '{description}' cancelled before it started."
+
+        workspace = None
+        isolation_error = ""
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            detail = lease.last_error or "cancelled while waiting for the workspace write lease"
+            return f"Sub-task '{description}' was not started: {detail}."
         try:
-            sub.run_turn(task_prompt)
+            try:
+                configured_root = str(self.config.get("subagent_worktree_root", "") or "").strip()
+                workspace, isolation_error = TaskWorkspace.prepare(
+                    self.config.project_root, description or "delegated-work",
+                    Path(configured_root) if configured_root else None)
+            except Exception as e:
+                isolation_error = f"{type(e).__name__}: {e}"
+        finally:
+            lease.release()
+
+        isolated = workspace is not None
+        if not isolated and repo_root(self.config.project_root) is not None:
+            return (f"Sub-task '{description}' was not started because its isolated Git worktree "
+                    f"could not be created: {isolation_error or 'unknown error'}. The parent checkout "
+                    "was left unchanged.")
+        child_root = workspace.project_root if isolated else self.config.project_root
+        try:
+            child_config = self.config.clone_for_root(child_root)
         except Exception as e:
-            return f"Sub-task '{description}' failed: {type(e).__name__}: {e}"
-        result = sub_ui.result() or "(the sub-agent finished but produced no summary text)"
-        return f"Sub-task '{description}' completed. Summary:\n{result}"
+            cleanup_error = ""
+            if workspace is not None:
+                cleanup_error = workspace.cleanup() or ""
+            cleanup = (f" Cleanup warning for {workspace.path} on {workspace.branch}: "
+                       f"{cleanup_error}." if workspace is not None and cleanup_error else "")
+            return (f"Sub-task '{description}' was not started because its isolated configuration "
+                    f"could not be created: {type(e).__name__}: {e}.{cleanup}")
+        if isolated:
+            self.ui.info(f"↳ isolated checkout: {workspace.project_root}")
+        else:
+            self.ui.info("↳ this project has no Git HEAD; sub-task writes use the shared checkout")
+
+        sub = None
+        isolated_mcp = None
+        thrown = ""
+        try:
+            if isolated:
+                isolated_mcp = MCPManager(child_config.project_root)
+                isolated_mcp.connect_all(child_config.get("mcp_servers"))
+            sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
+            sub.depth = self.depth + 1
+            sub.cancelled = self.cancelled
+            sub.ctx.cancelled = self.cancelled
+            if not isolated:
+                sub.checkpoints = self.checkpoints
+            sub._metrics_parent = self
+            override = self._subagent_client(adef)
+            if override is not None:
+                sub.client = override
+            if adef and adef.effort:
+                sub._effort_override = adef.effort
+            if self.cancelled.is_set():
+                thrown = "cancelled before the isolated run started"
+            else:
+                sub.run_turn(task_prompt)
+        except Exception as e:
+            thrown = f"{type(e).__name__}: {e}"
+        finally:
+            if isolated_mcp is not None:
+                try:
+                    isolated_mcp.stop_all()
+                except Exception as e:
+                    if not thrown:
+                        thrown = f"isolated MCP cleanup failed: {type(e).__name__}: {e}"
+
+        failure = thrown or sub_ui.failure()
+        result = sub_ui.result()
+        if not failure and not result:
+            failure = "the sub-agent stopped without a final summary"
+
+        def preserve_or_clean(reason: str) -> str:
+            if workspace is None:
+                return ""
+            try:
+                changed = workspace.changed_paths()
+            except Exception as e:
+                workspace.retain(f"{reason}; delta inspection failed: {e}", [])
+                return (f" Its isolated worktree was preserved at {workspace.path} on branch "
+                        f"{workspace.branch} because the delta could not be inspected.")
+            if changed:
+                workspace.retain(reason, changed)
+                return (f" Its unintegrated changes were preserved at {workspace.path} on branch "
+                        f"{workspace.branch}.")
+            cleanup_error = workspace.cleanup()
+            return f" Cleanup warning: {cleanup_error}." if cleanup_error else ""
+
+        if failure:
+            kept = preserve_or_clean(failure)
+            shared = " Partial changes may remain in the shared checkout." if not isolated else ""
+            return f"Sub-task '{description}' did not complete: {failure}.{kept}{shared}"
+
+        if workspace is None:
+            return f"Sub-task '{description}' completed in the shared checkout. Summary:\n{result}"
+
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            detail = lease.last_error or "cancelled while waiting to integrate"
+            kept = preserve_or_clean(detail)
+            return f"Sub-task '{description}' completed but was not integrated: {detail}.{kept}"
+        try:
+            integration = workspace.integrate(self.checkpoints)
+        finally:
+            lease.release()
+
+        warning = f" Cleanup warning: {integration.cleanup_error}." if integration.cleanup_error else ""
+        if integration.status == "applied":
+            self._last_task_integrated = True
+            paths = ", ".join(integration.paths[:20])
+            extra = f" (+{len(integration.paths) - 20} more)" if len(integration.paths) > 20 else ""
+            return (f"Sub-task '{description}' completed and integrated {len(integration.paths)} path(s): "
+                    f"{paths}{extra}.{warning}\nSummary:\n{result}")
+        if integration.status == "clean":
+            return f"Sub-task '{description}' completed with no file changes.{warning}\nSummary:\n{result}"
+        conflicts = ", ".join(integration.conflicts[:20]) or "(delta inspection/integration error)"
+        return (f"Sub-task '{description}' completed but its changes were NOT integrated: "
+                f"{integration.error or integration.status}. Conflicts: {conflicts}. The isolated "
+                f"worktree is preserved at {workspace.path} on branch {workspace.branch}.\n"
+                f"Summary:\n{result}")
 
     # ---------------------------------------------------------- compaction ---
     def estimate_tokens(self) -> int:
