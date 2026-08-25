@@ -800,6 +800,34 @@ def unit_tests(tmp: Path):
     check("an explicit project verifier is recognized exactly inside a wrapped command",
           _is_verification_command("cd repo && pytest -q", "pytest -q")
           and not _is_verification_command("cd repo && pytest -q other", "cargo test"))
+    check("shell-equivalent verifier quotes are canonicalized without prefix matches",
+          _is_verification_command("./build/all-your-base", "./build/'all-your-base'")
+          and not _is_verification_command("pytest -qq", "pytest -q"))
+    _green_root = Path(tempfile.mkdtemp())
+    _green_agent = _Ag(_Cfg(_green_root), _AgUI())
+    _green_agent.config.data.update({
+        "mode": "auto", "turn_budget_s": 60,
+        "verify_before_done": True, "verify_command": "test -f 'answer.txt'",
+    })
+    class _GreenClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[
+                    _ToolCall("green-edit", "write_file", {"path": "answer.txt", "content": "good\n"}),
+                    _ToolCall("green-test", "bash", {"command": "test -f answer.txt"}),
+                ])
+            return _ChatResult(tool_calls=[_ToolCall(
+                "textcall_post_green", "write_file",
+                {"path": "post-green.txt", "content": "must not execute\n"})])
+    _green_agent.client = _GreenClient()
+    _green_agent.run_turn("write and verify the answer")
+    check("shell-equivalent green verifier hard-stops post-pass text tools",
+          _green_agent.client.n == 2
+          and (_green_root / "answer.txt").read_text() == "good\n"
+          and not (_green_root / "post-green.txt").exists())
     _parent_cancel = threading.Event()
     check("budget deadline cancellation does not mutate the user's Stop event",
           _DeadlineCancel(_parent_cancel, _now - 1).is_set() and not _parent_cancel.is_set())

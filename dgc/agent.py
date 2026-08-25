@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import shlex
 import threading
 import time
 from dataclasses import dataclass, field
@@ -126,7 +127,17 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     normalized = " ".join(str(command or "").lower().split())
     expected = " ".join(str(configured or "").lower().split())
     if expected:
-        return expected in normalized
+        # Models routinely remove redundant shell quotes from an exact command copied out of the
+        # prompt (``./build/'exercise'`` -> ``./build/exercise``).  Those commands are shell-
+        # equivalent, but a raw substring comparison misses the green verifier and lets the model
+        # keep editing already-passing code.  shlex gives both forms the same canonical spelling;
+        # surrounding spaces retain token boundaries so ``pytest -q`` does not match ``pytest -qq``.
+        try:
+            normalized = " ".join(shlex.split(normalized, posix=True))
+            expected = " ".join(shlex.split(expected, posix=True))
+        except ValueError:
+            pass
+        return f" {expected} " in f" {normalized} "
     return any(keyword in normalized for keyword in _VERIFY_KWS)
 from .tools import TOOL_SCHEMAS, execute
 
