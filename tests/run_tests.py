@@ -1825,6 +1825,51 @@ def test_mcp_protocol():
         check("MCP connection failures remain visible in process diagnostics",
               "missing: failed" in failed.summary() and not failed.servers, failed.summary())
         failed.stop_all()
+
+        stalled_py = root / "stalled-writer.py"
+        stalled_pid = root / "stalled-writer.pid"
+        stalled_py.write_text(textwrap.dedent(r'''
+            import json, os, pathlib, sys, time
+            for raw in sys.stdin:
+                msg = json.loads(raw)
+                method, mid = msg.get("method"), msg.get("id")
+                if method == "server/discover":
+                    out = {"resultType": "complete", "supportedVersions": ["2026-07-28"],
+                           "capabilities": {"tools": {}}}
+                elif method == "tools/list":
+                    out = {"resultType": "complete", "tools": [{"name": "stall",
+                           "inputSchema": {"type": "object"}}]}
+                else:
+                    continue
+                print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": out}), flush=True)
+                if method == "tools/list":
+                    pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))
+                    break
+            time.sleep(30)
+        '''))
+        stalled = MCPManager(root)
+        stalled.connect_all({"stalled": {"command": sys.executable,
+                                           "args": [str(stalled_py), str(stalled_pid)]}})
+        started = _time.monotonic()
+        stalled_out = stalled.call("mcp__stalled__stall", {"payload": "x" * 2_000_000})
+        elapsed = _time.monotonic() - started
+        stalled_proc = stalled.servers["stalled"].proc
+        stalled_summary = stalled.summary()
+        stalled_pid_value = int(stalled_pid.read_text()) if stalled_pid.exists() else 0
+        stalled_alive = False
+        if stalled_pid_value:
+            try:
+                os.kill(stalled_pid_value, 0)
+                stalled_alive = True
+            except (OSError, ProcessLookupError):
+                pass
+        check("MCP bounds a request write when a server stops reading stdin",
+              elapsed < 5 and "stdin stalled" in stalled_out
+              and stalled_proc is None and not stalled_alive
+              and "stdin stalled" in stalled_summary,
+              f"elapsed={elapsed:.2f}s pid={stalled_pid_value} alive={stalled_alive} "
+              f"out={stalled_out} summary={stalled_summary}")
+        stalled.stop_all()
     finally:
         if old_secret is None:
             os.environ.pop("DGC_PARENT_ONLY_SECRET", None)

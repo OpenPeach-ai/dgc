@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 505 / 505 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 513 / 513 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -433,7 +433,7 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 512/512 Python checks, 12/12 editor transport/webview checks, and
+The complete offline evidence is 513/513 Python checks, 12/12 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for step 4: `tool_profile: adaptive` keeps the complete core coding catalog but
@@ -531,7 +531,9 @@ claiming MCP `2026-07-28`. It now probes `server/discover` on a disposable stdio
 the required protocol/client/capability metadata to every modern request, validates modern
 `resultType`, and restarts on a clean process before a truthful `2025-11-25`-era fallback. Tool
 wire frames and catalog pagination are bounded; roots-only multi-round-trip input is retried with opaque request
-state; unsupported elicitation/sampling is not advertised and fails closed. Progress tokens and
+state; unsupported elicitation/sampling is not advertised and fails closed. Inbound and outbound
+stdio frames are bounded, and a stalled request write retires and reaps the poisoned process before
+returning control. Progress tokens and
 severity-filtered server logs stay correlated with the active tool card across classic CLI, TUI,
 headless/editor, and ACP surfaces. Connection failures and negotiated eras remain visible in
 `/mcp`, and generation-scoped pending requests prevent a retired probe reader from failing the
@@ -611,7 +613,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-512/512 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+513/513 Python checks, 12/12 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

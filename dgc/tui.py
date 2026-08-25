@@ -2559,6 +2559,7 @@ class TUI:
                 if servers.pop(sub[1], None) is not None:
                     cfg.set("mcp_servers", servers)
                     live = self.agent.mcp.servers.pop(sub[1], None)
+                    self.agent.mcp.failures.pop(sub[1], None)
                     if live:
                         live.stop()
                     self.agent.mcp._rebuild_routes()
@@ -2774,9 +2775,15 @@ class TUI:
             servers = self.config.get("mcp_servers", {}) or {}   # MCP Servers
             out = []
             for name, spec in servers.items():
-                live = name in getattr(self.agent.mcp, "servers", {}) if getattr(self.agent, "mcp", None) else False
+                manager = getattr(self.agent, "mcp", None)
+                server = getattr(manager, "servers", {}).get(name) if manager else None
+                live = bool(server and server.proc is not None and server.proc.poll() is None)
                 tail = f"{spec.get('command', '')} {' '.join(spec.get('args', []))}".strip()
-                out.append({"label": ("● " if live else "○ ") + name, "desc": tail[:64],
+                failure = getattr(manager, "failures", {}).get(name, "") if manager else ""
+                if server is not None and not live:
+                    failure = server.error or server._diagnostic_tail() or "process exited"
+                desc = f"failed: {failure}" if failure else tail
+                out.append({"label": ("● " if live else "○ ") + name, "desc": desc[:64],
                             "value": ("mcp", name)})
             return out
 
@@ -2796,6 +2803,7 @@ class TUI:
                     self.config.set("mcp_servers", servers)
                     if getattr(self.agent, "mcp", None):
                         live = self.agent.mcp.servers.pop(name, None)
+                        self.agent.mcp.failures.pop(name, None)
                         if live:
                             live.stop()
                         self.agent.mcp._rebuild_routes()

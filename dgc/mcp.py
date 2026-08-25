@@ -21,6 +21,7 @@ _MAX_DIAGNOSTIC = 32_000
 _MAX_CONTENT = 120_000
 _MAX_FRAME = 4 * 1024 * 1024
 _MAX_MRTR_ROUNDS = 4
+_MAX_WRITE_SECONDS = 2.0
 _CLIENT_INFO = {"name": "dgc", "version": __version__}
 _LOG_LEVELS = ("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")
 
@@ -308,17 +309,48 @@ class MCPServer:
         proc = self.proc
         return self._send_to(proc, obj) if proc else False
 
-    def _send_to(self, proc: subprocess.Popen | None, obj: dict) -> bool:
+    def _write_to(self, proc: subprocess.Popen | None, obj: dict, *,
+                  timeout: float = _MAX_WRITE_SECONDS,
+                  cancel: threading.Event | None = None) -> tuple[bool, str]:
         if not proc or not proc.stdin:
-            return False
+            return False, "server process is unavailable"
+        if cancel is not None and cancel.is_set():
+            return False, "cancelled by user"
         try:
             wire = json.dumps(obj, separators=(",", ":")) + "\n"
-            with self._send_lock:
-                proc.stdin.write(wire)
-                proc.stdin.flush()
-            return True
-        except Exception:
-            return False
+        except (TypeError, ValueError):
+            return False, "request is not JSON serializable"
+        if len(wire.encode("utf-8")) > _MAX_FRAME:
+            return False, f"outbound frame exceeded {_MAX_FRAME} bytes"
+
+        done = threading.Event()
+        outcome = {"ok": False, "error": "server stdin failed"}
+
+        def write() -> None:
+            try:
+                with self._send_lock:
+                    proc.stdin.write(wire)
+                    proc.stdin.flush()
+                outcome["ok"] = True
+                outcome["error"] = ""
+            except (OSError, ValueError):
+                pass
+            finally:
+                done.set()
+
+        threading.Thread(target=write, daemon=True,
+                         name=f"dgc-mcp-{self.name}-stdin").start()
+        deadline = time.monotonic() + max(0.01, min(_MAX_WRITE_SECONDS, float(timeout)))
+        while not done.wait(min(0.05, max(0.0, deadline - time.monotonic()))):
+            if cancel is not None and cancel.is_set():
+                return False, "cancelled while writing request"
+            if time.monotonic() >= deadline:
+                return False, "server stdin stalled"
+        return bool(outcome["ok"]), str(outcome["error"])
+
+    def _send_to(self, proc: subprocess.Popen | None, obj: dict, *,
+                 timeout: float = _MAX_WRITE_SECONDS) -> bool:
+        return self._write_to(proc, obj, timeout=timeout)[0]
 
     @staticmethod
     def _client_capabilities() -> dict:
@@ -364,14 +396,23 @@ class MCPServer:
             "progress_token": progress_token, "on_progress": on_progress, "on_log": on_log,
             "last_progress": -math.inf, "last_progress_emit": 0.0, "last_log_emit": 0.0,
         }
+        deadline = time.monotonic() + max(0.01, float(timeout))
         with self._lock:
             self._pending[mid] = (ev, holder, generation)
-        if not self._send_to(proc, {
-                "jsonrpc": "2.0", "id": mid, "method": method, "params": wire_params}):
+        sent, send_error = self._write_to(
+            proc, {"jsonrpc": "2.0", "id": mid, "method": method,
+                   "params": wire_params},
+            timeout=max(0.01, deadline - time.monotonic()), cancel=cancel)
+        if not sent:
             with self._lock:
                 self._pending.pop(mid, None)
-            return None, "server stdin is unavailable"
-        deadline = time.monotonic() + max(0.01, float(timeout))
+            if send_error in {"server stdin failed", "server stdin stalled",
+                              "cancelled while writing request",
+                              "server process is unavailable"}:
+                self.error = send_error
+                self._append_diagnostic(send_error)
+                self._stop_process(proc, generation)
+            return None, send_error
         while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
             reason = None
             if cancel is not None and cancel.is_set():
@@ -384,8 +425,15 @@ class MCPServer:
                 # Address the process that owns this request. A reconnect may already have
                 # installed a replacement in ``self.proc``; cancellation must never leak across
                 # generations and terminate an unrelated request with the same server name.
-                self._send_to(proc, {"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                     "params": {"requestId": mid, "reason": reason}})
+                cancelled, cancel_error = self._write_to(
+                    proc, {"jsonrpc": "2.0", "method": "notifications/cancelled",
+                           "params": {"requestId": mid, "reason": reason}}, timeout=0.1)
+                if not cancelled and cancel_error in {
+                        "server stdin failed", "server stdin stalled",
+                        "cancelled while writing request", "server process is unavailable"}:
+                    self.error = cancel_error
+                    self._append_diagnostic(cancel_error)
+                    self._stop_process(proc, generation)
                 return None, reason
         err = holder.get("error")
         if err:
@@ -491,7 +539,8 @@ class MCPServer:
             res, err = self._request("tools/call", params, timeout, cancel,
                                      on_progress=on_progress, on_log=on_log)
             if res is None:
-                detail = f" · {self._diagnostic_tail()}" if self._diagnostic_tail() else ""
+                tail = self._diagnostic_tail()
+                detail = f" · {tail}" if tail and tail != err else ""
                 return f"ERROR: MCP tool '{tool}' failed: {err or 'no response'}{detail}"
             if self.protocol_era != "modern" or res.get("resultType") == "complete":
                 break
@@ -609,8 +658,13 @@ class MCPManager:
         rows = []
         for name, server in self.servers.items():
             dropped = f" · dropped env: {', '.join(server._env_dropped)}" if server._env_dropped else ""
-            rows.append(f"  {name}: {len(server.tools)} tool(s) · MCP {server.protocol_version or '?'} "
-                        f"({server.protocol_era or '?'}){dropped}")
+            live = server.proc is not None and server.proc.poll() is None
+            if live:
+                rows.append(f"  {name}: {len(server.tools)} tool(s) · MCP {server.protocol_version or '?'} "
+                            f"({server.protocol_era or '?'}){dropped}")
+            else:
+                detail = server.error or server._diagnostic_tail() or "process exited"
+                rows.append(f"  {name}: disconnected · {detail[:500]}{dropped}")
         for name, error in self.failures.items():
             rows.append(f"  {name}: failed · {error[:500]}")
         return "\n".join(rows)

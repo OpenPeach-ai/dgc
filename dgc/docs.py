@@ -159,6 +159,10 @@ tools update the same tool card with correlated progress and warning/error logs;
 set `log_level` to `debug`, `info`, `notice`, `warning` (default), `error`,
 `critical`, `alert`, `emergency`, or `off`.
 
+Inbound and outbound stdio frames are bounded. If a server stops reading its pipe,
+the request write remains cancellable, the poisoned process is reaped, and `/mcp`
+reports the disconnected state instead of freezing the agent.
+
 Modern roots requests are answered through bounded multi-round-trip requests.
 Sampling and elicitation are not advertised yet and fail closed because they need
 their own model and user-consent boundaries.
