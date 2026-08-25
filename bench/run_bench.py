@@ -257,7 +257,8 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
                 "aborting before a late request can be attributed to the next round")
     path, offset = mark
     totals = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
-              "cached_input_tokens": 0, "requests": 0, "synchronized": synchronized}
+              "cached_input_tokens": 0, "requests": 0,
+              "client_disconnected_requests": 0, "synchronized": synchronized}
     try:
         with path.open("r", encoding="utf-8") as stream:
             stream.seek(offset)
@@ -273,6 +274,8 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
             continue
         usage = record.get("usage") or {}
         totals["requests"] += 1
+        if record.get("client_disconnected") is True:
+            totals["client_disconnected_requests"] += 1
         for key in ("input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens"):
             totals[key] += max(0, int(usage.get(key, 0) or 0))
     return totals
@@ -668,16 +671,37 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
 
 
 def _reconcile_dgc_usage(run: dict, stats: dict) -> None:
-    """Cross-check independent provider and crash-safe session request counters in-place."""
+    """Cross-check independent provider and crash-safe session request counters in-place.
+
+    Provider usage is authoritative for consumed compute. A timed-out client may abandon a
+    request while the provider is still generating; the proxy drains and charges that response,
+    but DGC correctly has no completed-response journal entry for it. Treat only the explainable
+    provider surplus as synchronized and retain the independent counts in the evidence record.
+    """
     usage = run.get("usage")
     if not isinstance(usage, dict):
         return
     provider_requests = max(0, int(usage.get("requests", 0) or 0))
     journal_requests = max(0, int(stats.get("requests", 0) or 0))
-    if provider_requests != journal_requests:
-        usage["synchronized"] = False
-        usage["request_mismatch"] = {
-            "provider": provider_requests, "session_journal": journal_requests}
+    disconnected_requests = max(
+        0, int(usage.get("client_disconnected_requests", 0) or 0))
+    provider_surplus = provider_requests - journal_requests
+    if provider_surplus == 0:
+        return
+    if 0 < provider_surplus <= disconnected_requests:
+        usage["provider_only_cancelled_requests"] = provider_surplus
+        usage["request_reconciliation"] = {
+            "provider": provider_requests,
+            "session_journal": journal_requests,
+            "client_disconnected": disconnected_requests,
+        }
+        return
+    usage["synchronized"] = False
+    usage["request_mismatch"] = {
+        "provider": provider_requests,
+        "session_journal": journal_requests,
+        "client_disconnected": disconnected_requests,
+    }
 
 
 # ---------------------------------------------------------------- one run -----

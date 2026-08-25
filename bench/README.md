@@ -99,7 +99,8 @@ build manifests, or added files cannot weaken grading.
 DGC's internal turn deadline is set 15 seconds before the external process-group timeout (scaled
 down for very short diagnostics). This reserves time for cancellation, snapshot restoration, and
 atomic session persistence; the `.metrics` journal remains the crash-safe fallback if hard
-termination still wins the race.
+termination still wins the race. Once that deadline is set, a response-header timeout is terminal:
+DGC does not retry the already-abandoned request and multiply provider work after the turn has ended.
 
 `run_league.sh` requires clean DGC and dataset checkouts, runs DGC, Aider, Codex, Goose, OpenCode,
 and Pi sequentially, then writes a task-set/provenance-checked comparison with Wilson 95% confidence
@@ -108,8 +109,11 @@ Ollama/OpenAI transport, drains final usage events, and records request metadata
 prompts or responses. `DGC_BENCH_NORMALIZE_THINKING=0` disables it only for a documented diagnostic.
 If a deadline-cancelled harness disconnects while the provider is still generating, the runner waits
 for the proxy to drain that request before taking the next round's log offset. It aborts fail-closed
-if quiescence cannot be proven, and DGC rows independently require provider request counts to match
-the crash-safe session journal. Late usage can therefore never leak into the next task.
+if quiescence cannot be proven. DGC rows independently reconcile provider requests with the
+crash-safe session journal: an exact match is accepted, and a provider surplus is accepted only when
+every extra request is explained by a proxy-observed client disconnect. All provider-only cancelled
+compute remains charged and visible in the row. Any unexplained difference is unsynchronized, so
+late usage can never silently leak into the next task.
 
 Without `DGC_BENCH_ALLOW_PARTIAL=1`, comparison rejects anything except all six engines, all 225
 tasks, a clean runner and dataset revision, immutable model digest, hardware label, transport

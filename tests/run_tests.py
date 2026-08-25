@@ -556,6 +556,30 @@ def unit_tests(tmp: Path):
     _srv.shutdown()
     check("llm cancel interrupts a prefill stall", _dt < 3 and _r.finish_reason == "cancelled")
 
+    # A per-request timeout can coincide exactly with a turn deadline while response headers are
+    # still pending. Cancellation is terminal: it must not fan out retry attempts that the provider
+    # will continue generating after the CLI has gone away.
+    import dgc.llm as _LM
+    _original_post = _LM.requests.post
+    _deadline = _th2.Event(); _attempts = []
+    def _timeout_at_deadline(*_args, **_kwargs):
+        _attempts.append(1); _deadline.set()
+        raise _LM.requests.Timeout("deadline")
+    try:
+        _LM.requests.post = _timeout_at_deadline
+        _cancelled = _cl.chat([{"role": "user", "content": "hi"}], cancel=_deadline)
+        _deadline.clear()
+        _responses_cl = LLMClient(
+            base_url="https://api.openai.com/v1", api_key="x", model="gpt-5",
+            api_mode="responses", provider_capabilities={"responses": True})
+        _responses_cancelled = _responses_cl.chat(
+            [{"role": "user", "content": "hi"}], cancel=_deadline)
+        check("deadline cancellation never retries an abandoned provider request",
+              _cancelled.finish_reason == _responses_cancelled.finish_reason == "cancelled"
+              and len(_attempts) == 2)
+    finally:
+        _LM.requests.post = _original_post
+
     # --- todo pane: modern-CLI-style per-status glyphs render, and it stays pinned while a turn runs
     import dgc.glyphs as _gl
     tp = object.__new__(TUI)
@@ -862,6 +886,33 @@ def unit_tests(tmp: Path):
     _forget_mutation_sensitive_signatures(_sigs)
     check("successful edits reset read/test loop signatures but retain edit-grind evidence",
           _sigs == {("edit_file", "same failed edit"): 4}, repr(_sigs))
+    _repair_root = Path(tempfile.mkdtemp())
+    _repair_agent = _Ag(_Cfg(_repair_root), _AgUI())
+    _repair_agent.config.data.update({"mode": "auto", "turn_budget_s": 600, "max_turns": 12})
+    class _RepairClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n <= 6:
+                return _ChatResult(tool_calls=[
+                    _ToolCall(f"repair-edit-{self.n}", "write_file", {
+                        "path": "attempt.txt", "content": f"attempt {self.n}\n"}),
+                    _ToolCall(f"repair-test-{self.n}", "bash", {
+                        "command": f"echo failure-{self.n}; exit 1"}),
+                ])
+            if self.n == 7:
+                return _ChatResult(tool_calls=[
+                    _ToolCall("repair-edit-green", "write_file", {
+                        "path": "attempt.txt", "content": "fixed\n"}),
+                    _ToolCall("repair-test-green", "bash", {"command": "true"}),
+                ])
+            return _ChatResult(content="Done.")
+    _repair_agent.client = _RepairClient()
+    _repair_agent.run_turn("iterate through evolving failures until the fix passes")
+    check("landed edits keep evolving repair cycles alive past the varied-failure cap",
+          _repair_agent.client.n == 8
+          and (_repair_root / "attempt.txt").read_text() == "fixed\n")
     _d = _tf.mkdtemp(); _f = Path(_d) / "sol.py"
     _f.write_text("BROKEN")                                    # current on-disk = a broken later edit
     _p._restore_snapshot({str(_f): "GOOD"})                    # snapshot from the last green run
@@ -1637,12 +1688,22 @@ def test_benchmark_integrity():
         check("benchmark round-two diagnostics never reference a deleted grader fixture",
               str(grade) not in portable_error
               and portable_error == "./test_solution.py:7: assertion failed")
+        cancelled_run = {"usage": {"requests": 20, "client_disconnected_requests": 4,
+                                    "synchronized": True}}
+        _RB._reconcile_dgc_usage(cancelled_run, {"requests": 16})
+        check("benchmark charges provider work abandoned by a timed-out client",
+              cancelled_run["usage"] == {
+                  "requests": 20, "client_disconnected_requests": 4,
+                  "synchronized": True, "provider_only_cancelled_requests": 4,
+                  "request_reconciliation": {
+                      "provider": 20, "session_journal": 16, "client_disconnected": 4}})
         mismatched_run = {"usage": {"requests": 11, "synchronized": True}}
         _RB._reconcile_dgc_usage(mismatched_run, {"requests": 12})
         check("benchmark cross-checks provider requests against the DGC journal",
               mismatched_run["usage"] == {
                   "requests": 11, "synchronized": False,
-                  "request_mismatch": {"provider": 11, "session_journal": 12}})
+                  "request_mismatch": {
+                      "provider": 11, "session_journal": 12, "client_disconnected": 0}})
         check("benchmark provenance strips URL credentials",
               _RB._safe_base_url("https://user:secret@example.com/v1?x=1") == "https://example.com/v1")
         trace = _RB._trace_record("Authorization: Bearer bench-secret\nworked", "", ("bench-secret",))
@@ -1881,7 +1942,8 @@ def test_benchmark_integrity():
         check("benchmark runner synchronizes and attributes provider usage by round",
               round_usage == {"input_tokens": 13, "output_tokens": 5,
                               "reasoning_tokens": 0, "cached_input_tokens": 0,
-                              "requests": 2, "synchronized": True})
+                              "requests": 2, "client_disconnected_requests": 0,
+                              "synchronized": True})
 
         # A cancelled harness may disconnect while the provider is still generating its final usage
         # event. A 503 barrier is "busy", not a synchronization failure: retry it so the late record
@@ -1912,7 +1974,8 @@ def test_benchmark_integrity():
             check("benchmark usage barrier attributes a late provider record to its own round",
                   len(barrier_calls) == 2 and delayed_usage == {
                       "input_tokens": 21, "output_tokens": 8, "reasoning_tokens": 0,
-                      "cached_input_tokens": 0, "requests": 1, "synchronized": True})
+                      "cached_input_tokens": 0, "requests": 1,
+                      "client_disconnected_requests": 0, "synchronized": True})
         finally:
             _RB.urlopen = old_urlopen
     finally:

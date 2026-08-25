@@ -1177,6 +1177,11 @@ class Agent:
                 if (call.name in ("write_file", "edit_file", "multi_edit", "apply_patch")
                         and not out.lstrip().lower().startswith("error")):
                     batch_edit_index = call_index
+                    # A landed mutation is progress relative to earlier varied command failures.
+                    # Let the next verification establish a fresh streak, but deliberately retain
+                    # same_fail/last_fail_fp: repeatedly producing the identical failure through
+                    # meaningless code churn must still trip the hard no-progress guard.
+                    fail_streak, fail_nudged = 0, False
                     _forget_mutation_sensitive_signatures(sig_count)
                 if deadline is not None and call.name in ("write_file", "edit_file", "multi_edit", "apply_patch") \
                         and not out.lstrip().lower().startswith("error"):

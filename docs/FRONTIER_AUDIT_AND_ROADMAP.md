@@ -104,7 +104,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 424 / 424 | Environment-independent unit, adversarial, interaction-contract, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 427 / 427 | Environment-independent unit, adversarial, interaction-contract, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -117,7 +117,7 @@ release rehearsal—not another round of unmeasured feature claims.
 | Grader reference validation | 6 / 6 | 225 / 225 | Every canonical solution passes its official suite; validator now maps Rust manifests and Java helpers correctly. |
 | Six-harness protocol canary | None | 6 / 6 pass on `python/proverb` | Final replacement run used one loaded model, official grading, transport reasoning-off, and synchronized provider usage for every engine. Pi 73.7s, DGC 83.2s, Codex 85.2s, Aider 86.4s, OpenCode 89.7s, Goose 101.6s; zero reasoning tokens. This one-task smoke is not ranking evidence. |
 | Stratified six-harness diagnostic | None | 12 tasks × 6 engines complete | Same model, controlled hardware, two tasks in each of six languages, official isolated grading, reasoning-off transport and synchronized usage. It is trace/controls evidence, not ranking evidence or a replacement for the 225-task league. |
-| Full controlled league | None | New replacement run required | Attempt 1 stopped after 8 DGC cases when compaction erased transcript-derived activity. Attempt 2 reached 16 DGC cases (15 solved), then proved that an external round timeout could bypass the transcript finalizer. Attempt 3 used the frozen `a5df131` release candidate and stopped after four persisted DGC rows: a hard `binary-search-tree` miss exposed deleted isolated-grader paths in round-two diagnostics, and a deadline-cancelled provider request completed 573 seconds late, making usage unsynchronized and liable to cross into the next task's offset. All attempts are diagnostic only. The runner now path-normalizes grader diagnostics, waits fail-closed for provider quiescence, reconciles provider requests with the atomic session journal, and preserves multi-round failure totals; these controls plus shell-equivalent post-green closeout are covered by 424 checks. |
+| Full controlled league | None | New replacement run required | Attempts 1–3 exposed compaction-sensitive counters, hard-timeout persistence loss, deleted isolated-grader paths, and a 573-second late provider completion. A clean targeted attempt 4 on `cpp/binary-search-tree` validated portable round-two paths and the fail-closed quiescence boundary: recovery improved from compile failure to 10/12 tests, but trace evidence exposed four retry-generated provider completions after deadline cancellation and a premature five-failure stop despite landed edits. All attempts are diagnostic only. DGC now treats deadline cancellation as terminal before retry, charges and explicitly reconciles provider-only cancelled work, resets varied-command failure streaks on landed edits while retaining identical-failure evidence, and preserves the earlier path/accounting/closeout controls. These cases are covered by 427 checks; the hard case and then the complete league require a new clean candidate run. |
 | Public GitHub history | 1 commit | External state unchanged | New scripts forbid force/snapshot publishing, but the public history has not been migrated. |
 
 The existing 40/52 result is encouraging, but it is not publishable evidence of parity. It covers
@@ -551,7 +551,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-418/418 Python checks and 6/6 editor webview checks. Step 6's complete preflight was green before the
+427/427 Python checks and 6/6 editor webview checks. Step 6's complete preflight was green before the
 latest timeout-journal change and must be rerun on the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed

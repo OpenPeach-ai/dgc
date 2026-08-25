@@ -552,10 +552,17 @@ class LLMClient:
         level = reasoning_effort   # current thinking level; the watchdog steps it down on a runaway
         _LOWER = {"high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
+            # A deadline may expire while requests.post is waiting for response headers. Never turn
+            # that terminal cancellation into several fresh provider generations via the transient
+            # retry path; the abandoned in-flight attempt is already billable work.
+            if cancel is not None and cancel.is_set():
+                return ChatResult(finish_reason="cancelled")
             try:
                 r = requests.post(self._url, headers=self._headers(), json=payload,
                                   stream=True, timeout=(15, self.read_timeout))
             except requests.ConnectionError as e:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
                 # transient network drops (connection reset / broken pipe / socket hang-up) recover on
                 # a retry; a persistent refusal (server down) exhausts the budget and raises the hint.
                 last_err = f"connection: {e}"
@@ -567,6 +574,8 @@ class LLMClient:
                     f"cannot connect to {self.base_url} — is your local LLM server running? "
                     f"(/connect <url> to change it)\n{e}") from e
             except requests.Timeout as e:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
                 last_err = f"timeout: {e}"
                 transient += 1
                 if transient < 4:
@@ -804,16 +813,22 @@ class LLMClient:
         transient = 0
         disabled: set[str] = set()
         for _ in range(10):
+            if cancel is not None and cancel.is_set():
+                return ChatResult(finish_reason="cancelled")
             payload, stateful = self._responses_payload(messages, tools, reasoning_effort, disabled)
             try:
                 response = requests.post(f"{self.base_url}/responses", headers=self._headers(), json=payload,
                                          stream=True, timeout=(15, self.read_timeout))
             except requests.ConnectionError as e:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
                 transient += 1
                 if transient < 4:
                     time.sleep(0.5 * transient); continue
                 raise LLMError(f"cannot connect to {self.base_url}: {e}") from e
             except requests.Timeout as e:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
                 transient += 1
                 if transient < 4:
                     time.sleep(0.5 * transient); continue
