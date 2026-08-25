@@ -423,7 +423,8 @@ class Agent:
             self, base, key, model,
             api_mode=Agent._route_api_mode(self, base, "fallback_api_mode"))
 
-    def _aux_client(self):
+    def _aux_client(self, *, max_tokens: int | None = None,
+                    read_timeout: int | None = None):
         """A one-shot client that cannot overwrite the main Responses continuation chain."""
         if not isinstance(self.client, LLMClient):  # lightweight injected clients in embedders/tests
             return self.client
@@ -431,6 +432,11 @@ class Agent:
             self.client.base_url, self.client.api_key, self.client.model,
             api_mode=getattr(self.client, "requested_api_mode", self.client.api_mode))
         client.provider_state = "stateless"         # auxiliary output is never useful as server state
+        if max_tokens is not None:
+            cap = max(1, int(max_tokens))
+            client.max_tokens = min(client.max_tokens, cap) if client.max_tokens else cap
+        if read_timeout is not None:
+            client.read_timeout = min(client.read_timeout, max(1, int(read_timeout)))
         return client
 
     def _record_usage(self, raw_usage: dict | None) -> None:
@@ -773,7 +779,7 @@ class Agent:
             elif self.session_name:
                 sessions.set_name(self.session_file, self.session_name, self.config.project_root)
 
-    def generate_title(self, prompt: str) -> str | None:
+    def generate_title(self, prompt: str, cancel=None) -> str | None:
         """A short, distinctive 5-10 word session title derived from the first prompt (
         session_summary.rs). Best-effort, no tools/thinking; returns None on any failure."""
         import re as _re
@@ -783,8 +789,9 @@ class Agent:
         msgs = [{"role": "system", "content": sysmsg},
                 {"role": "user", "content": f"<user_query>{str(prompt)[:2000]}</user_query>"}]
         try:
-            res = self._aux_client().chat(msgs, tools=None, reasoning_effort="off",
-                                          cancel=self.cancelled)
+            res = self._aux_client(max_tokens=64, read_timeout=60).chat(
+                msgs, tools=None, reasoning_effort="off",
+                cancel=cancel if cancel is not None else self.cancelled)
             self._record_usage(getattr(res, "usage", None))
         except Exception:
             return None
@@ -793,7 +800,7 @@ class Agent:
         title = _re.sub(r"\s+", " ", title).strip()[:60]
         return title or None
 
-    def suggest_next(self, user_prompt: str, assistant_response: str) -> str | None:
+    def suggest_next(self, user_prompt: str, assistant_response: str, cancel=None) -> str | None:
         """Predict ONE plausible next prompt the user might type . Best-effort,
         cheap (no tools/thinking); returns None on failure."""
         import re as _re
@@ -802,9 +809,10 @@ class Agent:
                   "no quotes, no trailing punctuation.")
         ctx = f"User: {str(user_prompt)[:600]}\nAssistant: {str(assistant_response)[:800]}"
         try:
-            res = self._aux_client().chat([{"role": "system", "content": sysmsg},
-                                           {"role": "user", "content": ctx}], tools=None,
-                                          reasoning_effort="off", cancel=self.cancelled)
+            res = self._aux_client(max_tokens=48, read_timeout=60).chat(
+                [{"role": "system", "content": sysmsg}, {"role": "user", "content": ctx}],
+                tools=None, reasoning_effort="off",
+                cancel=cancel if cancel is not None else self.cancelled)
             self._record_usage(getattr(res, "usage", None))
         except Exception:
             return None

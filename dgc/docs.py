@@ -268,7 +268,9 @@ Useful keys:
   `compact_threshold` of it.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never
   repainting your terminal).
-- `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept).
+- `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion
+  requests wait for fleet-wide idle time and are canceled before foreground work;
+  `aux_idle_delay_ms` controls the grace period.
 - `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
   sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.

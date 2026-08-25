@@ -98,6 +98,7 @@ DEFAULTS: dict = {
     "logo_animation": True,                     # animate the startup wordmark (TTY only)
     "theme": "auto",                            # auto (match the terminal) | dark | light
     "suggest": True,                            # ghost-text: predict the next prompt after each turn
+    "aux_idle_delay_ms": 750,                   # wait for foreground activity before title/suggestion
     "artifact_port": 45000,                     # the single fixed port the artifact server binds
     "artifact_autostart": True,                 # bring the artifact server up on launch if any are saved
     "artifact_bind": "localhost",               # localhost (127.0.0.1 only) | lan (0.0.0.0 — your local network)

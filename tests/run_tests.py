@@ -751,9 +751,9 @@ def unit_tests(tmp: Path):
     rt = object.__new__(TUI); rt._invalidate = lambda: None; rt._tls = _threading.local()
     def _mk(n):
         ag = _types.SimpleNamespace(session_name=None)
-        ag.generate_title = lambda p, n=n: f"title-{n}"
+        ag.generate_title = lambda p, cancel=None, n=n: f"title-{n}"
         ag.name_session = lambda t, ag=ag: setattr(ag, "session_name", t)
-        ag.suggest_next = lambda p, r, n=n: f"sug-{n}"
+        ag.suggest_next = lambda p, r, cancel=None, n=n: f"sug-{n}"
         return _types.SimpleNamespace(agent=ag, _suggestion=None)
     _sA, _sB = _mk("A"), _mk("B")
     rt._sessions = [_sA, _sB]; rt._active_idx = 0        # A is on screen; B just finished
@@ -763,6 +763,44 @@ def unit_tests(tmp: Path):
     rt._compute_suggestion(_sB, "hi", "yo")
     check("ghost-text suggestion targets the finishing session",
           _sB._suggestion == "sug-B" and _sA._suggestion is None)
+
+    _aux_calls, _aux_active = [], {"now": 0, "max": 0}
+    def _aux_step(name, result, cancel=None):
+        _aux_active["now"] += 1
+        _aux_active["max"] = max(_aux_active["max"], _aux_active["now"])
+        _aux_calls.append(name)
+        _threading.Event().wait(0.02)
+        _aux_active["now"] -= 1
+        return result
+    _aux_agent = _types.SimpleNamespace(session_name=None)
+    _aux_agent.generate_title = lambda p, cancel=None: _aux_step("title", "scheduled", cancel)
+    _aux_agent.name_session = lambda t: setattr(_aux_agent, "session_name", t)
+    _aux_agent.suggest_next = lambda p, r, cancel=None: _aux_step("suggest", "next", cancel)
+    _aux_sess = _types.SimpleNamespace(
+        id="aux", agent=_aux_agent, config=_types.SimpleNamespace(get=lambda k, d=None: 0),
+        _suggestion=None, _turn=_threading.Event(), _queue=[],
+        _autotitled=False, _autotitle_pending=False,
+        _aux_cancel=_threading.Event(), _aux_generation=0, _aux_thread=None)
+    rt._sessions = [_aux_sess]; rt._active_idx = 0; rt._aux_lock = _threading.Lock()
+    rt._schedule_auxiliary(_aux_sess, "prompt", "response", title=True, suggestion=True)
+    _aux_sess._aux_thread.join(2)
+    check("TUI auxiliary generations wait for idle and serialize title before suggestion",
+          _aux_calls == ["title", "suggest"] and _aux_active["max"] == 1
+          and _aux_agent.session_name == "scheduled" and _aux_sess._suggestion == "next"
+          and _aux_sess._autotitled and not _aux_sess._autotitle_pending)
+
+    _started, _released, _barrier_done = (_threading.Event() for _ in range(3))
+    def _blocking_title(prompt, cancel=None):
+        _started.set(); cancel.wait(1); _released.set(); return None
+    _aux_agent.session_name = None; _aux_agent.generate_title = _blocking_title
+    _aux_sess._autotitled = False
+    rt._schedule_auxiliary(_aux_sess, "prompt 2", "", title=True, suggestion=False)
+    _started.wait(1)
+    rt._cancel_auxiliary()
+    _barrier = _threading.Thread(target=lambda: (rt._foreground_aux_barrier(), _barrier_done.set()))
+    _barrier.start(); _barrier.join(2); _aux_sess._aux_thread.join(2)
+    check("a foreground turn cancels auxiliary generation before crossing its model barrier",
+          _released.is_set() and _barrier_done.is_set() and not _aux_sess._autotitle_pending)
 
     # --- a sub-agent shares the parent's cancel Event but must NOT clear it on run_turn entry (only a
     #     top-level turn clears), else a cancel arriving during sub construction is silently swallowed.
@@ -971,6 +1009,9 @@ def unit_tests(tmp: Path):
     check("auxiliary generations cannot overwrite the main Responses continuation",
           _aux is not _aux_agent.client and _aux.provider_state == "stateless"
           and _aux_agent.client._response_id == "main-response")
+    _bounded_aux = _aux_agent._aux_client(max_tokens=48, read_timeout=60)
+    check("interactive auxiliary generations have bounded output and stall time",
+          _bounded_aux.max_tokens == 48 and _bounded_aux.read_timeout == 60)
     _sigs = {("bash", "same tests"): 4, ("read_file", "same file"): 4,
              ("edit_file", "same failed edit"): 4}
     _forget_mutation_sensitive_signatures(_sigs)

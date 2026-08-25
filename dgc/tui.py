@@ -104,6 +104,10 @@ class AgentSession:
         self._phase_act: str | None = None
         self._phase_t0 = 0.0
         self._autotitled = False
+        self._autotitle_pending = False
+        self._aux_cancel = threading.Event()
+        self._aux_generation = 0
+        self._aux_thread: threading.Thread | None = None
         self._turn_marks: list[tuple[int, str]] = []
         self._suggestion: str | None = None
         self._todos: list = []
@@ -205,6 +209,7 @@ class TUI:
         self._sessions: list[AgentSession] = [AgentSession(config, self, agent=agent)]
         self._active_idx = 0
         self._tls = threading.local()      # per-thread: which session a worker thread's turn belongs to
+        self._aux_lock = threading.Lock()  # title/suggestion calls serialize across the whole fleet
         self.agent.ui = self               # the agent calls back into this TUI
 
         self._start = time.monotonic()
@@ -345,6 +350,7 @@ class TUI:
             ("max_turns", "Max tool iterations", "int"), ("bash_timeout", "Bash timeout (s)", "int"),
             ("verify_before_done", "Verify before finishing", "bool"),
             ("verify_command", "Verify command", "str"), ("suggest", "Ghost-text suggestions", "bool"),
+            ("aux_idle_delay_ms", "Title/suggestion idle delay (ms)", "int"),
             ("sandbox", "Confine bash (sandbox)", "bool"),
             ("sandbox_network", "Sandbox network access", "bool"),
         ],
@@ -1279,7 +1285,7 @@ class TUI:
             elif key == "r" and kind == "switch":
                 self._close_overlay()
                 self._ask_input(f"rename '{v.name or 'agent'}' then Enter",
-                                lambda nm, _v=v: (_v.agent.name_session(nm.strip()) if nm.strip() else None,
+                                lambda nm, _v=v: (self._name_session(_v, nm),
                                                   self._open_dashboard()))
 
         self._open_overlay(rows, on_pick=on_pick, on_action=on_action, header=header,
@@ -2058,16 +2064,42 @@ class TUI:
         the point). A title is auto-derived from the first prompt; /name overrides it."""
         self._new_session()
 
-    def _autotitle(self, sess, prompt: str) -> None:
+    def _cancel_auxiliary(self) -> None:
+        """Cancel every low-priority model request before any foreground turn starts."""
+        for session in list(getattr(self, "_sessions", ())):
+            session._aux_generation += 1
+            session._aux_cancel.set()
+            session._autotitle_pending = False
+
+    def _name_session(self, sess, name: str) -> None:
+        """Apply an explicit name and retire any now-obsolete automatic title request."""
+        value = name.strip()
+        if not value:
+            return
+        sess._aux_generation += 1
+        sess._aux_cancel.set()
+        sess._autotitle_pending = False
+        sess._autotitled = True
+        sess.agent.name_session(value)
+
+    def _foreground_aux_barrier(self) -> None:
+        """Wait until a canceled auxiliary call releases the shared local-model slot."""
+        lock = getattr(self, "_aux_lock", None)
+        if lock is None:
+            return
+        lock.acquire()
+        lock.release()
+
+    def _autotitle(self, sess, prompt: str, cancel=None) -> None:
         """Background: derive a session title from the first prompt and apply it, unless the user
         already named it. Silent on failure."""
         self._tls.session = sess        # route _active_prop reads/writes to the session that FINISHED,
         #                                 not whatever is on screen now (fleet: user may have switched)
         try:
-            title = self.agent.generate_title(prompt)
+            title = self.agent.generate_title(prompt, cancel=cancel)
         except Exception:
             title = None
-        if title and not self.agent.session_name:
+        if title and not (cancel and cancel.is_set()) and not self.agent.session_name:
             self.agent.name_session(title)
             self._invalidate()
 
@@ -2097,16 +2129,84 @@ class TUI:
                                     f"[{th.faint}] — hand this file (or the text above) to another agent[/]"))
         self._flash(f"handoff saved → {name}" if saved else "handoff ready above (couldn't write a file)")
 
-    def _compute_suggestion(self, sess, prompt: str, resp: str) -> None:
+    def _compute_suggestion(self, sess, prompt: str, resp: str, cancel=None) -> None:
         """Background: predict the next prompt (ghost text)."""
         self._tls.session = sess        # bind to the finishing session (see _autotitle) so a fleet
         #                                 switch during this ~1s window can't ghost-text the wrong session
         try:
-            s = self.agent.suggest_next(prompt, resp)
+            s = self.agent.suggest_next(prompt, resp, cancel=cancel)
         except Exception:
             s = None
+        if cancel and cancel.is_set():
+            return
         self._suggestion = s
         self._invalidate()
+
+    def _schedule_auxiliary(self, sess, prompt: str, resp: str, *,
+                            title: bool, suggestion: bool) -> None:
+        """Run title then suggestion only while the whole fleet is idle.
+
+        One lock serializes auxiliary generations across sessions. A new foreground prompt sets the
+        per-job cancellation event and waits at the lock boundary, preventing title/suggestion work
+        from consuming the same local model concurrently with a real turn.
+        """
+        if not title and not suggestion:
+            return
+        sess._aux_generation += 1
+        generation = sess._aux_generation
+        sess._aux_cancel.set()
+        cancel = threading.Event()
+        sess._aux_cancel = cancel
+        if title:
+            sess._autotitle_pending = True
+        delay = max(0, min(60_000, int(sess.config.get("aux_idle_delay_ms", 750)))) / 1000.0
+
+        def work():
+            self._tls.session = sess
+            acquired = False
+            title_attempted = False
+            try:
+                if cancel.wait(delay):
+                    return
+                deadline = time.monotonic() + 30.0
+                while not cancel.is_set() and time.monotonic() < deadline:
+                    fleet = list(getattr(self, "_sessions", (sess,)))
+                    if any(s._turn.is_set() or s._queue for s in fleet):
+                        cancel.wait(0.1)
+                        continue
+                    lock = getattr(self, "_aux_lock", None)
+                    if lock is None or lock.acquire(blocking=False):
+                        acquired = lock is not None
+                        if any(s._turn.is_set() or s._queue for s in fleet):
+                            if acquired:
+                                lock.release()
+                                acquired = False
+                            cancel.wait(0.1)
+                            continue
+                        break
+                    cancel.wait(0.1)
+                else:
+                    return
+                if cancel.is_set():
+                    return
+                if title:
+                    title_attempted = True
+                    self._autotitle(sess, prompt, cancel=cancel)
+                fleet = list(getattr(self, "_sessions", (sess,)))
+                if (suggestion and not cancel.is_set()
+                        and not any(s._turn.is_set() or s._queue for s in fleet)):
+                    self._compute_suggestion(sess, prompt, resp, cancel=cancel)
+            finally:
+                if acquired:
+                    self._aux_lock.release()
+                if sess._aux_generation == generation:
+                    sess._autotitle_pending = False
+                    if title_attempted and not cancel.is_set():
+                        sess._autotitled = True
+
+        sess._aux_thread = threading.Thread(
+            target=work, name=f"dgc-aux-{sess.id}", daemon=True)
+        sess._aux_thread.start()
 
     def _new_session(self, name: str | None = None) -> None:
         """SPAWN a new agent into the fleet and switch to it. The previous session keeps running
@@ -2119,8 +2219,7 @@ class TUI:
         sess = AgentSession(session_config, self)
         sess.agent.session_file = _sess.new_path(session_config.project_root)
         if name:
-            sess.agent.name_session(name)
-            sess._autotitled = True                  # a manual name skips auto-titling
+            self._name_session(sess, name)
         self._sessions.append(sess)
         self._naming = False
         self._switch_to(len(self._sessions) - 1)
@@ -2147,6 +2246,7 @@ class TUI:
             self._flash("can't close the only session"); return
         sess = self._sessions.pop(idx)
         try:
+            sess._aux_cancel.set()
             sess.agent.cancelled.set()                   # stop its turn if one is running
             sess.agent.mcp.stop_all()
         except Exception:
@@ -2276,7 +2376,7 @@ class TUI:
             self._prompt_new_session()
         elif cmd == "name":
             if rest:
-                self.agent.name_session(rest); self._flash(f"session named: {rest}")
+                self._name_session(self.active, rest); self._flash(f"session named: {rest}")
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "goal":
@@ -2485,6 +2585,9 @@ class TUI:
         elif cmd == "clear":
             from . import sessions as _sess
             sess = self.active
+            sess._aux_generation += 1
+            sess._aux_cancel.set()
+            sess._autotitle_pending = False
             sess.agent.reset()
             sess.agent.session_file = _sess.new_path(self.config.project_root)
             sess.blocks.clear()
@@ -2901,6 +3004,9 @@ class TUI:
         from .config import Config as _Config
         sess = self.active
         old_agent = sess.agent
+        sess._aux_generation += 1
+        sess._aux_cancel.set()
+        sess._autotitle_pending = False
         new_config = _Config(wt_path)
         new_agent = Agent(new_config, self)
         try:
@@ -3240,6 +3346,7 @@ class TUI:
     def _submit(self, text: str) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
+        self._cancel_auxiliary()                       # foreground work always preempts title/suggest
         self._cancel.clear()
         self._tool_count = 0
         self._suggestion = None                       # a new prompt supersedes the ghost text
@@ -3255,6 +3362,7 @@ class TUI:
         def work():
             self._tls.session = sess        # route this worker thread's agent callbacks to `sess`
             try:
+                self._foreground_aux_barrier()
                 self.agent.run_turn(text)
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
@@ -3271,19 +3379,18 @@ class TUI:
                                            ("" if self._tool_count == 1 else "s") if self._tool_count else "") + "[/]"))
                 if sess is not self.active and not self._cancel.is_set():   # a background agent finished
                     self._flash(f"⧉ {sess.name or 'agent'} finished — ^\\ to view")
-                # auto-derive a title for an unnamed session from the first prompt
-                if (not self.agent.session_name and not self._autotitled
-                        and not self._cancel.is_set()):
-                    self._autotitled = True
-                    threading.Thread(target=self._autotitle, args=(sess, text), daemon=True).start()
-                if self.config.get("suggest", True) and not self._cancel.is_set():
-                    resp = next((m.get("content", "") for m in reversed(self.agent.messages)
-                                 if m.get("role") == "assistant"), "")
-                    threading.Thread(target=self._compute_suggestion,
-                                     args=(sess, text, str(resp)), daemon=True).start()
                 self._invalidate()
                 if self._queue:
                     self._submit(self._queue.pop(0))
+                    return
+                title_needed = (not self.agent.session_name and not self._autotitled
+                                and not sess._autotitle_pending and not self._cancel.is_set())
+                suggestion_needed = (bool(self.config.get("suggest", True))
+                                     and not self._cancel.is_set())
+                resp = next((m.get("content", "") for m in reversed(self.agent.messages)
+                             if m.get("role") == "assistant"), "")
+                self._schedule_auxiliary(
+                    sess, text, str(resp), title=title_needed, suggestion=suggestion_needed)
 
         threading.Thread(target=work, daemon=True).start()
 
