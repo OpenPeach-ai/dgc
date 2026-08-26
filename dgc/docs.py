@@ -3,6 +3,38 @@ right in the TUI. Single source of truth: the DOCS list (title, description,
 markdown). Kept concise and accurate to DGC's actual features."""
 from __future__ import annotations
 
+from .commands import command_specs
+
+
+def _slash_command_doc() -> str:
+    """Build the TUI reference from the same registry that drives its live palette."""
+    lines = [
+        "# Slash commands",
+        "",
+        "Type **/** on an empty composer to open the live command palette; filter as you",
+        "type, ↑/↓ to select, Enter to run. This list is the complete full-screen TUI surface;",
+        "classic and editor clients advertise only the commands they can execute.",
+        "",
+    ]
+    for spec in command_specs("tui"):
+        aliases = (" Aliases: " + ", ".join(f"`/{alias}`" for alias in spec.aliases) + "."
+                   if spec.aliases else "")
+        lines.append(f"- **/{spec.usage or spec.name}** — {spec.description}.{aliases}")
+    lines.extend([
+        "",
+        "## Project commands",
+        "",
+        "Add a custom prompt command at `.dgc/commands/<name>.md` (or",
+        "`~/.dgc/commands/<name>.md`). Use `$ARGUMENTS` or `{{args}}` in the template, then",
+        "run `/name optional arguments`. Project commands override personal commands and",
+        "appear in the classic/TUI/editor/ACP catalogs automatically. Names begin with a",
+        "lowercase letter or digit, then use lowercase letters, digits, `.`, `_`, or `-`",
+        "(1–64 characters). Built-in names and aliases are reserved. DGC bounds the catalog",
+        "and each template, and rejects symlinked command directories or files.",
+    ])
+    return "\n".join(lines)
+
+
 # Each entry: (title, one-line description, markdown body).
 DOCS: list[tuple[str, str, str]] = [
     ("Getting started", "install, first launch, connect a model", """
@@ -57,24 +89,7 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 - **Ctrl+N** — new session · **/resume** — reopen a past one · **/name** — rename
 """.strip()),
 
-    ("Slash commands", "the full / command reference", """
-# Slash commands
-
-Type **/** on an empty composer to open the live command palette; filter as you
-type, ↑/↓ to select, Enter to run.
-
-- **/help** — list every command · **/keys** — keyboard cheatsheet · **/docs** — this library
-- **/new** — start a fresh session · **/resume** — reopen a past one (`dN` deletes one)
-- **/history** — search & recall a past prompt · **/jump** — jump the transcript to a past turn
-- **/rewind** — restore code + conversation to a past turn
-- **/model**, **/connect**, **/subagent** — choose the model / host / route transport
-- **/mode** — permission mode · **/think** — reasoning effort · **/thoughts** — show/hide thinking
-- **/worktree** — isolate fleet edits · **/tasks** — recover retained sub-agent work · **/sandbox** — confine bash
-- **/bg**, **/theme** — appearance · **/context** — context-window usage · **/compact** — summarise older turns
-- **/mcp**, **/agents**, **/skills**, **/memory**, **/permissions** — extend + configure
-- **/artifact** — list / open / stop your running localhost previews
-- **/status**, **/name**, **/bug**, **/update**, **/clear**, **/quit**
-""".strip()),
+    ("Slash commands", "the full / command reference", _slash_command_doc()),
 
     ("Permission modes", "default · acceptEdits · plan · auto", """
 # Permission modes
@@ -272,24 +287,6 @@ or cleared. It survives `/resume`.
 The model can use the visible `update_goal` tool only for genuine whole-goal
 completion or a real blocker. Ending one turn or finishing one milestone is not
 goal completion.
-""".strip()),
-
-    ("Slash commands", "one command catalog plus project prompt templates", """
-# Slash commands
-
-Type `/` to open the searchable command palette. DGC advertises only commands
-that the current surface can execute; core editor actions travel as typed backend
-messages and are never passed to the model as literal slash text. Declared aliases
-resolve through the same canonical registry on classic, full-screen, and editor
-surfaces; typing an alias prefix in the editor discovers its primary command.
-
-Add a custom prompt command at `.dgc/commands/<name>.md` (or
-`~/.dgc/commands/<name>.md`). Use `$ARGUMENTS` or `{{args}}` in the template, then
-run `/name optional arguments`. Project commands override personal commands and
-appear in the classic/TUI/editor/ACP catalogs automatically. Names begin with a
-lowercase letter/digit, then use lowercase letters/digits or `._-` (1–64
-characters); built-in names and aliases are reserved. DGC bounds the catalog and
-each template, and rejects symlinked command directories or files.
 """.strip()),
 
     ("Configuration", "config.json, models, context, providers", """

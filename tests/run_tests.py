@@ -1400,6 +1400,16 @@ def unit_tests(tmp: Path):
     # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls 
     import dgc.docs as _docs
     check("docs library", len(_docs.DOCS) >= 8 and _docs.find("Plan mode") is not None)
+    _doc_titles = _docs.titles()
+    _slash_doc = _docs.find("Slash commands")
+    check("in-app documentation titles are unique and slash help has one authoritative page",
+          len(_doc_titles) == len(set(_doc_titles)) and _slash_doc is not None)
+    from dgc.commands import command_specs as _doc_command_specs
+    check("in-app slash documentation is generated from every advertised TUI command",
+          all(f"**/{spec.usage or spec.name}**" in _slash_doc[2]
+              and spec.description in _slash_doc[2]
+              for spec in _doc_command_specs("tui"))
+          and ".dgc/commands/<name>.md" in _slash_doc[2])
     ui.input_buf = type("B", (), {"text": "", "reset": lambda self: None})()
     ui._open_doc_reader("Plan mode")
     check("doc reader builds rows", ui._overlay.get("reader") and len(ui._overlay["rows"]) > 5)
