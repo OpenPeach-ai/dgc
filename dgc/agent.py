@@ -20,7 +20,7 @@ from .config import Config
 from .hooks import run_hooks
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
                   normalize_usage)
-from .memory import load_memories
+from .memory import load_instruction_file, load_memories, project_memory_path
 from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
 from .mcp import MCPInputError, MCPManager
@@ -1243,15 +1243,12 @@ class Agent:
         if think:
             parts += ["", "# Reasoning", think]
 
-        project_mem, user_mem = load_memories(cfg.project_root)
-        agents_md = cfg.project_root / "AGENTS.md"
+        project_mem, user_mem = load_memories(cfg.project_root, sanitizer=self._safe_text)
+        agents_md = project_memory_path(cfg.project_root).with_name("AGENTS.md")
         # only adopt AGENTS.md as project memory in a real project dir — never the bare home dir,
         # where it may belong to a different agent (another assistant) and hijack the session.
-        if not project_mem and agents_md.exists() and cfg.project_root != Path.home():
-            try:
-                project_mem = agents_md.read_text().strip()
-            except OSError:
-                pass
+        if not project_mem and cfg.project_root != Path.home():
+            project_mem = load_instruction_file(agents_md, sanitizer=self._safe_text)
         if project_mem or user_mem:
             parts += ["", "# Memory"]
             if project_mem:

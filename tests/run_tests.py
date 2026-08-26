@@ -883,6 +883,7 @@ def unit_tests(tmp: Path):
     _direct_ctx.cancelled.clear()
     _tui_session = _ShellNamespace(
         id="direct-shell-test", agent=_ShellNamespace(ctx=_direct_ctx),
+        config=_ShellNamespace(project_root=tmp),
         blocks=[], _turn_marks=[], _scroll_off=0, _follow=True,
         _turn=threading.Event(), _cancel=_direct_ctx.cancelled, _turn_t0=0.0,
         _suggestion=None, _worker_thread=None, _closing=False, last_activity=0.0)
@@ -919,6 +920,14 @@ def unit_tests(tmp: Path):
           and "direct shell" in _tui_text and "tui-direct" in _tui_text
           and 'text.startswith("!")' in _tui_key_source and "_submit_shell" in _tui_key_source,
           _tui_text[-500:])
+    _tui_memory_direct = _tui_shell._save_memory_direct("remember from hash")
+    _tui_memory_slash = _tui_shell._handle_slash("/memory add remember from slash")
+    _tui_memory_text = (tmp / "DGC.md").read_text()
+    check("full-screen TUI routes # and /memory add directly into durable memory",
+          _tui_memory_direct and _tui_memory_slash
+          and "remember from hash" in _tui_memory_text and "remember from slash" in _tui_memory_text
+          and 'text.startswith("#")' in _tui_key_source and "_save_memory_direct" in _tui_key_source,
+          _tui_memory_text[-500:])
 
     class _ToolSecretCfg:
         def __init__(self, secret): self.secret = secret
@@ -2693,6 +2702,110 @@ def unit_tests(tmp: Path):
     add_memory("second fact", tmp)
     proj, _ = load_memories(tmp)
     check("memory appends", "second fact" in proj and "always run pytest" in proj)
+    _memory_tool_result = execute(
+        "save_memory", {"memory": "fact from the model tool", "scope": "project"}, ctx)
+    check("save_memory tool uses the same durable atomic memory path",
+          _memory_tool_result.startswith("memory saved to")
+          and "fact from the model tool" in load_memories(tmp)[0], _memory_tool_result)
+
+    import dgc.memory as _memory_safe
+    _memory_bounds_ok = True
+    for _bad_memory, _bad_scope in (("", "project"),
+                                    ("x" * (_memory_safe.MAX_MEMORY_ENTRY_CHARS + 1), "project"),
+                                    ("valid", "outside")):
+        try:
+            add_memory(_bad_memory, tmp, _bad_scope)
+            _memory_bounds_ok = False
+        except ValueError:
+            pass
+    check("memory entries and scopes are validated before persistence", _memory_bounds_ok)
+
+    _concurrent_memory = tmp / "concurrent-memory"
+    _concurrent_memory.mkdir()
+    _memory_errors = []
+    _memory_gate = threading.Barrier(12)
+
+    def _append_concurrent_memory(number):
+        try:
+            _memory_gate.wait()
+            add_memory(f"concurrent fact {number}", _concurrent_memory)
+        except Exception as exc:
+            _memory_errors.append(str(exc))
+
+    _memory_threads = [threading.Thread(target=_append_concurrent_memory, args=(number,))
+                       for number in range(12)]
+    for _memory_thread in _memory_threads:
+        _memory_thread.start()
+    for _memory_thread in _memory_threads:
+        _memory_thread.join(5)
+    _concurrent_text, _ = load_memories(_concurrent_memory)
+    check("concurrent memory appends are serialized without losing facts",
+          not _memory_errors and all(f"concurrent fact {number}" in _concurrent_text
+                                     for number in range(12)),
+          repr(_memory_errors) + "\n" + _concurrent_text[-500:])
+
+    _outside_memory = Path(tempfile.mkdtemp()) / "outside-DGC.md"
+    _outside_memory.write_text("OUTSIDE_MEMORY_SECRET\n")
+    _linked_memory_root = tmp / "linked-memory"
+    _linked_memory_root.mkdir()
+    (_linked_memory_root / "DGC.md").symlink_to(_outside_memory)
+    _linked_loaded, _ = load_memories(_linked_memory_root)
+    try:
+        add_memory("must not escape", _linked_memory_root)
+        _linked_write_blocked = False
+    except (OSError, RuntimeError, ValueError):
+        _linked_write_blocked = True
+    check("project memory never reads or writes through a final symlink",
+          _linked_loaded == "" and _linked_write_blocked
+          and _outside_memory.read_text() == "OUTSIDE_MEMORY_SECRET\n")
+
+    _large_memory_root = tmp / "large-memory"
+    _large_memory_root.mkdir()
+    (_large_memory_root / "DGC.md").write_text(
+        "MEMORY_HEAD\n" + "m" * 80_000 + "\nMEMORY_TAIL\n")
+    _large_memory, _ = load_memories(_large_memory_root)
+    check("memory prompt input is bounded while preserving its head and newest tail",
+          len(_large_memory) <= _memory_safe.MAX_MEMORY_PROMPT_CHARS
+          and "MEMORY_HEAD" in _large_memory and "MEMORY_TAIL" in _large_memory
+          and "omitted from this bounded view" in _large_memory)
+    _memory_boundary_secret = "memoryBoundaryCredential-fixture-123456789"
+    (_large_memory_root / "DGC.md").write_text(
+        "h" * (_memory_safe.MAX_MEMORY_PROMPT_CHARS // 3 - 12)
+        + _memory_boundary_secret + "m" * 60_000 + "MEMORY_REDACT_TAIL")
+    _sanitizer_saw_complete_memory = []
+
+    def _sanitize_memory_before_clip(value):
+        _sanitizer_saw_complete_memory.append(_memory_boundary_secret in value)
+        return _redact_text(value, (_memory_boundary_secret,))
+
+    _sanitized_memory = load_memories(
+        _large_memory_root, sanitizer=_sanitize_memory_before_clip)[0]
+    check("memory credentials are sanitized before bounded head-tail clipping",
+          _sanitizer_saw_complete_memory == [True]
+          and _memory_boundary_secret not in _sanitized_memory
+          and _memory_boundary_secret[:20] not in _sanitized_memory
+          and "MEMORY_REDACT_TAIL" in _sanitized_memory,
+          _sanitized_memory[:300] + _sanitized_memory[-300:])
+
+    _old_user_memory = _memory_safe.USER_MEMORY
+    _private_user_memory = tmp / "private-user" / "DGC.md"
+    _memory_safe.USER_MEMORY = _private_user_memory
+    try:
+        add_memory("private user preference", tmp, "user")
+        _loaded_user = load_memories(tmp)[1]
+        _user_mode = _private_user_memory.stat().st_mode & 0o777
+    finally:
+        _memory_safe.USER_MEMORY = _old_user_memory
+    check("user memory is atomically created owner-private and remains loadable",
+          "private user preference" in _loaded_user
+          and (_user_mode == 0o600 if os.name == "posix" else True),
+          f"mode={oct(_user_mode)} loaded={_loaded_user!r}")
+
+    _instruction_root = tmp / "instruction-memory"
+    _instruction_root.mkdir()
+    (_instruction_root / "AGENTS.md").symlink_to(_outside_memory)
+    check("AGENTS fallback instructions use the same exact bounded reader as memory",
+          _memory_safe.load_instruction_file(_instruction_root / "AGENTS.md") == "")
 
     # --- resume transcript flattening (drives the extension's `history` event
     #     so a resumed session re-renders instead of showing blank)

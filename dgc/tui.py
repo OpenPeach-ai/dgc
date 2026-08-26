@@ -40,7 +40,7 @@ from . import __version__, glyphs, logo as logo_mod, render as render_mod, style
 from .update import cached_update
 from .agent import Agent
 from .commands import command_pairs, command_pairs_with_custom
-from .redaction import secret_values
+from .redaction import redact_text, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
@@ -2978,9 +2978,23 @@ class TUI:
         elif cmd in ("skills", "extensions", "ext"):
             self._extensions_modal(tab=0)               # open the tabbed Skills/MCP modal on Skills
         elif cmd == "memory":
-            p = cfg.project_root / "DGC.md"
-            body = p.read_text()[:1500] if p.exists() else "(no project DGC.md — durable memory file)"
-            self._append(self._rich(f"[bold {th.accent}]DGC.md[/]\n[{th.faint}]{_esc(body)}[/]"))
+            match = re.match(r"add\s+(user\s+)?(.+)", rest, re.S) if rest else None
+            if rest and rest != "show" and match is None:
+                self._flash("usage: /memory [show] | /memory add [user] TEXT")
+            elif match is not None:
+                self._save_memory_direct(
+                    match.group(2), "user" if match.group(1) else "project", show_entry=False)
+            else:
+                from .memory import bounded_memory_view, load_memories
+                project_memory, user_memory = load_memories(
+                    cfg.project_root,
+                    sanitizer=lambda value: redact_text(value, secret_values(cfg)))
+                project_body = bounded_memory_view(
+                    project_memory or "(no project DGC.md — durable memory file)", 4000)
+                user_body = bounded_memory_view(user_memory or "(no user DGC.md)", 4000)
+                self._append(self._rich(
+                    f"[bold {th.accent}]project DGC.md[/]\n[{th.faint}]{_esc(project_body)}[/]\n"
+                    f"[bold {th.accent}]user DGC.md[/]\n[{th.faint}]{_esc(user_body)}[/]"))
         elif cmd == "permissions":
             perms = getattr(cfg, "permissions", {}) or {}
             spec = rest.strip().split(maxsplit=1)
@@ -3706,6 +3720,9 @@ class TUI:
                 return
             if text.startswith("/") and self._handle_slash(text):
                 return
+            if text.startswith("#"):
+                self._save_memory_direct(text[1:])
+                return
             if text.startswith("!"):
                 self._submit_shell(text[1:])
                 return
@@ -3961,6 +3978,29 @@ class TUI:
         sess._worker_thread = threading.Thread(
             target=work, name=f"dgc-turn-{sess.id}", daemon=True)
         sess._worker_thread.start()
+
+    def _save_memory_direct(self, text: str, scope: str = "project", *, show_entry: bool = True) -> bool:
+        """Persist an explicit terminal memory action without asking the model to interpret it."""
+        value = str(text or "").strip()
+        if not value:
+            self._flash("enter a memory after #, or use /memory add [user] TEXT")
+            return False
+        self._cancel.clear()
+        try:
+            from .memory import add_memory
+            path = add_memory(value, self.config.project_root, scope, cancelled=self._cancel)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._flash(f"memory was not saved: {str(exc)[:160]}")
+            return False
+        if show_entry:
+            shown = "#" + value
+            self.blocks.append({"kind": "user", "text": shown, "tag": "saved memory"})
+            self._scroll_off = 0
+            self._follow = True
+            self._invalidate()
+        label = "user memory" if scope == "user" else "project memory"
+        self._flash(f"saved to {label} · {path.name}")
+        return True
 
     def _submit_shell(self, command: str) -> None:
         """Execute an explicitly entered ``!`` command without routing it through the model."""

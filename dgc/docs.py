@@ -41,7 +41,8 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 - **Enter** — send · **Shift+Enter** — newline
 - **Shift+Tab** — cycle permission mode (default → acceptEdits → plan → auto)
 - **/** — command palette · **@ path** — attach a file
-- **! command** — run a shell command · **# note** — save a memory
+- **! command** — run a bounded direct shell command · **# note** — atomically save project memory
+- **/memory add TEXT** — save project memory · **/memory add user TEXT** — save personal memory
 - **Ctrl+R** — recall a past prompt · **Tab / →** — accept the ghost suggestion
 
 ## This turn

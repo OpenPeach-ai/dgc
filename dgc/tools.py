@@ -2348,7 +2348,8 @@ def add_skill(args: dict, ctx) -> str:
 def save_memory(args: dict, ctx) -> str:
     from .memory import add_memory
     scope = str(args.get("scope", "project"))
-    path = add_memory(str(args.get("memory", "")), ctx.project_root, scope)
+    path = add_memory(str(args.get("memory", "")), ctx.project_root, scope,
+                      cancelled=getattr(ctx, "cancelled", None))
     return f"memory saved to {path}"
 
 

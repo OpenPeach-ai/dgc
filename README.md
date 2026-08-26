@@ -127,7 +127,7 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 
 ```
 just type            ask DGC — it uses tools to act on your project
-#fact                quick-add a memory to DGC.md
+#fact                atomically quick-add project memory (`/memory add user TEXT` for personal)
 !cmd                 run directly with DGC's shell boundary (Esc cancels in the TUI)
 @path/to/file        attach a file's contents to your message
 Tab / →              accept the ghost-text next-prompt suggestion

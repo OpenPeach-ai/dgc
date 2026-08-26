@@ -19,6 +19,7 @@ from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__, glyphs, logo as logo_mod, memory as memory_mod, render, sessions as sessions_mod
 from . import style as style_mod
@@ -28,7 +29,7 @@ from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
-from .redaction import secret_values
+from .redaction import redact_text, secret_values
 from .style import ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section
 from .tools import TOOL_SCHEMAS
 
@@ -1041,16 +1042,24 @@ class CLI:
 
     def _memory_cmd(self, rest: str) -> None:
         if not rest or rest == "show":
-            proj, user = memory_mod.load_memories(self.config.project_root)
-            self.console.print(Panel(proj or "(none)", title="project DGC.md", expand=False))
-            self.console.print(Panel(user or "(none)", title="~/.dgc/DGC.md", expand=False))
+            proj, user = memory_mod.load_memories(
+                self.config.project_root,
+                sanitizer=lambda value: redact_text(value, secret_values(self.config)))
+            self.console.print(Panel(
+                Text(memory_mod.bounded_memory_view(proj or "(none)", 8000)),
+                title="project DGC.md", expand=False))
+            self.console.print(Panel(
+                Text(memory_mod.bounded_memory_view(user or "(none)", 8000)),
+                title="~/.dgc/DGC.md", expand=False))
             return
         m = re.match(r"add\s+(user\s+)?(.+)", rest, re.S)
         if not m:
             self.ui.error("usage: /memory [show] | /memory add [user] TEXT")
             return
         scope = "user" if m.group(1) else "project"
-        path = memory_mod.add_memory(m.group(2), self.config.project_root, scope)
+        self.agent.cancelled.clear()
+        path = memory_mod.add_memory(
+            m.group(2), self.config.project_root, scope, cancelled=self.agent.cancelled)
         self.ui.info(f"memory saved to {path}")
 
     # ----------------------------------------------------------- input prep ---
@@ -1125,7 +1134,9 @@ class CLI:
                 if line.startswith("/"):
                     self.handle_slash(line)
                 elif line.startswith("#"):
-                    path = memory_mod.add_memory(line[1:], self.config.project_root)
+                    self.agent.cancelled.clear()
+                    path = memory_mod.add_memory(
+                        line[1:], self.config.project_root, cancelled=self.agent.cancelled)
                     self.ui.info(f"memory saved to {path}")
                 elif line.startswith("!"):
                     self.run_bang(line[1:])
