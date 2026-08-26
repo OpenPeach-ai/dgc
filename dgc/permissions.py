@@ -13,6 +13,7 @@ Actions: allow | ask | deny.  Deny rules always win.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,10 +134,35 @@ def parse_rules(rules: dict[str, list[str]]) -> list[Rule]:
     return out
 
 
+_MCP_ROUTE_RE = re.compile(r"mcp__[A-Za-z0-9_-]{1,506}\Z")
+
+
+def _mcp_permission_route(value) -> str:
+    """Return an exact rule-safe route, hashing malformed/oversized untrusted names."""
+    route = str(value or "")
+    if _MCP_ROUTE_RE.fullmatch(route):
+        return route
+    return "sha256:" + hashlib.sha256(route.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _permission_subject(tool: str, args: dict) -> tuple[str, dict]:
+    """Map a generated direct MCP route onto its stable broker permission identity."""
+    if isinstance(tool, str) and tool.startswith("mcp__"):
+        # Server-defined arguments may themselves contain ``name``. Policy is intentionally scoped
+        # to the exact controller-owned route, never a colliding untrusted argument field.
+        return "mcp_call", {"name": _mcp_permission_route(tool)}
+    if tool == "mcp_call":
+        return tool, {**args, "name": _mcp_permission_route(args.get("name"))}
+    return tool, args
+
+
 def rule_for(tool: str, args: dict) -> str:
     """Build a 'don't ask again' rule string for a specific invocation."""
+    tool, args = _permission_subject(tool, args)
     value = str(args.get(RULE_ARG.get(tool, ""), ""))
     name = DISPLAY.get(tool, tool)
+    if tool == "mcp_call" and value:
+        return f"{name}({value})"
     if value and len(value) <= 80:
         return f"{name}({value})"
     return name
@@ -209,7 +235,8 @@ class PermissionEngine:
         """Return (allow|ask|deny, reason)."""
         external = self.external_paths(tool, args)
         ext_args = {"path": external[0]} if external else {}
-        deny = self._rule_action(tool, args, DENY)
+        policy_tool, policy_args = _permission_subject(tool, args)
+        deny = self._rule_action(policy_tool, policy_args, DENY)
         ext_deny = self._rule_action("external_directory", ext_args, DENY) if external else None
         if deny or ext_deny:
             r = deny or ext_deny
@@ -218,15 +245,15 @@ class PermissionEngine:
         if self.mode == "plan":
             if external:
                 return DENY, f"plan mode cannot access paths outside the project: {external[0]}"
-            if tool in ("mcp_search", "mcp_call"):
+            if policy_tool in ("mcp_search", "mcp_call"):
                 return DENY, "plan mode does not expose MCP discovery or execution"
-            if tool in READ_ONLY_TOOLS or tool == "present_plan":
+            if policy_tool in READ_ONLY_TOOLS or policy_tool == "present_plan":
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
 
         # Security precedence is deny -> ask -> allow. A narrow ask must beat a broad allow.
         for action in (ASK, ALLOW):
-            r = self._rule_action(tool, args, action)
+            r = self._rule_action(policy_tool, policy_args, action)
             er = self._rule_action("external_directory", ext_args, action) if external else None
             if r or er:
                 matched = r or er
@@ -238,10 +265,10 @@ class PermissionEngine:
         if self.mode == "auto":
             return ALLOW, "auto mode"
         if self.mode == "acceptEdits":
-            if tool in READ_ONLY_TOOLS or tool in EDIT_TOOLS:
+            if policy_tool in READ_ONLY_TOOLS or policy_tool in EDIT_TOOLS:
                 return ALLOW, "acceptEdits mode"
             return ASK, "acceptEdits: shell commands need approval"
         # default
-        if tool in READ_ONLY_TOOLS:
+        if policy_tool in READ_ONLY_TOOLS:
             return ALLOW, "read-only tool"
         return ASK, "default mode requires approval"

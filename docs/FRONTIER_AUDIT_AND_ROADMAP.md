@@ -125,7 +125,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 970 / 970 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 972 / 972 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -1006,7 +1006,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 970/970 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 972/972 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1145,6 +1145,9 @@ The provider-runtime slice is also implemented and contract-tested:
     oversized route reachable through the same approval, hook, workspace lease, cancellation, progress,
     logging, input-consent, redaction, and output-boundary path as a direct MCP call. Full profile remains
     the explicit expose-everything escape hatch, and plan mode exposes neither direct nor brokered calls.
+    Direct routes and brokered calls now share a stable `MCPCall(route)` permission identity (with
+    malformed or oversized names reduced to an exact SHA-256 identity), so always-allow and deny rules
+    persist and apply identically instead of silently rejecting generated names or broadening authority.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

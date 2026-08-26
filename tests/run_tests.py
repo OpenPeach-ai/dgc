@@ -19,7 +19,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
 from dgc.llm import _ThinkFilter, parse_text_tool_calls  # noqa: E402
-from dgc.permissions import PermissionEngine, Rule, _is_readonly_bash  # noqa: E402
+from dgc.permissions import PermissionEngine, Rule, _is_readonly_bash, rule_for  # noqa: E402
 from dgc.skills import _parse_skill, discover_skills  # noqa: E402
 from dgc.memory import add_memory, load_memories  # noqa: E402
 from dgc.tools import execute  # noqa: E402
@@ -189,6 +189,29 @@ def unit_tests(tmp: Path):
     check("default: MCP search is read-only but brokered execution asks",
           eng.decide("mcp_search", {"query": "issues"})[0] == "allow"
           and eng.decide("mcp_call", {"name": "mcp__github__create_issue"})[0] == "ask")
+    _direct_mcp = "mcp__github__create_issue"
+    check("direct MCP tools share the broker's ask boundary and persist a valid exact-route rule",
+          eng.decide(_direct_mcp, {"title": "fixture"})[0] == "ask"
+          and rule_for(_direct_mcp, {"name": "untrusted-argument"})
+          == "MCPCall(mcp__github__create_issue)"
+          and Rule.parse(rule_for(_direct_mcp, {}), "allow").tool == "mcp_call"
+          and rule_for("mcp_call", {"name": "mcp__*"}).startswith("MCPCall(sha256:")
+          and rule_for("mcp__" + "x" * 600, {}) != "MCPCall")
+    _mcp_rule = PermissionEngine(
+        "default", {"allow": ["MCPCall(mcp__github__create_issue)"],
+                    "ask": [], "deny": ["MCPCall(mcp__github__delete_issue)"]})
+    _oversized_mcp = "mcp__" + "x" * 600
+    _oversized_rule = rule_for(_oversized_mcp, {})
+    _oversized_engine = PermissionEngine(
+        "default", {"allow": [_oversized_rule], "ask": [], "deny": []})
+    check("exact MCPCall rules govern direct and brokered routes with deny precedence",
+          _mcp_rule.decide(_direct_mcp, {})[0] == "allow"
+          and _mcp_rule.decide("mcp_call", {"name": _direct_mcp})[0] == "allow"
+          and _mcp_rule.decide("mcp__github__delete_issue", {})[0] == "deny"
+          and _mcp_rule.decide("mcp__github__other", {})[0] == "ask"
+          and _oversized_rule.startswith("MCPCall(sha256:")
+          and _oversized_engine.decide(_oversized_mcp, {})[0] == "allow"
+          and _oversized_engine.decide(_oversized_mcp + "y", {})[0] == "ask")
 
     eng = PermissionEngine("acceptEdits", {"allow": [], "ask": [], "deny": []})
     check("acceptEdits: edit allowed", eng.decide("edit_file", {"path": "x"})[0] == "allow")
@@ -203,7 +226,8 @@ def unit_tests(tmp: Path):
     check("plan: present_plan allowed", eng.decide("present_plan", {"plan": "p"})[0] == "allow")
     check("plan: MCP brokers denied even when called without advertisement",
           eng.decide("mcp_search", {"query": "issues"})[0] == "deny"
-          and eng.decide("mcp_call", {"name": "mcp__github__create_issue"})[0] == "deny")
+          and eng.decide("mcp_call", {"name": "mcp__github__create_issue"})[0] == "deny"
+          and eng.decide("mcp__github__create_issue", {})[0] == "deny")
 
     eng = PermissionEngine("auto", {"allow": [], "ask": [], "deny": ["Bash(rm -rf *)"]})
     check("auto: bash allowed", eng.decide("bash", {"command": "make install"})[0] == "allow")
