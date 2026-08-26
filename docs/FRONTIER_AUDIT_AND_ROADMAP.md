@@ -1038,7 +1038,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 1013/1013 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 1015/1015 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1092,6 +1092,10 @@ The stratified diagnostic added trace-backed runtime controls after this interac
 11. MCP shutdown owns its per-generation stdio readers and always sweeps the known POSIX process
     group, including after the direct server leader has exited. A hostile fixture proves that a
     descendant retaining all inherited pipes is killed and both readers terminate before stop returns.
+12. Background Bash now treats its owned reader/lease—not only the shell leader—as the active
+    lifecycle. Pipe-holding descendants keep `bash_kill` available and render as finishing; kill and
+    interpreter shutdown sweep the exited leader's group and join the reader before claiming cleanup.
+    Retained completed handles never signal their stale process-group IDs, which may have been reused.
 
 The provider-runtime slice is also implemented and contract-tested:
 

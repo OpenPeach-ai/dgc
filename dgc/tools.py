@@ -1070,7 +1070,11 @@ def bash_handle_tools(ctx) -> set[str]:
             has_output = True
             proc = entry.get("proc")
             try:
-                if proc is not None and proc.poll() is None:
+                # The shell leader can exit while a descendant retains stdout and the workspace
+                # lease. The reader owns that lifecycle, so ``finished``—not only leader poll—is the
+                # authoritative signal for whether kill control remains useful.
+                if (proc is not None and proc.poll() is None
+                        or entry.get("finished") is None):
                     has_running = True
             except Exception:
                 pass
@@ -1251,7 +1255,12 @@ def _render_output(oid: str, entry: dict, args: dict, *, background: bool) -> st
 
     if background:
         rc = entry["proc"].poll()
-        status = "running" if rc is None else f"exited {rc}"
+        if rc is None:
+            status = "running"
+        elif entry.get("finished") is None:
+            status = f"finishing (leader exited {rc})"
+        else:
+            status = f"exited {rc}"
         discarded = int(entry.get("dropped_chars") or 0)
         retention = f"; {discarded} earlier chars discarded" if discarded else ""
     else:
@@ -1474,7 +1483,7 @@ def _bash_background(command: str, ctx) -> str:
     safe_command = _safe_command_label(command, ctx)
     entry = {"proc": proc, "buf": [], "buf_chars": 0, "dropped_chars": 0,
              "lock": _threading.Lock(), "cmd": safe_command, "owner": _tool_owner(ctx),
-             "started": time.time(), "finished": None}
+             "started": time.time(), "finished": None, "thread": None}
     with _BG_LOCK:
         _BG[bid] = entry
 
@@ -1514,7 +1523,10 @@ def _bash_background(command: str, ctx) -> str:
             entry["finished"] = time.time()
             workspace_lock.release()
 
-    _threading.Thread(target=reader, daemon=True).start()
+    reader_thread = _threading.Thread(target=reader, daemon=True,
+                                      name=f"dgc-background-{bid}")
+    entry["thread"] = reader_thread
+    reader_thread.start()
     return (f"started background task {bid}: {safe_command}\n"
             f"Read its output with bash_output(id=\"{bid}\").")
 
@@ -1552,8 +1564,11 @@ def bash_kill(args: dict, ctx) -> str:
         e = _BG.get(bid)
     if not e or e.get("owner") != _tool_owner(ctx):
         return f"no background task '{bid}'"
-    _terminate_background(e["proc"])
-    e["finished"] = e.get("finished") or time.time()
+    if e.get("finished") is not None:
+        return f"{bid} already finished (exit code {e['proc'].poll()})"
+    _terminate_background(e["proc"], sweep_exited_group=True)
+    if not _join_background_reader(e):
+        return f"error: killed {bid}, but its output reader did not close and cleanup is incomplete"
     return f"killed {bid} (process group reaped)"
 
 
@@ -1589,6 +1604,23 @@ def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = 
         pass
 
 
+def _join_background_reader(entry: dict, timeout: float = 2.0) -> bool:
+    """Wait for the owned drain thread so process cleanup and lease release are complete."""
+    thread = entry.get("thread")
+    if not isinstance(thread, _threading.Thread) or thread is _threading.current_thread():
+        return True
+    thread.join(timeout=max(0.0, timeout))
+    if thread.is_alive():
+        stream = getattr(entry.get("proc"), "stdout", None)
+        try:
+            if stream is not None:
+                stream.close()
+        except (OSError, ValueError):
+            pass
+        thread.join(timeout=1)
+    return not thread.is_alive()
+
+
 def _reap_background(now: float | None = None) -> None:
     """Bound the registry while retaining recent completed output for inspection."""
     cutoff = (time.time() if now is None else now) - _BG_RETAIN_S
@@ -1603,7 +1635,11 @@ def _shutdown_background() -> None:
     with _BG_LOCK:
         entries = list(_BG.values())
     for entry in entries:
-        _terminate_background(entry["proc"])
+        # Completed handles remain inspectable for 30 minutes. Never signal their stale process-group
+        # IDs: the kernel may have reused one for an unrelated process by interpreter shutdown.
+        if entry.get("finished") is None:
+            _terminate_background(entry["proc"], sweep_exited_group=True)
+            _join_background_reader(entry)
 
 
 atexit.register(_shutdown_background)

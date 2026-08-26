@@ -1298,10 +1298,13 @@ def unit_tests(tmp: Path):
         if "exited 0" in _bg_secret_out and "[REDACTED]" in _bg_secret_out:
             break
         _time_tools.sleep(0.01)
+    _bg_secret_finished_kill = execute("bash_kill", {"id": _bg_secret_id}, _output_ctx)
     check("background commands and buffered output are redacted before bounded retention",
           bool(_bg_secret_id) and _tool_secret not in _bg_secret_start + _bg_secret_out
           and "[REDACTED]" in _bg_secret_start and "[REDACTED]" in _bg_secret_out,
           _bg_secret_start + "\n" + _bg_secret_out)
+    check("completed background handles never signal a potentially reused process group",
+          "already finished" in _bg_secret_finished_kill, _bg_secret_finished_kill)
     check("background task handles are isolated between agent sessions",
           execute("bash_output", {"id": _bg_secret_id}, _other_output_ctx)
           == f"no bash output '{_bg_secret_id}' (available: none)")
@@ -1323,6 +1326,51 @@ def unit_tests(tmp: Path):
     if _released_lease:
         _lease.release()
     check("background bash releases its workspace lease after exit", _released_lease)
+
+    _orphan_program = (
+        "import subprocess,sys\n"
+        "child=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print(f'BG_ORPHAN={child.pid}', flush=True)\n"
+    )
+    _orphan_command = (f"{_shlex_tools.quote(sys.executable)} -c "
+                       f"{_shlex_tools.quote(_orphan_program)}")
+    _orphan_start = execute(
+        "bash", {"command": _orphan_command, "background": True}, ctx)
+    _orphan_id_match = _re_bg.search(r"background task (bg\d+)", _orphan_start)
+    _orphan_id = _orphan_id_match.group(1) if _orphan_id_match else ""
+    _orphan_entry = _tools_bg._BG.get(_orphan_id, {})
+    _orphan_output = ""
+    _orphan_pid_match = None
+    for _ in range(200):
+        _orphan_output = execute("bash_output", {"id": _orphan_id}, ctx)
+        _orphan_pid_match = _re_bg.search(r"BG_ORPHAN=(\d+)", _orphan_output)
+        _orphan_proc = _orphan_entry.get("proc")
+        if (_orphan_pid_match and _orphan_proc is not None
+                and _orphan_proc.poll() is not None):
+            break
+        _time_tools.sleep(0.01)
+    _orphan_pid = int(_orphan_pid_match.group(1)) if _orphan_pid_match else 0
+    _orphan_was_alive = _live_process(_orphan_pid, wait=0.05)
+    _orphan_controls = _tools_bg.bash_handle_tools(ctx)
+    _orphan_killed = execute("bash_kill", {"id": _orphan_id}, ctx)
+    _orphan_still_alive = _live_process(_orphan_pid)
+    _orphan_lease = _workspace_lock(tmp)
+    _orphan_lease_released = _orphan_lease.acquire(timeout=0.2)
+    if _orphan_lease_released:
+        _orphan_lease.release()
+    check("background kill owns descendants and lease after the shell leader exits",
+          bool(_orphan_id) and _orphan_was_alive and not _orphan_still_alive
+          and "finishing (leader exited 0)" in _orphan_output
+          and "bash_kill" in _orphan_controls
+          and "process group reaped" in _orphan_killed
+          and _orphan_lease_released,
+          f"id={_orphan_id!r} pid={_orphan_pid} controls={_orphan_controls} "
+          f"killed={_orphan_killed!r} output={_orphan_output[-300:]!r}")
+    if _orphan_still_alive:
+        try:
+            os.kill(_orphan_pid, 9)
+        except OSError:
+            pass
     for unsafe_url in ("file:///etc/passwd", "http://127.0.0.1/x", "http://[::1]/x",
                        "http://169.254.169.254/latest/meta-data", "https://user:pass@example.com/"):
         try:
