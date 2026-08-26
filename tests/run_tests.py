@@ -7733,6 +7733,7 @@ def test_slash_palette():
 def test_steering():
     """A mid-turn message is folded into the running turn as a <user-interjection>, not a new turn."""
     import tempfile as _tf
+    import dgc.agent as _agent_mod
     from pathlib import Path as _P
     from dgc.agent import Agent
     from dgc.config import Config
@@ -7747,6 +7748,33 @@ def test_steering():
           and "user-interjection" in a.messages[-1]["content"]
           and "write a test" in a.messages[-1]["content"])
     check("drain with an empty queue is a no-op", a._drain_steer() is False)
+
+    _real_datetime = _agent_mod.datetime
+    class _PromptClock(_real_datetime):
+        current = _real_datetime(2026, 8, 26, 10, 1)
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+    try:
+        _agent_mod.datetime = _PromptClock
+        _stable_prompt_one = a.system_prompt()
+        _PromptClock.current = _real_datetime(2026, 8, 26, 23, 59)
+        _stable_prompt_two = a.system_prompt()
+    finally:
+        _agent_mod.datetime = _real_datetime
+    check("system prompt prefix remains byte-stable across clock minutes",
+          _stable_prompt_one == _stable_prompt_two
+          and "- Date: 2026-08-26\n" in _stable_prompt_one)
+
+    _text_protocol = a._text_protocol_section()
+    _text_schema_wire = _text_protocol.split("Available tools:\n", 1)[1]
+    _text_schemas = json.loads(_text_schema_wire)
+    _pretty_text_schemas = json.dumps(_text_schemas, indent=1)
+    check("text-tool schemas omit insignificant repeated prefill whitespace",
+          _text_schema_wire == json.dumps(
+              _text_schemas, separators=(",", ":"))
+          and len(_text_schema_wire) < 0.85 * len(_pretty_text_schemas)
+          and any(tool.get("name") == "read_file" for tool in _text_schemas))
 
     # Adaptive tool exposure keeps the coding surface complete while withholding unrelated product
     # schemas until the user or standing goal asks for them. Full mode is an explicit escape hatch.
@@ -7807,6 +7835,10 @@ def test_steering():
         _lazy_tools = a._tool_schemas()
         _lazy_names = {tool["function"]["name"] for tool in _lazy_tools}
         _lazy_protocol = a._text_protocol_section()
+        _lazy_protocol_names = {
+            tool["name"] for tool in json.loads(
+                _lazy_protocol.split("Available tools:\n", 1)[1])
+        }
         _lazy_mcp_chars = sum(
             len(json.dumps(tool, default=str)) for tool in _lazy_tools
             if tool["function"]["name"].startswith("mcp"))
@@ -7820,8 +7852,7 @@ def test_steering():
               and "mcp__fixture__filler_0" not in _lazy_names
               and "mcp__archive__oversized_export" not in _lazy_names
               and _lazy_mcp_chars <= a._mcp_schema_budget_chars()
-              and '"name": "mcp_search"' in _lazy_protocol
-              and '"name": "mcp__github__create_issue"' in _lazy_protocol
+              and {"mcp_search", "mcp__github__create_issue"} <= _lazy_protocol_names
               and "mcp__github__create_issue" not in _untrusted_catalog_names)
 
         _search_result = a._search_mcp_tools("database backup", 5)
@@ -7995,9 +8026,13 @@ def test_steering():
     a._active_skill_names.clear()
     check("adaptive prompt omits dormant artifact instructions", "# Artifacts" not in a.system_prompt())
     _adaptive_protocol = a._text_protocol_section()
+    _adaptive_protocol_names = {
+        tool["name"] for tool in json.loads(
+            _adaptive_protocol.split("Available tools:\n", 1)[1])
+    }
     check("adaptive text-tool protocol mirrors the filtered native catalog",
-          '"name": "read_file"' in _adaptive_protocol
-          and all(f'"name": "{name}"' not in _adaptive_protocol for name in _optional))
+          "read_file" in _adaptive_protocol_names
+          and not (_optional & _adaptive_protocol_names))
     _spurious_expansion = False
     for _prompt in ("Update the documentation for the frontend package; remember to run tests",
                     "Show me where this function is defined in the codebase"):
@@ -8037,8 +8072,12 @@ def test_steering():
     check("explicit intent activates every matching optional tool",
           _optional <= _intent_names and "# Artifacts" in a.system_prompt())
     _intent_protocol = a._text_protocol_section()
+    _intent_protocol_names = {
+        tool["name"] for tool in json.loads(
+            _intent_protocol.split("Available tools:\n", 1)[1])
+    }
     check("explicit intent also activates optional text-protocol tools",
-          all(f'"name": "{name}"' in _intent_protocol for name in _optional))
+          _optional <= _intent_protocol_names)
 
     a._active_tool_intents.clear()
     a.set_goal("Research the latest API docs", "active")

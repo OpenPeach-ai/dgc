@@ -1284,7 +1284,9 @@ class Agent:
             "not by just describing solutions.",
             "",
             "# Environment",
-            f"- Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            # Keep the static prefix stable throughout a working day. Minute-level clock churn
+            # invalidates provider/local prefix caches between otherwise identical follow-up turns.
+            f"- Date: {datetime.now().strftime('%Y-%m-%d')}",
             f"- OS: {platform.system()} {platform.release()}",
             f"- Project root (cwd for all tools): {cfg.project_root}",
             f"- Model: {cfg.model} @ {cfg.base_url}",
@@ -1452,7 +1454,11 @@ class Agent:
             "```tool_call\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"src/main.py\"}}\n```\n\n"
             "After you emit tool_call blocks, STOP and wait — the harness executes them and gives "
             "you the results in the next message. Do not write tool results yourself.\n"
-            "Available tools:\n" + json.dumps(schemas, indent=1))
+            # Tool schemas are already machine-structured JSON. Insignificant pretty-print
+            # whitespace costs hundreds of prefill tokens on text-only local models every time the
+            # active catalog changes, without adding semantics or improving the fenced example.
+            "Available tools:\n" + json.dumps(
+                schemas, separators=(",", ":")))
 
     # ------------------------------------------------------------ thinking ---
     def _effective_thinking(self, user_text: str) -> str:
