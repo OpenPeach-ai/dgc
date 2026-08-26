@@ -20,8 +20,9 @@ file(s), and we score by running the official tests:
 - **pass@1** = solved after round 1 · **pass@2** = solved by end of round 2.
 
 We also record wall-time, tool-call/turn counts, `edit_file` failure counts, provider-reported
-input/output/reasoning tokens, provider request/wall latency, and DGC built-in tool time. Each
-exercise gets its own private HOME; round two reuses only that exercise's real harness session.
+input/output/reasoning tokens, provider request/wall latency, and DGC built-in tool time. Aggregate
+comparisons retain a trace-free row for every engine/task and can print bounded slow/request outliers.
+Each exercise gets its own private HOME; round two reuses only that exercise's real harness session.
 
 ## Setup
 
@@ -90,13 +91,14 @@ and by bounded tool name. Tool arguments, commands, paths, prompts, and results 
 timing records. The timer updates only in-memory counters; the already-required activity/request
 journal save persists them, so instrumentation does not add a disk write to each tool call.
 
-These quantities are intentionally not collapsed into a synthetic “overhead” number. Built-in
-tool-seconds can overlap when DGC runs independent reads in parallel, and provider work may continue
-after a timed-out client disconnects. Compare `avg_s`, `prov_s`, the DGC-only `tool_s`, request count,
-and the raw `by_tool_us`/`by_tool_samples` maps together. A high `prov_s` points at model/endpoint
-latency; a high named tool total points at execution, sandbox, or filesystem cost; a large remainder
-points at orchestration, permission/lease waits, external tools, process startup, or unmeasured
-frontend work. Legacy records render timing as `?`, not a misleading zero.
+The report shows `other_s = max(agent_s - prov_s, 0)` only as outside-provider wall time—not as a
+claim that all of it is DGC overhead. Built-in tool-seconds can overlap when DGC runs independent
+reads in parallel, and provider work may continue after a timed-out client disconnects. Compare
+`avg_s`, `prov_s`, `other_s`, the DGC-only `tool_s`, request count, and the raw
+`by_tool_us`/`by_tool_samples` maps together. A high `prov_s` points at model/endpoint latency; a high
+named tool total points at execution, sandbox, or filesystem cost; `other_s` includes orchestration,
+permission/lease waits, external tools, process startup, and unmeasured frontend work. Legacy or
+incompletely synchronized records render affected metrics as `?`, never a misleading zero.
 
 Round-two compiler/test diagnostics are path-normalized before they are returned to a harness. The
 official grader runs in a disposable clean fixture, so absolute paths from that deleted fixture are
@@ -148,19 +150,26 @@ variables still override those binaries.
 ## Read the results
 
 ```bash
-python3 report.py results/results-<model>-<tag>.jsonl
+python3 report.py results/results-<engine>-<model>-<tag>.jsonl
+
+# compare controlled engines and show the top five slow/request-heavy tasks per engine
+python3 compare.py --top-tasks 5 --json results/comparison-<model>-<tag>.json \
+  results/results-<engine>-<model>-<tag>.jsonl ...
 ```
 
 ```
-lang           n         pass@1         pass@2   avg_s  prov_s  tool_s   avg_out editfail  t/o
-python        34   19 ( 55.9%)   24 ( 70.6%)      92      71     8.4      1234        3    0
+lang           n         pass@1         pass@2   avg_s  prov_s other_s  tool_s  req/t   avg_out  out/req editfail  t/o
+python        34   19 ( 55.9%)   24 ( 70.6%)      92      71      21     8.4    6.2      1234      199        3    0
 ...
 TOTAL        225  ...
 ```
 
 `tool_s` is available only for instrumented DGC rounds. The report also prints the eight largest
 built-in tool totals with sample counts; the JSONL remains authoritative for every per-round and
-per-tool value.
+per-tool value. Comparison JSON schema v4 adds a bounded, trace-free `tasks` array with pass state,
+rounds, timeouts, attributed requests/tokens/timings, outside-provider time, and available activity
+counters for every engine/exercise. A task with incomplete or unsynchronized provider attribution
+uses JSON `null` for affected totals instead of mixing partial work into a seemingly exact number.
 
 Key flags: `--langs` (subset), `-n/--limit` (cap per language), `--rounds`,
 `--dgc-timeout`, `--test-timeout`, `--tag`, `--keep-work`, `--dry-run`.

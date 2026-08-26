@@ -27,6 +27,23 @@ def wilson(successes: int, total: int, z: float = 1.959963984540054) -> tuple[fl
     return max(0.0, center - margin), min(1.0, center + margin)
 
 
+def _timing_value(usage: dict, key: str) -> float | None:
+    if key not in usage or usage.get(key) is None:
+        return None
+    try:
+        value = float(usage[key])
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
+
+
+def _attributed_usage(value: object) -> dict | None:
+    if (not isinstance(value, dict) or int(value.get("requests", 0) or 0) <= 0
+            or value.get("synchronized", True) is False):
+        return None
+    return value
+
+
 def load(path: Path) -> dict:
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -53,11 +70,8 @@ def load(path: Path) -> dict:
     agent_s = sum(float((rd.get("agent") or rd.get("dgc") or {}).get("time") or 0) for rd in rounds)
     edit_fails = sum(int((rd.get("stats") or {}).get("edit_fails") or 0) for rd in rounds)
     usages = [((rd.get("agent") or rd.get("dgc") or {}).get("usage")) for rd in rounds]
-    attributed_usages = [
-        usage for usage in usages
-        if (isinstance(usage, dict) and int(usage.get("requests", 0) or 0) > 0
-            and usage.get("synchronized", True) is not False)
-    ]
+    attributed_usages = [usage for value in usages
+                         if (usage := _attributed_usage(value)) is not None]
     usage_rounds = len(attributed_usages)
     input_tokens = sum(int(usage.get("input_tokens", 0) or 0) for usage in attributed_usages)
     output_tokens = sum(int(usage.get("output_tokens", 0) or 0) for usage in attributed_usages)
@@ -76,18 +90,9 @@ def load(path: Path) -> dict:
                 continue
             provider_transports[name] = provider_transports.get(name, 0) + max(
                 0, int(values.get(name, 0) or 0))
-    def timing_value(usage: dict, key: str) -> float | None:
-        if key not in usage or usage.get(key) is None:
-            return None
-        try:
-            value = float(usage[key])
-        except (TypeError, ValueError):
-            return None
-        return value if math.isfinite(value) and value >= 0 else None
-
     provider_timings = []
     for usage in attributed_usages:
-        values = tuple(timing_value(usage, key) for key in
+        values = tuple(_timing_value(usage, key) for key in
                        ("provider_duration_s", "provider_wall_s", "provider_max_duration_s"))
         if all(value is not None for value in values):
             provider_timings.append(values)
@@ -164,6 +169,115 @@ def efficiency_metrics(run: dict) -> dict[str, float | None]:
     }
 
 
+def task_metrics(engine: str, record: dict) -> dict:
+    """Return a trace-free, per-task diagnostic row with fail-closed attribution."""
+    rounds = list(record.get("rounds") or [])
+    agents = [(rd.get("agent") or rd.get("dgc") or {}) for rd in rounds]
+    usages = [_attributed_usage(agent.get("usage")) for agent in agents]
+    usage_complete = bool(rounds) and all(usage is not None for usage in usages)
+    complete_usages = [usage for usage in usages if usage is not None]
+    provider_requests = (sum(max(0, int(usage.get("requests", 0) or 0))
+                             for usage in complete_usages)
+                         if usage_complete else None)
+
+    def token_total(key: str) -> int | None:
+        return (sum(max(0, int(usage.get(key, 0) or 0)) for usage in complete_usages)
+                if usage_complete else None)
+
+    timing_rows = [tuple(_timing_value(usage, key) for key in
+                         ("provider_duration_s", "provider_wall_s", "provider_max_duration_s"))
+                   for usage in complete_usages]
+    attributed_timings = [row for row in timing_rows
+                          if all(value is not None for value in row)]
+    timing_complete = usage_complete and len(attributed_timings) == len(rounds)
+    provider_duration_s = (sum(row[0] for row in attributed_timings)
+                           if timing_complete else None)
+    provider_wall_s = (sum(row[1] for row in attributed_timings)
+                       if timing_complete else None)
+    provider_max_duration_s = (max((row[2] for row in attributed_timings), default=0.0)
+                               if timing_complete else None)
+    agent_s = sum(float(agent.get("time") or 0) for agent in agents)
+
+    transport_complete = (usage_complete
+                          and all(isinstance(usage.get("provider_transports"), dict)
+                                  for usage in complete_usages))
+    transports: dict[str, int] | None = {} if transport_complete else None
+    if transports is not None:
+        for usage in complete_usages:
+            values = usage.get("provider_transports")
+            if not isinstance(values, dict):
+                continue
+            for name in sorted(values):
+                if name in _PROVIDER_TRANSPORTS:
+                    transports[name] = transports.get(name, 0) + max(
+                        0, int(values.get(name, 0) or 0))
+        if sum(transports.values()) != provider_requests:
+            transports = None
+
+    stats = [rd.get("stats") if isinstance(rd.get("stats"), dict) else None for rd in rounds]
+
+    def stat_total(key: str) -> int | None:
+        return (sum(max(0, int(item.get(key, 0) or 0)) for item in stats if item is not None)
+                if rounds and all(item is not None and key in item for item in stats) else None)
+
+    builtin_us = stat_total("builtin_tool_us")
+    output_tokens = token_total("output_tokens")
+    solved_round = record.get("solved_round")
+    return {
+        "engine": str(engine), "lang": str(record.get("lang") or ""),
+        "exercise": str(record.get("ex") or ""),
+        "solved": bool(record.get("solved")),
+        "solved_round": int(solved_round) if isinstance(solved_round, int) else None,
+        "rounds": len(rounds), "timeout_rounds": sum(bool(agent.get("timeout")) for agent in agents),
+        "error": bool(record.get("error")), "agent_s": agent_s,
+        "usage_rounds": len(complete_usages),
+        "provider_requests": provider_requests,
+        "input_tokens": token_total("input_tokens"), "output_tokens": output_tokens,
+        "reasoning_tokens": token_total("reasoning_tokens"),
+        "output_tokens_per_request": (
+            output_tokens / provider_requests
+            if output_tokens is not None and provider_requests else None),
+        "provider_timing_rounds": len(attributed_timings),
+        "provider_duration_s": provider_duration_s, "provider_wall_s": provider_wall_s,
+        "provider_max_duration_s": provider_max_duration_s,
+        "outside_provider_s": (max(0.0, agent_s - provider_wall_s)
+                               if provider_wall_s is not None else None),
+        "provider_transports": transports,
+        "tool_calls": stat_total("tool_calls"), "edits": stat_total("edits"),
+        "edit_fails": stat_total("edit_fails"),
+        "builtin_tool_s": builtin_us / 1_000_000 if builtin_us is not None else None,
+        "builtin_tool_samples": stat_total("builtin_tool_samples"),
+    }
+
+
+def task_outliers(runs: list[dict], limit: int) -> list[dict]:
+    """Select a bounded union of the slowest and highest-request tasks per engine."""
+    limit = max(0, min(20, int(limit)))
+    if limit == 0:
+        return []
+    selected: list[dict] = []
+    for run in sorted(runs, key=lambda item: str(item.get("engine") or "")):
+        rows = [task_metrics(str(run.get("engine") or ""), record)
+                for record in run.get("records") or []]
+        signals: dict[tuple[str, str], set[str]] = {}
+        by_key = {(row["lang"], row["exercise"]): row for row in rows}
+        slow_rows = sorted(
+            rows, key=lambda item: (-item["agent_s"], item["lang"], item["exercise"]))[:limit]
+        for row in slow_rows:
+            signals.setdefault((row["lang"], row["exercise"]), set()).add("slow")
+        request_rows = [row for row in rows if row["provider_requests"] is not None]
+        request_rows = sorted(request_rows, key=lambda item: (
+            -item["provider_requests"], -item["agent_s"],
+            item["lang"], item["exercise"]))[:limit]
+        for row in request_rows:
+            signals.setdefault((row["lang"], row["exercise"]), set()).add("requests")
+        for key in sorted(signals, key=lambda item: (
+                -by_key[item]["timeout_rounds"],
+                -(by_key[item]["provider_requests"] or 0), -by_key[item]["agent_s"], item)):
+            selected.append(dict(by_key[key], signals=sorted(signals[key])))
+    return selected
+
+
 def publication_errors(runs: list[dict]) -> list[str]:
     """Return every reason a league is unsuitable for a public frontier claim."""
     errors: list[str] = []
@@ -213,7 +327,11 @@ def main() -> None:
     parser.add_argument("--json", type=Path, help="also write the comparison as JSON")
     parser.add_argument("--allow-partial", action="store_true",
                         help="allow incomplete task sets (never use for published claims)")
+    parser.add_argument("--top-tasks", type=int, default=0, metavar="N",
+                        help="show the N slowest and highest-request tasks per engine (0-20)")
     args = parser.parse_args()
+    if not 0 <= args.top_tasks <= 20:
+        parser.error("--top-tasks must be between 0 and 20")
     runs = [load(path) for path in args.results]
     if not args.allow_partial:
         problems = publication_errors(runs)
@@ -292,10 +410,31 @@ def main() -> None:
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
                              "efficiency": efficiency,
                              "source": str(run["path"])})
+    outliers = task_outliers(runs, args.top_tasks)
+    if outliers:
+        print("\ntask outliers (bounded union of slowest and highest-request tasks per engine)")
+        print(f"{'engine':12s} {'task':34s} {'result':>7} {'agent_s':>8} {'req':>5} "
+              f"{'out':>7} {'other_s':>8} {'edits':>6} {'ef':>4} {'t/o':>4} {'signal':>13}")
+        for row in outliers:
+            result = (f"p{row['solved_round']}" if row["solved_round"] else "fail")
+            requests = str(row["provider_requests"]) if row["provider_requests"] is not None else "?"
+            output = str(row["output_tokens"]) if row["output_tokens"] is not None else "?"
+            outside = (f"{row['outside_provider_s']:.1f}"
+                       if row["outside_provider_s"] is not None else "?")
+            edits = str(row["edits"]) if row["edits"] is not None else "?"
+            edit_fails = str(row["edit_fails"]) if row["edit_fails"] is not None else "?"
+            task = re.sub(r"[\x00-\x1f\x7f]", "?", f"{row['lang']}/{row['exercise']}")[:34]
+            print(f"{row['engine']:12.12s} {task:34s} {result:>7} {row['agent_s']:8.1f} "
+                  f"{requests:>5} {output:>7} {outside:>8} {edits:>6} {edit_fails:>4} "
+                  f"{row['timeout_rounds']:4d} {'+'.join(row['signals']):>13}")
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps({"schema_version": 3, "task_count": len(baseline),
-                                         "runs": comparison}, indent=2) + "\n", encoding="utf-8")
+        tasks = sorted((task_metrics(run["engine"], record) for run in runs
+                        for record in run["records"]),
+                       key=lambda row: (row["engine"], row["lang"], row["exercise"]))
+        args.json.write_text(json.dumps({"schema_version": 4, "task_count": len(baseline),
+                                         "runs": comparison, "tasks": tasks},
+                                        indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

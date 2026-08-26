@@ -7025,22 +7025,25 @@ def test_benchmark_integrity():
               and ("src/main/java/Card.java", ".meta/ref/Card.java") in pairs)
         results = root / "mixed.jsonl"
         results.write_text("\n".join((
-            json.dumps({"lang": "python", "solved": True, "solved_round": 1,
+            json.dumps({"engine": "dgc", "lang": "python", "ex": "timed",
+                        "solved": True, "solved_round": 1,
                         "rounds": [{"agent": {"time": 2, "timeout": False, "usage": {
                             "requests": 1, "synchronized": True,
                             "input_tokens": 10, "output_tokens": 4,
                             "provider_transports": {"ollama_chat": 1},
                             "provider_duration_s": 1.5, "provider_wall_s": 1.5,
                             "provider_max_duration_s": 1.5}},
-                            "stats": {"builtin_tool_us": 250000,
+                            "stats": {"tool_calls": 3, "edits": 1, "edit_fails": 0,
+                                      "builtin_tool_us": 250000,
                                       "builtin_tool_samples": 2,
                                       "by_tool_us": {"read_file": 50000, "bash": 200000},
                                       "by_tool_samples": {"read_file": 1, "bash": 1}}}]}),
-            json.dumps({"lang": "python", "solved": False,
+            json.dumps({"engine": "dgc", "lang": "python", "ex": "legacy", "solved": False,
                         "rounds": [{"dgc": {"time": 3, "timeout": True, "usage": {
                             "requests": 2, "synchronized": True,
                             "input_tokens": 6, "output_tokens": 3,
                             "provider_transports": {"ollama_chat": 2}}}, "stats": {
+                            "tool_calls": 4, "edits": 2, "edit_fails": 1,
                             "builtin_tool_us": 0, "builtin_tool_samples": 0,
                             "by_tool_us": {}, "by_tool_samples": {}}}]}),
         )))
@@ -7065,7 +7068,11 @@ def test_benchmark_integrity():
               and "built-in tool-seconds (sum; parallel calls may overlap)" in report_out.getvalue())
         compare_results = root / "results-timing.jsonl"
         compare_results.write_bytes(results.read_bytes())
-        (root / "manifest-timing.json").write_text(json.dumps({"schema_version": 3}))
+        (root / "manifest-timing.json").write_text(json.dumps({
+            "schema_version": 3,
+            "settings": {"engine": "dgc", "exercises": "timed,legacy"},
+            "preflight": {"tasks": {"python": 2}},
+        }))
         loaded_timing = _BC.load(compare_results)
         check("benchmark comparison retains provider and per-tool attribution",
               loaded_timing["provider_timing_rounds"] == 1
@@ -7116,6 +7123,49 @@ def test_benchmark_integrity():
                   "n": 2, "rounds": 2, "usage_rounds": 1,
                   "provider_timing_rounds": 1, "provider_requests": 1,
               }).values()))
+        mixed_records = [json.loads(line) for line in results.read_text().splitlines()]
+        timed_task = _BC.task_metrics("dgc", mixed_records[0])
+        legacy_task = _BC.task_metrics("dgc", mixed_records[1])
+        ignored_task = _BC.task_metrics("dgc", json.loads(unsynchronized_results.read_text()))
+        check("benchmark comparison emits trace-free per-task efficiency with honest coverage",
+              timed_task["exercise"] == "timed" and timed_task["solved_round"] == 1
+              and timed_task["provider_requests"] == 1 and timed_task["output_tokens"] == 4
+              and timed_task["provider_wall_s"] == 1.5
+              and timed_task["outside_provider_s"] == 0.5
+              and timed_task["tool_calls"] == 3 and timed_task["edits"] == 1
+              and timed_task["builtin_tool_s"] == 0.25 and "trace" not in timed_task
+              and legacy_task["provider_requests"] == 2
+              and legacy_task["provider_timing_rounds"] == 0
+              and legacy_task["provider_wall_s"] is None
+              and ignored_task["usage_rounds"] == 0
+              and ignored_task["provider_requests"] is None
+              and ignored_task["input_tokens"] is None
+              and ignored_task["provider_transports"] is None)
+        selected_outliers = _BC.task_outliers(
+            [{"engine": "dgc", "records": mixed_records}], 1)
+        check("benchmark task outliers are bounded, deduplicated, and carry selection reasons",
+              len(selected_outliers) == 1
+              and selected_outliers[0]["exercise"] == "legacy"
+              and selected_outliers[0]["signals"] == ["requests", "slow"])
+        comparison_json = root / "comparison-v4.json"
+        comparison_stdout = _StringIO()
+        original_argv = sys.argv
+        try:
+            sys.argv = ["compare.py", "--allow-partial", "--top-tasks", "1",
+                        "--json", str(comparison_json), str(compare_results)]
+            with _redirect_stdout(comparison_stdout):
+                _BC.main()
+        finally:
+            sys.argv = original_argv
+        comparison_payload = json.loads(comparison_json.read_text())
+        check("benchmark comparison CLI writes schema-v4 task rows and bounded outliers",
+              comparison_payload["schema_version"] == 4
+              and comparison_payload["task_count"] == 2
+              and len(comparison_payload["runs"]) == 1
+              and [row["exercise"] for row in comparison_payload["tasks"]]
+                  == ["legacy", "timed"]
+              and "task outliers" in comparison_stdout.getvalue()
+              and "python/legacy" in comparison_stdout.getvalue())
         round_delta = _RB._monotonic_stats_delta(
             {"tool_calls": 9, "builtin_tool_us": 9000, "builtin_tool_samples": 5,
              "by_tool_us": {"read_file": 3000, "bash": 6000},
