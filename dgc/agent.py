@@ -56,6 +56,8 @@ _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "c
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options"}
 _GOAL_MAX_CHARS = 4000
+_MAX_STEER_MESSAGES = 8
+_MAX_STEER_CHARS = 64_000
 _MAX_TIMING_NAMES = 64
 _MAX_TIMING_VALUE = (1 << 63) - 1
 _MAX_MCP_SEARCH_OUTPUT_CHARS = 16_000
@@ -772,6 +774,8 @@ class Agent:
         self._session_started = False       # SessionStart hook fires once per session
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
+        self._steer_lock = threading.Lock()
+        self._accepting_steer = False        # false once a final response owns the completion boundary
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
@@ -1259,7 +1263,9 @@ class Agent:
         self._last_turn_error = ""
         self.plan_return_mode = None
         self._pending_images = None
-        self.steer_queue.clear()
+        with self._steer_lock:
+            self.steer_queue.clear()
+            self._accepting_steer = False
         self.cancelled.clear()
         self._session_started = False                    # re-arm the SessionStart hook for the new session
         with self._usage_lock:
@@ -1474,19 +1480,35 @@ class Agent:
                 level = bumped
         return level
 
-    def steer(self, text: str) -> None:
+    def steer(self, text: str) -> bool:
         """Queue a message the user typed WHILE a turn is running; it's injected at the next
-        tool-loop boundary so the model reads it and adjusts (not a separate later turn)."""
-        self.steer_queue.append(self._safe_text(text))
+        tool-loop boundary so the model reads it and adjusts (not a separate later turn).
 
-    def _drain_steer(self) -> bool:
-        """Fold any mid-turn user messages into the conversation. Returns True if it added any."""
-        msgs = []
-        while self.steer_queue:
-            try:
-                msgs.append(self.steer_queue.popleft())
-            except IndexError:
-                break
+        ``False`` means the active operation cannot consume steering (for example a direct shell
+        command, or a model turn that atomically owns its final response); the frontend must retain
+        the text as a subsequent turn instead of dropping it.
+        """
+        clean = self._safe_text(text)
+        if not clean.strip():
+            return False
+        with self._steer_lock:
+            if not self._accepting_steer:
+                return False
+            if (len(self.steer_queue) >= _MAX_STEER_MESSAGES
+                    or sum(len(message) for message in self.steer_queue) + len(clean)
+                    > _MAX_STEER_CHARS):
+                return False
+            self.steer_queue.append(clean)
+            return True
+
+    def _drain_steer(self, *, close_if_empty: bool = False) -> bool:
+        """Fold queued steering into context, optionally owning an empty final boundary."""
+        with self._steer_lock:
+            msgs = list(self.steer_queue)
+            self.steer_queue.clear()
+            if close_if_empty and not msgs:
+                # steer() now rejects atomically; the TUI will preserve later text as a new turn.
+                self._accepting_steer = False
         joined = "\n".join(m for m in msgs if m and m.strip())
         if not joined:
             return False
@@ -1501,6 +1523,14 @@ class Agent:
             f"course now if it changes anything:\n{joined}\n</user-interjection>"})
         self.ui.info(f"↳ steering: {joined[:80]}")
         return True
+
+    def take_deferred_steers(self) -> list[str]:
+        """Close steering and hand unconsumed messages back to a serialized frontend."""
+        with self._steer_lock:
+            self._accepting_steer = False
+            messages = list(self.steer_queue)
+            self.steer_queue.clear()
+        return [message for message in messages if message.strip()]
 
     # ------------------------------------------------------------- main loop ---
     @contextmanager
@@ -1583,7 +1613,9 @@ class Agent:
                     self._session_started = True
                     run_hooks("SessionStart", {"project": str(self.config.project_root)},
                               self.config, self.config.project_root, cancelled=self.cancelled)
-            self.steer_queue.clear()            # drop stale interjections from a prior turn
+            with self._steer_lock:
+                self.steer_queue.clear()        # drop stale interjections from a prior turn
+                self._accepting_steer = True
             safe_user_text = self._safe_text(user_text)
             self._mcp_query_text = _trusted_intent_text(safe_user_text)
             self._active_mcp_tools.clear()
@@ -1594,6 +1626,8 @@ class Agent:
             try:
                 completed = self._run_turn(safe_user_text)
             finally:
+                with self._steer_lock:
+                    self._accepting_steer = False
                 self._active_tool_intents.clear()
                 self._active_skill_names.clear()
                 self._active_mcp_tools.clear()
@@ -1980,7 +2014,8 @@ class Agent:
                 else:
                     self.ui.info("⏱ out of time — stopping")
                 return True
-            steered = self._drain_steer()   # inject anything the user typed mid-turn
+            steered = self._drain_steer(
+                close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
             if summary_only and steered:
                 # The deterministic closeout was armed for the previously verified request.
                 # A queued interjection is newer user intent, so let the model process it and
@@ -2196,6 +2231,9 @@ class Agent:
                             f"pass (`{safe_cmd}`). Fix the code or the verifier failure, then finish:\n"
                             + verify_out[-3000:] + "\n</system-reminder>"})
                         continue
+                if self._drain_steer(close_if_empty=True):
+                    # Catch steering that arrived while the final configured verifier was running.
+                    continue
                 return True
 
             if result.finish_reason == "length" and result.tool_calls:

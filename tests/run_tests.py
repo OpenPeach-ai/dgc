@@ -887,12 +887,25 @@ def unit_tests(tmp: Path):
     import inspect as _inspect_shell
     from dgc.tui import TUI as _ShellTUI
     _direct_ctx.cancelled.clear()
+    _tui_followup_runs = []
+    _tui_followup_done = threading.Event()
+    def _tui_followup_turn(text, reset_cancel=False):
+        _tui_followup_runs.append((text, reset_cancel))
+        _tui_followup_done.set()
+        return False
+    _tui_config = _ShellNamespace(project_root=tmp, get=lambda _key, default=None: default)
+    _tui_agent = _ShellNamespace(
+        ctx=_direct_ctx, config=_tui_config, cancelled=_direct_ctx.cancelled,
+        _pending_images=None, session_name=None, messages=[],
+        steer=lambda _text: False, run_turn=_tui_followup_turn)
     _tui_session = _ShellNamespace(
-        id="direct-shell-test", agent=_ShellNamespace(ctx=_direct_ctx),
-        config=_ShellNamespace(project_root=tmp),
+        id="direct-shell-test", agent=_tui_agent,
+        config=_tui_config,
         blocks=[], _turn_marks=[], _scroll_off=0, _follow=True,
         _turn=threading.Event(), _cancel=_direct_ctx.cancelled, _turn_t0=0.0,
-        _suggestion=None, _worker_thread=None, _closing=False, last_activity=0.0)
+        _suggestion=None, _worker_thread=None, _closing=False, last_activity=0.0,
+        _queue=[], _queue_lock=threading.Lock(), _tool_count=0, _autotitled=True,
+        _autotitle_pending=False)
     _tui_shell = object.__new__(_ShellTUI)
     _tui_shell._sessions = [_tui_session]
     _tui_shell._active_idx = 0
@@ -901,6 +914,9 @@ def unit_tests(tmp: Path):
     _tui_shell._foreground_aux_barrier = lambda: None
     _tui_shell._invalidate = lambda: None
     _tui_shell._flash = lambda _message: None
+    _tui_shell._prompt_history = []
+    _tui_shell._flush_text = lambda: None
+    _tui_shell._settle_running_tools = lambda: None
     _tui_shell.error = lambda message: _tui_session.blocks.append("ERROR " + message)
     _tui_shell._append = lambda value: _tui_session.blocks.append(str(value))
     _tui_shell._rich = lambda value: str(value)
@@ -915,8 +931,13 @@ def unit_tests(tmp: Path):
     try:
         _tui_shell._submit_shell("printf tui-direct")
         _tui_worker = _tui_session._worker_thread
+        _direct_followup_route = _tui_shell._route_followup("explain the shell result")
         _tui_shell_gate.set()
         _tui_worker.join(3)
+        _tui_followup_done.wait(3)
+        _followup_worker = _tui_session._worker_thread
+        if _followup_worker is not None:
+            _followup_worker.join(3)
     finally:
         _tools_bg.direct_bash = _real_direct_bash
     _tui_text = "\n".join(str(block) for block in _tui_session.blocks)
@@ -926,6 +947,10 @@ def unit_tests(tmp: Path):
           and "direct shell" in _tui_text and "tui-direct" in _tui_text
           and 'text.startswith("!")' in _tui_key_source and "_submit_shell" in _tui_key_source,
           _tui_text[-500:])
+    check("full-screen TUI retains text entered during a direct shell as the next model turn",
+          _direct_followup_route == "queued"
+          and _tui_followup_runs == [("explain the shell result", False)]
+          and not _tui_session._queue)
     _tui_memory_direct = _tui_shell._save_memory_direct("remember from hash")
     _tui_memory_slash = _tui_shell._handle_slash("/memory add remember from slash")
     _tui_memory_text = (tmp / "DGC.md").read_text()
@@ -1421,6 +1446,48 @@ def unit_tests(tmp: Path):
           and _dov["rows"][0]["value"][0] == "new" and _dov["rows"][1]["value"][0] == "switch"
           and len(_dov["header"]) == 2)
     ui._render_overlay()
+
+    class _FollowupAgent:
+        accepting = True
+        def steer(self, _text): return self.accepting
+    _followup_agent = _FollowupAgent()
+    _followup_session = type("FollowupSession", (), {})()
+    _followup_session.agent = _followup_agent
+    _followup_session.blocks = []
+    _followup_session._queue = []
+    _followup_session._queue_lock = threading.Lock()
+    _followup_session._scroll_off = 3
+    _followup_session._follow = False
+    _followup_ui = object.__new__(TUI)
+    _followup_ui._sessions = [_followup_session]
+    _followup_ui._active_idx = 0
+    _followup_ui._tls = threading.local()
+    _followup_flashes = []
+    _followup_ui._flash = _followup_flashes.append
+    _followup_ui._invalidate = lambda: None
+    check("TUI routes an accepted follow-up into the active model turn",
+          _followup_ui._route_followup("adjust the active work") == "steered"
+          and _followup_session.blocks[-1]["tag"] == "follow-up · steering this turn"
+          and not _followup_session._queue)
+    _followup_agent.accepting = False
+    check("TUI retains a follow-up when the active operation cannot consume steering",
+          _followup_ui._route_followup("run this immediately after") == "queued"
+          and _followup_ui._pop_followup(_followup_session)
+          == ("run this immediately after", False)
+          and "queued for the next turn" in _followup_flashes[-1])
+    _followup_ui._queue_followup(
+        _followup_session, "newer rejected input", shown=False)
+    _followup_ui._queue_followup(
+        _followup_session, "older accepted but unconsumed input", shown=True, front=True)
+    check("deferred accepted steering keeps order ahead of later rejected input",
+          _followup_ui._pop_followup(_followup_session)
+          == ("older accepted but unconsumed input", True)
+          and _followup_ui._pop_followup(_followup_session)
+          == ("newer rejected input", False))
+    check("TUI next-turn follow-ups have a deterministic aggregate size ceiling",
+          not _followup_ui._queue_followup(
+              _followup_session, "x" * 70_000, shown=False)
+          and not _followup_session._queue)
 
     # Every TUI route into full-auto (menu, slash, settings, Shift+Tab) shares this modal gate.
     _mode_calls = []
@@ -8105,12 +8172,29 @@ def test_steering():
         def __getattr__(self, k):
             return lambda *a, **kw: None
     a = Agent(Config(project_root=_P(_tf.mkdtemp())), _UI())
-    a.steer("also write a test for it")
-    check("steer + drain injects a user-interjection", a._drain_steer() is True
+    check("steering is rejected when no model turn can consume it",
+          a.steer("must become a subsequent turn") is False and not a.steer_queue)
+    with a._steer_lock:
+        a._accepting_steer = True
+    accepted = a.steer("also write a test for it")
+    check("steer + drain injects a user-interjection", accepted and a._drain_steer() is True
           and a.messages[-1]["role"] == "user"
           and "user-interjection" in a.messages[-1]["content"]
           and "write a test" in a.messages[-1]["content"])
     check("drain with an empty queue is a no-op", a._drain_steer() is False)
+    check("an empty final boundary atomically closes steering",
+          a._drain_steer(close_if_empty=True) is False
+          and a.steer("too late for this turn") is False and not a.steer_queue)
+    with a._steer_lock:
+        a._accepting_steer = True
+    check("unconsumed steering can be handed back to a serialized frontend",
+          a.steer("retry this after the stopped turn")
+          and a.take_deferred_steers() == ["retry this after the stopped turn"]
+          and a.steer("closed") is False)
+    with a._steer_lock:
+        a._accepting_steer = True
+    check("active-turn steering has a deterministic aggregate size ceiling",
+          a.steer("x" * 70_000) is False and not a.steer_queue)
 
     _real_datetime = _agent_mod.datetime
     class _PromptClock(_real_datetime):
@@ -8452,6 +8536,8 @@ def test_steering():
     a._active_tool_intents.clear()
     a._active_skill_names.clear()
 
+    with a._steer_lock:
+        a._accepting_steer = True
     a.steer("also preview this as a dashboard")
     check("mid-turn steering activates newly requested tools and prompt guidance",
           a._drain_steer() is True

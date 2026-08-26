@@ -115,9 +115,12 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
 - **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors. Put another host's credential in `DGC_FALLBACK_API_KEY`; DGC never forwards the main provider key there, auto-detects its transport, and honors a `fallback_api_mode` override.
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the classic/TUI/editor/ACP catalogs. Names begin with a lowercase letter/digit, then use lowercase letters/digits or `._-` (1–64 characters). Built-in names and aliases are reserved, catalogs/templates are bounded, and symlinked command directories or files are rejected.
 - **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension through a generated protocol-v3 command/event contract with bounded frames and strict wire ordering. Permission, plan, option, and MCP decisions are exactly ID-correlated and first-response-wins; control frames bypass prompt backpressure, while expired, duplicate, mismatched, and post-restart responses fail closed. Pasted images are count/byte bounded in the webview and revalidated by media signature before provider use; remote image URLs are rejected. Live multi-root changes are acknowledged and coalesced across active turns so added folders gain access and removed folders lose their session grant; editor context and `@file` mentions keep visible labels separate from typed canonical paths across roots. `dgc acp` speaks bounded UTF-8 Agent Client Protocol JSON-RPC over stdio, limits prompt blocks/text/images, and frames embedded resources as untrusted data.
-- **Mid-turn queueing** — type follow-ups while a turn runs and DGC executes up to 32 in FIFO order;
-  count or aggregate-byte overflow is rejected visibly, and a prompt sent while a cancelled turn
-  unwinds is not stranded.
+- **Mid-turn steering and queueing** — in the full-screen terminal, a follow-up typed while the model
+  is working is injected at its next tool boundary. Once final response ownership has closed—or while
+  a direct `!` shell command runs—the text is retained in a count/size-bounded per-session FIFO and
+  starts as the next turn, including after cancellation or failure. The editor/headless backend
+  separately executes up to 32 submitted turns in a count/aggregate-byte-bounded FIFO. Overflow is
+  rejected visibly, and prompts submitted while a cancelled turn unwinds are not stranded.
   Editor, ACP, and terminal interrupts also remain effective during worker startup.
 - **Tools** — `read_file` · `repo_map` · `code_intel` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
   Foreground command output is drained continuously through credential masking into a bounded,

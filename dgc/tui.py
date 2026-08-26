@@ -46,6 +46,9 @@ from .redaction import redact_text, secret_values
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
 SLASH_COMMANDS: list[tuple[str, str]] = command_pairs("tui")
+_MAX_QUEUED_FOLLOWUPS = 8
+_MAX_QUEUED_FOLLOWUP_CHARS = 64_000
+_MAX_TRANSITIONAL_FOLLOWUP_CHARS = 128_000  # queued + one older accepted steer batch
 
 
 def _session_generation_guard(agent) -> dict:
@@ -114,7 +117,8 @@ class AgentSession:
         self._tool_count = 0
         self._turn = threading.Event()     # set while this session's turn runs
         self._cancel = self.agent.cancelled
-        self._queue: list[str] = []
+        self._queue: list[tuple[str, bool]] = []  # (prompt, user band was already rendered)
+        self._queue_lock = threading.Lock()
         self._turn_t0 = 0.0
         self._phase_act: str | None = None
         self._phase_t0 = 0.0
@@ -2637,7 +2641,8 @@ class TUI:
             self._flash("can't close the only session"); return
         sess = self._sessions.pop(idx)
         sess._closing = True
-        sess._queue.clear()
+        with sess._queue_lock:
+            sess._queue.clear()
         try:
             sess._aux_cancel.set()
             sess.agent.cancelled.set()                   # stop its turn if one is running
@@ -3711,13 +3716,7 @@ class TUI:
             if not text:
                 return
             if self._turn.is_set():
-                # inject into the RUNNING turn (the model reads it mid-turn), not a later turn.
-                # Show it in the same highlighted band as a normal prompt, tagged as a follow-up.
-                self.agent.steer(text)
-                self.blocks.append({"kind": "user", "text": text, "tag": "follow-up · steering this turn"})
-                self._scroll_off = 0
-                self._follow = True
-                self._invalidate()
+                self._route_followup(text)
                 return
             if text.startswith("/") and self._handle_slash(text):
                 return
@@ -3911,7 +3910,48 @@ class TUI:
         tls = getattr(self, "_tls", None)
         return (getattr(tls, "session", None) if tls else None) or self.active
 
-    def _submit(self, text: str) -> None:
+    @staticmethod
+    def _queue_followup(sess: "AgentSession", text: str, *, shown: bool,
+                        front: bool = False) -> bool:
+        """Retain one bounded follow-up for the session's serialized next turn."""
+        item = (str(text), bool(shown))
+        with sess._queue_lock:
+            queued_chars = sum(len(queued_text) for queued_text, _ in sess._queue)
+            char_limit = (_MAX_TRANSITIONAL_FOLLOWUP_CHARS if front
+                          else _MAX_QUEUED_FOLLOWUP_CHARS)
+            if ((not front and len(sess._queue) >= _MAX_QUEUED_FOLLOWUPS)
+                    or queued_chars + len(item[0]) > char_limit):
+                return False
+            if front:
+                sess._queue.insert(0, item)
+            else:
+                sess._queue.append(item)
+        return True
+
+    @staticmethod
+    def _pop_followup(sess: "AgentSession") -> tuple[str, bool] | None:
+        with sess._queue_lock:
+            return sess._queue.pop(0) if sess._queue else None
+
+    def _route_followup(self, text: str) -> str:
+        """Atomically steer the active model turn or retain text as the next turn."""
+        sess = self._cur_session()
+        if sess.agent.steer(text):
+            sess.blocks.append({"kind": "user", "text": text,
+                                "tag": "follow-up · steering this turn"})
+            sess._scroll_off = 0
+            sess._follow = True
+            self._invalidate()
+            return "steered"
+        if not self._queue_followup(sess, text, shown=False):
+            self._flash(
+                f"follow-up queue full ({_MAX_QUEUED_FOLLOWUPS} prompts / "
+                f"{_MAX_QUEUED_FOLLOWUP_CHARS} characters) — wait for this turn")
+            return "full"
+        self._flash("follow-up queued for the next turn")
+        return "queued"
+
+    def _submit(self, text: str, *, echo: bool = True) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
         self._cancel_auxiliary()                       # foreground work always preempts title/suggest
@@ -3920,8 +3960,15 @@ class TUI:
         self._suggestion = None                       # a new prompt supersedes the ghost text
         if text.strip():
             self._prompt_history.append(text)         # for /history (Ctrl+R) recall
-        self.blocks.append({"kind": "user", "text": text})   # re-rendered at current width (reflows on resize)
-        self._turn_marks.append((len(self.blocks) - 1, text.replace("\n", " ")[:70]))   # for /jump
+        if echo:
+            self.blocks.append({"kind": "user", "text": text})  # reflows at current width
+            mark = len(self.blocks) - 1
+        else:
+            mark = next((index for index in range(len(self.blocks) - 1, -1, -1)
+                         if self.blocks[index].get("kind") == "user"
+                         and self.blocks[index].get("text") == text), len(self.blocks) - 1)
+        if mark >= 0:
+            self._turn_marks.append((mark, text.replace("\n", " ")[:70]))  # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
@@ -3939,6 +3986,12 @@ class TUI:
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
+                take_deferred = getattr(self.agent, "take_deferred_steers", None)
+                deferred = take_deferred() if callable(take_deferred) else []
+                if deferred:
+                    # These bands were rendered when accepted as steering. The old turn ended before
+                    # consuming them, so preserve their order as one subsequent prompt without echoing.
+                    self._queue_followup(sess, "\n".join(deferred), shown=True, front=True)
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._turn.clear()
@@ -3959,13 +4012,14 @@ class TUI:
                     if result is not None and result.status != "cleaned":
                         self._flash(f"retained {result.branch} at {result.path}")
                     return
-                if not succeeded:
-                    self._queue.clear()
+                queued = self._pop_followup(sess)
+                if queued is not None:
                     sess._worker_thread = None
+                    queued_text, shown = queued
+                    self._submit(queued_text, echo=not shown)
                     return
-                if self._queue:
+                if not succeeded:
                     sess._worker_thread = None
-                    self._submit(self._queue.pop(0))
                     return
                 title_needed = (not self.agent.session_name and not self._autotitled
                                 and not sess._autotitle_pending and not self._cancel.is_set())
@@ -4064,6 +4118,12 @@ class TUI:
                     if result is not None and result.status != "cleaned":
                         self._flash(f"retained {result.branch} at {result.path}")
                     return
+                queued = self._pop_followup(sess)
+                if queued is not None:
+                    sess._worker_thread = None
+                    queued_text, shown = queued
+                    self._submit(queued_text, echo=not shown)
+                    return
                 sess._worker_thread = None
 
         sess._worker_thread = threading.Thread(
@@ -4075,7 +4135,8 @@ class TUI:
         fleet = list(getattr(self, "_sessions", ()))
         for sess in fleet:
             sess._closing = True
-            sess._queue.clear()
+            with sess._queue_lock:
+                sess._queue.clear()
             sess._aux_cancel.set()
             sess._cancel.set()
             sess._req_answer = None
