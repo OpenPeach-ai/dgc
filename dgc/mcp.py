@@ -483,6 +483,7 @@ class MCPServer:
         self._lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._catalog_lock = threading.Lock()
+        self._process_threads: dict[int, tuple[threading.Thread, threading.Thread]] = {}
         self._generation = 0
         self._input_capabilities = (dict(client_capabilities)
                                     if isinstance(client_capabilities, dict) else {})
@@ -593,10 +594,16 @@ class MCPServer:
         self._generation += 1
         generation = self._generation
         self.proc = proc
-        threading.Thread(target=self._reader, args=(proc, generation), daemon=True,
-                         name=f"dgc-mcp-{self.name}-stdout").start()
-        threading.Thread(target=self._stderr_reader, args=(proc,), daemon=True,
-                         name=f"dgc-mcp-{self.name}-stderr").start()
+        stdout_thread = threading.Thread(
+            target=self._reader, args=(proc, generation), daemon=True,
+            name=f"dgc-mcp-{self.name}-stdout")
+        stderr_thread = threading.Thread(
+            target=self._stderr_reader, args=(proc,), daemon=True,
+            name=f"dgc-mcp-{self.name}-stderr")
+        with self._lock:
+            self._process_threads[generation] = (stdout_thread, stderr_thread)
+        stdout_thread.start()
+        stderr_thread.start()
         return True
 
     def _load_tools(self, timeout: float) -> bool:
@@ -793,6 +800,7 @@ class MCPServer:
             return
         subscription_slot = None
         with self._lock:
+            reader_threads = self._process_threads.pop(generation, ())
             if self._subscription_generation == generation:
                 if self._subscription_id is not None:
                     subscription_slot = self._pending.pop(self._subscription_id, None)
@@ -804,25 +812,42 @@ class MCPServer:
             event.set()
         if self.proc is proc:
             self.proc = None
+        # start_new_session makes the direct child's PID the stable POSIX process-group ID. Preserve
+        # and sweep that group even if the leader has already exited: a server can otherwise leave a
+        # descendant holding inherited stdio pipes, keeping both reader threads and arbitrary work
+        # alive indefinitely.
+        pgid = proc.pid if os.name == "posix" else None
         if proc.poll() is None:
             try:
-                if os.name == "posix":
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                if pgid is not None:
+                    os.killpg(pgid, signal.SIGTERM)
                 else:
                     proc.terminate()
                 proc.wait(timeout=2)
-            except Exception:
-                try:
-                    if os.name == "posix":
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    else:
-                        proc.kill()
-                except Exception:
-                    pass
-                try:
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
+            except (OSError, ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+                pass
+        try:
+            if pgid is not None:
+                os.killpg(pgid, signal.SIGKILL)
+            elif proc.poll() is None:
+                proc.kill()
+        except (OSError, ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except (OSError, ValueError):
+                pass
+        for thread in reader_threads:
+            if thread is not threading.current_thread():
+                thread.join(timeout=1)
+        if any(thread.is_alive() for thread in reader_threads):
+            self._append_diagnostic("MCP stdio readers did not close after process-group cleanup")
         self._fail_pending("server stopped", generation)
 
     # JSON-RPC -----------------------------------------------------------------

@@ -4920,6 +4920,7 @@ def test_mcp_protocol():
     """MCP negotiates both protocol eras, uses modern per-request metadata/MRTR, reports progress,
     sanitizes routes and environments, propagates cancellation, and reaps every stdio process."""
     import textwrap
+    import signal as _signal
     import time as _time
     from dgc import __version__
     from dgc.guards import mcp_process_env
@@ -5077,6 +5078,63 @@ def test_mcp_protocol():
               subscription_lifecycle._subscription_id is None
               and subscription_lifecycle._tools_invalidated.is_set()
               and "invalid result" not in subscription_lifecycle.diagnostics)
+
+        descendant_reaped = True
+        descendant_readers_closed = True
+        if os.name == "posix":
+            descendant_root = Path(tempfile.mkdtemp())
+            descendant_pid = descendant_root / "child.pid"
+            descendant_server_py = descendant_root / "server.py"
+            descendant_server_py.write_text(textwrap.dedent(r'''
+                import os, subprocess, sys
+                from pathlib import Path
+                child = subprocess.Popen([
+                    sys.executable, "-c", "import time; time.sleep(30)"])
+                Path(os.environ["CHILD_PID"]).write_text(str(child.pid))
+            '''))
+            descendant_server = MCPServer(
+                "pipe-descendant", sys.executable, [str(descendant_server_py)],
+                {"CHILD_PID": str(descendant_pid)}, descendant_root)
+            launched = descendant_server._launch()
+            descendant_proc = descendant_server.proc
+            deadline = _time.monotonic() + 2
+            while (launched and descendant_proc is not None
+                   and (not descendant_pid.exists() or descendant_proc.poll() is None)
+                   and _time.monotonic() < deadline):
+                _time.sleep(0.01)
+            child_pid = int(descendant_pid.read_text()) if descendant_pid.exists() else 0
+            generation = descendant_server._generation
+            reader_threads = descendant_server._process_threads.get(generation, ())
+
+            def descendant_alive(pid):
+                try:
+                    if pid <= 0:
+                        return False
+                    os.kill(pid, 0)
+                    if sys.platform.startswith("linux"):
+                        return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+                    return True
+                except (OSError, IndexError, ProcessLookupError):
+                    return False
+
+            alive_before_stop = descendant_alive(child_pid)
+            descendant_server.stop()
+            deadline = _time.monotonic() + 2
+            while descendant_alive(child_pid) and _time.monotonic() < deadline:
+                _time.sleep(0.01)
+            descendant_reaped = (launched and descendant_proc is not None
+                                  and descendant_proc.poll() is not None
+                                  and alive_before_stop and not descendant_alive(child_pid))
+            descendant_readers_closed = bool(reader_threads) and all(
+                not thread.is_alive() for thread in reader_threads)
+            # A failing assertion must never strand the hostile fixture on the test host.
+            if descendant_proc is not None:
+                try:
+                    os.killpg(descendant_proc.pid, _signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
+        check("MCP stop reaps pipe-holding descendants after leader exit",
+              descendant_reaped and descendant_readers_closed)
 
         root = Path(tempfile.mkdtemp())
         server_py = root / "server.py"

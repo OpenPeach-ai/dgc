@@ -1038,7 +1038,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 1012/1012 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 1013/1013 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1089,6 +1089,9 @@ The stratified diagnostic added trace-backed runtime controls after this interac
 10. Internal Git output enforcement now reconciles the final byte count after both pipe readers
     drain. This closes a measured 1-in-500 scheduling race that could return exit zero with a
     silently truncated path/status payload despite the operation-specific ceiling.
+11. MCP shutdown owns its per-generation stdio readers and always sweeps the known POSIX process
+    group, including after the direct server leader has exited. A hostile fixture proves that a
+    descendant retaining all inherited pipes is killed and both readers terminate before stop returns.
 
 The provider-runtime slice is also implemented and contract-tested:
 
