@@ -2727,6 +2727,31 @@ def unit_tests(tmp: Path):
     _ordered_agent.run_turn("make and verify the candidate")
     check("a later shell failure invalidates an earlier green result in the same batch",
           _ordered_agent.client.n == 3 and _ordered_agent.client.third_had_tools)
+    _cycles_root = Path(tempfile.mkdtemp())
+    _cycles_agent = _Ag(_Cfg(_cycles_root), _AgUI())
+    _cycles_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
+    class _FailedCyclesClient:
+        tools_supported = True
+        n = 0
+        final_context = ""
+        def chat(self, messages, **_kwargs):
+            self.n += 1
+            if self.n <= 3:
+                return _ChatResult(tool_calls=[
+                    _ToolCall(f"cycle-edit-{self.n}", "write_file", {
+                        "path": "answer.txt", "content": f"candidate {self.n}\n"}),
+                    _ToolCall(f"cycle-test-{self.n}", "bash", {
+                        "command": "python -m unittest missing_dgc_fixture"}),
+                ])
+            self.final_context = "\n".join(str(message.get("content") or "")
+                                             for message in messages)
+            return _ChatResult(content="I will replace the flawed design before testing again.")
+    _cycles_agent.client = _FailedCyclesClient()
+    _cycles_agent.run_turn("solve the test failures coherently")
+    check("repeated red verification cycles across edits trigger one coherent-solution nudge",
+          _cycles_agent.client.n == 4
+          and "3 test/verification cycles have failed" in _cycles_agent.client.final_context
+          and "Stop patching the latest assertion in isolation" in _cycles_agent.client.final_context)
     _parent_cancel = threading.Event()
     check("budget deadline cancellation does not mutate the user's Stop event",
           _DeadlineCancel(_parent_cancel, _now - 1).is_set() and not _parent_cancel.is_set())

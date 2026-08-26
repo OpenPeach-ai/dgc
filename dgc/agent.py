@@ -33,6 +33,7 @@ _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn th
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
 _FAIL_SOFT = 4          # consecutive failing bash runs (no success) before we nudge a rethink
 _FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn (grind guard)
+_VERIFY_CYCLE_SOFT = 3  # failed test cycles across landed edits before one coherent-solution nudge
 _EDIT_FAIL_SOFT = 3     # consecutive failing edit_file/multi_edit calls before we push write_file
 _EDIT_FAIL_HARD = 6     # consecutive failing edits before we abort — a varied-arg edit grind that
 #                         dodges the identical-call loop guard is DGC's #1 benchmark-timeout driver
@@ -1931,6 +1932,8 @@ class Agent:
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
         fail_streak = 0             # consecutive non-zero bash exits (no success) — grind guard
         fail_nudged = False
+        verify_fail_cycles = 0      # recognized failing tests persist across micro-edits
+        verify_cycle_nudged = False # one rethink nudge; unlike fail_streak this never aborts useful work
         verify_runs = 0             # consecutive verify_before_done failures without another action
         last_fail_fp = None         # fingerprint of the last failing bash output
         same_fail = 0               # consecutive failures with the SAME fingerprint (stuck signal)
@@ -2260,16 +2263,24 @@ class Agent:
                 self._record_activity(call.name, edit_failed)
                 if call.name == "bash" and out.startswith("exit code: "):   # grind guard
                     head, _, body = out.partition("\n")
+                    cmdstr = str(call.arguments.get("command", ""))
+                    configured_verifier = str(self.config.get("verify_command", ""))
+                    is_configured_verifier = _is_verification_command(
+                        cmdstr, configured_verifier)
+                    is_test_command = (is_configured_verifier
+                                       or _is_verification_command(cmdstr))
                     if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
                         fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
-                        cmdstr = str(call.arguments.get("command", ""))
-                        batch_verified = _is_verification_command(
-                            cmdstr, str(self.config.get("verify_command", "")))
+                        if is_test_command:
+                            verify_fail_cycles, verify_cycle_nudged = 0, False
+                        batch_verified = is_configured_verifier
                         verified = batch_verified
                         if not verified:
                             verify_nudged = False
                     else:
                         fail_streak += 1
+                        if is_test_command:
+                            verify_fail_cycles += 1
                         fp = "".join(c for c in body if not c.isdigit())[:400]  # ignore line #s / timings
                         same_fail = same_fail + 1 if fp == last_fail_fp else 1
                         last_fail_fp = fp
@@ -2366,6 +2377,15 @@ class Agent:
                 reminders.append(f"The last {fail_streak} commands all failed with no success. Stop "
                                  "retrying variations — re-read the failing output carefully, reconsider "
                                  "the approach from scratch, or state plainly what is blocking you.")
+            if (verify_fail_cycles >= _VERIFY_CYCLE_SOFT
+                    and not verify_cycle_nudged):
+                verify_cycle_nudged = True
+                reminders.append(
+                    f"{verify_fail_cycles} test/verification cycles have failed despite intervening "
+                    "edits. Stop patching the latest assertion in isolation. Use all tests and failure "
+                    "output already in context, reason across the remaining cases, make one coherent "
+                    "correction (rewrite the function/file if its design is wrong), then run the "
+                    "authoritative verifier once.")
             if edit_fail_streak >= _EDIT_FAIL_SOFT and not edit_grind_nudged:   # F3: steer to write_file
                 edit_grind_nudged = True
                 reminders.append(f"Your last {edit_fail_streak} edit_file calls failed to match the file. "

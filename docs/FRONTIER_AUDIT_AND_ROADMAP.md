@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 865 / 865 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 866 / 866 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -165,6 +165,10 @@ candidate write and test in one shell request, while DGC repeatedly alternated o
 and one test across separate generations. DGC already executes dependent tool calls in model order;
 the current auto-mode prompt now explicitly tells a confident local model to batch ordered edits and
 the verifier in one response. This remains a measured hypothesis until the replacement league runs.
+DGC also now retains a separate count of recognized red verification cycles across successful edits:
+after three, it issues one bounded reminder to stop patching the latest assertion in isolation and
+derive one coherent correction from all tests and failures already in context. It never aborts useful
+work on this signal, and any passing recognized test resets it.
 DGC's old JavaScript alphametics files passed at the 600-second external kill after tests were already
 green, while Rust runs received contradictory shell status or had legitimate re-tests blocked.
 
@@ -579,7 +583,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 865/865 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 866/866 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -890,7 +894,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 865/865 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 866/866 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
