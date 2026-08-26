@@ -175,6 +175,26 @@ or contacting a model. `dgc protocol schema` prints the installed schema; valida
 NDJSON with `dgc protocol validate command FILE` or `dgc protocol validate event FILE` (`-` reads
 stdin). Validation emits one correlated JSON row per input line and exits nonzero if any frame fails.
 
+Python controllers can use the dependency-free synchronous client instead of hand-rolling process
+and NDJSON handling:
+
+```python
+from dgc.client import DGCClient
+
+with DGCClient(cwd=".") as client:
+    config = client.request({"type": "get_config"}, "config")
+    skills = client.request(
+        {"type": "list_skills", "request_id": "skills-1"},
+        "skill_catalog",
+    )
+```
+
+`DGCClient` accepts a complete argv sequence (never a shell string), validates both wire directions,
+retains unrelated events for `next_event()` / `wait_for()`, enforces decision-request IDs, bounds all
+frames and buffers, and gracefully shuts down then reaps its child (including the isolated process
+group on POSIX). A client instance is deliberately one-shot; create a new one after `close()` or any
+protocol/transport failure.
+
 The same controller can verify skill precedence with
 `{"type":"list_skills","request_id":"skills-1"}` and receive a correlated `skill_catalog` whose
 entries identify `project`, `user`, or `builtin` without absolute paths. It can generate a continuation

@@ -8683,6 +8683,240 @@ def test_benchmark_integrity():
             sys.path.remove(str(bench_dir))
 
 
+def test_protocol_client():
+    """The stdlib client validates, correlates, bounds, and reaps protocol-v3 backends."""
+    import textwrap as _textwrap
+    import time as _time
+    from dgc.client import (DGCClient as _DGCClient,
+                            DGCCommandError as _DGCCommandError,
+                            DGCProcessError as _DGCProcessError,
+                            DGCProtocolError as _DGCProtocolError)
+    from dgc.editor_protocol import PROTOCOL_VERSION as _CLIENT_PROTOCOL_VERSION
+
+    _fixture = _textwrap.dedent(r'''
+        import json, os, sys, time
+
+        mode = sys.argv[1]
+        protocol = int(sys.argv[2])
+        seq = 0
+
+        def emit(kind, **fields):
+            global seq
+            value = {"type": kind, "seq": seq, **fields}
+            seq += 1
+            sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
+
+        emit("ready", version="fixture", protocol_version=protocol, capabilities={}, model="fixture",
+             mode="default", think="off", base_url="http://127.0.0.1:1/v1",
+             workspace_trusted=False, commands=[], custom_commands=[],
+             goal={"text": "", "status": "none"}, context_size=32768)
+        if mode == "bad-seq":
+            sys.stdout.write('{"type":"info","seq":0,"message":"duplicate"}\n')
+            sys.stdout.flush()
+            time.sleep(30)
+        elif mode == "unknown":
+            sys.stdout.write('{"type":"secret-frame-DoNotReflect123","seq":1}\n')
+            sys.stdout.flush()
+            time.sleep(30)
+        elif mode == "nonfinite":
+            sys.stdout.write('{"type":"tool_progress","seq":1,"call_id":null,"name":"x",'
+                             '"message":"x","progress":NaN}\n')
+            sys.stdout.flush()
+            time.sleep(30)
+        elif mode == "oversized":
+            sys.stdout.buffer.write(b"x" * (4 * 1024 * 1024 + 1) + b"\n")
+            sys.stdout.buffer.flush()
+            time.sleep(30)
+        elif mode == "stall":
+            time.sleep(30)
+        elif mode == "descendant-exit":
+            if hasattr(os, "fork") and os.fork() == 0:
+                time.sleep(30)
+                os._exit(0)
+        else:
+            emit("context", used=0, size=32768)
+            if mode == "overflow":
+                for number in range(10):
+                    emit("info", message=str(number))
+                time.sleep(30)
+            if mode == "approval":
+                emit("permission_request", id="request-1", call_id="call-1", name="bash",
+                     args={"command": "true"}, command="true", suggested_rule="Bash(true)",
+                     choices=["once", "always", "deny"])
+            for line in sys.stdin:
+                command = json.loads(line)
+                if command.get("type") == "shutdown":
+                    break
+                if command.get("type") == "status":
+                    emit("status", model="fixture", mode="default", think="off",
+                         base_url="http://127.0.0.1:1/v1",
+                         goal={"text": "", "status": "none"}, context_used=0,
+                         context_size=32768)
+                elif command.get("type") == "permission_response":
+                    emit("info", message="decision received")
+    ''')
+
+    def _fixture_client(mode, **kwargs):
+        return _DGCClient(
+            [sys.executable, "-c", _fixture, mode, str(_CLIENT_PROTOCOL_VERSION)],
+            cwd=PROJECT, start_timeout=2, event_timeout=2, shutdown_timeout=0.2, **kwargs)
+
+    # A real installed backend proves launch semantics and the useful discovery/correlation path
+    # without making a provider request.
+    _real_root = Path(tempfile.mkdtemp())
+    _real_home = _real_root / "home"
+    _real_project = _real_root / "project"
+    _skill_dir = _real_project / ".dgc" / "skills" / "matrix-client"
+    _skill_dir.mkdir(parents=True)
+    _real_home.mkdir()
+    (_skill_dir / "SKILL.md").write_text(
+        "---\nname: matrix-client\ndescription: Client fixture skill\n---\nUse the fixture.\n")
+    _pythonpath = str(PROJECT)
+    if os.environ.get("PYTHONPATH"):
+        _pythonpath += os.pathsep + os.environ["PYTHONPATH"]
+    _real_env = {**os.environ, "HOME": str(_real_home), "PYTHONPATH": _pythonpath}
+    _real = _DGCClient(cwd=_real_project, env=_real_env, start_timeout=10, event_timeout=5)
+    _real_pid = None
+    try:
+        _ready = _real.start()
+        _real_pid = _real.pid
+        _config = _real.request({"type": "get_config"}, "config")
+        _skills = _real.request(
+            {"type": "list_skills", "request_id": "client-skills"}, "skill_catalog")
+        _retained_ready = _real.next_event()
+        _retained_context = _real.next_event()
+        check("protocol client launches the real backend and correlates side-effect-free requests",
+              _ready.get("protocol_version") == _CLIENT_PROTOCOL_VERSION
+              and _config.get("project_root") == str(_real_project.resolve())
+              and _skills.get("request_id") == "client-skills")
+        check("protocol client confirms project skill discovery without exposing absolute paths",
+              any(row == {"name": "matrix-client", "description": "Client fixture skill",
+                          "source": "project"} for row in _skills.get("items", []))
+              and str(_real_project) not in json.dumps(_skills))
+        check("protocol client correlated waits preserve unrelated events in wire order",
+              _retained_ready.get("type") == "ready"
+              and _retained_context.get("type") == "context"
+              and _retained_ready["seq"] < _retained_context["seq"])
+    finally:
+        _real.close()
+    check("protocol client gracefully shuts down and reaps the real backend",
+          _real_pid is not None and _real.returncode == 0 and _real.closed)
+
+    # Invalid commands fail before any transport write, including JSON's non-standard numbers and
+    # frames that would overrun the protocol ceiling.
+    _unstarted = _fixture_client("normal")
+    _command_failures = 0
+    for _invalid in (
+            {"type": "set_mode", "mode": "unsafe"},
+            {"type": "set_config", "values": {"context_size": float("nan")}},
+            {"type": "prompt", "text": "\ud800"},
+            {"type": "prompt", "text": "x" * (4 * 1024 * 1024 + 32)}):
+        try:
+            _unstarted.send(_invalid)
+        except _DGCCommandError:
+            _command_failures += 1
+    check("protocol client rejects invalid, non-finite, non-Unicode, and oversized commands "
+          "before launch",
+          _command_failures == 4 and _unstarted.pid is None)
+    _unstarted.close()
+
+    _approval = _fixture_client("approval")
+    _mismatch = _duplicate = False
+    _ack = {}
+    try:
+        _approval.start()
+        _approval.wait_for("permission_request")
+        try:
+            _approval.send({"type": "plan_response", "id": "request-1",
+                            "decision": "reject"})
+        except _DGCCommandError:
+            _mismatch = True
+        _approval.send({"type": "permission_response", "id": "request-1", "decision": "once"})
+        try:
+            _approval.send({"type": "permission_response", "id": "request-1", "decision": "once"})
+        except _DGCCommandError:
+            _duplicate = True
+        _ack = _approval.wait_for("info", predicate=lambda event:
+                                  event.get("message") == "decision received")
+    finally:
+        _approval.close()
+    check("protocol client enforces exact first-response-wins approval correlation",
+          _mismatch and _duplicate and _ack.get("message") == "decision received"
+          and _approval.returncode == 0)
+
+    def _capture_protocol_failure(mode, **kwargs):
+        client = _fixture_client(mode, **kwargs)
+        error = None
+        try:
+            client.start()
+            client.wait_for("status", timeout=1)
+        except _DGCProtocolError as exc:
+            error = exc
+        finally:
+            client.close()
+        return client, error
+
+    _wrong = _DGCClient(
+        [sys.executable, "-c", _fixture, "normal", str(_CLIENT_PROTOCOL_VERSION + 1)],
+        cwd=PROJECT, start_timeout=2, shutdown_timeout=0.2)
+    _wrong_error = None
+    try:
+        _wrong.start()
+    except _DGCProtocolError as exc:
+        _wrong_error = exc
+    finally:
+        _wrong.close()
+    _bad_seq, _bad_seq_error = _capture_protocol_failure("bad-seq")
+    _unknown, _unknown_error = _capture_protocol_failure("unknown")
+    _nonfinite, _nonfinite_error = _capture_protocol_failure("nonfinite")
+    _oversized, _oversized_error = _capture_protocol_failure("oversized")
+    _overflow, _overflow_error = _capture_protocol_failure("overflow", max_pending_events=2)
+    check("protocol client fails closed on handshake, ordering, JSON, frame, and queue violations",
+          all(error is not None for error in (
+              _wrong_error, _bad_seq_error, _unknown_error, _nonfinite_error,
+              _oversized_error, _overflow_error))
+          and all(client.returncode is not None and client.closed for client in (
+              _wrong, _bad_seq, _unknown, _nonfinite, _oversized, _overflow)))
+    check("protocol client never reflects hostile event values in diagnostics",
+          _unknown_error is not None
+          and "secret-frame-DoNotReflect123" not in str(_unknown_error)
+          and "unknown message type" in str(_unknown_error))
+
+    if os.name == "posix":
+        _descendant = _fixture_client("descendant-exit")
+        _descendant_error = None
+        _descendant_started = _time.monotonic()
+        try:
+            _descendant.start()
+            _descendant.wait_for("status", timeout=2)
+        except _DGCProcessError as exc:
+            _descendant_error = exc
+        finally:
+            _descendant.close()
+        check("protocol client reaps descendants that retain pipes after the backend exits",
+              _descendant_error is not None and _descendant.returncode == 0
+              and _time.monotonic() - _descendant_started < 3 and _descendant.closed)
+
+    # A child that never consumes stdin cannot pin its controller indefinitely.
+    _stall = _fixture_client("stall", write_timeout=0.2)
+    _stalled = False
+    _stall_elapsed = None
+    _started_at = _time.monotonic()
+    try:
+        _stall.start()
+        _started_at = _time.monotonic()
+        _stall.send({"type": "prompt", "text": "x" * (3 * 1024 * 1024)})
+    except _DGCProcessError:
+        _stalled = True
+        _stall_elapsed = _time.monotonic() - _started_at
+    finally:
+        _stall.close()
+    check("protocol client bounds stalled writes and reaps the unresponsive process group",
+          _stalled and _stall_elapsed is not None and _stall_elapsed < 3
+          and _stall.returncode is not None and _stall.closed)
+
+
 def test_acp_protocol():
     """ACP v1 has isolated sessions, explicit plan gates, and correlated tool lifecycles."""
     import tempfile as _tf
@@ -11789,6 +12023,7 @@ def main():
         test_private_config()
         test_release_script_contract()
         test_benchmark_integrity()
+        test_protocol_client()
         test_acp_protocol()
         test_slash_palette()
         test_steering()
