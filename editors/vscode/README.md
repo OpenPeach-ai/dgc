@@ -32,7 +32,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 ```bash
 npm test                 # transport + webview interaction/accessibility checks
 npm run compile          # TypeScript + development bundle
-npm run test:host        # activate DGC and handshake its webview in installed VS Code
+npm run test:host        # installed VS Code: activate, handshake, roots/secrets, permission + plan
 ```
 
 `test:host` never downloads or installs VS Code. Set `DGC_VSCODE_EXECUTABLE` to the editor's real

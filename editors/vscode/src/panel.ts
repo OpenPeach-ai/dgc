@@ -47,6 +47,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private workspaceRootsInFlight: number | undefined;
   private initializingBackend?: DgcBackend;
   private nativeSettingsReady = false;
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string }> = [];
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -336,7 +337,35 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private post(msg: any): void {
+    if (process.env.DGC_EXTENSION_TEST_TOKEN) {
+      const event = msg?.type === "event" && msg.event && typeof msg.event === "object"
+        ? msg.event : undefined;
+      this.testPostedMessages.push({
+        type: String(msg?.type || ""),
+        ...(event ? { eventType: String(event.type || ""),
+          ...(event.id === undefined ? {} : { id: String(event.id) }) } : {}),
+      });
+      if (this.testPostedMessages.length > 256) {
+        this.testPostedMessages.splice(0, this.testPostedMessages.length - 256);
+      }
+    }
     this.view?.webview.postMessage(msg);
+  }
+
+  /** Installed-host tests use the same boundary as a real webview without exposing a production
+   * command. The activation API exists only when the isolated runner supplies an exact token. */
+  async testOnlyWebviewMessage(token: string, msg: any): Promise<void> {
+    if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
+      throw new Error("DGC extension test bridge is unavailable");
+    }
+    await this.onMessage(msg);
+  }
+
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string }> {
+    if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
+      throw new Error("DGC extension test bridge is unavailable");
+    }
+    return this.testPostedMessages.map((item) => ({ ...item }));
   }
   private postState(): void {
     this.post({ type: "state", state: this.state });

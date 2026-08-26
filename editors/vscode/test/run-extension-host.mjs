@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = resolve(here, "..");
@@ -19,6 +20,7 @@ const settingsPath = join(userDataDir, "User", "settings.json");
 const fixtureSecret = "dgc-extension-secret-sentinel";
 const initialEndpoint = "https://provider-a.invalid/v1";
 const changedEndpoint = "https://provider-b.invalid/v1";
+const testToken = randomUUID();
 
 mkdirSync(secondaryWorkspace);
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
@@ -48,6 +50,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
   if (cmd.type === "set_workspace_roots") send({ type: "workspace_roots", roots: cmd.roots });
+  if (cmd.type === "prompt" && cmd.text === "installed-host decision lifecycle") {
+    send({ type: "turn_start", turn_id: "decision-turn", prompt: cmd.text });
+    send({ type: "permission_request", id: "host-permission", call_id: "host-call",
+      name: "bash", args: { command: "npm test" }, command: "npm test",
+      suggested_rule: "Bash(npm test)", choices: ["once", "always", "deny"] });
+  }
+  if (cmd.type === "permission_response" && cmd.id === "host-permission") {
+    send({ type: "request_expired", id: "host-permission" });
+    send({ type: "plan_proposal", id: "host-plan", plan: "1. Inspect\\n2. Verify",
+      choices: ["auto", "acceptEdits", "default", "reject"] });
+  }
+  if (cmd.type === "plan_response" && cmd.id === "host-plan") {
+    send({ type: "request_expired", id: "host-plan" });
+    send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
+  }
   if (cmd.type === "shutdown") process.exit(0);
 });
 `);
@@ -102,6 +119,7 @@ try {
   env.DGC_EXTENSION_TEST_PRIMARY_ROOT = workspacePath;
   env.DGC_EXTENSION_TEST_SECONDARY_ROOT = secondaryWorkspace;
   env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT = changedEndpoint;
+  env.DGC_EXTENSION_TEST_TOKEN = testToken;
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
     env,
@@ -121,10 +139,11 @@ try {
   if (evidence.activated !== true || evidence.handshake !== true
       || evidence.multiRootLifecycle !== true
       || evidence.secretStorageLifecycle !== true
+      || evidence.decisionLifecycle !== true
       || !Number.isInteger(evidence.commands) || evidence.commands < 1) {
     throw new Error("VS Code extension-host test evidence was incomplete");
   }
-  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root + SecretStorage lifecycle)\n`);
+  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
 } finally {
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);

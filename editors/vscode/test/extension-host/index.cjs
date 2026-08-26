@@ -43,7 +43,7 @@ async function run() {
     .filter((name) => typeof name === "string");
   assert.ok(declared.length > 0, "DGC must declare editor commands");
 
-  await extension.activate();
+  const testApi = await extension.activate();
   assert.equal(extension.isActive, true, "DGC must activate successfully in VS Code");
 
   const registered = new Set(await vscode.commands.getCommands(true));
@@ -63,8 +63,14 @@ async function run() {
   const primaryRoot = process.env.DGC_EXTENSION_TEST_PRIMARY_ROOT;
   const secondaryRoot = process.env.DGC_EXTENSION_TEST_SECONDARY_ROOT;
   const changedEndpoint = process.env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT;
+  const testToken = process.env.DGC_EXTENSION_TEST_TOKEN;
   assert.ok(backendPath && backendLogPath && settingsPath && primaryRoot && secondaryRoot
-    && changedEndpoint, "the host runner must provide its fixture backend and workspace roots");
+    && changedEndpoint && testToken,
+  "the host runner must provide its fixture backend, workspace roots, and bridge token");
+  assert.equal(typeof testApi?.testOnlyWebviewMessage, "function",
+    "test activation must expose the isolated webview-message bridge");
+  assert.equal(typeof testApi?.testOnlyPostedMessages, "function",
+    "test activation must expose bounded webview delivery evidence");
   const seededSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
   const fixtureSecret = seededSettings["dgc.apiKey"];
   const initialEndpoint = seededSettings["dgc.baseUrl"];
@@ -129,10 +135,58 @@ async function run() {
   await waitFor(() => rootsCommands().slice(removedCount).some((command) =>
     sameRoots(command.roots, [primaryRoot, secondaryRoot])));
 
+  // Cross the real extension-host/webview boundary in both directions. The jsdom suite proves the
+  // actual buttons emit these messages; this installed-host layer proves that correlated permission
+  // and plan requests reach the live webview and that each response reaches the child exactly once.
+  const posted = () => testApi.testOnlyPostedMessages(testToken);
+  assert.throws(() => testApi.testOnlyPostedMessages("wrong-token"), /unavailable/,
+    "the installed-host bridge must reject a caller outside its isolated test token");
+  await assert.rejects(() => testApi.testOnlyWebviewMessage("wrong-token", { type: "cancel" }),
+    /unavailable/, "the installed-host bridge must not accept an unauthenticated message");
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "prompt", text: "installed-host decision lifecycle" });
+  await waitFor(() => posted().some((item) =>
+    item.type === "event" && item.eventType === "permission_request"
+      && item.id === "host-permission"));
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "permission_response", id: "host-permission", decision: "once" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "permission_response" && command.id === "host-permission"
+      && command.decision === "once"));
+  await waitFor(() => posted().some((item) =>
+    item.type === "event" && item.eventType === "plan_proposal" && item.id === "host-plan"));
+  const feedback = "Keep the public API stable.";
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "plan_response", id: "host-plan", decision: "reject", feedback });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "plan_response" && command.id === "host-plan"
+      && command.decision === "reject" && command.feedback === feedback));
+  await waitFor(() => posted().some((item) =>
+    item.type === "event" && item.eventType === "turn_end"));
+  assert.ok(posted().some((item) => item.eventType === "request_expired"
+    && item.id === "host-permission"), "permission resolution must retire its exact webview card");
+  assert.ok(posted().some((item) => item.eventType === "request_expired" && item.id === "host-plan"),
+    "plan resolution must retire its exact webview card");
+
+  // A late replay crosses the same extension API but must be rejected by the backend correlator.
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "permission_response", id: "host-permission", decision: "once" });
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "plan_response", id: "host-plan", decision: "reject", feedback: "late" });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const decisionCommands = backendCommands(backendLogPath);
+  assert.equal(decisionCommands.filter((command) =>
+    command.type === "permission_response" && command.id === "host-permission").length, 1,
+  "one installed-host permission request must reach the backend at most once");
+  assert.equal(decisionCommands.filter((command) =>
+    command.type === "plan_response" && command.id === "host-plan").length, 1,
+  "one installed-host plan request must reach the backend at most once");
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
-    handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true }));
+    handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
+    decisionLifecycle: true }));
 }
 
 module.exports = { run };
