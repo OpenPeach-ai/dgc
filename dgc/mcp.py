@@ -42,6 +42,11 @@ _MAX_WRITE_SECONDS = 2.0
 _CLIENT_INFO = {"name": "dgc", "version": __version__}
 _LOG_LEVELS = ("debug", "info", "notice", "warning", "error", "critical", "alert", "emergency")
 _INPUT_ORIGIN_METHODS = {"tools/call", "prompts/get", "resources/read"}
+_CATALOG_SEARCH_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "call", "do", "for", "from",
+    "in", "is", "it", "mcp", "of", "on", "or", "please", "the", "this", "to", "tool",
+    "tools", "use", "with",
+}
 _SENSITIVE_FIELD_RE = re.compile(
     r"\b(?:password|passphrase|secret|client[ _-]?secret|api[ _-]?key|access[ _-]?token|"
     r"refresh[ _-]?token|bearer|private[ _-]?key|ssh[ _-]?key|seed[ _-]?phrase|mnemonic|"
@@ -1441,6 +1446,77 @@ class MCPManager:
                 "parameters": schema,
             }})
         return schemas
+
+    @staticmethod
+    def _catalog_terms(query: str) -> set[str]:
+        return {
+            term for term in re.findall(r"[a-z0-9]{2,}", str(query or "").lower())
+            if term not in _CATALOG_SEARCH_STOP_WORDS
+        }
+
+    @classmethod
+    def _schema_relevance(cls, schema: dict, query: str) -> int:
+        terms = cls._catalog_terms(query)
+        if not terms:
+            return 0
+        fn = schema.get("function") or {}
+        name = str(fn.get("name") or "").lower()
+        name_parts = set(re.findall(r"[a-z0-9]{2,}", name))
+        description = str(fn.get("description") or "").lower()
+        try:
+            parameters = json.dumps(fn.get("parameters") or {}, ensure_ascii=False,
+                                    separators=(",", ":"), default=str).lower()
+        except (RecursionError, TypeError, ValueError):
+            parameters = ""
+        score = 100 if str(query or "").strip().lower() == name else 0
+        for term in terms:
+            if term in name_parts:
+                score += 24
+            elif term in name:
+                score += 12
+            if term in description:
+                score += 4
+            if term in parameters:
+                score += 1
+        return score
+
+    def search_tool_schemas(self, query: str, limit: int = 8) -> list[dict]:
+        """Return deterministic relevant schemas from the current catalog, never arbitrary filler."""
+        limit = max(1, min(20, int(limit)))
+        ranked = []
+        for index, schema in enumerate(self.tool_schemas()):
+            score = self._schema_relevance(schema, query)
+            if score > 0:
+                ranked.append((-score, index, schema))
+        ranked.sort(key=lambda row: (row[0], row[1]))
+        return [schema for _, _, schema in ranked[:limit]]
+
+    def select_tool_schemas(self, query: str, budget_chars: int,
+                            active: set[str] | None = None, *,
+                            reserve_chars: int = 0) -> tuple[list[dict], bool]:
+        """Fit relevant direct schemas in a prompt budget; report whether brokers are required."""
+        schemas = self.tool_schemas()
+        budget = max(0, int(budget_chars))
+        # Match LLMClient.estimate_input_tokens: escaped non-ASCII schema text must consume budget
+        # exactly as it does in the provider request estimate.
+        sizes = [len(json.dumps(schema, default=str)) for schema in schemas]
+        if sum(sizes) <= budget:
+            return schemas, False
+        budget = max(0, budget - max(0, int(reserve_chars)))
+        active = set(active or ())
+        ranked = []
+        for index, schema in enumerate(schemas):
+            name = str((schema.get("function") or {}).get("name") or "")
+            score = self._schema_relevance(schema, query)
+            if name in active or score > 0:
+                ranked.append((0 if name in active else 1, -score, index, schema, sizes[index]))
+        ranked.sort(key=lambda row: (row[0], row[1], row[2]))
+        selected, used = [], 0
+        for _, _, _, schema, size in ranked:
+            if size <= budget - used:
+                selected.append(schema)
+                used += size
+        return selected, True
 
     def call(self, full_name: str, arguments: dict,
              cancel: threading.Event | None = None, *, on_progress=None, on_log=None,

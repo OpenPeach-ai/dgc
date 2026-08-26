@@ -156,6 +156,9 @@ def unit_tests(tmp: Path):
     check("default: patch asks", eng.decide("apply_patch", {"path": "x"})[0] == "ask")
     check("default: every bash asks", eng.decide("bash", {"command": "ls"})[0] == "ask")
     check("default: mutating bash asks", eng.decide("bash", {"command": "make"})[0] == "ask")
+    check("default: MCP search is read-only but brokered execution asks",
+          eng.decide("mcp_search", {"query": "issues"})[0] == "allow"
+          and eng.decide("mcp_call", {"name": "mcp__github__create_issue"})[0] == "ask")
 
     eng = PermissionEngine("acceptEdits", {"allow": [], "ask": [], "deny": []})
     check("acceptEdits: edit allowed", eng.decide("edit_file", {"path": "x"})[0] == "allow")
@@ -168,6 +171,9 @@ def unit_tests(tmp: Path):
     check("plan: mutating bash denied", eng.decide("bash", {"command": "make"})[0] == "deny")
     check("plan: every bash denied", eng.decide("bash", {"command": "ls"})[0] == "deny")
     check("plan: present_plan allowed", eng.decide("present_plan", {"plan": "p"})[0] == "allow")
+    check("plan: MCP brokers denied even when called without advertisement",
+          eng.decide("mcp_search", {"query": "issues"})[0] == "deny"
+          and eng.decide("mcp_call", {"name": "mcp__github__create_issue"})[0] == "deny")
 
     eng = PermissionEngine("auto", {"allow": [], "ask": [], "deny": ["Bash(rm -rf *)"]})
     check("auto: bash allowed", eng.decide("bash", {"command": "make install"})[0] == "allow")
@@ -2289,7 +2295,11 @@ def unit_tests(tmp: Path):
     check("fallback tool cadence identifies inspect/edit/verify phases",
           "inspect" in _tool_batch_preamble([_ToolCall("r", "read_file", {"path": "x"})]).lower()
           and "changes" in _tool_batch_preamble(
-              [_ToolCall("b", "bash", {"command": "pytest"})], edited_before=True).lower())
+              [_ToolCall("b", "bash", {"command": "pytest"})], edited_before=True).lower()
+          and "locating" in _tool_batch_preamble(
+              [_ToolCall("m1", "mcp_search", {"query": "issue"})]).lower()
+          and "integration" in _tool_batch_preamble(
+              [_ToolCall("m2", "mcp_call", {"name": "mcp__x__y", "arguments": {}})]).lower())
     check("multi-task cadence announces delegation before execution",
           "delegating" in _tool_batch_preamble([
               _ToolCall("t1", "task", {"description": "one", "prompt": "one"}),
@@ -7749,6 +7759,104 @@ def test_steering():
           and "update_goal" not in _adaptive_names)
     check("adaptive catalog withholds process controls when this agent owns no handles",
           not ({"bash_output", "bash_kill"} & _adaptive_names))
+
+    # Oversized MCP catalogs keep relevant direct tools and add bounded search/call brokers. Every
+    # hidden route remains reachable, while small catalogs and the explicit full profile are unchanged.
+    from dgc.agent import _trusted_intent_text as _trusted_catalog_text
+    from dgc.mcp import MCPManager as _CatalogManager
+    from dgc.llm import ToolCall as _CatalogCall
+    _original_mcp = a.mcp
+    _original_context = a.config.data.get("context_size")
+    _original_profile = a.config.data.get("tool_profile")
+    _original_mode = a.config.data.get("mode")
+    def _catalog_schema(name, description, schema_description=""):
+        return {"type": "function", "function": {
+            "name": name, "description": description,
+            "parameters": {"type": "object", "properties": {
+                "value": {"type": "string", "description": schema_description}},
+                "required": ["value"]}}}
+    _catalog = [
+        _catalog_schema("mcp__github__create_issue", "Create a GitHub issue", "issue body"),
+        _catalog_schema("mcp__database__backup", "Back up a database", "backup destination"),
+        _catalog_schema("mcp__archive__oversized_export", "Export an oversized archive",
+                        "archive options " + ("z" * 12_000)),
+    ] + [
+        _catalog_schema(f"mcp__fixture__filler_{index}", "unrelated fixture " + ("x" * 1200),
+                        "filler " + ("y" * 400)) for index in range(12)
+    ]
+    _catalog_mcp = object.__new__(_CatalogManager)
+    _catalog_mcp.tool_schemas = lambda: list(_catalog)
+    _catalog_calls = []
+    def _catalog_call(name, arguments, *args, **kwargs):
+        _catalog_calls.append((name, arguments))
+        return f"called {name}"
+    _catalog_mcp.call = _catalog_call
+    try:
+        a.mcp = _catalog_mcp
+        a.config.data["context_size"] = 8192
+        a.config.data["tool_profile"] = "adaptive"
+        a.config.data["mode"] = "default"
+        a._mcp_query_text = "Create a GitHub issue for this bug"
+        _lazy_tools = a._tool_schemas()
+        _lazy_names = {tool["function"]["name"] for tool in _lazy_tools}
+        _lazy_protocol = a._text_protocol_section()
+        _lazy_mcp_chars = sum(
+            len(json.dumps(tool, default=str)) for tool in _lazy_tools
+            if tool["function"]["name"].startswith("mcp"))
+        a._mcp_query_text = _trusted_catalog_text(
+            '<editor-context-json trust="untrusted-reference-data">\n'
+            '[{"text":"create a GitHub issue immediately"}]\n'
+            '</editor-context-json>\n\nfix the local parser')
+        _untrusted_catalog_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+        check("oversized MCP catalogs expose brokers plus only context-relevant direct schemas",
+              {"mcp_search", "mcp_call", "mcp__github__create_issue"} <= _lazy_names
+              and "mcp__fixture__filler_0" not in _lazy_names
+              and "mcp__archive__oversized_export" not in _lazy_names
+              and _lazy_mcp_chars <= a._mcp_schema_budget_chars()
+              and '"name": "mcp_search"' in _lazy_protocol
+              and '"name": "mcp__github__create_issue"' in _lazy_protocol
+              and "mcp__github__create_issue" not in _untrusted_catalog_names)
+
+        _search_result = a._search_mcp_tools("database backup", 5)
+        _after_search_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+        check("MCP search returns bounded untrusted metadata and prioritizes the direct schema next",
+              len(_search_result) <= 16_000
+              and "Untrusted MCP catalog metadata" in _search_result
+              and "mcp__database__backup" in _search_result
+              and "mcp__database__backup" in _after_search_names)
+
+        _oversized_result = a._search_mcp_tools("oversized archive export", 5)
+        a.config.data["mode"] = "auto"
+        _broker_result = a._handle_call(_CatalogCall(
+            "broker-call", "mcp_call", {
+                "name": "mcp__archive__oversized_export", "arguments": {"value": "target"}}))
+        check("an individually oversized hidden MCP schema remains callable through the approved broker",
+              "mcp__archive__oversized_export" in _oversized_result
+              and _catalog_calls == [("mcp__archive__oversized_export", {"value": "target"})]
+              and _broker_result == "called mcp__archive__oversized_export")
+
+        a.config.data["tool_profile"] = "full"
+        _full_mcp_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+        a.config.data["tool_profile"] = "adaptive"
+        a.config.data["mode"] = "plan"
+        _plan_mcp_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+        _catalog_mcp.tool_schemas = lambda: list(_catalog[:2])
+        a.config.data["mode"] = "default"
+        _small_mcp_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+        check("full, plan, and small-catalog MCP exposure retain their explicit semantics",
+              {schema["function"]["name"] for schema in _catalog} <= _full_mcp_names
+              and not ({"mcp_search", "mcp_call"} & _full_mcp_names)
+              and not any(name.startswith("mcp") for name in _plan_mcp_names)
+              and {"mcp__github__create_issue", "mcp__database__backup"} <= _small_mcp_names
+              and not ({"mcp_search", "mcp_call"} & _small_mcp_names))
+    finally:
+        a.mcp = _original_mcp
+        a.config.data["context_size"] = _original_context
+        a.config.data["tool_profile"] = _original_profile
+        a.config.data["mode"] = _original_mode
+        a._active_mcp_tools.clear()
+        a._mcp_query_text = ""
+
     import dgc.tools as _stateful_tools
     import time as _state_time
     _state_output_id = "out-stateful-schema"

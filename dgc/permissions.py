@@ -34,6 +34,7 @@ DISPLAY = {
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "todo": "Todo", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
+    "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "propose_options": "ProposeOptions", "artifact": "Artifact",
     "task": "Task", "external_directory": "ExternalDirectory",
 }
@@ -45,12 +46,13 @@ RULE_ARG = {
     "edit_file": "path", "multi_edit": "path", "apply_patch": "path",
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
+    "mcp_search": "query", "mcp_call": "name",
     "save_memory": "scope", "artifact": "path", "task": "description",
     "external_directory": "path",
 }
 
 READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search", "todo", "skill",
-                   "bash_output", "propose_options"}
+                   "bash_output", "propose_options", "mcp_search"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 
 # A shell string is not a trustworthy read/write boundary. Redirections, substitutions, interpreters,
@@ -216,6 +218,8 @@ class PermissionEngine:
         if self.mode == "plan":
             if external:
                 return DENY, f"plan mode cannot access paths outside the project: {external[0]}"
+            if tool in ("mcp_search", "mcp_call"):
+                return DENY, "plan mode does not expose MCP discovery or execution"
             if tool in READ_ONLY_TOOLS or tool == "present_plan":
                 return ALLOW, "plan mode (read-only)"
             return DENY, "plan mode is active — no changes allowed; present a plan and get it approved first"
