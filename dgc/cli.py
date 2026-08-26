@@ -503,6 +503,12 @@ class CLI:
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
 
+    def _context_window_size(self) -> int:
+        effective = getattr(self.agent, "context_size", None)
+        if callable(effective):
+            return int(effective())
+        return int(self.config.get("context_size", 32768))
+
     # ------------------------------------------------------------- banner ---
     # DGC wordmark — assembled from fixed-width block letters so it always aligns.
     _LOGO_D = ["██████╗ ", "██╔══██╗", "██║  ██║", "██║  ██║", "██████╔╝", "╚═════╝ "]
@@ -545,7 +551,7 @@ class CLI:
             row("memory", "loaded: " + ", ".join(loaded))
         row("search", cfg.get("search_provider", "duckduckgo"))
         c.print(f"  [{DIM}]{'context':<8}[/]  ", render.context_bar(self.agent.estimate_tokens(),
-                int(cfg.get("context_size", 32768))), highlight=False)
+                self._context_window_size()), highlight=False)
         upd = cached_update()
         if upd:
             c.print(f"  [bold {BRAND_MAGENTA}]⬆ update available: v{upd}[/]  "
@@ -739,7 +745,7 @@ class CLI:
         elif cmd == "status":
             self.banner()
         elif cmd == "context":
-            used, size = self.agent.estimate_tokens(), int(cfg.get("context_size", 32768))
+            used, size = self.agent.estimate_tokens(), self._context_window_size()
             self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)
         elif cmd == "theme":
             if not rest:
@@ -913,10 +919,9 @@ class CLI:
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
 
     def _set_model(self, model: str) -> None:
-        from .config import context_for_model
         self.config.set("model", model)
         self.agent.refresh_client()
-        ctx = context_for_model(model)
+        ctx = self.agent.recommended_context_size(model)
         if ctx and ctx != int(self.config.get("context_size", 32768)):
             self.config.set("context_size", ctx)
             self.ui.info(f"model → {model}  ·  context auto-set to {ctx // 1024}k (/context to change)")
@@ -1295,14 +1300,27 @@ def run_setup(config: Config) -> None:
     except Exception as e:
         c.print(f"  [yellow]couldn't list models[/yellow] ({type(e).__name__}) — set one by name below.")
         models = []
+    model_changed = False
     if models:
         mi = select("Model", models[:60])
         if mi is not None:
             config.set("model", models[mi])
+            model_changed = True
     else:
         m = input(f"  model name [{config.model}] › ").strip()
         if m:
             config.set("model", m)
+            model_changed = True
+    if model_changed:
+        from .config import context_for_model
+        selected_client = LLMClient(
+            config.base_url, config.api_key, config.model,
+            api_mode=str(config.get("api_mode", "auto")))
+        discovered_context = (selected_client.model_context_limit()
+                              if selected_client.api_mode == "anthropic" else 0)
+        suggested_context = discovered_context or context_for_model(config.model)
+        if suggested_context:
+            config.set("context_size", suggested_context)
     cs = input(f"  context window in tokens [{config.get('context_size')}] › ").strip()
     if cs.isdigit():
         config.set("context_size", int(cs))

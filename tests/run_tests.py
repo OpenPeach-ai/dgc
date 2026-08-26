@@ -4208,6 +4208,8 @@ def test_context_prune():
 
     from dgc.config import context_for_model
     check("catalog sizes a qwen model", context_for_model("qwen3.5:122b") == 32768)
+    check("catalog gives Qwen3.8 a memory-conscious coding window",
+          context_for_model("qwen3.8:27b-bf16") == 65536)
     check("catalog sizes a gpt-oss model", context_for_model("gpt-oss:120b") == 131072)
     check("catalog returns None for an unknown model", context_for_model("totally-unknown-xyz") is None)
 
@@ -10956,7 +10958,11 @@ def test_anthropic_adapter():
         status_code = 200
         headers = {"Content-Type": "application/json"}
         def __init__(self): self.closed = False
-        def json(self): return {"data": [{"id": "claude-z"}, {"id": "claude-a"}]}
+        def json(self): return {"data": [
+            {"id": "claude-z", "max_input_tokens": 1_000_000, "max_tokens": 64_000,
+             "capabilities": {"thinking": {"supported": True}}},
+            {"id": "claude-a", "max_input_tokens": 200_000, "max_tokens": 32_000},
+        ]}
         def close(self): self.closed = True
     original_get = _llm.requests.get
     catalog_calls = []
@@ -10974,6 +10980,53 @@ def test_anthropic_adapter():
           and catalog_calls[0][1]["stream"] is True
           and catalog_calls[0][1]["timeout"] == (2, 2)
           and "Authorization" not in catalog_calls[0][1]["headers"])
+    cached_catalog_model = LLMClient(
+        "https://api.anthropic.com/v1", "another-secret", "claude-z",
+        api_mode="anthropic", max_tokens=128_000, context_size=2_000_000)
+    cached_catalog_snapshot = cached_catalog_model.capability_snapshot()
+    cached_catalog_payload = cached_catalog_model._anthropic_payload(
+        [{"role": "user", "content": "inspect"}], None, "off", set())
+    check("Anthropic catalog metadata is cached per endpoint/model and clamps hard limits",
+          cached_catalog_snapshot["discovery"] == "anthropic_models"
+          and cached_catalog_snapshot["model_context_length"] == 1_000_000
+          and cached_catalog_snapshot["model_max_output_tokens"] == 64_000
+          and cached_catalog_snapshot["model_capabilities"] == ["thinking"]
+          and cached_catalog_model.effective_context_size() == 1_000_000
+          and cached_catalog_payload["max_tokens"] == 64_000)
+
+    class _ModelDetail(_Models):
+        def json(self):
+            return {"id": "claude-resolved", "max_input_tokens": 400_000,
+                    "max_tokens": 20_000,
+                    "capabilities": {"effort": {"supported": True},
+                                     "invalid capability": {"supported": True}}}
+    detail_calls = []
+    detail_client = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude/alias", api_mode="anthropic",
+        max_tokens=32_000, context_size=500_000)
+    detail_client.invalidate_capabilities()
+    try:
+        detail = _ModelDetail()
+        def _get_detail(url, **kwargs):
+            detail_calls.append((url, kwargs)); return detail
+        _llm.requests.get = _get_detail
+        first_detail = detail_client.prepare_model()
+        second_detail = detail_client.prepare_model()
+    finally:
+        _llm.requests.get = original_get
+    detail_snapshot = detail_client.capability_snapshot()
+    check("Anthropic selected-model metadata uses the bounded native detail route once",
+          len(detail_calls) == 1 and detail_calls[0][0].endswith("/models/claude%2Falias")
+          and detail_calls[0][1]["timeout"] == (2, 2) and detail.closed
+          and first_detail == second_detail
+          and first_detail["context_length"] == 400_000
+          and first_detail["max_output_tokens"] == 20_000
+          and detail_snapshot["resolved_model"] == "claude-resolved"
+          and detail_snapshot["model_capabilities"] == ["effort"]
+          and detail_client.effective_context_size() == 400_000
+          and detail_client._anthropic_payload(
+              [{"role": "user", "content": "x"}], None, "off", set())["max_tokens"]
+              == 20_000)
 
     image_tokens = client.estimate_input_tokens([{"role": "user", "content": [{
         "type": "image_url", "image_url": {"url":

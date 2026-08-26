@@ -1060,14 +1060,40 @@ class Agent:
         return [skill for name, skill in self.skills.items() if name in active]
 
     def _mcp_schema_budget_chars(self) -> int:
-        try:
-            context_size = max(2_048, int(self.config.get("context_size", 32_768)))
-        except (TypeError, ValueError):
-            context_size = 32_768
+        context_size = self.context_size()
         # Approximate token accounting uses four chars/token. Half a char per context token gives
         # MCP direct schemas one eighth of the model window, capped so large models do not regress
         # into an unbounded every-turn catalog.
         return max(2_048, min(65_536, context_size // 2))
+
+    def context_size(self) -> int:
+        """Return the configured operating window clamped to an authoritative model maximum."""
+        try:
+            configured = max(2_048, int(self.config.get("context_size", 32_768)))
+        except (TypeError, ValueError):
+            configured = 32_768
+        effective = getattr(self.client, "effective_context_size", None)
+        if callable(effective):
+            try:
+                return max(1, int(effective(configured) or configured))
+            except (TypeError, ValueError):
+                pass
+        return configured
+
+    def recommended_context_size(self, model: str | None = None) -> int | None:
+        """Choose a model-switch default without turning a trained local maximum into allocation."""
+        from .config import context_for_model
+        selected = str(model or self.config.model)
+        if selected == self.config.model and getattr(self.client, "api_mode", "") == "anthropic":
+            discovered = getattr(self.client, "model_context_limit", None)
+            if callable(discovered):
+                try:
+                    limit = int(discovered() or 0)
+                except (TypeError, ValueError):
+                    limit = 0
+                if limit > 0:
+                    return limit
+        return context_for_model(selected)
 
     def _mcp_catalog_query(self) -> str:
         query = str(getattr(self, "_mcp_query_text", "") or "")
@@ -3559,10 +3585,7 @@ class Agent:
         self.messages, repaired = _repair_tool_transcript(self.messages)
         if repaired:
             self.ui.info("repaired an interrupted tool-call transcript")
-        try:
-            context_size = max(2_048, int(self.config.get("context_size", 32768)))
-        except (TypeError, ValueError):
-            context_size = 32_768
+        context_size = self.context_size()
         try:
             threshold = float(self.config.get("compact_threshold", COMPACT_THRESHOLD))
         except (TypeError, ValueError):

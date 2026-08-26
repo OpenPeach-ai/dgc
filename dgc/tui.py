@@ -1046,11 +1046,17 @@ class TUI:
     def _ctx_color(self, pct: float, th):
         return th.err if pct >= 90 else th.warn if pct >= 75 else th.muted if pct >= 50 else th.text
 
+    def _context_window_size(self) -> int:
+        effective = getattr(self.agent, "context_size", None)
+        if callable(effective):
+            return int(effective())
+        return int(self.config.get("context_size", 32768))
+
     def _context_chip(self, hover: bool):
         """Top-right context counter  Default: `used / total` (colored by an
         urgency gradient). Hover: morph to `█████ 42.0%` at the SAME width (no layout shift)."""
         th = style_mod.theme()
-        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        used, size = self.agent.estimate_tokens(), self._context_window_size()
         pct = min(100.0, used * 100 / size) if size else 0.0
         col = self._ctx_color(pct, th)
         default = f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}"
@@ -1068,7 +1074,7 @@ class TUI:
         summary, a bar, the model, and turn/tool stats."""
         from rich.text import Text
         th = style_mod.theme()
-        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        used, size = self.agent.estimate_tokens(), self._context_window_size()
         pct = used * 100 / size if size else 0.0
         col = self._ctx_color(pct, th)
         barw = 34
@@ -1265,7 +1271,7 @@ class TUI:
         from rich.text import Text
         from . import sessions, artifacts
         th = style_mod.theme()
-        used, size = self.agent.estimate_tokens(), int(self.config.get("context_size", 32768))
+        used, size = self.agent.estimate_tokens(), self._context_window_size()
         pct = used * 100 / size if size else 0.0
         col = self._ctx_color(pct, th)
         full, part, empty = render_mod.frac_bar(pct, 22)
@@ -3087,7 +3093,7 @@ class TUI:
     def _status_block(self) -> str:
         th = style_mod.theme()
         cfg = self.config
-        used, size = self.agent.estimate_tokens(), int(cfg.get("context_size", 32768))
+        used, size = self.agent.estimate_tokens(), self._context_window_size()
         rows = [("model", cfg.model), ("host", cfg.base_url), ("mode", self.agent.mode),
                 ("thinking", cfg.get("thinking", "off")), ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
@@ -3096,14 +3102,13 @@ class TUI:
             f"  [{th.faint}]{k:<9}[/] [{th.text}]{_esc(str(v))}[/]" for k, v in rows)
 
     def _set_model_tui(self, model: str, subagent: bool = False) -> None:
-        from .config import context_for_model
         if subagent:
             self.config.set("subagent_model", model)
             self._flash(f"sub-agent model → {model}")
             return
         self.config.set("model", model)
         self.agent.refresh_client()
-        ctx = context_for_model(model)
+        ctx = self.agent.recommended_context_size(model)
         if ctx and ctx != int(self.config.get("context_size", 32768)):
             self.config.set("context_size", ctx)
             self._flash(f"model → {model}  ·  context {ctx // 1024}k")

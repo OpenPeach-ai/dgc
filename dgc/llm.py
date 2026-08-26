@@ -11,6 +11,7 @@ import math
 import re
 import threading
 import time
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from datetime import timezone
 from email.utils import parsedate_to_datetime
@@ -44,6 +45,17 @@ def _decoded_base64_size(payload: str) -> int:
         return 0
     padding = len(payload) - len(payload.rstrip("="))
     return max(0, (len(payload) * 3) // 4 - padding)
+
+
+def _bounded_model_tokens(raw) -> int:
+    """Normalize an untrusted provider token limit without accepting booleans or absurd values."""
+    if isinstance(raw, bool):
+        return 0
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return parsed if 0 < parsed <= 10_000_000 else 0
 
 
 def _image_prefix(payload: str) -> bytes:
@@ -917,10 +929,11 @@ class LLMClient:
                 entry = None
             return (True, dict(entry[1])) if entry else (False, {})
 
-    def _cache_model_metadata(self, metadata: dict, ttl: int | float | None = None) -> None:
+    def _cache_model_metadata_for(self, model: str, metadata: dict,
+                                  ttl: int | float | None = None) -> None:
         lifetime = self.capability_cache_ttl_s if ttl is None else max(1, float(ttl))
         now = time.monotonic()
-        key = self._model_metadata_key()
+        key = (self.base_url.lower(), str(model))
         with self._model_metadata_lock:
             for stale in [candidate for candidate, entry in self._model_metadata_cache.items()
                           if entry[0] <= now]:
@@ -931,6 +944,9 @@ class LLMClient:
                              key=lambda candidate: self._model_metadata_cache[candidate][0])
                 self._model_metadata_cache.pop(oldest, None)
             self._model_metadata_cache[key] = (now + lifetime, dict(metadata))
+
+    def _cache_model_metadata(self, metadata: dict, ttl: int | float | None = None) -> None:
+        self._cache_model_metadata_for(self.model, metadata, ttl)
 
     @staticmethod
     def _ollama_metadata(value) -> dict:
@@ -949,17 +965,9 @@ class LLMClient:
         info = value.get("model_info")
         info = info if isinstance(info, dict) else {}
 
-        def bounded_context(raw) -> int:
-            if isinstance(raw, bool):
-                return 0
-            try:
-                parsed = int(raw)
-            except (TypeError, ValueError, OverflowError):
-                return 0
-            return parsed if 0 < parsed <= 10_000_000 else 0
-
         architecture = str(info.get("general.architecture") or "")[:128]
-        preferred = bounded_context(info.get(f"{architecture}.context_length")) if architecture else 0
+        preferred = (_bounded_model_tokens(info.get(f"{architecture}.context_length"))
+                     if architecture else 0)
         contexts = []
         for index, (key, raw) in enumerate(info.items()):
             if index >= _MAX_MODEL_INFO_FIELDS:
@@ -967,7 +975,7 @@ class LLMClient:
             normalized = str(key).lower()
             if (normalized.endswith(".context_length")
                     and ".vision." not in normalized and ".mm." not in normalized):
-                context = bounded_context(raw)
+                context = _bounded_model_tokens(raw)
                 if context:
                     contexts.append(context)
         context_length = preferred or (max(contexts) if contexts else 0)
@@ -975,7 +983,7 @@ class LLMClient:
         configured_context = 0
         if isinstance(parameters, str) and len(parameters) <= 64_000:
             match = re.search(r"(?im)^\s*num_ctx\s+(\d+)\s*$", parameters)
-            configured_context = bounded_context(match.group(1)) if match else 0
+            configured_context = _bounded_model_tokens(match.group(1)) if match else 0
         details = value.get("details")
         details = details if isinstance(details, dict) else {}
         return {
@@ -990,14 +998,40 @@ class LLMClient:
             "quantization_level": str(details.get("quantization_level") or "")[:64],
         }
 
-    def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
-        """Discover selected native-Ollama model metadata once per bounded cache generation.
+    @staticmethod
+    def _anthropic_metadata(value) -> dict:
+        """Normalize one bounded Models API record; zero/null limits mean unspecified."""
+        if not isinstance(value, dict):
+            return {}
+        model_id = str(value.get("id") or "")
+        if not model_id or len(model_id) > 512:
+            return {}
+        raw_capabilities = value.get("capabilities")
+        supported: list[str] = []
+        if isinstance(raw_capabilities, dict):
+            for key, details in list(raw_capabilities.items())[:64]:
+                name = str(key).strip().lower()
+                if (not _MODEL_CAPABILITY_RE.fullmatch(name)
+                        or not isinstance(details, dict)
+                        or details.get("supported") is not True):
+                    continue
+                supported.append(name)
+        return {
+            "source": "anthropic_models",
+            "resolved_model": model_id,
+            "context_length": _bounded_model_tokens(value.get("max_input_tokens")),
+            "max_output_tokens": _bounded_model_tokens(value.get("max_tokens")),
+            "capabilities": sorted(set(supported)),
+        }
 
-        Discovery is advisory and never prevents a chat when an older/proxied endpoint lacks
-        `/api/show`. A valid capabilities array is authoritative unless the user explicitly
-        overrides that feature; failures retain the adapter's optimistic compatibility behavior.
+    def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
+        """Discover selected native-provider model metadata once per bounded cache generation.
+
+        Discovery is advisory and never prevents a chat when an older/proxied endpoint lacks its
+        model-info route. Ollama's valid capabilities array is authoritative unless explicitly
+        overridden; Anthropic metadata supplies limits and diagnostics without guessing features.
         """
-        if self.api_mode != "ollama" or not self.model:
+        if self.api_mode not in ("ollama", "anthropic") or not self.model:
             return {}
         if cancel is not None and cancel.is_set():
             return {}
@@ -1006,17 +1040,25 @@ class LLMClient:
             return metadata
         deadline = time.monotonic() + _MODEL_METADATA_TOTAL_S
         try:
-            response = requests.post(
-                f"{self._ollama_root}/api/show", headers=self._headers(),
-                json={"model": self.model, "verbose": False}, stream=True, timeout=(2, 2))
+            if self.api_mode == "ollama":
+                response = requests.post(
+                    f"{self._ollama_root}/api/show", headers=self._headers(),
+                    json={"model": self.model, "verbose": False}, stream=True, timeout=(2, 2))
+                label = "Ollama model metadata"
+            else:
+                response = requests.get(
+                    f"{self.base_url}/models/{quote(self.model, safe='')}",
+                    headers=self._anthropic_headers(), stream=True, timeout=(2, 2))
+                label = "Anthropic model metadata"
             if response.status_code != 200:
                 _close_response(response)
                 self._cache_model_metadata({}, min(
                     self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
                 return {}
-            value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
-                                           "Ollama model metadata", deadline=deadline)
-            metadata = self._ollama_metadata(value)
+            value = _bounded_json_response(
+                response, _MAX_MODEL_METADATA_BYTES, label, deadline=deadline)
+            metadata = (self._ollama_metadata(value) if self.api_mode == "ollama"
+                        else self._anthropic_metadata(value))
         except (LLMError, requests.RequestException, ValueError, TypeError):
             self._cache_model_metadata({}, min(
                 self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
@@ -1027,6 +1069,23 @@ class LLMClient:
             metadata, None if metadata else min(
                 self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
         return dict(metadata)
+
+    def model_context_limit(self) -> int:
+        """Return a discovered hard input limit, or zero when the provider did not report one."""
+        _, metadata = self._cached_model_metadata()
+        return _bounded_model_tokens(metadata.get("context_length"))
+
+    def effective_context_size(self, configured: int | None = None) -> int:
+        """Clamp a requested operating window to a discovered model maximum without expanding it."""
+        requested = _bounded_model_tokens(
+            self.context_size if configured is None else configured)
+        limit = self.model_context_limit()
+        return min(requested, limit) if requested and limit else (requested or limit)
+
+    def model_output_limit(self) -> int:
+        """Return a discovered hard output limit, or zero when the provider did not report one."""
+        _, metadata = self._cached_model_metadata()
+        return _bounded_model_tokens(metadata.get("max_output_tokens"))
 
     def _feature_supported(self, feature: str) -> bool:
         supported = bool(getattr(self.capabilities, feature, False))
@@ -1087,11 +1146,15 @@ class LLMClient:
             snapshot["sampling"] = False
         _, metadata = self._cached_model_metadata()
         result: dict[str, bool | str | int | list] = {"provider": self.family, **snapshot}
-        if metadata.get("source") == "ollama_show":
-            result["discovery"] = "ollama_show"
+        if metadata.get("source") in ("ollama_show", "anthropic_models"):
+            result["discovery"] = str(metadata["source"])
             result["model_capabilities"] = list(metadata.get("capabilities") or ())
             if metadata.get("context_length"):
                 result["model_context_length"] = int(metadata["context_length"])
+            if metadata.get("max_output_tokens"):
+                result["model_max_output_tokens"] = int(metadata["max_output_tokens"])
+            if metadata.get("resolved_model"):
+                result["resolved_model"] = str(metadata["resolved_model"])
             if metadata.get("configured_context"):
                 result["model_configured_context"] = int(metadata["configured_context"])
         return result
@@ -1181,8 +1244,14 @@ class LLMClient:
                     deadline=time.monotonic() + _MODEL_METADATA_TOTAL_S)
                 if not isinstance(value, dict) or not isinstance(value.get("data"), list):
                     raise LLMError("Anthropic model catalog returned an invalid shape")
-                return sorted(str(model.get("id") or "?") for model in value["data"]
-                              if isinstance(model, dict))
+                ids = []
+                for model in value["data"]:
+                    metadata = self._anthropic_metadata(model)
+                    if metadata:
+                        model_id = str(metadata["resolved_model"])
+                        ids.append(model_id)
+                        self._cache_model_metadata_for(model_id, metadata)
+                return sorted(ids)
             if self.requested_api_mode != "auto" or r.status_code not in (404, 405, 501):
                 status = r.status_code
                 body = _error_body(r, 400)
@@ -1733,6 +1802,9 @@ class LLMClient:
                            disabled: set[str], max_tokens_limit: int | None = None) -> dict:
         system, wire_messages = self._anthropic_messages(messages)
         maximum = max(1, int(self.max_tokens or 16_384))
+        discovered_limit = self.model_output_limit()
+        if discovered_limit:
+            maximum = min(maximum, discovered_limit)
         if max_tokens_limit is not None:
             maximum = min(maximum, max(1, int(max_tokens_limit)))
         payload: dict = {"model": self.model, "messages": wire_messages,
@@ -2145,8 +2217,9 @@ class LLMClient:
         options: dict = {}
         if self.max_tokens and self._feature_supported("max_output_tokens"):
             options["num_predict"] = self.max_tokens
-        if self.context_size:
-            options["num_ctx"] = self.context_size
+        context_size = self.effective_context_size()
+        if context_size:
+            options["num_ctx"] = context_size
         if self.sampling and self._feature_supported("sampling"):
             options.update(self.sampling)
         if options:

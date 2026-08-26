@@ -409,8 +409,7 @@ class ACPServer:
                                  or "session turn could not be committed"}
                     else:
                         reason = "cancelled" if state.agent.cancelled.is_set() else "end_turn"
-                        state.ui.usage(state.agent.estimate_tokens(),
-                                       int(state.config.get("context_size", 32768)))
+                        state.ui.usage(state.agent.estimate_tokens(), state.agent.context_size())
                         result = {"stopReason": reason}
                 except Exception as e:
                     if state.agent.cancelled.is_set():

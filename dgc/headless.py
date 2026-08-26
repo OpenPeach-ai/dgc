@@ -323,8 +323,14 @@ class Backend:
             commands=editor_command_metadata(),
             custom_commands=custom_command_names(self.config.project_root),
             goal={"text": self.agent.goal, "status": self.agent.goal_status},
-            context_size=int(self.config.get("context_size", 32768)))
+            context_size=self._context_window_size())
         self._emit_context()
+
+    def _context_window_size(self) -> int:
+        effective = getattr(self.agent, "context_size", None)
+        if callable(effective):
+            return int(effective())
+        return int(self.config.get("context_size", 32768))
 
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
@@ -421,7 +427,7 @@ class Backend:
         except Exception:
             used = 0
         totals = getattr(self.agent, "usage_totals", {})
-        self.em.emit("context", used=used, size=int(self.config.get("context_size", 32768)),
+        self.em.emit("context", used=used, size=self._context_window_size(),
                      input_tokens=int(totals.get("input_tokens", 0)),
                      output_tokens=int(totals.get("output_tokens", 0)),
                      cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
@@ -619,7 +625,15 @@ class Backend:
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
+            recommend = getattr(self.agent, "recommended_context_size", None)
+            ctx = (recommend() if cmd.get("model") and callable(recommend) else None)
+            context_changed = False
+            if ctx and ctx != int(self.config.get("context_size", 32768)):
+                self.config.set("context_size", ctx)
+                context_changed = True
             self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url)
+            if context_changed:
+                self._emit_context()
         elif t == "list_models":
             request_id = redact_value(
                 str(cmd.get("request_id") or ""), secret_values(self.config))[:128]
@@ -798,7 +812,7 @@ class Backend:
                          goal={"text": getattr(self.agent, "goal", ""),
                                "status": getattr(self.agent, "goal_status", "none")},
                          context_used=self.agent.estimate_tokens(),
-                         context_size=int(self.config.get("context_size", 32768)))
+                         context_size=self._context_window_size())
         elif t == "shutdown":
             raise _Shutdown()
         else:

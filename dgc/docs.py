@@ -324,8 +324,10 @@ Useful keys:
   storage is acceptable.
 - `provider_capabilities`, `capability_cache_ttl_s` — explicit feature overrides and the bounded
   interval before DGC retries a capability that an endpoint/model rejected.
-- `context_size` — auto-sized to the model; long sessions compact at
-  `compact_threshold` of it.
+- `context_size` — the requested operating window. Known model selections apply a
+  memory-conscious recommendation; authoritative provider metadata clamps impossible values but
+  never silently expands a local Ollama allocation. Long sessions compact at
+  `compact_threshold` of the effective value.
 - `search_timeout` — bounded 1–60 second lifetime for internal `grep`/`glob` discovery. DGC uses
   ripgrep without a shell when available and a link-safe bounded fallback otherwise.
 - `session_redaction` — on by default. Durable transcripts, checkpoint conversation blobs, goals,

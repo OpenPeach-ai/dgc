@@ -151,9 +151,14 @@ PROVIDERS: dict[str, dict] = {
 }
 
 
-# Known context windows (tokens) by model-name substring — so the context budget auto-sizes to
-# the model and long sessions compact at the right point. First match wins; unknown → keep current.
+# Recommended operating windows (tokens) by model-name substring. For local models this may be
+# deliberately smaller than the trained maximum because larger KV caches cost RAM/VRAM. Provider
+# metadata still supplies a hard upper bound. First match wins; unknown → keep the current setting.
 MODEL_CATALOG: list[tuple[str, int]] = [
+    # Qwen3.8's native maximum is 256K. Use Ollama's 64K coding-agent recommendation as
+    # the default operating window so model selection improves horizon without surprising local
+    # users with the full maximum's RAM/VRAM allocation.
+    ("qwen3.8", 65536),
     ("qwen3", 32768), ("qwen2.5", 32768), ("qwen2", 32768), ("qwen", 32768),
     ("gpt-oss", 131072), ("llama3.1", 131072), ("llama-3.1", 131072), ("llama3.3", 131072),
     ("llama-3.3", 131072), ("deepseek-v3", 65536), ("deepseek", 65536),
@@ -165,7 +170,7 @@ MODEL_CATALOG: list[tuple[str, int]] = [
 
 
 def context_for_model(model: str) -> int | None:
-    """The known context window for `model`, or None if unrecognised (keep the current setting)."""
+    """A recommended operating window for `model`, or None to keep the current setting."""
     m = (model or "").lower()
     for pat, ctx in MODEL_CATALOG:
         if pat in m:

@@ -209,7 +209,11 @@ Paste this to any coding agent:
 }
 ```
 
-Set `context_size` to your model's real context window — compaction timing depends on it.
+Set `context_size` to the operating window you want DGC to use — compaction timing and native
+Ollama KV-cache allocation depend on it. Provider-reported hard limits clamp an oversized setting;
+DGC never silently expands a local allocation to the model's trained maximum. `/model` applies a
+memory-conscious recommendation for known model families (64K for Qwen3.8, whose native maximum is
+256K); `/settings` or `/set context_size …` remains authoritative.
 Set `subagent_worktree_root` only if private delegated checkouts should live somewhere other than
 `~/.dgc/worktrees`; DGC rejects a task-worktree root inside the source repository.
 Set `fleet_worktree_root` only to move automatically managed TUI checkouts from
@@ -227,12 +231,14 @@ With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/a
 limits, sampling, keep-alive, multimodal data, and provider token counts without an OpenAI
 translation layer. Set `api_mode` to `"ollama"` when Ollama sits behind a URL that cannot be
 detected (for example, a loopback proxy), or to `"chat_completions"` to force compatibility mode.
-Before the selected model's first generation, DGC makes one bounded, short-lived metadata request
-and caches the result by endpoint and model. A valid capability list selects native tools, thinking,
-and vision before schemas are built; a text-only model therefore receives DGC's text tool protocol
-on its first generation instead of spending a failed tool request. Explicit capability overrides
-still win. Missing, malformed, oversized, or unavailable metadata is negative-cached briefly and
-falls back to the compatible optimistic behavior used by older Ollama servers and proxies.
+Before the selected native model's first generation, DGC makes one bounded, short-lived metadata
+request and caches the result by endpoint and model. Ollama's valid capability list selects native
+tools, thinking, and vision before schemas are built; a text-only model therefore receives DGC's
+text tool protocol on its first generation instead of spending a failed tool request. Anthropic's
+Models API supplies the selected model's input/output limits and resolved ID, so impossible context
+and output settings are clamped before use. Explicit capability and smaller operating limits still
+win. Missing, malformed, oversized, or unavailable metadata is negative-cached briefly and falls
+back to compatible behavior instead of blocking chat.
 Context budgeting uses each adapter's provider-visible transcript and exact active tool schemas.
 Validated base64 image transport is accounted through a bounded visual-dimension estimate rather
 than misclassified as language text, so image compression does not cause premature compaction.
