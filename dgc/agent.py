@@ -1396,7 +1396,7 @@ class Agent:
                 if not self._session_started:   # SessionStart hook fires once per session
                     self._session_started = True
                     run_hooks("SessionStart", {"project": str(self.config.project_root)},
-                              self.config, self.config.project_root)
+                              self.config, self.config.project_root, cancelled=self.cancelled)
             self.steer_queue.clear()            # drop stale interjections from a prior turn
             safe_user_text = self._safe_text(user_text)
             self._activate_tool_intents(safe_user_text, replace=True)
@@ -1418,7 +1418,7 @@ class Agent:
                     self.ui.error(self._last_turn_error)
                 if self.depth == 0:             # Stop lifecycle hook (turn finished)
                     run_hooks("Stop", {"prompt": safe_user_text},
-                              self.config, self.config.project_root)
+                              self.config, self.config.project_root, cancelled=self.cancelled)
             if completed is False and not self._last_turn_error:
                 self._last_turn_error = (self._last_persist_error
                                          or "the turn stopped before it completed")
@@ -1704,7 +1704,8 @@ class Agent:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
             blocked, hout = run_hooks("UserPromptSubmit", {"prompt": user_text},
-                                      self.config, self.config.project_root)
+                                      self.config, self.config.project_root,
+                                      cancelled=self.cancelled)
             if blocked:
                 return self._fail_turn(f"prompt blocked by a UserPromptSubmit hook: {hout}")
             if not self.checkpoints.open(
@@ -2408,7 +2409,9 @@ class Agent:
                     out = path_error
                 else:
                     blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
-                                              self.config, self.config.project_root)
+                                              self.config, self.config.project_root,
+                                              cancelled=self.cancelled,
+                                              lease_held=lease is not None)
                     if blocked:
                         self.ui.tool_denied(name, display_args, "PreToolUse hook", call_id)
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
@@ -2451,7 +2454,7 @@ class Agent:
                     lease.release()
         out = _clamp(redact_text(out, secrets))  # credential boundary before the central ceiling
         _, post = run_hooks("PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
-                            self.config, self.config.project_root)
+                            self.config, self.config.project_root, cancelled=self.cancelled)
         if post:
             out = redact_text(f"{out}\n[hook] {post}", secrets)
         self.ui.tool_result(name, out, call_id)
@@ -3001,7 +3004,8 @@ class Agent:
                 calls = f" [tools: {rendered}]" if rendered else ""
             transcript_lines.append(f"{role}{calls}: {content}")
         # PreCompact lifecycle hook — a user hook can snapshot state before context is summarized.
-        run_hooks("PreCompact", {"messages": len(self.messages)}, self.config, self.config.project_root)
+        run_hooks("PreCompact", {"messages": len(self.messages)}, self.config,
+                  self.config.project_root, cancelled=self.cancelled)
         # Structured + MERGED summary (pi): a fixed schema, and fold the PREVIOUS brief in rather than
         # restart — so facts established before an earlier compaction aren't lost on the next one.
         source_limit = max(4_000, min(60_000, context_size * 2))

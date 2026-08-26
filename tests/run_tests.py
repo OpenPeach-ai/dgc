@@ -3014,6 +3014,133 @@ def test_supply_chain_guard():
     check("guard drops a PATH override", "PATH" in screen_mcp_env({"PATH": "/evil:$PATH"})[1])
 
 
+def test_hook_runtime():
+    """Hooks are bounded, cancellable, sandbox-aware, and serialized with checkout writes."""
+    import shlex
+    import time as _time
+    from dgc import sandbox
+    from dgc.hooks import _MAX_OUTPUT_BYTES, run_hooks
+    from dgc.scheduler import workspace_mutation_lock
+
+    root = Path(tempfile.mkdtemp())
+
+    class _HookConfig:
+        def __init__(self, event, command, *, sandboxed=False, **values):
+            self.values = {"hooks": {event: [{"command": command}]},
+                           "sandbox": sandboxed, "sandbox_network": False,
+                           "sandbox_env_allow": [], **values}
+        def get(self, key, default=None):
+            return self.values.get(key, default)
+
+    output_script = ("import sys;sys.stdin.buffer.read();"
+                     "sys.stdout.buffer.write(b'HOOK-HEAD'+b'x'*100000+b'HOOK-TAIL');"
+                     "sys.stdout.flush()")
+    output_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(output_script)}"
+    output_blocked, hook_output = run_hooks(
+        "PostToolUse", {"tool": "bash", "result": "ok"},
+        _HookConfig("PostToolUse", output_command), root)
+    check("hook output is drained into a truthful bounded head and tail",
+          not output_blocked and "HOOK-HEAD" in hook_output and "HOOK-TAIL" in hook_output
+          and "hook-output bytes omitted" in hook_output
+          and len(hook_output.encode("utf-8")) <= _MAX_OUTPUT_BYTES + 128)
+
+    hook_secret = "sk-hook-fixture-1234567890"
+    boundary_script = ("import sys;sys.stdout.write('x'*32750+" + repr(hook_secret)
+                       + "+'y'*100000);sys.stdout.flush()")
+    secret_blocked, secret_output = run_hooks(
+        "PostToolUse", {"tool": "bash"},
+        _HookConfig(
+            "PostToolUse",
+            f"{shlex.quote(sys.executable)} -c {shlex.quote(boundary_script)}",
+            api_key=hook_secret),
+        root)
+    check("hook feedback is credential-redacted before bounded retention",
+          not secret_blocked and hook_secret not in secret_output
+          and hook_secret[:12] not in secret_output and "[REDACTED]" in secret_output)
+
+    batch_cfg = _HookConfig("PreToolUse", "sleep 0.15")
+    batch_cfg.values["hooks"]["PreToolUse"].append({"command": "sleep 0.15"})
+    batch_started = _time.monotonic()
+    batch_blocked, batch_output = run_hooks(
+        "PreToolUse", {"tool": "bash"}, batch_cfg, root, timeout=0.2)
+    batch_elapsed = _time.monotonic() - batch_started
+    check("one monotonic deadline bounds the complete hook batch",
+          batch_blocked and "timed out" in batch_output and batch_elapsed < 0.5,
+          f"elapsed={batch_elapsed:.3f}s output={batch_output!r}")
+
+    timeout_script = ("import subprocess,sys,time;"
+                      "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+                      "print(p.pid,flush=True);time.sleep(30)")
+    timeout_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(timeout_script)}"
+    timeout_blocked, timeout_output = run_hooks(
+        "PreToolUse", {"tool": "bash"}, _HookConfig("PreToolUse", timeout_command),
+        root, timeout=0.2)
+    child_pid = 0
+    try:
+        child_pid = int(timeout_output.splitlines()[-1])
+    except (IndexError, ValueError):
+        pass
+    child_alive = bool(child_pid)
+    deadline = _time.monotonic() + 2
+    while child_alive and _time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+            if sys.platform.startswith("linux"):
+                state = Path(f"/proc/{child_pid}/stat").read_text().split()[2]
+                child_alive = state != "Z"
+        except (OSError, ProcessLookupError, FileNotFoundError):
+            child_alive = False
+        if child_alive:
+            _time.sleep(0.02)
+    check("timed-out hooks reap their complete POSIX process group",
+          timeout_blocked and "timed out" in timeout_output and child_pid > 0
+          and (not child_alive if os.name == "posix" else True),
+          f"pid={child_pid} alive={child_alive} output={timeout_output!r}")
+
+    sandbox_marker = root / "sandbox-hook-ran"
+    real_backend = sandbox._backend
+    try:
+        sandbox._backend = lambda: None
+        sandbox_blocked, sandbox_output = run_hooks(
+            "PreToolUse", {"tool": "bash"},
+            _HookConfig("PreToolUse", f"touch {shlex.quote(str(sandbox_marker))}", sandboxed=True),
+            root)
+    finally:
+        sandbox._backend = real_backend
+    check("requested sandboxing never lets a lifecycle hook fall back to the host shell",
+          sandbox_blocked and "cannot safely confine" in sandbox_output
+          and not sandbox_marker.exists())
+
+    lease_marker = root / "leased-hook-ran"
+    lease = workspace_mutation_lock(root)
+    lease.acquire()
+    cancelled = threading.Event()
+    lease_result = []
+    waiter = threading.Thread(target=lambda: lease_result.append(run_hooks(
+        "PreToolUse", {"tool": "read_file"},
+        _HookConfig("PreToolUse", f"touch {shlex.quote(str(lease_marker))}"), root,
+        cancelled=cancelled)))
+    waiter.start()
+    _time.sleep(0.1)
+    serialized_before_cancel = not lease_marker.exists() and waiter.is_alive()
+    cancelled.set()
+    waiter.join(timeout=2)
+    lease.release()
+    check("hooks wait cancellably behind another process's workspace mutation lease",
+          serialized_before_cancel and not waiter.is_alive() and not lease_marker.exists()
+          and bool(lease_result) and lease_result[0][0] is True)
+
+    lease.acquire()
+    try:
+        held_blocked, held_output = run_hooks(
+            "PreToolUse", {"tool": "bash"},
+            _HookConfig("PreToolUse", "printf lease-held"), root, lease_held=True)
+    finally:
+        lease.release()
+    check("PreToolUse can execute inside the caller's existing workspace lease",
+          not held_blocked and held_output == "lease-held")
+
+
 def test_mcp_protocol():
     """MCP negotiates both protocol eras, uses modern per-request metadata/MRTR, reports progress,
     sanitizes routes and environments, propagates cancellation, and reaps every stdio process."""
@@ -8149,6 +8276,7 @@ def main():
         test_edit_tiers()
         test_context_prune()
         test_supply_chain_guard()
+        test_hook_runtime()
         test_mcp_protocol()
         test_cross_process_workspace_leases()
         test_code_intel_lsp()

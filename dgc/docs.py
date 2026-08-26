@@ -332,6 +332,8 @@ Useful keys:
 - `mcp_servers`, `hooks`, `fallback_model`, `subagent_model` — extend the agent. When a fallback or
   sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a
   forced main-provider mode; set `fallback_api_mode` or `subagent_api_mode` only to override that.
+  Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded
+  redacted head/tail, own a process group and checkout mutation lease, and honor `/sandbox`.
 - `subagent_worktree_root` — optional private storage for automatic delegated checkouts; empty uses
   `~/.dgc/worktrees`. It must be outside the source repository.
 - `fleet_worktree_root` — optional private storage for automatically isolated TUI agents; empty uses
