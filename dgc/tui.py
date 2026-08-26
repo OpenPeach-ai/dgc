@@ -38,7 +38,7 @@ from rich.console import Console
 from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
 from .update import cached_update
 from .agent import Agent
-from .commands import command_pairs
+from .commands import command_pairs, command_pairs_with_custom
 from .redaction import secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -285,11 +285,7 @@ class TUI:
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
         def rebuild(ov):
             q = self.input_buf.text.lstrip("/").strip().lower()
-            rows = list(SLASH_COMMANDS)
-            from .commands import discover_commands
-            builtins = {name for name, _ in rows}
-            rows += [(name, "custom prompt command")
-                     for name in discover_commands(self.config.project_root) if name not in builtins]
+            rows = command_pairs_with_custom("tui", self.config.project_root)
             rows = [(n, d) for n, d in rows if not q or q in n.lower() or q in d.lower()]
             if q:   # rank: exact name, then name-prefix, then name-substring, then description-only
                 rows.sort(key=lambda nd: (nd[0].lower() != q, not nd[0].lower().startswith(q),
@@ -3053,7 +3049,7 @@ class TUI:
             from .commands import discover_commands, render_command
             custom = discover_commands(cfg.project_root)
             if cmd in custom:
-                rendered = render_command(custom[cmd], rest)
+                rendered = render_command(custom[cmd], rest, cfg.project_root)
                 if rendered:
                     self._submit(rendered)
             else:

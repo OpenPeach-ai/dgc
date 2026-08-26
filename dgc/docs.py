@@ -278,7 +278,10 @@ messages and are never passed to the model as literal slash text.
 Add a custom prompt command at `.dgc/commands/<name>.md` (or
 `~/.dgc/commands/<name>.md`). Use `$ARGUMENTS` or `{{args}}` in the template, then
 run `/name optional arguments`. Project commands override personal commands and
-appear in the terminal/editor palette automatically.
+appear in the classic/TUI/editor/ACP catalogs automatically. Names begin with a
+lowercase letter/digit, then use lowercase letters/digits or `._-` (1–64
+characters); built-in names and aliases are reserved. DGC bounds the catalog and
+each template, and rejects symlinked command directories or files.
 """.strip()),
 
     ("Configuration", "config.json, models, context, providers", """

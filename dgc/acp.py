@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +24,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions
 from .agent import Agent
-from .commands import discover_commands
+from .commands import custom_command_names
 from .config import Config
 from .permissions import MODE_DESCRIPTIONS, MODES, rule_for
 from .redaction import redact_text, redact_value, secret_values, sensitive_name
@@ -266,7 +267,7 @@ class ACPServer:
             self._install_state(config.project_root, agent, ui)
             self.respond(rid, {"sessionId": ui.sid, "modes": _mode_state(agent),
                                "goal": {"text": agent.goal, "status": agent.goal_status}})
-            ui.available_commands(discover_commands(config.project_root))
+            ui.available_commands(custom_command_names(config.project_root))
 
         elif method == "session/load":
             cwd = Path(str(params.get("cwd", ""))).expanduser()
@@ -295,7 +296,7 @@ class ACPServer:
             agent.load_session(path)
             self._install_state(config.project_root, agent, ui)
             ui.replay(agent.messages)
-            ui.available_commands(discover_commands(config.project_root))
+            ui.available_commands(custom_command_names(config.project_root))
             self.respond(rid, {"modes": _mode_state(agent),
                                "goal": {"text": agent.goal, "status": agent.goal_status}})
 
@@ -712,7 +713,7 @@ class _ACPUi:
         self._update({"sessionUpdate": "usage_update", "used": max(0, int(used)),
                       "size": max(0, int(size))})
 
-    def available_commands(self, commands: dict) -> None:
+    def available_commands(self, commands: Iterable[str]) -> None:
         values = [{"name": name, "description": f"Run the /{name} DGC command",
                    "input": {"hint": "optional arguments"}} for name in sorted(commands)]
         self._update({"sessionUpdate": "available_commands_update", "availableCommands": values})

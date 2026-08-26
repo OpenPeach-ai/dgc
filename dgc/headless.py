@@ -16,7 +16,9 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
-from .commands import discover_commands, editor_command_metadata, render_command
+from .commands import (
+    custom_command_names, discover_commands, editor_command_metadata, render_command,
+)
 from .config import Config
 from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
 from .permissions import Rule, rule_for
@@ -307,7 +309,7 @@ class Backend:
             tools=[t["function"]["name"] for t in TOOL_SCHEMAS],
             skills=[s.name for s in self.agent.skills.values()],
             commands=editor_command_metadata(),
-            custom_commands=list(discover_commands(self.config.project_root)),
+            custom_commands=custom_command_names(self.config.project_root),
             goal={"text": self.agent.goal, "status": self.agent.goal_status},
             context_size=int(self.config.get("context_size", 32768)))
         self._emit_context()
@@ -495,7 +497,8 @@ class Backend:
                 parts = text[1:].split(None, 1)
                 custom = discover_commands(self.config.project_root)
                 if parts and parts[0] in custom:
-                    text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "") or text
+                    text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "",
+                                          self.config.project_root) or text
             state, count = self._start_turn(text, images, context)
             if state == "queued":
                 self.em.emit("queued", count=count, text=text)
@@ -511,7 +514,8 @@ class Backend:
             if not parts or parts[0] not in custom:
                 self.em.emit("error", message=f"unknown command: {text or '/'}")
                 return
-            rendered = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "")
+            rendered = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "",
+                                      self.config.project_root)
             if not rendered:
                 self.em.emit("error", message=f"custom command /{parts[0]} is empty")
             else:

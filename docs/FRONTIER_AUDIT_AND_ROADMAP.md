@@ -106,7 +106,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 729 / 729 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 754 / 754 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -547,7 +547,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 740/740 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 754/754 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -789,10 +789,14 @@ the same safe state transitions.
 Implementation status: steps 1–5 are implemented in the working tree. Plan rejection feedback now
 round-trips through classic/TUI/headless (and ACP captures client-provided reason fields); plan
 transitions are scoped and non-empty; plan previews have a dedicated loopback server; artifact state
-and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
-editor consume the canonical command registry; custom commands appear in palettes; and goals have
-bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-740/740 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+and rendering are hardened; bare tool batches receive an ordered truthful preamble; classic help and
+completion, the TUI palette, editor/headless metadata, and ACP custom-command discovery consume the
+canonical registry; and goals have bounded persisted lifecycle state plus typed headless/editor/ACP
+control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
+and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
+the exact workspace reader rather than disclosing outside content to the model. The current offline
+evidence is 754/754 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
+host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

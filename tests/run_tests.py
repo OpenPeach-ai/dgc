@@ -6470,14 +6470,19 @@ def test_slash_palette():
     """The `/` command palette filters commands by prefix and never fires without a leading slash."""
     import ast
     import inspect
+    import io
     import tempfile
     import textwrap
     from pathlib import Path
     from types import SimpleNamespace
     from prompt_toolkit.document import Document
+    from rich.console import Console
 
-    from dgc.commands import command_pairs, command_specs, editor_command_metadata
-    from dgc.cli import CLI
+    import dgc.commands as command_mod
+    from dgc.commands import (command_pairs, command_pairs_with_custom, command_specs,
+                              custom_command_names, discover_commands, editor_command_metadata,
+                              render_command)
+    from dgc.cli import CLI, ClassicSlashCompleter, render_help
     from dgc.tui import SLASH_COMMANDS, SlashCompleter, TUI
     c = SlashCompleter()
 
@@ -6509,17 +6514,119 @@ def test_slash_palette():
     check("surface capability metadata does not over-advertise TUI-only commands",
           "dashboard" not in {c.name for c in command_specs("editor")}
           and "settings" not in {c.name for c in command_specs("classic")})
+    _spellings = [name for spec in command_mod.BUILTIN_COMMANDS
+                  for name in (spec.name, *spec.aliases)]
+    check("canonical command names and reserved aliases never collide",
+          len(_spellings) == len(set(_spellings)))
 
-    _root = Path(tempfile.mkdtemp()); _cmd_dir = _root / ".dgc" / "commands"; _cmd_dir.mkdir(parents=True)
+    _root = Path(tempfile.mkdtemp())
+    _home = _root / "home" / ".dgc"
+    _personal = _home / "commands"
+    _cmd_dir = _root / "project" / ".dgc" / "commands"
+    _personal.mkdir(parents=True)
+    _cmd_dir.mkdir(parents=True)
+    (_personal / "review-api.md").write_text("Personal {{args}}")
+    (_personal / "global-check.md").write_text("Global $ARGUMENTS")
     (_cmd_dir / "review-api.md").write_text("Review $ARGUMENTS")
-    _menu = object.__new__(TUI)
-    _menu.config = SimpleNamespace(project_root=_root)
-    _menu.input_buf = SimpleNamespace(text="/", reset=lambda: None)
-    _menu._invalidate = lambda: None
-    _menu._open_command_palette()
-    _rows = _menu._overlay["rebuild"](_menu._overlay)
-    check("project custom commands appear in the live slash palette",
-          any(row["value"] == "review-api" and "custom" in row["desc"] for row in _rows))
+    (_cmd_dir / "goal.md").write_text("shadow a built-in")
+    (_cmd_dir / "exit.md").write_text("shadow a built-in alias")
+    (_cmd_dir / "commands.md").write_text("shadow another built-in alias")
+    (_cmd_dir / "Bad.md").write_text("uppercase command")
+    (_cmd_dir / "bad name.md").write_text("spaced command")
+    (_cmd_dir / "directory.md").mkdir()
+    _outside = _root / "outside-secret.md"
+    _outside.write_text("outside secret")
+    (_cmd_dir / "leak.md").symlink_to(_outside)
+    _old_home = command_mod.USER_HOME
+    command_mod.USER_HOME = _home
+    try:
+        _commands = discover_commands(_root / "project")
+        check("custom command discovery is deterministic, project-first, and reserves built-ins",
+              list(_commands) == ["review-api", "global-check"]
+              and _commands["review-api"] == _cmd_dir / "review-api.md"
+              and not {"goal", "exit", "commands", "Bad"} & set(_commands))
+        check("custom templates substitute arguments through the exact-file reader",
+              render_command(_commands["review-api"], "users", _root / "project") == "Review users"
+              and render_command(_commands["global-check"], "state", _root / "project") == "Global state"
+              and render_command(_outside, "", _root / "project") == "")
+        check("custom command file symlinks cannot expose files outside the command directory",
+              "leak" not in _commands and "outside secret" not in str(_commands))
+
+        _race = _cmd_dir / "race.md"
+        _race.write_text("safe")
+        _race_path = discover_commands(_root / "project")["race"]
+        _race.unlink()
+        _race.symlink_to(_outside)
+        check("a custom template swapped to a symlink after discovery fails closed",
+              render_command(_race_path, "", _root / "project") == "")
+        _large = _cmd_dir / "large.md"
+        _large.write_bytes(b"x" * (command_mod.MAX_COMMAND_TEMPLATE_BYTES + 1))
+        check("custom prompt templates have a bounded read size",
+              render_command(_large, "", _root / "project") == "")
+
+        _linked_root = _root / "linked-project"
+        (_linked_root / ".dgc").mkdir(parents=True)
+        (_linked_root / ".dgc" / "commands").symlink_to(_cmd_dir, target_is_directory=True)
+        check("a symlinked project command directory is never traversed",
+              discover_commands(_linked_root) == {"global-check": _personal / "global-check.md",
+                                                   "review-api": _personal / "review-api.md"})
+
+        _classic = ClassicSlashCompleter(_root / "project")
+        def classic_comps(value):
+            return [x.text for x in _classic.get_completions(
+                Document(value, len(value)), None)]
+        check("classic slash completion uses the canonical built-in registry",
+              classic_comps("/mo") == ["/model", "/models", "/mode"])
+        check("classic slash completion includes safe custom commands only",
+              classic_comps("/rev") == ["/review-api"]
+              and classic_comps("/model q") == [])
+
+        _capture = io.StringIO()
+        _console = Console(file=_capture, width=240, color_system=None)
+        render_help(_console, _root / "project")
+        _help = _capture.getvalue()
+        check("classic help is generated from every canonical classic command",
+              all("/" + (spec.usage or spec.name) in _help and spec.description in _help
+                  for spec in command_specs("classic")))
+        check("classic help includes custom commands without advertising TUI-only routes",
+              "/review-api [ARGS]" in _help and "/dashboard" not in _help
+              and "/settings" not in _help)
+        _narrow_capture = io.StringIO()
+        render_help(Console(file=_narrow_capture, width=48, color_system=None),
+                    _root / "project")
+        _narrow_help = _narrow_capture.getvalue()
+        check("classic help keeps descriptions in a responsive column on narrow terminals",
+              max(map(len, _narrow_help.splitlines())) <= 48
+              and "/help" in _narrow_help and "list every command" in _narrow_help)
+
+        _menu = object.__new__(TUI)
+        _menu.config = SimpleNamespace(project_root=_root / "project")
+        _menu.input_buf = SimpleNamespace(text="/", reset=lambda: None)
+        _menu._invalidate = lambda: None
+        _menu._open_command_palette()
+        _rows = _menu._overlay["rebuild"](_menu._overlay)
+        check("project custom commands appear in the registry-driven TUI palette",
+              any(row["value"] == "review-api" and "custom" in row["desc"] for row in _rows)
+              and [(row["value"], row["desc"]) for row in _rows]
+              == command_pairs_with_custom("tui", _root / "project"))
+        check("editor and ACP custom metadata cannot collide with any built-in command",
+              custom_command_names(_root / "project") == list(_commands))
+
+        _bounded_root = _root / "bounded"
+        _bounded_dir = _bounded_root / ".dgc" / "commands"
+        _bounded_dir.mkdir(parents=True)
+        for name in ("one", "three", "two"):
+            (_bounded_dir / f"{name}.md").write_text(name)
+        _old_limit = command_mod.MAX_CUSTOM_COMMANDS
+        command_mod.MAX_CUSTOM_COMMANDS = 2
+        try:
+            _bounded = discover_commands(_bounded_root)
+        finally:
+            command_mod.MAX_CUSTOM_COMMANDS = _old_limit
+        check("custom command catalogs enforce a deterministic global count bound",
+              list(_bounded) == ["one", "three"] and len(_bounded) == 2)
+    finally:
+        command_mod.USER_HOME = _old_home
 
 
 def test_steering():

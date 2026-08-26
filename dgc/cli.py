@@ -15,6 +15,7 @@ import webbrowser
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.panel import Panel
@@ -23,6 +24,7 @@ from rich.table import Table
 from . import __version__, glyphs, logo as logo_mod, memory as memory_mod, render, sessions as sessions_mod
 from . import style as style_mod
 from .agent import Agent
+from .commands import command_pairs_with_custom, command_specs, custom_command_names
 from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
@@ -421,78 +423,73 @@ class UI:
 
 # ------------------------------------------------------------------- REPL ---
 
-HELP = """\
-[bold]chat[/bold]
-  just type            ask dgc anything; it uses tools to act on your project
-  #fact                quick-add a memory to DGC.md
-  !cmd                 run a shell command directly
-  @path/to/file        attach a file's contents to your message
-
-[bold]slash commands[/bold]
-  /help                this help
-  /new                 start a new session
-  /connect P|URL       connect a preset (ollama, llamacpp, openai, openrouter, groq…) or a raw URL
-  /models              list models served by the endpoint
-  /model [NAME]        show or set the model
-  /mode [MODE]         default | acceptEdits | plan | auto   (no arg: cycle)
-  /plan                toggle plan mode
-  /view-plan           reopen the most recently proposed plan
-  /goal [TEXT]         inspect/set the standing goal; complete | blocked | resume | clear
-  /think [LEVEL]       off | low | medium | high   (keywords 'think', 'think hard',
-                       'ultrathink' in a prompt bump it for that turn; reasoning
-                       models — o-series, DeepSeek-R1, qwen-thinking — do best on
-                       hard tasks at 'high')
-  /permissions         list rules;  /permissions allow|ask|deny Tool(pattern)
-  /memory [show]       show memory files
-  /memory add TEXT     add to project memory;  /memory add user TEXT → user memory
-  /skills              list skills (bundled defaults + ~/.dgc/skills + .dgc/skills)
-  /skill NAME [ARGS]   invoke a skill directly
-  /agents              list named sub-agents (.dgc/agents/*.md) + sub-agent defaults
-  /subagent …          set sub-agent model/host/transport: model NAME | host URL | transport MODE | clear
-  /init                have the agent analyze the project and write DGC.md
-  /status              current config
-  /context             show context-window usage
-  /theme [NAME]        switch theme: dark | light
-  /compact             compact conversation context now
-  /clear               reset the conversation
-  /rewind              restore code + conversation to an earlier turn
-  /mcp                 list connected MCP servers and their tools
-  /search [P [URL]]    web search provider: duckduckgo | brave | tavily | searxng
-  /resume              resume a past conversation in this project
-  /name [NAME]         show or name the current session
-  /worktree [NAME]     list, create, or remove an isolated git worktree
-  /tasks               retained sub-agent work; show|apply|drop ID (--confirm to drop)
-  /artifact            list previews; /artifact stop ID
-  /handoff             generate and save a continuation handoff
-  /update              update DGC to the latest version
-  /exit, /quit         quit
-  (while a turn runs: type a follow-up + Enter to queue it · Esc to interrupt)
-"""
-
-
-def render_help(console) -> None:
-    """Print HELP with brand-tinted command tokens + dim descriptions (one content source).
-
-    Command tokens contain literal brackets (/memory [show], /think [LEVEL]) that would
-    collide with rich markup — build styled Text so nothing is parsed as a tag.
-    """
+def _help_table(console, rows) -> None:
+    """Render literal command syntax in a responsive two-column grid."""
     from rich.text import Text
-    for line in HELP.splitlines():
-        if not line.strip():
+    values = list(rows)
+    if not values:
+        return
+    terminal_width = max(32, int(console.size.width or 80))
+    token_width = min(max(len(token) + 2 for token, _description in values),
+                      max(14, terminal_width // 2), 40)
+    table = Table.grid(expand=True, padding=(0, 2))
+    table.add_column(width=token_width, no_wrap=True, overflow="ellipsis")
+    table.add_column(ratio=1)
+    for token, description in values:
+        command = Text("  ")
+        command.append(token, style=BRAND)
+        table.add_row(command, Text(description, style=DIM))
+    console.print(table)
+
+
+def render_help(console, project_root: Path | None = None) -> None:
+    """Render classic help from the same command registry used by every command palette."""
+    from rich.text import Text
+    console.print("[bold]chat[/bold]", highlight=False)
+    _help_table(console, (
+        ("just type", "ask dgc anything; it uses tools to act on your project"),
+        ("#fact", "quick-add a memory to DGC.md"),
+        ("!cmd", "run a shell command directly"),
+        ("@path/to/file", "attach a file's contents to your message"),
+    ))
+
+    console.print()
+    console.print("[bold]slash commands[/bold]", highlight=False)
+    _help_table(console, (("/" + (spec.usage or spec.name), spec.description)
+                          for spec in command_specs("classic")))
+
+    if project_root is not None:
+        custom = custom_command_names(project_root)
+        if custom:
             console.print()
-        elif line.startswith("[bold]"):
-            console.print(line, highlight=False)                       # section header (white)
-        elif line[:2] == "  " and line[2:3] not in (" ", "(", ""):
-            m = re.match(r"^(\S.*?)(\s{2,})(.*)$", line[2:])            # command  ·  description
-            t = Text("  ")
-            if m:
-                cmd, gap, desc = m.groups()
-                t.append(cmd, style=BRAND); t.append(gap); t.append(desc, style=DIM)
-            else:
-                t.append(line[2:], style=BRAND)
-            console.print(t)
-        else:
-            console.print(Text(line, style=DIM))                       # continuation / footer hint
+            console.print("[bold]custom prompt commands[/bold]", highlight=False)
+            _help_table(console, (("/" + name + " [ARGS]",
+                                   "project or personal prompt template") for name in custom))
+
+    quit_spec = next(spec for spec in command_specs("classic") if spec.name == "quit")
+    aliases = " and ".join("/" + name for name in quit_spec.aliases)
+    console.print(Text(f"  {aliases} are aliases for /quit", style=DIM))
+    console.print(Text(
+        "  while a turn runs: type a follow-up + Enter to queue it · Esc to interrupt",
+        style=DIM))
+
+
+class ClassicSlashCompleter(Completer):
+    """Live classic-REPL completion derived from the shared command registry."""
+
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+
+    def get_completions(self, document, complete_event):
+        del complete_event
+        before = document.text_before_cursor
+        if not before.startswith("/") or any(ch.isspace() for ch in before):
+            return
+        query = before[1:].casefold()
+        for name, description in command_pairs_with_custom("classic", self.project_root):
+            if name.casefold().startswith(query):
+                yield Completion("/" + name, start_position=-len(before),
+                                 display="/" + name, display_meta=description)
 
 
 class CLI:
@@ -576,7 +573,7 @@ class CLI:
         if cmd in ("exit", "quit", "q"):
             raise EOFError
         if cmd == "help":
-            render_help(self.console)
+            render_help(self.console, cfg.project_root)
         elif cmd == "connect":
             args = rest.split()
             if len(args) > 1:
@@ -864,7 +861,7 @@ class CLI:
             from .commands import discover_commands, render_command
             custom = discover_commands(self.config.project_root)
             if cmd in custom:
-                rendered = render_command(custom[cmd], rest)
+                rendered = render_command(custom[cmd], rest, self.config.project_root)
                 if rendered:
                     self.agent.run_turn(rendered)
             else:
@@ -1104,7 +1101,10 @@ class CLI:
     def repl(self) -> None:
         self.banner()
         USER_HOME.mkdir(parents=True, exist_ok=True)
-        session: PromptSession = PromptSession(history=FileHistory(str(USER_HOME / "history")))
+        session: PromptSession = PromptSession(
+            history=FileHistory(str(USER_HOME / "history")),
+            completer=ClassicSlashCompleter(self.config.project_root),
+            complete_while_typing=True)
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
         while True:
