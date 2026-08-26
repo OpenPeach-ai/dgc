@@ -671,6 +671,32 @@ class LLMClient:
         snapshot["native_chat"] = self.api_mode == "ollama" or snapshot["native_chat"]
         return {"provider": self.family, **snapshot}
 
+    def estimate_input_tokens(self, messages: list[dict],
+                              tools: list[dict] | None = None) -> int:
+        """Approximate the provider-visible input, including native tool definitions.
+
+        The exact tokenizer is model-specific, but estimating the same transcript and tool-schema
+        shapes used by the selected transport is materially safer than counting DGC's stored
+        transcript alone. Responses deliberately counts the full stateless shape even when a
+        server-side continuation can make the HTTP body smaller: the earlier context still occupies
+        the model's context window.
+        """
+        if self.api_mode == "ollama":
+            wire = self._ollama_messages(messages)
+            wire_tools = tools
+        elif self.api_mode == "responses":
+            instructions, items = self._responses_input(messages)
+            wire = {"instructions": instructions, "input": items}
+            wire_tools = self._responses_tools(tools)
+        else:
+            wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                    for message in messages]
+            wire_tools = tools
+        chars = len(json.dumps(wire, default=str))
+        if wire_tools and self.tools_supported:
+            chars += len(json.dumps(wire_tools, default=str))
+        return chars // 4
+
     def _reset_response_state(self) -> None:
         self._response_id = ""
         self._response_cursor = 0

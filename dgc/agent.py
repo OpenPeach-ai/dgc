@@ -310,6 +310,7 @@ _COMPACT_TIMEOUT_S = 120
 _COMPACT_SUMMARY_CHARS = 12_000
 _COMPACT_PREFIX = "[Earlier conversation compacted to this summary]"
 _COMPACT_ACK = "Understood — I have the context summary and will continue from it."
+_AUTO_CONTEXT_TOOLS = object()
 
 
 def _tool_call_ids(message: dict) -> list[str]:
@@ -1810,9 +1811,11 @@ class Agent:
                 return True
             self._drain_steer()             # inject anything the user typed mid-turn
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
-            self.maybe_compact(deadline=compact_deadline)
             tools = (None if summary_only else
                      (self._tool_schemas() if self.client.tools_supported else None))
+            # Use one state-aware schema snapshot for both budgeting and the request. Besides being
+            # exact, this avoids refreshing a large MCP catalog twice at the start of every turn.
+            self.maybe_compact(deadline=compact_deadline, tools=tools)
             chat_cancel = self.cancelled
             chat_timeout = None
             if deadline is not None:
@@ -1839,7 +1842,7 @@ class Agent:
                     self.ui.end_stream()
                     self.ui.info("↻ context overflowed — compacting and retrying")
                     # Aggressive compaction guarantees the retry is smaller.
-                    self.maybe_compact(force=True, deadline=compact_deadline)
+                    self.maybe_compact(force=True, deadline=compact_deadline, tools=tools)
                     continue
                 self.ui.end_stream()
                 return self._fail_turn(
@@ -2921,22 +2924,17 @@ class Agent:
         return outcomes
 
     # ---------------------------------------------------------- compaction ---
-    def estimate_tokens(self) -> int:
+    def estimate_tokens(self, tools=_AUTO_CONTEXT_TOOLS) -> int:
         messages = self.messages
+        if tools is _AUTO_CONTEXT_TOOLS:
+            tools = (self._tool_schemas()
+                     if bool(getattr(self.client, "tools_supported", False)) else None)
         if isinstance(self.client, LLMClient):
-            # Provider-private continuation data can duplicate canonical display text and calls in
-            # storage. Estimate the transcript shape that is actually sent so native continuation
-            # does not trigger compaction early merely because DGC preserved it faithfully.
-            if self.client.api_mode == "ollama":
-                wire = self.client._ollama_messages(messages)
-            elif self.client.api_mode == "responses":
-                instructions, items = self.client._responses_input(messages)
-                wire = {"instructions": instructions, "input": items}
-            else:
-                wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
-                        for message in messages]
-            return len(json.dumps(wire, default=str)) // 4
-        return sum(len(json.dumps(m, default=str)) for m in messages) // 4
+            return self.client.estimate_input_tokens(messages, tools)
+        chars = sum(len(json.dumps(m, default=str)) for m in messages)
+        if tools:
+            chars += len(json.dumps(tools, default=str))
+        return chars // 4
 
     def _mechanical_prune(self, aggressive: bool = False) -> bool:
         """Tier-1 context relief (no LLM): cap stale tool-result bodies so a few huge outputs
@@ -2967,7 +2965,8 @@ class Agent:
                 changed = True
         return changed
 
-    def maybe_compact(self, force: bool = False, *, deadline: float | None = None) -> bool:
+    def maybe_compact(self, force: bool = False, *, deadline: float | None = None,
+                      tools=_AUTO_CONTEXT_TOOLS) -> bool:
         """Compact transactionally and persist the exact generation before reporting success."""
         with self._session_turn_scope() as reserved:
             if not reserved:
@@ -2976,7 +2975,7 @@ class Agent:
                 return False
             before = copy.deepcopy(self.messages)
             try:
-                self._compact(force=force, deadline=deadline)
+                self._compact(force=force, deadline=deadline, tools=tools)
             except BaseException:
                 self.messages = before
                 raise
@@ -2988,7 +2987,8 @@ class Agent:
             self.ui.error(self._last_persist_error or "compaction could not be saved and was rolled back")
             return False
 
-    def _compact(self, force: bool = False, *, deadline: float | None = None) -> None:
+    def _compact(self, force: bool = False, *, deadline: float | None = None,
+                 tools=_AUTO_CONTEXT_TOOLS) -> None:
         # A legacy/interrupted session may already contain an orphan. Repair before choosing groups so
         # the compaction boundary and the next provider request are always valid.
         self.messages, repaired = _repair_tool_transcript(self.messages)
@@ -3003,10 +3003,14 @@ class Agent:
         except (TypeError, ValueError):
             threshold = COMPACT_THRESHOLD
         budget = context_size * threshold
-        if not force and self.estimate_tokens() < budget:
+        if tools is _AUTO_CONTEXT_TOOLS and not force:
+            tools = (self._tool_schemas()
+                     if bool(getattr(self.client, "tools_supported", False)) else None)
+        if not force and self.estimate_tokens(tools=tools) < budget:
             return
         # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
-        if self._mechanical_prune(aggressive=force) and not force and self.estimate_tokens() < budget:
+        if (self._mechanical_prune(aggressive=force) and not force
+                and self.estimate_tokens(tools=tools) < budget):
             self.ui.info("context pruned")
             return
         keep = 2 if force else KEEP_RECENT          # under force (overflow), summarize almost everything

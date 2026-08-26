@@ -3384,7 +3384,7 @@ def test_context_prune():
     check("an early tool output is pruned", len(f.messages[1]["content"]) < 5000 and "pruned" in f.messages[1]["content"])
     check("the most recent tool output is protected", f.messages[-1]["content"] == big)
 
-    from dgc.agent import (_compaction_split_index, _repair_tool_transcript,
+    from dgc.agent import (_COMPACT_PREFIX, _compaction_split_index, _repair_tool_transcript,
                            _tool_transcript_errors)
     transcript = [
         {"role": "system", "content": "sys"},
@@ -3559,6 +3559,39 @@ def test_context_prune():
     short_content = str(short_agent.messages[1].get("content", ""))
     check("forced relief on a single oversized turn preserves both ends without a model call",
           len(short_content) <= 1200 and "SHORT-HEAD" in short_content and "SHORT-TAIL" in short_content)
+
+    # Native schemas occupy the same model context as transcript text. A catalog that crosses the
+    # configured threshold must therefore trigger relief even when the transcript alone fits.
+    from dgc.llm import LLMClient as _BudgetClient
+    schema_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), _CompactUI())
+    schema_agent.client = _BudgetClient(
+        "http://127.0.0.1:11434/v1", "", "fixture", api_mode="ollama")
+    schema_agent.messages = [{"role": "system", "content": "system"}] + [
+        {"role": "user" if i % 2 == 0 else "assistant",
+         "content": f"context-{i}-" + ("c" * 250)} for i in range(14)
+    ]
+    large_schema = [{"type": "function", "function": {
+        "name": "mcp__fixture__large", "description": "d" * 6000,
+        "parameters": {"type": "object", "properties": {}}}}]
+    transcript_only = schema_agent.estimate_tokens(tools=[])
+    transcript_and_schema = schema_agent.estimate_tokens(tools=large_schema)
+    schema_agent.config.data["context_size"] = 2048
+    schema_agent.config.data["compact_threshold"] = (
+        (transcript_only + transcript_and_schema) / 2 / 2048)
+    original_messages = [dict(message) for message in schema_agent.messages]
+    schema_agent._compact(tools=[])
+    fits_without_schema = schema_agent.messages == original_messages
+    class _SchemaCompactor:
+        def chat(self, *args, **kwargs):
+            return _CompactResult(content=(
+                "## Goal\ncontinue\n## Constraints\nkeep APIs\n## Progress\nreviewed\n"
+                "## Next\nimplement\n## Critical\ncontext"))
+    schema_agent._aux_client = lambda **kwargs: _SchemaCompactor()
+    schema_agent._compact(tools=large_schema)
+    check("native tool schemas participate in the actual compaction threshold",
+          fits_without_schema and schema_agent.messages != original_messages
+          and str(schema_agent.messages[1].get("content", "")).startswith(_COMPACT_PREFIX),
+          detail=repr((transcript_only, transcript_and_schema)))
 
     from dgc.config import context_for_model
     check("catalog sizes a qwen model", context_for_model("qwen3.5:122b") == 32768)
@@ -8710,7 +8743,42 @@ def test_ollama_adapter():
     }]
     expected_wire_chars = len(json.dumps(native._ollama_messages(estimate_agent.messages)))
     check("context estimation counts the native wire transcript without stored-display duplication",
-          estimate_agent.estimate_tokens() == expected_wire_chars // 4)
+          estimate_agent.estimate_tokens(tools=[]) == expected_wire_chars // 4)
+    native_tools = posted[0][1]["tools"]
+    estimate_agent._tool_schemas = lambda: native_tools
+    expected_native_chars = expected_wire_chars + len(json.dumps(native_tools))
+    check("native context estimation includes the exact adaptive tool-schema snapshot",
+          estimate_agent.estimate_tokens() == expected_native_chars // 4)
+
+    responses_client = LLMClient(
+        "https://api.openai.com/v1", "k", "gpt-5", api_mode="responses")
+    instructions, response_items = responses_client._responses_input(estimate_agent.messages)
+    response_wire = {"instructions": instructions, "input": response_items}
+    converted_tools = responses_client._responses_tools(native_tools)
+    expected_response_chars = (len(json.dumps(response_wire))
+                               + len(json.dumps(converted_tools)))
+    check("Responses context estimation uses its converted native tool schema",
+          responses_client.estimate_input_tokens(estimate_agent.messages, native_tools)
+          == expected_response_chars // 4)
+
+    chat_client = LLMClient(
+        "http://127.0.0.1:1234/v1", "k", "compat", api_mode="chat_completions")
+    chat_wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
+                 for message in estimate_agent.messages]
+    expected_chat_chars = len(json.dumps(chat_wire)) + len(json.dumps(native_tools))
+    check("Chat Completions context estimation includes native schemas without private replay data",
+          chat_client.estimate_input_tokens(estimate_agent.messages, native_tools)
+          == expected_chat_chars // 4)
+
+    large_mcp_tools = [{"type": "function", "function": {
+        "name": "mcp__fixture__large_catalog_tool", "description": "m" * 8000,
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "q" * 2000}}}}}]
+    without_mcp = native.estimate_input_tokens(estimate_agent.messages, [])
+    with_mcp = native.estimate_input_tokens(estimate_agent.messages, large_mcp_tools)
+    check("large MCP schemas consume compaction budget instead of remaining hidden",
+          with_mcp - without_mcp > 2400,
+          detail=repr((without_mcp, with_mcp)))
 
     class _TaggedResponse(_NativeResponse):
         def iter_lines(self, decode_unicode=True):
