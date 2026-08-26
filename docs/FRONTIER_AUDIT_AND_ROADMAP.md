@@ -38,7 +38,7 @@ the editor registries: those are external release actions that require a reviewe
 
 | Area | Implemented and verified in this working tree | Still required for a defensible frontier claim |
 |---|---|---|
-| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including descendant search discovery and late parent swaps for structured file tools), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
+| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including bounded descendant discovery, exact model-visible grep reads, and late parent swaps across structured files, repository maps, static code intelligence, checkpoints and recovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted foreground/background output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
@@ -106,7 +106,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 724 / 724 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 729 / 729 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -541,7 +541,13 @@ validation, while the Windows OS sandbox and cross-platform adversarial runner r
 Checkpoint/last-good capture and restoration now reuse the same exact-entry boundary for regular
 files, symlink targets, modes, and absence. A parent swap after checkpoint validation or rollback
 capture therefore fails the whole transaction without reading or overwriting the outside target.
-The complete offline evidence is 724/724 Python checks, 18/18 editor transport/webview checks, and
+Repository mapping, static code intelligence, and dependency-free search now enumerate directories
+through bounded no-follow snapshots and reopen every source through the same exact-entry reader.
+Ripgrep remains a discovery accelerator, but its reported line is disclosed only when an independent
+exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
+the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
+remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
+The complete offline evidence is 729/729 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for command-output continuity: foreground pipes are drained continuously rather
@@ -776,7 +782,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-724/724 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+729/729 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

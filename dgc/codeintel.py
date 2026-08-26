@@ -16,6 +16,7 @@ import math
 import os
 import re
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -24,6 +25,12 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from . import __version__
+from .workspace import (
+    WorkspaceBoundaryError,
+    read_regular_bytes,
+    scan_directory_entries,
+    stat_entry,
+)
 
 try:
     import tomllib
@@ -41,6 +48,7 @@ _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next",
 _IDENT = re.compile(r"[A-Za-z_$][\w$]*")
 _MAX_FILE_BYTES = 2_000_000
 _MAX_FILES = 2_000
+_MAX_SCAN_ENTRIES = 100_000
 _MAX_RESULTS = 200
 _MAX_LSP_MESSAGE = 8_000_000
 _MAX_LSP_SESSIONS = 4
@@ -66,30 +74,63 @@ _SYMBOL_KINDS = {
 }
 
 
-def _source_files(target: Path) -> list[Path]:
-    if target.is_file():
+def _frozen_absolute(path: Path) -> Path:
+    return Path(os.path.normpath(os.path.abspath(str(path))))
+
+
+def _source_files(target: Path, *, cancel=None, deadline: float = float("inf")) -> list[Path]:
+    """Discover source files through bounded no-follow directory snapshots."""
+    try:
+        target_info = stat_entry(target, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError):
+        return []
+    if target_info is None:
+        return []
+    if stat.S_ISREG(target_info.st_mode):
         return [target] if target.suffix.lower() in _SOURCE_EXTS else []
+    if not stat.S_ISDIR(target_info.st_mode):
+        return []
     files: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
-        base = Path(dirpath)
-        dirnames[:] = sorted(
-            name for name in dirnames
-            if name not in _SKIP_DIRS and not (base / name).is_symlink())
-        for name in sorted(filenames):
-            path = base / name
-            if not path.is_symlink() and path.suffix.lower() in _SOURCE_EXTS:
+    scanned = 0
+    stack = [target]
+    while stack and len(files) < _MAX_FILES and scanned < _MAX_SCAN_ENTRIES:
+        if ((cancel is not None and cancel.is_set()) or time.monotonic() >= deadline):
+            break
+        directory = stack.pop()
+        try:
+            remaining = _MAX_SCAN_ENTRIES - scanned
+            entries, truncated, count = scan_directory_entries(
+                directory, maximum=remaining)
+        except (OSError, WorkspaceBoundaryError):
+            continue
+        scanned += count
+        child_directories: list[Path] = []
+        for name, info in entries:
+            path = directory / name
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                if name not in _SKIP_DIRS:
+                    child_directories.append(path)
+            elif stat.S_ISREG(info.st_mode) and path.suffix.lower() in _SOURCE_EXTS:
                 files.append(path)
                 if len(files) >= _MAX_FILES:
                     return files
+        stack.extend(reversed(child_directories))
+        if truncated:
+            break
     return files
 
 
 def _read_source(path: Path) -> str | None:
     try:
-        raw = path.read_bytes()
-    except OSError:
+        captured = read_regular_bytes(path, maximum=_MAX_FILE_BYTES, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError):
         return None
-    if len(raw) > _MAX_FILE_BYTES or b"\x00" in raw[:8192]:
+    if captured is None:
+        return None
+    raw, _version = captured
+    if b"\x00" in raw[:8192]:
         return None
     return raw.decode("utf-8", errors="replace")
 
@@ -159,14 +200,21 @@ def _identifier_at(text: str, line: int, column: int) -> str:
 
 def _rel(path: Path, root: Path) -> str:
     try:
-        return str(path.resolve(strict=False).relative_to(root.resolve(strict=False)))
+        candidate = _frozen_absolute(path)
+        base = _frozen_absolute(root)
+        if os.path.normcase(os.path.commonpath((str(base), str(candidate)))) != os.path.normcase(
+                str(base)):
+            return ""
+        relative = os.path.relpath(candidate, base)
+        return "" if relative == "." or ".." in Path(relative).parts else Path(relative).as_posix()
     except (OSError, ValueError):
         return ""
 
 
-def _static_symbols(target: Path, root: Path, symbol: str = "") -> list[str]:
+def _static_symbols(target: Path, root: Path, symbol: str = "", *, cancel=None,
+                    deadline: float = float("inf")) -> list[str]:
     rows: list[str] = []
-    for path in _source_files(target):
+    for path in _source_files(target, cancel=cancel, deadline=deadline):
         text = _read_source(path)
         if text is None:
             continue
@@ -182,12 +230,13 @@ def _static_symbols(target: Path, root: Path, symbol: str = "") -> list[str]:
     return rows
 
 
-def _static_references(target: Path, root: Path, symbol: str) -> list[str]:
+def _static_references(target: Path, root: Path, symbol: str, *, cancel=None,
+                       deadline: float = float("inf")) -> list[str]:
     if not _IDENT.fullmatch(symbol):
         return []
     pattern = re.compile(rf"(?<![\w$]){re.escape(symbol)}(?![\w$])")
     rows: list[str] = []
-    for path in _source_files(target):
+    for path in _source_files(target, cancel=cancel, deadline=deadline):
         text = _read_source(path)
         if text is None:
             continue
@@ -245,7 +294,7 @@ def _server_spec(config, path: Path) -> dict | None:
 class _LSPClient:
     def __init__(self, spec: dict, root: Path, timeout: float, cancel=None):
         self.spec = spec
-        self.root = root.resolve(strict=False)
+        self.root = _frozen_absolute(root)
         self.timeout = max(0.1, min(60.0, float(timeout)))
         self.cancel = cancel
         self.proc: subprocess.Popen | None = None
@@ -485,7 +534,7 @@ class _LSPClient:
 
     def sync_document(self, path: Path, text: str) -> str:
         """Open a file once and close/reopen it when its on-disk contents change."""
-        uri = path.resolve(strict=False).as_uri()
+        uri = _frozen_absolute(path).as_uri()
         digest = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
         with self._diagnostic_lock:
             prior = self._documents.get(uri)
@@ -600,9 +649,10 @@ def _lsp_file(uri: str, root: Path) -> tuple[Path | None, str]:
         decoded = url2pathname(unquote(parsed.path))
         if parsed.netloc and parsed.netloc not in ("", "localhost"):
             decoded = f"//{parsed.netloc}{decoded}"
-        path = Path(decoded)
+        path = _frozen_absolute(Path(decoded))
         rel = _rel(path, root)
-        return (path.resolve(strict=False), rel) if rel else (None, "")
+        info = stat_entry(path, missing_ok=True) if rel else None
+        return (path, rel) if info is not None and stat.S_ISREG(info.st_mode) else (None, "")
     except (OSError, ValueError):
         return None, ""
 
@@ -797,7 +847,7 @@ class _PersistentLSPSession:
 
     def __init__(self, spec: dict, root: Path, idle_s: float):
         self.spec = dict(spec)
-        self.root = root.resolve(strict=False)
+        self.root = _frozen_absolute(root)
         self.idle_s = idle_s
         self.last_used = time.monotonic()
         self.users = 0  # protected by _LSPPool._lock
@@ -855,7 +905,7 @@ class _LSPPool:
     @staticmethod
     def _key(spec: dict, root: Path) -> tuple[str, str]:
         encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), default=str).encode()
-        return str(root.resolve(strict=False)), hashlib.sha256(encoded).hexdigest()
+        return str(_frozen_absolute(root)), hashlib.sha256(encoded).hexdigest()
 
     def _ensure_reaper_locked(self) -> None:
         if self._reaper is not None and self._reaper.is_alive():
@@ -918,7 +968,7 @@ class _LSPPool:
                 self._wake.set()
 
     def stop_all(self, root: Path | None = None) -> None:
-        wanted = str(root.resolve(strict=False)) if root is not None else None
+        wanted = str(_frozen_absolute(root)) if root is not None else None
         with self._lock:
             chosen = [(key, session) for key, session in self._sessions.items()
                       if wanted is None or key[0] == wanted]
@@ -955,15 +1005,23 @@ def run_code_intel(*, root: Path, target: Path, operation: str, symbol: str = ""
     """Execute a bounded code-intelligence query and render model-friendly locations."""
     if operation not in ("symbols", "definition", "references", "diagnostics"):
         return "error: operation must be symbols, definition, references, or diagnostics"
-    if not target.exists():
+    try:
+        target_info = stat_entry(target, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError):
+        target_info = None
+    if target_info is None:
         return f"error: code-intelligence path does not exist: {target}"
+    target_is_file = stat.S_ISREG(target_info.st_mode)
+    target_is_directory = stat.S_ISDIR(target_info.st_mode)
+    if not target_is_file and not target_is_directory:
+        return f"error: code-intelligence path is not a regular file/directory: {target}"
     try:
         line_number, column_number = max(1, int(line)), max(1, int(column))
     except (TypeError, ValueError):
         return "error: line and column must be positive integers"
 
     chosen_symbol = str(symbol or "").strip()
-    if operation in ("definition", "references") and not chosen_symbol and target.is_file():
+    if operation in ("definition", "references") and not chosen_symbol and target_is_file:
         text = _read_source(target) or ""
         chosen_symbol = _identifier_at(text, line_number, column_number)
     if operation in ("definition", "references") and not chosen_symbol:
@@ -972,7 +1030,7 @@ def run_code_intel(*, root: Path, target: Path, operation: str, symbol: str = ""
         return "error: symbol must be one identifier of at most 256 characters"
 
     lsp_note = ""
-    if target.is_file():
+    if target_is_file:
         spec = _server_spec(config, target)
         if spec:
             query_line, query_column = line_number, column_number
@@ -1000,12 +1058,18 @@ def run_code_intel(*, root: Path, target: Path, operation: str, symbol: str = ""
                 return f"code intelligence (lsp) · {operation}\n{body}"
             lsp_note = f"language server unavailable ({error or 'no result'}); static fallback\n"
 
+    static_timeout = _configured_seconds(config, "code_intel_timeout", 15.0, 0.1, 60.0)
+    static_deadline = time.monotonic() + static_timeout
     if operation in ("symbols", "definition"):
-        rows = _static_symbols(target, root, chosen_symbol if operation == "definition" else "")
+        rows = _static_symbols(
+            target, root, chosen_symbol if operation == "definition" else "",
+            cancel=cancel, deadline=static_deadline)
     elif operation == "references":
-        rows = _static_references(target if target.is_dir() else root, root, chosen_symbol)
+        rows = _static_references(
+            target if target_is_directory else root, root, chosen_symbol,
+            cancel=cancel, deadline=static_deadline)
     else:
-        if not target.is_file():
+        if not target_is_file:
             return "error: diagnostics requires a file path"
         rows = _static_diagnostics(target)
         if not rows:

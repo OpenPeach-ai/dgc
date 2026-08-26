@@ -35,6 +35,8 @@ from .workspace import (
     list_directory,
     read_regular_bytes,
     resolve_path,
+    scan_directory_entries,
+    stat_entry,
 )
 
 MAX_READ_LINES = 2000
@@ -1507,13 +1509,16 @@ def _validate_glob_pattern(value, *, name: str = "glob pattern") -> str:
 
 
 def _confined_regular(path: Path, boundary: Path) -> os.stat_result | None:
-    """Accept only a non-symlink regular file whose resolved parent stays under the scan root."""
+    """Accept only an exact regular entry lexically under the frozen scan root."""
     try:
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode):
+        candidate = Path(os.path.normpath(str(path)))
+        base = Path(os.path.normpath(str(boundary)))
+        if os.path.commonpath((str(base), str(candidate))) != str(base):
             return None
-        resolved = path.resolve(strict=True)
-        if os.path.commonpath((str(boundary), str(resolved))) != str(boundary):
+        info = stat_entry(candidate, missing_ok=True)
+        if info is None:
+            return None
+        if not stat.S_ISREG(info.st_mode):
             return None
         return info
     except (OSError, RuntimeError, ValueError):
@@ -1521,18 +1526,17 @@ def _confined_regular(path: Path, boundary: Path) -> os.stat_result | None:
 
 
 def _scan_boundary(target: Path) -> Path:
-    try:
-        candidate = target if stat.S_ISDIR(target.lstat().st_mode) else target.parent
-        return candidate.resolve(strict=True)
-    except OSError:
-        return target.parent.resolve(strict=False)
+    return Path(os.path.normpath(str(target)))
 
 
 def _search_target_kind(target: Path) -> str:
     try:
-        mode = target.lstat().st_mode
-    except OSError:
+        info = stat_entry(target, missing_ok=True)
+    except (OSError, ValueError):
         return ""
+    if info is None:
+        return ""
+    mode = info.st_mode
     if stat.S_ISDIR(mode):
         return "directory"
     if stat.S_ISREG(mode):
@@ -1541,23 +1545,14 @@ def _search_target_kind(target: Path) -> str:
 
 
 def _prepare_search_target(target: Path) -> tuple[str, Path] | None:
-    """Freeze one canonical scan boundary and reject a target changed during preparation."""
+    """Freeze one canonical no-follow scan target for later exact-entry operations."""
     try:
-        before = target.lstat()
-        kind = ("directory" if stat.S_ISDIR(before.st_mode) else
-                "file" if stat.S_ISREG(before.st_mode) else "")
+        info = stat_entry(target, missing_ok=True)
+        kind = ("directory" if info is not None and stat.S_ISDIR(info.st_mode) else
+                "file" if info is not None and stat.S_ISREG(info.st_mode) else "")
         if not kind:
             return None
-        resolved_target = target.resolve(strict=True)
-        boundary = resolved_target if kind == "directory" else resolved_target.parent
-        after = target.lstat()
-        identity_before = (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))
-        identity_after = (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode))
-        same_path = (os.path.normcase(os.path.normpath(str(resolved_target)))
-                     == os.path.normcase(os.path.normpath(str(target))))
-        if identity_before != identity_after or not same_path:
-            return None
-        return kind, boundary
+        return kind, target
     except (OSError, RuntimeError, ValueError):
         return None
 
@@ -1641,7 +1636,7 @@ def _glob_with_rg(executable: str, pattern: str, base: Path, boundary: Path,
 
 
 def _walk_regular_files(root: Path, ctx, state: dict, *, boundary: Path | None = None):
-    """Yield bounded non-symlink regular files without following discovered directory links."""
+    """Yield bounded regular files through exact no-follow directory snapshots."""
     boundary = boundary or _scan_boundary(root)
     kind = _search_target_kind(root)
     if kind == "file":
@@ -1663,44 +1658,48 @@ def _walk_regular_files(root: Path, ctx, state: dict, *, boundary: Path | None =
             return
         directory = stack.pop()
         try:
-            dinfo = directory.lstat()
-            if not stat.S_ISDIR(dinfo.st_mode) or directory.is_symlink():
+            dinfo = stat_entry(directory, missing_ok=True)
+            if dinfo is None or not stat.S_ISDIR(dinfo.st_mode):
                 continue
-            resolved = directory.resolve(strict=True)
-            if os.path.commonpath((str(boundary), str(resolved))) != str(boundary):
+            candidate = Path(os.path.normpath(str(directory)))
+            if os.path.commonpath((str(boundary), str(candidate))) != str(boundary):
                 continue
-            entries = os.scandir(directory)
+            remaining = MAX_SEARCH_ENTRIES - state["entries"]
+            if remaining <= 0:
+                state["truncated"] = True
+                return
+            entries, truncated, scanned = scan_directory_entries(
+                directory, maximum=remaining)
         except (OSError, RuntimeError, ValueError):
             continue
-        with entries:
-            for entry in entries:
-                if time.monotonic() >= state.get("deadline", float("inf")):
-                    state["timed_out"] = True
-                    return
-                state["entries"] += 1
-                if state["entries"] > MAX_SEARCH_ENTRIES:
-                    state["truncated"] = True
-                    return
-                try:
-                    if entry.is_symlink():
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        if entry.name not in SKIP_DIRS:
-                            stack.append(Path(entry.path))
-                        continue
-                    if not entry.is_file(follow_symlinks=False):
-                        continue
-                except OSError:
-                    continue
-                if state["files"] >= MAX_SEARCH_FILES:
-                    state["truncated"] = True
-                    return
-                path = Path(entry.path)
-                info = _confined_regular(path, boundary)
-                if info is None:
-                    continue
-                state["files"] += 1
-                yield path, info
+        state["entries"] += scanned
+        if truncated:
+            state["truncated"] = True
+        child_directories: list[Path] = []
+        for name, info in entries:
+            if time.monotonic() >= state.get("deadline", float("inf")):
+                state["timed_out"] = True
+                return
+            path = directory / name
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                if name not in SKIP_DIRS:
+                    child_directories.append(path)
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            if state["files"] >= MAX_SEARCH_FILES:
+                state["truncated"] = True
+                return
+            verified = _confined_regular(path, boundary)
+            if verified is None:
+                continue
+            state["files"] += 1
+            yield path, verified
+        stack.extend(reversed(child_directories))
+        if truncated:
+            return
 
 
 def _segment_glob_match(relative: str, pattern: str) -> bool:
@@ -1791,28 +1790,11 @@ def glob_tool(args: dict, ctx) -> str:
 def _read_regular_bytes(path: Path, boundary: Path, maximum: int) -> bytes | None:
     if _confined_regular(path, boundary) is None:
         return None
-    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
-             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
     try:
-        fd = os.open(path, flags)
-    except OSError:
+        captured = read_regular_bytes(path, maximum=maximum, missing_ok=True)
+        return captured[0] if captured is not None else None
+    except (OSError, WorkspaceBoundaryError):
         return None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
-            return None
-        chunks: list[bytes] = []
-        total = 0
-        while total <= maximum:
-            chunk = os.read(fd, min(65_536, maximum + 1 - total))
-            if not chunk:
-                break
-            chunks.append(chunk); total += len(chunk)
-        return None if total > maximum else b"".join(chunks)
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
 
 
 def _grep_fallback_scan(pattern: str, target: Path, boundary: Path,
@@ -1938,9 +1920,11 @@ def _grep_with_rg(executable: str, pattern: str, target: Path, boundary: Path,
     matches: list[str] = []
     files_hit: set[str] = set()
     parse_error = ""
+    verified_path: Path | None = None
+    verified_lines: list[str] | None = None
 
     def consume(chunk: bytes) -> bool:
-        nonlocal parse_error
+        nonlocal parse_error, verified_path, verified_lines
         pending.extend(chunk)
         while True:
             separator = pending.find(b"\x00")
@@ -1966,9 +1950,25 @@ def _grep_with_rg(executable: str, pattern: str, target: Path, boundary: Path,
                 path = target / path if target_is_directory else target.parent / path
             if _confined_regular(path, boundary) is None:
                 continue
+            # Ripgrep is a discovery accelerator, not the authority for model-visible bytes. A
+            # repository process can replace a descendant directory after rg opens it; re-read the
+            # exact approved path through the held-directory boundary and require the reported line
+            # to match before exposing it. Keep only one file in memory at a time.
+            if verified_path != path:
+                safe_raw = _read_regular_bytes(path, boundary, 2_000_000)
+                verified_path = path
+                verified_lines = (safe_raw.decode("utf-8", errors="replace").splitlines()
+                                  if safe_raw is not None and b"\x00" not in safe_raw[:8192]
+                                  else None)
+            if verified_lines is None or number > len(verified_lines):
+                continue
+            safe_line = verified_lines[number - 1].rstrip("\r")
+            reported_line = fields[2].decode("utf-8", errors="replace").rstrip("\r")
+            if reported_line != safe_line:
+                continue
             relative = _display_search_path(path, ctx)
-            line = fields[2].decode("utf-8", errors="replace").rstrip("\r")
-            matches.append(f"{relative}:{number}: {_trunc_line(_safe_output(line.strip(), ctx))}")
+            matches.append(
+                f"{relative}:{number}: {_trunc_line(_safe_output(safe_line.strip(), ctx))}")
             files_hit.add(relative)
             if len(matches) >= MAX_GREP_MATCHES:
                 return False
@@ -2066,37 +2066,37 @@ def _symbol_lines(path: Path, text: str) -> list[str]:
 def repo_map(args: dict, ctx) -> str:
     root = (_resolve(str(args.get("path", "")), ctx.project_root,
                      allow_external=_allow_external(args)) if args.get("path") else ctx.project_root)
-    if not root.exists() or not root.is_dir():
+    prepared = _prepare_search_target(root)
+    if prepared is None or prepared[0] != "directory":
         return f"error: repository map path is not a directory: {root}"
+    _kind, boundary = prepared
     max_files = max(1, min(1000, int(args.get("max_files") or 300)))
     files: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            if path.is_symlink():
-                continue
-            if path.suffix.lower() in _SOURCE_EXTS or name in _MANIFEST_NAMES:
-                files.append(path)
-                if len(files) >= max_files:
-                    break
+    state = {"entries": 0, "files": 0, "truncated": False, "cancelled": False,
+             "timed_out": False, "deadline": time.monotonic() + _search_timeout(ctx)}
+    for path, _info in _walk_regular_files(root, ctx, state, boundary=boundary):
+        if path.suffix.lower() in _SOURCE_EXTS or path.name in _MANIFEST_NAMES:
+            files.append(path)
         if len(files) >= max_files:
             break
     rows = [f"repository map: {root} · {len(files)} file(s)" +
             (f" (capped at {max_files})" if len(files) == max_files else "")]
     for path in files:
-        try:
-            raw = path.read_bytes()
-            if len(raw) > 2_000_000 or b"\x00" in raw[:8192]:
-                continue
-            text = raw.decode("utf-8", errors="replace")
-            digest = hashlib.sha256(raw).hexdigest()[:12]
-            rel = os.path.relpath(path, ctx.project_root)
-            symbols = _symbol_lines(path, text)
-            suffix = " · " + ", ".join(symbols) if symbols else ""
-            rows.append(f"{rel}  [{len(raw)} B · {digest}]{suffix}")
-        except OSError:
+        raw = _read_regular_bytes(path, boundary, 2_000_000)
+        if raw is None or b"\x00" in raw[:8192]:
             continue
+        text = raw.decode("utf-8", errors="replace")
+        digest = hashlib.sha256(raw).hexdigest()[:12]
+        rel = os.path.relpath(path, ctx.project_root)
+        symbols = _symbol_lines(path, text)
+        suffix = " · " + ", ".join(symbols) if symbols else ""
+        rows.append(f"{rel}  [{len(raw)} B · {digest}]{suffix}")
+    if state["cancelled"]:
+        rows.append("… (repository map cancelled; results are partial)")
+    elif state["timed_out"]:
+        rows.append(f"… (repository map timed out after {_search_timeout(ctx):g}s; results are partial)")
+    elif state["truncated"] and len(files) < max_files:
+        rows.append("… (repository scan limit reached; results are partial)")
     return "\n".join(rows)
 
 

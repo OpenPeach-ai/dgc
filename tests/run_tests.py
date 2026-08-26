@@ -451,6 +451,160 @@ def unit_tests(tmp: Path):
           _race_prepared is not None and not _race_fallback[0] and not _race_fast[0],
           repr((_race_fallback, _race_fast)))
 
+    # Repository maps, static intelligence, and the search fast path are read-only but still cross
+    # the same authority boundary. A descendant can change after enumeration or validation; no
+    # content from the replacement may reach the model-visible result.
+    _discovery_root = tmp / "discovery-race"
+    _discovery_parent = _discovery_root / "pkg"
+    _discovery_held = _discovery_root / "held"
+    _discovery_parent.mkdir(parents=True)
+    _discovery_target = _discovery_parent / "target.py"
+    _discovery_target.write_text("def inside_discovery():\n    pass\n")
+    _discovery_outside = Path(tempfile.mkdtemp())
+    (_discovery_outside / "target.py").write_text(
+        "def outside_repo_map_secret():\n    pass\n")
+    _real_directory_scan = _tools_bg.scan_directory_entries
+    _discovery_swapped = False
+
+    def _swap_after_directory_scan(path, **kwargs):
+        nonlocal _discovery_swapped
+        result = _real_directory_scan(path, **kwargs)
+        if Path(path) == _discovery_parent and not _discovery_swapped:
+            _discovery_parent.rename(_discovery_held)
+            _discovery_parent.symlink_to(_discovery_outside, target_is_directory=True)
+            _discovery_swapped = True
+        return result
+
+    _tools_bg.scan_directory_entries = _swap_after_directory_scan
+    try:
+        _late_map = execute("repo_map", {"path": "discovery-race"}, ctx)
+    finally:
+        _tools_bg.scan_directory_entries = _real_directory_scan
+        if _discovery_parent.is_symlink():
+            _discovery_parent.unlink()
+        if _discovery_held.exists():
+            _discovery_held.rename(_discovery_parent)
+    check("repo_map refuses a descendant parent swapped after directory enumeration",
+          "outside_repo_map_secret" not in _late_map
+          and (_discovery_outside / "target.py").read_text()
+          == "def outside_repo_map_secret():\n    pass\n",
+          _late_map)
+
+    import dgc.codeintel as _codeintel_safe
+    _intel_root = tmp / "intel-race"
+    _intel_parent = _intel_root / "pkg"
+    _intel_held = _intel_root / "held"
+    _intel_parent.mkdir(parents=True)
+    _intel_target = _intel_parent / "target.py"
+    _intel_target.write_text("def inside_intel():\n    pass\n")
+    _intel_outside = Path(tempfile.mkdtemp())
+    (_intel_outside / "target.py").write_text(
+        "def outside_intel_secret():\n    pass\n")
+    _real_intel_read = _codeintel_safe._read_source
+    _intel_swapped = False
+
+    def _swap_during_intel_read(path):
+        nonlocal _intel_swapped
+        if Path(path) == _intel_target and not _intel_swapped:
+            _intel_parent.rename(_intel_held)
+            _intel_parent.symlink_to(_intel_outside, target_is_directory=True)
+            try:
+                return _real_intel_read(path)
+            finally:
+                _intel_parent.unlink()
+                _intel_held.rename(_intel_parent)
+                _intel_swapped = True
+        return _real_intel_read(path)
+
+    _codeintel_safe._read_source = _swap_during_intel_read
+    try:
+        _late_intel = execute(
+            "code_intel", {"operation": "symbols", "path": "intel-race"}, ctx)
+    finally:
+        _codeintel_safe._read_source = _real_intel_read
+    check("static code intelligence refuses a transient descendant parent swap",
+          "outside_intel_secret" not in _late_intel, _late_intel)
+
+    _reader_root = tmp / "search-reader-race"
+    _reader_parent = _reader_root / "pkg"
+    _reader_held = _reader_root / "held"
+    _reader_parent.mkdir(parents=True)
+    _reader_target = _reader_parent / "target.txt"
+    _reader_target.write_text("INSIDE_READER_STATE\n")
+    _reader_outside = Path(tempfile.mkdtemp())
+    (_reader_outside / "target.txt").write_text("OUTSIDE_READER_SECRET\n")
+    _real_confined_regular = _tools_bg._confined_regular
+    _reader_swapped = False
+
+    def _swap_after_reader_validation(path, boundary):
+        nonlocal _reader_swapped
+        info = _real_confined_regular(path, boundary)
+        if info is not None and not _reader_swapped:
+            _reader_parent.rename(_reader_held)
+            _reader_parent.symlink_to(_reader_outside, target_is_directory=True)
+            _reader_swapped = True
+        return info
+
+    _tools_bg._confined_regular = _swap_after_reader_validation
+    try:
+        _late_reader = _tools_bg._read_regular_bytes(
+            _reader_target, _reader_root, 2_000_000)
+    finally:
+        _tools_bg._confined_regular = _real_confined_regular
+        if _reader_parent.is_symlink():
+            _reader_parent.unlink()
+        if _reader_held.exists():
+            _reader_held.rename(_reader_parent)
+    check("search file reads hold the exact parent after candidate validation",
+          _late_reader is None or b"OUTSIDE_READER_SECRET" not in _late_reader,
+          repr(_late_reader))
+
+    _verified_rg_file = tmp / "verified-rg.txt"
+    _verified_rg_file.write_text("INSIDE_VERIFIED_MATCH\n")
+    _real_search_process = _tools_bg._run_search_process
+
+    def _forged_rg_process(_argv, consume, _ctx, **_kwargs):
+        raw_path = os.fsencode(str(_verified_rg_file))
+        consume(raw_path + b"\x001:1:OUTSIDE_FORGED_MATCH\n"
+                + raw_path + b"\x001:1:INSIDE_VERIFIED_MATCH\n")
+        return 0, "", ""
+
+    _tools_bg._run_search_process = _forged_rg_process
+    try:
+        _verified_matches = _tools_bg._grep_with_rg(
+            "rg", "MATCH", _verified_rg_file, _verified_rg_file, False, "", ctx)
+    finally:
+        _tools_bg._run_search_process = _real_search_process
+    check("ripgrep output is re-read from the exact approved file before disclosure",
+          len(_verified_matches[0]) == 1
+          and "INSIDE_VERIFIED_MATCH" in _verified_matches[0][0]
+          and "OUTSIDE_FORGED_MATCH" not in repr(_verified_matches),
+          repr(_verified_matches))
+
+    _portable_discovery = tmp / "portable-discovery"
+    _portable_discovery.mkdir()
+    (_portable_discovery / "portable.py").write_text(
+        "def portable_symbol():\n    return True\n")
+    for number in range(3):
+        (_portable_discovery / f"entry-{number}.txt").write_text(str(number))
+    _real_discovery_dirfd = _workspace_safe._dirfd_supported
+    _workspace_safe._dirfd_supported = lambda: False
+    try:
+        _portable_entries = _workspace_safe.scan_directory_entries(
+            _portable_discovery, maximum=2)
+        _portable_map = execute(
+            "repo_map", {"path": "portable-discovery", "max_files": 10}, ctx)
+        _portable_intel = execute(
+            "code_intel", {"operation": "symbols", "path": "portable-discovery"}, ctx)
+    finally:
+        _workspace_safe._dirfd_supported = _real_discovery_dirfd
+    check("non-dirfd repository discovery remains bounded and functional",
+          len(_portable_entries[0]) == 2 and _portable_entries[1]
+          and _portable_entries[2] == 2
+          and "portable_symbol@1" in _portable_map
+          and "function portable_symbol" in _portable_intel,
+          repr((_portable_entries, _portable_map, _portable_intel)))
+
     _real_ripgrep_path = _tools_bg._ripgrep_path
     _tools_bg._ripgrep_path = lambda: None
     try:

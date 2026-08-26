@@ -190,26 +190,112 @@ def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
     return data, _version(opened)
 
 
-def list_directory(path: Path | str, *, limit: int = 200) -> list[str]:
-    """List one canonical directory through a descriptor that cannot be redirected by a symlink."""
+def stat_entry(path: Path | str, *, missing_ok: bool = False) -> os.stat_result | None:
+    """Stat one exact directory entry without following its final link or mutable parents."""
     target = _absolute_frozen(path)
-    limit = max(0, int(limit))
+    if _dirfd_supported():
+        try:
+            parent_fd = _open_parent_fd(target, create=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return None
+            raise
+        try:
+            try:
+                return os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if missing_ok:
+                    return None
+                raise
+        finally:
+            os.close(parent_fd)
+
+    try:
+        _fallback_parent(target, create=False)
+        before = target.lstat()
+        _fallback_parent(target, create=False)
+        after = target.lstat()
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise
+    if _version(before) != _version(after):
+        raise WorkspaceBoundaryError(f"path changed while it was being inspected: {target}")
+    return after
+
+
+def scan_directory_entries(path: Path | str, *, maximum: int = 200_000
+                           ) -> tuple[list[tuple[str, os.stat_result]], bool, int]:
+    """Return a bounded no-follow snapshot of one exact directory.
+
+    The boolean is true when more entries existed than the caller allowed, and the final integer is
+    the number scanned (including entries that vanished before stat). Entry metadata is a discovery
+    hint only; callers that open a returned child must use another exact-path primitive.
+    """
+    target = _absolute_frozen(path)
+    if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 0:
+        raise ValueError("maximum must be a non-negative integer")
+
     if _dirfd_supported():
         parent_fd = _open_parent_fd(target, create=False)
+        directory_fd = -1
         try:
             flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
                      | getattr(os, "O_CLOEXEC", 0))
-            fd = os.open(target.name, flags, dir_fd=parent_fd)
-            try:
-                return sorted(os.listdir(fd))[:limit]
-            finally:
-                os.close(fd)
+            directory_fd = os.open(target.name, flags, dir_fd=parent_fd)
+            if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+                raise WorkspaceBoundaryError(f"path is not a directory: {target}")
+            rows: list[tuple[str, os.stat_result]] = []
+            truncated = False
+            seen = 0
+            with os.scandir(directory_fd) as entries:
+                for entry in entries:
+                    if seen >= maximum:
+                        truncated = True
+                        break
+                    seen += 1
+                    try:
+                        rows.append((entry.name, entry.stat(follow_symlinks=False)))
+                    except OSError:
+                        continue
+            rows.sort(key=lambda item: item[0])
+            return rows, truncated, seen
         finally:
+            if directory_fd >= 0:
+                os.close(directory_fd)
             os.close(parent_fd)
+
     _fallback_parent(target, create=False)
-    if target.is_symlink() or not target.is_dir():
+    before = target.lstat()
+    if not stat.S_ISDIR(before.st_mode) or stat.S_ISLNK(before.st_mode):
         raise WorkspaceBoundaryError(f"path is not a directory: {target}")
-    return sorted(os.listdir(target))[:limit]
+    rows = []
+    truncated = False
+    seen = 0
+    with os.scandir(target) as entries:
+        for entry in entries:
+            if seen >= maximum:
+                truncated = True
+                break
+            seen += 1
+            try:
+                rows.append((entry.name, entry.stat(follow_symlinks=False)))
+            except OSError:
+                continue
+    _fallback_parent(target, create=False)
+    after = target.lstat()
+    if (_version(before) != _version(after) or not stat.S_ISDIR(after.st_mode)
+            or stat.S_ISLNK(after.st_mode)):
+        raise WorkspaceBoundaryError(f"directory changed while it was being listed: {target}")
+    rows.sort(key=lambda item: item[0])
+    return rows, truncated, seen
+
+
+def list_directory(path: Path | str, *, limit: int = 200) -> list[str]:
+    """List one canonical directory through a descriptor that cannot be redirected by a symlink."""
+    limit = max(0, int(limit))
+    rows, _truncated, _scanned = scan_directory_entries(path, maximum=limit)
+    return [name for name, _info in rows]
 
 
 def atomic_write_bytes(path: Path | str, data: bytes, *,
