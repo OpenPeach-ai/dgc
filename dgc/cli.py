@@ -25,7 +25,8 @@ from . import (__version__, attachments as attachments_mod, glyphs, logo as logo
                memory as memory_mod, render, sessions as sessions_mod)
 from . import style as style_mod
 from .agent import Agent
-from .commands import command_pairs_with_custom, command_specs, custom_command_names
+from .commands import (canonical_command_name, command_pairs_with_custom, command_specs,
+                       custom_command_names)
 from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
@@ -567,7 +568,7 @@ class CLI:
     # ------------------------------------------------------ slash commands ---
     def handle_slash(self, line: str) -> bool:
         parts = line[1:].split(None, 1)
-        cmd = parts[0].lower() if parts else ""
+        cmd = canonical_command_name(parts[0] if parts else "", "classic")
         rest = parts[1] if len(parts) > 1 else ""
         cfg = self.config
 

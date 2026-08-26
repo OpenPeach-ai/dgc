@@ -274,7 +274,9 @@ goal completion.
 
 Type `/` to open the searchable command palette. DGC advertises only commands
 that the current surface can execute; core editor actions travel as typed backend
-messages and are never passed to the model as literal slash text.
+messages and are never passed to the model as literal slash text. Declared aliases
+resolve through the same canonical registry on classic, full-screen, and editor
+surfaces; typing an alias prefix in the editor discovers its primary command.
 
 Add a custom prompt command at `.dgc/commands/<name>.md` (or
 `~/.dgc/commands/<name>.md`). Use `$ARGUMENTS` or `{{args}}` in the template, then

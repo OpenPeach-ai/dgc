@@ -64,8 +64,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 "pickThink", usage="think [LEVEL]"),
     CommandSpec("thoughts", "show or hide the model's thinking in the transcript", _T,
                 aliases=("reasoning", "reason")),
-    CommandSpec("expand", "expand the last collapsed tool output (/expandall for all)", _T,
-                aliases=("expandall",)),
+    CommandSpec("expand", "expand the last collapsed tool output", _T),
+    CommandSpec("expandall", "expand every collapsed tool output", _T),
     CommandSpec("copy", "select & copy text — releases the mouse to your terminal", _T,
                 aliases=("select", "selection")),
     CommandSpec("worktree", "list or switch to a named git worktree", _TC,
@@ -120,6 +120,24 @@ def command_specs(surface: str) -> list[CommandSpec]:
     return [spec for spec in BUILTIN_COMMANDS if surface in spec.surfaces]
 
 
+def resolve_command(name: str, surface: str) -> CommandSpec | None:
+    """Resolve one primary name or declared alias on a surface to its canonical specification."""
+    token = str(name or "").casefold()
+    for spec in BUILTIN_COMMANDS:
+        if (surface in spec.surfaces
+                and (token == spec.name.casefold()
+                     or any(token == alias.casefold() for alias in spec.aliases))):
+            return spec
+    return None
+
+
+def canonical_command_name(name: str, surface: str) -> str:
+    """Return the canonical built-in name, or the normalized input for custom/unknown commands."""
+    token = str(name or "").casefold()
+    resolved = resolve_command(token, surface)
+    return resolved.name if resolved else token
+
+
 def command_pairs(surface: str) -> list[tuple[str, str]]:
     return [(spec.name, spec.description) for spec in command_specs(surface)]
 
@@ -137,7 +155,7 @@ def command_pairs_with_custom(surface: str, project_root) -> list[tuple[str, str
 
 def editor_command_metadata() -> list[dict]:
     return [{"name": spec.name, "description": spec.description, "action": spec.editor_action,
-             "accepts_args": spec.accepts_args, "kind": "builtin"}
+             "accepts_args": spec.accepts_args, "aliases": list(spec.aliases), "kind": "builtin"}
             for spec in command_specs("editor")]
 
 

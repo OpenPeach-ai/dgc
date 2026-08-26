@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 825 / 825 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 830 / 830 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -562,7 +562,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 825/825 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 830/830 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -838,10 +838,14 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; classic help and
 completion, the TUI palette, editor/headless metadata, and ACP custom-command discovery consume the
 canonical registry; and goals have bounded persisted lifecycle state plus typed headless/editor/ACP
-control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
+control. Declared aliases now resolve through that registry before dispatch on classic, TUI, and
+editor surfaces; this closes previously reserved-but-dead routes such as `/commands`, `/session`,
+`/extensions`, `/q`, `/config`, `/artifacts`, and `/viewplan`. Editor metadata carries aliases so
+prefix search discovers the canonical action without sending command text to the model. Custom
+prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 825/825 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 830/830 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

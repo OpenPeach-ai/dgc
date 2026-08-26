@@ -7507,9 +7507,9 @@ def test_slash_palette():
     from rich.console import Console
 
     import dgc.commands as command_mod
-    from dgc.commands import (command_pairs, command_pairs_with_custom, command_specs,
-                              custom_command_names, discover_commands, editor_command_metadata,
-                              render_command)
+    from dgc.commands import (canonical_command_name, command_pairs,
+                              command_pairs_with_custom, command_specs, custom_command_names,
+                              discover_commands, editor_command_metadata, render_command)
     from dgc.cli import CLI, ClassicSlashCompleter, render_help
     from dgc.tui import SLASH_COMMANDS, SlashCompleter, TUI
     c = SlashCompleter()
@@ -7524,10 +7524,18 @@ def test_slash_palette():
     check("all descriptions are non-empty", all(d for _, d in SLASH_COMMANDS))
     check("TUI slash menu is derived from the canonical command registry",
           SLASH_COMMANDS == command_pairs("tui") and len({n for n, _ in SLASH_COMMANDS}) == len(SLASH_COMMANDS))
+    check("every declared slash alias resolves to its surface's canonical command",
+          all(canonical_command_name(alias, surface) == spec.name
+              for spec in command_mod.BUILTIN_COMMANDS
+              for surface in spec.surfaces for alias in spec.aliases)
+          and canonical_command_name("expandall", "tui") == "expandall")
     _editor_meta = editor_command_metadata()
     check("every advertised editor command has a typed action route",
           _editor_meta and all(c["action"] for c in _editor_meta)
           and {"goal", "view-plan", "artifact"} <= {c["name"] for c in _editor_meta})
+    check("editor command metadata carries canonical aliases to the extension host",
+          next(c for c in _editor_meta if c["name"] == "settings")["aliases"]
+          == ["config", "prefs", "preferences"])
     def route_literals(fn):
         tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
         return {node.value for node in ast.walk(tree)
@@ -7627,6 +7635,14 @@ def test_slash_palette():
               max(map(len, _narrow_help.splitlines())) <= 48
               and "/help" in _narrow_help and "list every command" in _narrow_help)
 
+        _alias_capture = io.StringIO()
+        _classic_alias = object.__new__(CLI)
+        _classic_alias.config = SimpleNamespace(project_root=_root / "project")
+        _classic_alias.console = Console(file=_alias_capture, width=100, color_system=None)
+        check("classic slash dispatch executes registry aliases instead of reporting them unknown",
+              _classic_alias.handle_slash("/commands")
+              and "/help" in _alias_capture.getvalue())
+
         _menu = object.__new__(TUI)
         _menu.config = SimpleNamespace(project_root=_root / "project")
         _menu.input_buf = SimpleNamespace(text="/", reset=lambda: None)
@@ -7637,6 +7653,13 @@ def test_slash_palette():
               any(row["value"] == "review-api" and "custom" in row["desc"] for row in _rows)
               and [(row["value"], row["desc"]) for row in _rows]
               == command_pairs_with_custom("tui", _root / "project"))
+        _quit = {"called": False}
+        _tui_alias = object.__new__(TUI)
+        _tui_alias.config = SimpleNamespace(project_root=_root / "project")
+        _tui_alias.app = SimpleNamespace(exit=lambda: _quit.__setitem__("called", True))
+        _tui_alias._invalidate = lambda: None
+        check("TUI slash dispatch executes the registry's /q alias",
+              _tui_alias._handle_slash("/q") and _quit["called"])
         check("editor and ACP custom metadata cannot collide with any built-in command",
               custom_command_names(_root / "project") == list(_commands))
 

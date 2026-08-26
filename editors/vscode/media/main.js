@@ -569,9 +569,12 @@
     if (sl === 0 && !/\s/.test(v)) {
       popMode = "/"; popStart = 0;
       const all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
-        action: c.action, acceptsArgs: c.accepts_args === true }))
+        action: c.action, acceptsArgs: c.accepts_args === true,
+        aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
         .concat(customCommands.map((c) => ({ label: "/" + c, detail: "custom command", action: "custom:" + c, acceptsArgs: true })));
-      showPop(all.filter((c) => c.label.startsWith(v)));
+      const query = v.toLowerCase();
+      showPop(all.filter((c) => c.label.toLowerCase().startsWith(query)
+        || (c.aliases || []).some((alias) => ("/" + alias).toLowerCase().startsWith(query))));
     }
     else if (at !== -1 && !/\s/.test(upto.slice(at))) {
       popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();

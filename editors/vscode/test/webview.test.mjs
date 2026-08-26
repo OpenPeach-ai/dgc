@@ -377,8 +377,8 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
     type: "ready",
     commands: [
       { name: "goal", description: "standing objective", action: "goal", accepts_args: true },
-      { name: "view-plan", description: "saved plan", action: "viewPlan" },
-      { name: "artifact", description: "previews", action: "artifacts" },
+      { name: "view-plan", description: "saved plan", action: "viewPlan", aliases: ["viewplan"] },
+      { name: "artifact", description: "previews", action: "artifacts", aliases: ["artifacts"] },
     ],
     custom_commands: ["review-api"],
   } });
@@ -390,6 +390,17 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
   assert.equal(goal.text, "/goal ship the release");
   assert.equal(posted.some((m) => m.type === "prompt" && m.text === goal.text), false,
     "built-in slash commands must not be sent as model prompts");
+
+  input.value = "/viewp";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.match(doc.getElementById("pop").textContent, /saved plan/,
+    "typing an alias prefix should discover its canonical command");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  input.value = "/viewplan";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.filter((m) => m.type === "slashText").pop().text, "/viewplan");
+  assert.match(panelSrc, /slashAliases\.get\(typedName\) \|\| typedName/,
+    "the extension host must canonicalize typed aliases before dispatch");
 
   doc.getElementById("btn-cmd").click();
   assert.match(doc.getElementById("pop").textContent, /standing objective/);

@@ -40,7 +40,7 @@ from . import (__version__, attachments as attachments_mod, glyphs, logo as logo
                render as render_mod, style as style_mod)
 from .update import cached_update
 from .agent import Agent
-from .commands import command_pairs, command_pairs_with_custom
+from .commands import canonical_command_name, command_pairs, command_pairs_with_custom
 from .redaction import redact_text, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -2735,7 +2735,7 @@ class TUI:
     # ---- slash commands (the canonical terminal catalog; custom commands are merged at runtime) ----
     def _handle_slash(self, text: str) -> bool:
         parts = text[1:].split(maxsplit=1)
-        cmd = parts[0].lower() if parts else ""
+        cmd = canonical_command_name(parts[0] if parts else "", "tui")
         rest = parts[1].strip() if len(parts) > 1 else ""
         th = style_mod.theme()
         cfg = self.config

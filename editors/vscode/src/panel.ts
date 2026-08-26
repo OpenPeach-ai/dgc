@@ -37,6 +37,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private modelRequest = 0;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
   private mcpUrls = new Map<string, string>();
+  private slashAliases = new Map<string, string>();
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private workspaceRootsRevision = 0;
@@ -207,6 +208,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                        goal: ev.goal || { text: "", status: "none" } };
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
+        this.slashAliases.clear();
+        for (const command of (Array.isArray(ev.commands) ? ev.commands : [])) {
+          if (!command || typeof command !== "object") { continue; }
+          const canonical = String((command as any).name || "").toLowerCase();
+          if (!canonical) { continue; }
+          for (const alias of (Array.isArray((command as any).aliases) ? (command as any).aliases : [])) {
+            const normalized = String(alias || "").toLowerCase();
+            if (normalized) { this.slashAliases.set(normalized, canonical); }
+          }
+        }
         this.postState();
         if (this.backend) {
           const backend = this.backend;
@@ -530,7 +541,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const text = raw.trim();
     const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
     if (!match) { return; }
-    const name = match[1].toLowerCase(), rest = (match[2] || "").trim();
+    const typedName = match[1].toLowerCase(), rest = (match[2] || "").trim();
+    const name = this.slashAliases.get(typedName) || typedName;
     const be = this.ensureBackend();
     if (name === "goal") {
       const low = rest.toLowerCase();
