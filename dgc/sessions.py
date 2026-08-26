@@ -11,7 +11,6 @@ import json
 import os
 import re
 import stat
-import tempfile
 import threading
 import time
 import uuid
@@ -123,10 +122,37 @@ def session_turn_lock(path, project_root):
     return named_process_lock("session-turn", str(session))
 
 
+def _atomic_temp_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.tmp")
+
+
+def _reclaim_stale_temporary(path: Path) -> None:
+    """Remove the prior lease holder's exact orphan without scanning the session directory."""
+    temporary = _atomic_temp_path(path)
+    try:
+        info = temporary.lstat()
+        if stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            temporary.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _open_atomic_temporary(path: Path) -> tuple[int, Path]:
+    temporary = _atomic_temp_path(path)
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    return os.open(temporary, flags, 0o600), temporary
+
+
 def _atomic_write(path: Path, text: str) -> None:
     """Write private session state atomically in the destination directory."""
+    # The deterministic temp is safe only under the session-family lease; enforce that invariant
+    # here so a future caller cannot accidentally turn O(1) crash recovery into a writer race.
+    if int(getattr(_lock_for(path)._depth, "value", 0)) <= 0:
+        raise RuntimeError("atomic session writes require the session-family lease")
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    _reclaim_stale_temporary(path)
+    fd, tmp = _open_atomic_temporary(path)
     try:
         try:
             os.fchmod(fd, 0o600)
@@ -290,6 +316,7 @@ def _load_metrics(path, project_root) -> dict:
     try:
         journal = metrics_path(path, project_root)
         with _lock_for(journal):
+            _reclaim_stale_temporary(journal)
             data = json.loads(journal.read_text())
         if not isinstance(data, dict):
             return {}
@@ -368,6 +395,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
 def _load_data(path, project_root) -> dict:
     p = resolve_path(project_root, path, must_exist=True)
     with _lock_for(p):
+        _reclaim_stale_temporary(p)
         data = json.loads(p.read_text())
     if (not isinstance(data, dict) or not isinstance(data.get("messages", []), list)
             or any(not isinstance(message, dict) for message in data.get("messages", []))):
@@ -440,6 +468,7 @@ def load_plan(session_file, project_root) -> str | None:
     try:
         p = plan_path(session_file, project_root)
         with _lock_for(p):
+            _reclaim_stale_temporary(p)
             text = p.read_text().strip()
         return text or None
     except OSError:
@@ -495,6 +524,7 @@ def load_workspace(session_file, project_root) -> dict | None:
         if p.is_symlink():
             return None
         with _lock_for(p):
+            _reclaim_stale_temporary(p)
             flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
                      | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
             fd = os.open(p, flags)
@@ -545,6 +575,7 @@ def clear_workspace(session_file, project_root, *, expected_revision: int | None
             if not _expected_generation_matches(
                     exists, revision, expected_revision, expected_exists):
                 return False
+            _reclaim_stale_temporary(p)
             p.unlink(missing_ok=True)
         return True
     except (OSError, ValueError):
@@ -566,19 +597,16 @@ def delete(path, project_root, *, expected_revision: int | None = None,
             if not _expected_generation_matches(
                     exists, revision, expected_revision, expected_exists):
                 return False
+            sidecars = (plan_path(p, project_root), metrics_path(p, project_root),
+                        workspace_path(p, project_root))
+            for member in (p, *sidecars):
+                _reclaim_stale_temporary(member)
             p.unlink()
-            try:
-                plan_path(p, project_root).unlink()
-            except OSError:
-                pass
-            try:
-                metrics_path(p, project_root).unlink()
-            except OSError:
-                pass
-            try:
-                workspace_path(p, project_root).unlink()
-            except OSError:
-                pass
+            for sidecar in sidecars:
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
         return True
     except (OSError, ValueError):
         return False

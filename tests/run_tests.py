@@ -4319,6 +4319,15 @@ def test_sessions_and_worktree():
     d = _P(_tf.mkdtemp()); sp = sessions.new_path(d)
     sp2 = sessions.new_path(d)
     check("session IDs are collision resistant", sp != sp2 and sp.stem != sp2.stem)
+    unlocked = sessions.new_path(d)
+    try:
+        sessions._atomic_write(unlocked, '{}')
+        unlocked_rejected = False
+    except RuntimeError:
+        unlocked_rejected = True
+    check("deterministic session temporaries require the session-family lease",
+          unlocked_rejected and not unlocked.exists()
+          and not sessions._atomic_temp_path(unlocked).exists())
     checkpoint_payload = {"schema_version": 99, "opaque": ["preserve-me"]}
     session_saved = sessions.save(
         sp, [{"role": "user", "content": "hi"}], d, name="my session",
@@ -4336,7 +4345,68 @@ def test_sessions_and_worktree():
     if _os.name == "posix":
         check("session files are private", _stat.S_IMODE(sp.stat().st_mode) == 0o600)
         check("session directories are private", _stat.S_IMODE(sp.parent.stat().st_mode) == 0o700)
-    check("session save leaves no temporary files", not list(sp.parent.glob(f".{sp.name}.*.tmp")))
+    check("session save leaves no temporary files", not sessions._atomic_temp_path(sp).exists())
+
+    # Pause a real child immediately after opening its deterministic temporary, then kill it while
+    # it owns the family lease.
+    # The committed generation must remain readable, the kernel lease must release, and the next
+    # writer must reclaim only this target's orphan before advancing normally.
+    crash_write_session = sessions.new_path(d)
+    sessions.save(crash_write_session, [{"role": "user", "content": "before crash"}], d)
+    crash_write_dir = _P(_tf.mkdtemp())
+    crash_write_marker = crash_write_dir / "temp-path"
+    crash_write_child = r'''import pathlib
+import sys
+import time
+from dgc import sessions
+
+path, root, marker = map(pathlib.Path, sys.argv[1:4])
+original_open = sessions._open_atomic_temporary
+def paused_open(path):
+    fd, temporary = original_open(path)
+    marker.write_text(str(temporary))
+    time.sleep(30)
+    return fd, temporary
+sessions._open_atomic_temporary = paused_open
+revision = sessions.load_record(path, root)["revision"]
+sessions.save(path, [{"role": "user", "content": "never committed"}], root,
+              expected_revision=revision, expected_exists=True)
+'''
+    crash_writer = _sp.Popen(
+        [sys.executable, "-c", crash_write_child, str(crash_write_session), str(d),
+         str(crash_write_marker)], cwd=str(PROJECT), stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
+    crash_deadline = __import__("time").monotonic() + 5
+    while (not crash_write_marker.exists() and crash_writer.poll() is None
+           and __import__("time").monotonic() < crash_deadline):
+        __import__("time").sleep(0.01)
+    paused_at_temp = crash_write_marker.exists() and crash_writer.poll() is None
+    if crash_writer.poll() is None:
+        crash_writer.kill()
+    crash_stdout, crash_stderr = crash_writer.communicate(timeout=5)
+    orphan = (_P(crash_write_marker.read_text()) if crash_write_marker.exists()
+              else crash_write_session.with_name("missing-temp"))
+    orphan_survived_kill = orphan.exists()
+    sibling_temp = sessions._atomic_temp_path(sp2)
+    sibling_temp.write_text("belongs to another session target")
+    after_kill = sessions.load_record(crash_write_session, d)
+    reclaimed_on_reopen = not orphan.exists()
+    recovered_write = sessions.save(
+        crash_write_session, [{"role": "user", "content": "after crash"}], d,
+        expected_revision=after_kill.get("revision"), expected_exists=True)
+    recovered_record = sessions.load_record(crash_write_session, d)
+    check("session atomic writes survive a forced mid-temp kill and reclaim the orphan",
+          paused_at_temp and orphan_survived_kill
+          and after_kill.get("revision") == 1
+          and after_kill.get("messages", [{}])[0].get("content") == "before crash"
+          and recovered_write and recovered_record.get("revision") == 2
+          and recovered_record.get("messages", [{}])[0].get("content") == "after crash"
+          and reclaimed_on_reopen and not orphan.exists()
+          and sibling_temp.exists()
+          and not sessions._atomic_temp_path(crash_write_session).exists(),
+          f"rc={crash_writer.returncode} stdout={crash_stdout!r} stderr={crash_stderr!r}")
+    sibling_temp.unlink(missing_ok=True)
+    sessions.delete(crash_write_session, d)
+
     check("session name is saved", sessions.name_of(sp, d) == "my session")
     check("session provider usage survives resume",
           sessions.usage_of(sp, d) == {"input_tokens": 123, "output_tokens": 45,
@@ -4479,9 +4549,14 @@ def test_sessions_and_worktree():
           and workspace_sidecar.suffix == ".workspace"
           and (_stat.S_IMODE(workspace_sidecar.stat().st_mode) == 0o600
                if _os.name == "posix" else True))
+    orphan_sidecar_temps = [sessions._atomic_temp_path(path) for path in
+                            (sidecar, metrics, workspace_sidecar)]
+    for temporary in orphan_sidecar_temps:
+        temporary.write_text("orphan from a crashed family writer")
     check("session delete removes file and sidecar",
           sessions.delete(sp, d) is True and not sp.exists() and not sidecar.exists()
-          and not metrics.exists() and not workspace_sidecar.exists())
+          and not metrics.exists() and not workspace_sidecar.exists()
+          and not any(path.exists() for path in orphan_sidecar_temps))
     check("session delete on a missing file is False", sessions.delete(sp, d) is False)
     outside = _P(_tf.mkdtemp()) / "outside.json"
     outside.write_text('{"messages": []}')

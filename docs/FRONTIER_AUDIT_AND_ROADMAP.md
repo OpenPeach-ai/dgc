@@ -40,7 +40,7 @@ the editor registries: those are external release actions that require a reviewe
 |---|---|---|
 | Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including bounded descendant discovery, exact model-visible grep reads, and late parent swaps across structured files, repository maps, static code intelligence, checkpoints and recovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
-| Runtime correctness | Atomic file/session writes, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted foreground/background output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader crash-fuzz campaigns |
+| Runtime correctness | Atomic file/session writes with bounded post-crash temp reclamation, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted foreground/background output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader cross-platform crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
@@ -106,7 +106,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 754 / 754 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 756 / 756 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -414,7 +414,12 @@ lease; a stale current generation may merge monotonic counters but cannot recrea
 or contaminate a colliding new path. Legacy records migrate from revision zero, malformed identity or
 revision fields fail closed, and an Agent that loses the race stops before its next model request or
 workspace edit. Deterministic multiprocess tests cover simultaneous writers, monotonic loser metrics,
-normal handoff, crash release, stale deletion, sidecar resurrection, and legacy migration.
+normal handoff, crash release, stale deletion, sidecar resurrection, and legacy migration. Atomic
+session/metrics/plan/workspace writes now use and reclaim one deterministic same-target temporary
+file only while holding that family lease, keeping recovery O(1). A real child-process regression
+pauses immediately after opening that temp, is killed while holding the lease, proves the prior
+generation remains readable, then proves the next
+locked reopen removes the orphan and the next CAS writer advances cleanly.
 The session family now also has a separate crash-released foreground-turn lease. A process must own
 it and revalidate the exact generation before `SessionStart`, prompt hooks, model requests, or tools;
 it retains ownership through checkpointing and the final transcript commit. Concurrent turns and
@@ -547,7 +552,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 754/754 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 756/756 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -795,7 +800,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 754/754 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 756/756 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
