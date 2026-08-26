@@ -16,11 +16,11 @@ import base64
 import hashlib
 import json
 import os
-import stat
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from .workspace import capture_file_state, restore_file_state
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -52,79 +52,14 @@ class WorkspaceSnapshot:
 
 
 def _capture(path: Path, max_bytes: int | None = None) -> _Snapshot:
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return _Snapshot("missing")
-    if stat.S_ISLNK(info.st_mode):
-        data = os.fsencode(os.readlink(path))
-        if max_bytes is not None and len(data) > max(0, max_bytes):
-            raise OSError(f"checkpoint target exceeds its remaining snapshot budget: {path}")
-        return _Snapshot("symlink", data, 0o777)
-    if not stat.S_ISREG(info.st_mode):
-        raise OSError(f"checkpoint target is not a regular file: {path}")
-    if max_bytes is None:
-        data = path.read_bytes()
-    else:
-        limit = max(0, max_bytes)
-        if info.st_size > limit:
-            raise OSError(f"checkpoint target exceeds its remaining snapshot budget: {path}")
-        # Read at most one byte beyond the budget so a file growing after lstat cannot cause an
-        # unbounded allocation before the post-read check.
-        with path.open("rb") as handle:
-            data = handle.read(limit + 1)
-        if len(data) > limit:
-            raise OSError(f"checkpoint target grew beyond its remaining snapshot budget: {path}")
-    return _Snapshot("file", data, stat.S_IMODE(info.st_mode))
+    kind, data, mode = capture_file_state(path, maximum=max_bytes)
+    return _Snapshot(kind, data, mode)
 
 
 def _restore(path: Path, snapshot: _Snapshot) -> bool:
-    try:
-        current = path.lstat()
-    except FileNotFoundError:
-        current = None
-    if current is not None and stat.S_ISDIR(current.st_mode):
+    if not isinstance(snapshot, _Snapshot):
         return False
-    if snapshot.kind == "missing":
-        if current is not None:
-            path.unlink()
-        return True
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if snapshot.kind == "symlink":
-        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-        os.close(fd)
-        tmp = Path(tmp_name)
-        tmp.unlink()
-        try:
-            os.symlink(os.fsdecode(snapshot.data), tmp)
-            os.replace(tmp, path)
-            return True
-        finally:
-            try:
-                tmp.unlink()
-            except FileNotFoundError:
-                pass
-    if snapshot.kind != "file":
-        return False
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".dgc-rewind",
-                                    dir=str(path.parent))
-    tmp = Path(tmp_name)
-    try:
-        try:
-            os.fchmod(fd, snapshot.mode)
-        except (AttributeError, OSError):
-            pass
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(snapshot.data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-        return True
-    finally:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
+    return restore_file_state(path, snapshot.kind, snapshot.data, snapshot.mode)
 
 
 class CheckpointManager:

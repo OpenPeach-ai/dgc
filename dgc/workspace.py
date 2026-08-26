@@ -224,8 +224,9 @@ def atomic_write_bytes(path: Path | str, data: bytes, *,
     payload = bytes(data)
     if expected is not _ANY_VERSION and expected is not None and not isinstance(expected, FileVersion):
         raise TypeError("expected must be a FileVersion, None, or omitted")
-    if mode is not None and (not isinstance(mode, int) or mode < 0 or mode > 0o777):
-        raise ValueError("mode must be an integer between 0 and 0o777")
+    if mode is not None and (not isinstance(mode, int) or isinstance(mode, bool)
+                             or mode < 0 or mode > 0o7777):
+        raise ValueError("mode must be an integer between 0 and 0o7777")
     if _dirfd_supported():
         parent_fd = _open_parent_fd(target, create=True)
         temp_name = ""
@@ -262,6 +263,10 @@ def atomic_write_bytes(path: Path | str, data: bytes, *,
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(payload)
                     handle.flush()
+                    try:
+                        os.fchmod(handle.fileno(), file_mode)
+                    except (AttributeError, OSError):
+                        pass
                     os.fsync(handle.fileno())
             except BaseException:
                 try:
@@ -315,6 +320,10 @@ def atomic_write_bytes(path: Path | str, data: bytes, *,
         with os.fdopen(fd, "wb") as handle:
             handle.write(payload)
             handle.flush()
+            try:
+                os.fchmod(handle.fileno(), file_mode)
+            except (AttributeError, OSError):
+                pass
             os.fsync(handle.fileno())
         _fallback_parent(target, create=False)
         try:
@@ -330,6 +339,220 @@ def atomic_write_bytes(path: Path | str, data: bytes, *,
         os.replace(temp_name, target)
         temp_name = ""
         return _version(target.stat())
+    finally:
+        if temp_name:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+
+
+def capture_file_state(path: Path | str, *, maximum: int | None = None) -> tuple[str, bytes, int]:
+    """Capture exact regular-file, symlink, or missing state through a frozen canonical path."""
+    target = _absolute_frozen(path)
+    if maximum is not None and maximum < 0:
+        raise ValueError("maximum must be non-negative")
+    if _dirfd_supported():
+        try:
+            parent_fd = _open_parent_fd(target, create=False)
+        except FileNotFoundError:
+            return "missing", b"", 0
+        try:
+            try:
+                info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return "missing", b"", 0
+            before = _version(info)
+            if stat.S_ISLNK(info.st_mode):
+                value = os.readlink(target.name, dir_fd=parent_fd)
+                after = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+                if _version(after) != before:
+                    raise WorkspaceBoundaryError(
+                        f"symlink changed while it was being captured: {target}")
+                data = os.fsencode(value)
+                if maximum is not None and len(data) > maximum:
+                    raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
+                return "symlink", data, 0o777
+            if not stat.S_ISREG(info.st_mode):
+                raise WorkspaceBoundaryError(f"checkpoint target is not a file or symlink: {target}")
+            flags = (os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+            fd = os.open(target.name, flags, dir_fd=parent_fd)
+            try:
+                opened = os.fstat(fd)
+                if _version(opened) != before:
+                    raise WorkspaceBoundaryError(
+                        f"file changed while it was being captured: {target}")
+                if maximum is not None and opened.st_size > maximum:
+                    raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
+                chunks: list[bytes] = []
+                total = 0
+                while maximum is None or total <= maximum:
+                    size = 65_536 if maximum is None else min(65_536, maximum + 1 - total)
+                    if size <= 0:
+                        break
+                    chunk = os.read(fd, size)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                if maximum is not None and total > maximum:
+                    raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
+                after = os.fstat(fd)
+                if _version(after) != before:
+                    raise WorkspaceBoundaryError(
+                        f"file changed while it was being captured: {target}")
+                return "file", b"".join(chunks), stat.S_IMODE(after.st_mode)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+
+    try:
+        _fallback_parent(target, create=False)
+        info = target.lstat()
+    except FileNotFoundError:
+        return "missing", b"", 0
+    before = _version(info)
+    if stat.S_ISLNK(info.st_mode):
+        value = os.readlink(target)
+        after = target.lstat()
+        if _version(after) != before:
+            raise WorkspaceBoundaryError(f"symlink changed while it was being captured: {target}")
+        data = os.fsencode(value)
+        if maximum is not None and len(data) > maximum:
+            raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
+        return "symlink", data, 0o777
+    if not stat.S_ISREG(info.st_mode):
+        raise WorkspaceBoundaryError(f"checkpoint target is not a file or symlink: {target}")
+    captured = read_regular_bytes(target, maximum=maximum)
+    assert captured is not None
+    data, version = captured
+    if version != before:
+        raise WorkspaceBoundaryError(f"file changed while it was being captured: {target}")
+    return "file", data, stat.S_IMODE(info.st_mode)
+
+
+def _entry_version_at(parent_fd: int, name: str) -> tuple[os.stat_result | None, FileVersion | None]:
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None, None
+    return info, _version(info)
+
+
+def restore_file_state(path: Path | str, kind: str, data: bytes = b"", mode: int = 0) -> bool:
+    """Atomically restore exact file/symlink/absence state without following late parent links."""
+    target = _absolute_frozen(path)
+    if kind not in ("missing", "file", "symlink") or not isinstance(data, bytes):
+        raise ValueError("invalid file-state snapshot")
+    if (not isinstance(mode, int) or isinstance(mode, bool) or mode < 0 or mode > 0o7777
+            or (kind == "missing" and data)):
+        raise ValueError("invalid file-state mode or missing payload")
+    if kind == "file":
+        atomic_write_bytes(target, data, mode=mode)
+        return True
+
+    if _dirfd_supported():
+        try:
+            parent_fd = _open_parent_fd(target, create=(kind == "symlink"))
+        except FileNotFoundError:
+            return kind == "missing"
+        temp_name = ""
+        try:
+            current_info, current = _entry_version_at(parent_fd, target.name)
+            if current_info is not None and stat.S_ISDIR(current_info.st_mode):
+                return False
+            if kind == "missing":
+                if current_info is None:
+                    return True
+                check_info, check = _entry_version_at(parent_fd, target.name)
+                if check_info is None or check != current:
+                    raise WorkspaceBoundaryError(
+                        f"file changed while its missing state was being restored: {target}")
+                os.unlink(target.name, dir_fd=parent_fd)
+                try:
+                    os.fsync(parent_fd)
+                except OSError:
+                    pass
+                return True
+
+            for _ in range(128):
+                candidate = f".{target.name}.{secrets.token_hex(8)}.tmp"
+                try:
+                    os.symlink(os.fsdecode(data), candidate, dir_fd=parent_fd)
+                    temp_name = candidate
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise OSError(f"could not allocate a private temporary symlink beside {target}")
+            check_info, check = _entry_version_at(parent_fd, target.name)
+            if ((check_info is not None and stat.S_ISDIR(check_info.st_mode))
+                    or check != current):
+                raise WorkspaceBoundaryError(
+                    f"file changed while its symlink state was being restored: {target}")
+            os.replace(temp_name, target.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            temp_name = ""
+            try:
+                os.fsync(parent_fd)
+            except OSError:
+                pass
+            return True
+        finally:
+            if temp_name:
+                try:
+                    os.unlink(temp_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+            os.close(parent_fd)
+
+    try:
+        parent = _fallback_parent(target, create=(kind == "symlink"))
+    except FileNotFoundError:
+        return kind == "missing"
+    try:
+        current_info = target.lstat()
+    except FileNotFoundError:
+        current_info = None
+    if current_info is not None and stat.S_ISDIR(current_info.st_mode):
+        return False
+    current = _version(current_info) if current_info is not None else None
+    if kind == "missing":
+        if current_info is None:
+            return True
+        _fallback_parent(target, create=False)
+        check = _version(target.lstat())
+        if check != current:
+            raise WorkspaceBoundaryError(
+                f"file changed while its missing state was being restored: {target}")
+        target.unlink()
+        return True
+
+    temp_name = ""
+    try:
+        for _ in range(128):
+            candidate = str(parent / f".{target.name}.{secrets.token_hex(8)}.tmp")
+            try:
+                os.symlink(os.fsdecode(data), candidate)
+                temp_name = candidate
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OSError(f"could not allocate a private temporary symlink beside {target}")
+        _fallback_parent(target, create=False)
+        try:
+            check_info = target.lstat()
+        except FileNotFoundError:
+            check_info = None
+        check = _version(check_info) if check_info is not None else None
+        if ((check_info is not None and stat.S_ISDIR(check_info.st_mode)) or check != current):
+            raise WorkspaceBoundaryError(
+                f"file changed while its symlink state was being restored: {target}")
+        os.replace(temp_name, target)
+        temp_name = ""
+        return True
     finally:
         if temp_name:
             try:

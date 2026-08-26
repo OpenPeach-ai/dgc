@@ -4789,6 +4789,114 @@ def test_durable_checkpoints():
           not fresh_unsafe.record_file(str(safe_parent / "new.txt"))
           and not (external / "new.txt").exists())
 
+    import dgc.checkpoints as _checkpoint_module
+    late_capture_root = _P(_tf.mkdtemp()).resolve()
+    late_capture_parent = late_capture_root / "safe"
+    late_capture_held = late_capture_root / "held"
+    late_capture_parent.mkdir()
+    late_capture_target = late_capture_parent / "target.txt"
+    late_capture_target.write_text("inside capture state\n")
+    late_capture_outside = _P(_tf.mkdtemp()).resolve()
+    (late_capture_outside / "target.txt").write_text("outside capture sentinel\n")
+    late_capture_manager = _Checkpoints(late_capture_root)
+    late_capture_manager.open(3, "late capture", [{"role": "user", "content": "edit"}])
+    real_checkpoint_capture = _checkpoint_module._capture
+    capture_swapped = False
+
+    def swap_before_checkpoint_capture(path, maximum=None):
+        nonlocal capture_swapped
+        if not capture_swapped:
+            late_capture_parent.rename(late_capture_held)
+            late_capture_parent.symlink_to(late_capture_outside, target_is_directory=True)
+            capture_swapped = True
+        return real_checkpoint_capture(path, maximum)
+
+    _checkpoint_module._capture = swap_before_checkpoint_capture
+    try:
+        late_capture_result = late_capture_manager.record_file(str(late_capture_target))
+    finally:
+        _checkpoint_module._capture = real_checkpoint_capture
+        if late_capture_parent.is_symlink():
+            late_capture_parent.unlink()
+        if late_capture_held.exists():
+            late_capture_held.rename(late_capture_parent)
+    check("checkpoint capture refuses a parent symlink introduced after validation",
+          not late_capture_result
+          and str(late_capture_target) not in late_capture_manager.points[-1]["files"]
+          and (late_capture_outside / "target.txt").read_text() == "outside capture sentinel\n")
+
+    late_restore_root = _P(_tf.mkdtemp()).resolve()
+    late_restore_parent = late_restore_root / "safe"
+    late_restore_held = late_restore_root / "held"
+    late_restore_parent.mkdir()
+    late_restore_target = late_restore_parent / "target.txt"
+    late_restore_target.write_text("checkpoint original\n")
+    late_restore_outside = _P(_tf.mkdtemp()).resolve()
+    late_restore_outside_target = late_restore_outside / "target.txt"
+    late_restore_outside_target.write_text("outside restore sentinel\n")
+    late_restore_manager = _Checkpoints(late_restore_root)
+    late_restore_manager.open(4, "late restore", [{"role": "user", "content": "edit"}])
+    late_restore_manager.record_file(str(late_restore_target))
+    late_restore_target.write_text("current inside state\n")
+    real_checkpoint_restore = _checkpoint_module._restore
+    restore_swapped = False
+
+    def swap_before_checkpoint_restore(path, snapshot):
+        nonlocal restore_swapped
+        if not restore_swapped:
+            late_restore_parent.rename(late_restore_held)
+            late_restore_parent.symlink_to(late_restore_outside, target_is_directory=True)
+            restore_swapped = True
+        return real_checkpoint_restore(path, snapshot)
+
+    _checkpoint_module._restore = swap_before_checkpoint_restore
+    try:
+        late_restore_result = late_restore_manager.rewind_state(0)
+        outside_restore_after = late_restore_outside_target.read_text()
+    finally:
+        _checkpoint_module._restore = real_checkpoint_restore
+        if late_restore_parent.is_symlink():
+            late_restore_parent.unlink()
+        if late_restore_held.exists():
+            late_restore_held.rename(late_restore_parent)
+    check("checkpoint rewind refuses a parent symlink introduced after rollback capture",
+          late_restore_result == (-1, 0, None)
+          and outside_restore_after == "outside restore sentinel\n"
+          and late_restore_target.read_text() == "current inside state\n"
+          and len(late_restore_manager.listing()) == 1,
+          repr(late_restore_result))
+
+    import dgc.workspace as _checkpoint_workspace
+    fallback_checkpoint_root = _P(_tf.mkdtemp()).resolve()
+    fallback_checkpoint_file = fallback_checkpoint_root / "mode.bin"
+    fallback_checkpoint_file.write_bytes(b"before fallback")
+    fallback_checkpoint_file.chmod(0o751)
+    fallback_checkpoint_link = fallback_checkpoint_root / "alias"
+    fallback_checkpoint_link.symlink_to("mode.bin")
+    fallback_checkpoint_created = fallback_checkpoint_root / "created.txt"
+    fallback_checkpoints = _Checkpoints(fallback_checkpoint_root)
+    real_checkpoint_dirfd = _checkpoint_workspace._dirfd_supported
+    _checkpoint_workspace._dirfd_supported = lambda: False
+    try:
+        fallback_checkpoints.open(5, "portable exact state", [])
+        fallback_captured = all(fallback_checkpoints.record_file(str(path)) for path in (
+            fallback_checkpoint_file, fallback_checkpoint_link, fallback_checkpoint_created))
+        fallback_checkpoint_file.write_bytes(b"after fallback")
+        fallback_checkpoint_file.chmod(0o600)
+        fallback_checkpoint_link.unlink(); fallback_checkpoint_link.symlink_to("created.txt")
+        fallback_checkpoint_created.write_text("created\n")
+        fallback_checkpoint_result = fallback_checkpoints.rewind_state(0)
+    finally:
+        _checkpoint_workspace._dirfd_supported = real_checkpoint_dirfd
+    check("non-dirfd checkpoint fallback restores bytes, mode, symlink, and absence",
+          fallback_captured and fallback_checkpoint_result[:2] == (5, 3)
+          and fallback_checkpoint_file.read_bytes() == b"before fallback"
+          and (os.name != "posix" or _stat.S_IMODE(fallback_checkpoint_file.stat().st_mode) == 0o751)
+          and fallback_checkpoint_link.is_symlink()
+          and os.readlink(fallback_checkpoint_link) == "mode.bin"
+          and not fallback_checkpoint_created.exists(),
+          repr(fallback_checkpoint_result))
+
     failed_open = _Checkpoints(root, on_change=lambda: False)
     check("checkpoint creation rolls back when its durable save fails",
           not failed_open.open(1, "save failure", []) and failed_open.listing() == [])
