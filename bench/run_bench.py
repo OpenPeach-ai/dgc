@@ -890,6 +890,7 @@ def aggregate(jsonl_path: Path) -> dict:
         p = per.setdefault(r["lang"], {"n": 0, "p1": 0, "p2": 0, "agent_s": 0.0,
                                        "edit_fails": 0, "timeouts": 0, "input_tokens": 0,
                                        "output_tokens": 0, "reasoning_tokens": 0,
+                                       "provider_requests": 0,
                                        "usage_rounds": 0, "rounds": 0,
                                        "provider_duration_s": 0.0,
                                        "provider_wall_s": 0.0,
@@ -933,17 +934,22 @@ def aggregate(jsonl_path: Path) -> dict:
                 p["usage_rounds"] += 1
                 for key in ("input_tokens", "output_tokens", "reasoning_tokens"):
                     p[key] += max(0, int(usage.get(key, 0) or 0))
-                timing_keys = ("provider_duration_s", "provider_wall_s",
-                               "provider_max_duration_s")
-                if all(key in usage for key in timing_keys):
+                p["provider_requests"] += max(0, int(usage.get("requests", 0) or 0))
+                timing_values = []
+                for key in ("provider_duration_s", "provider_wall_s",
+                            "provider_max_duration_s"):
+                    try:
+                        value = float(usage[key]) if usage.get(key) is not None else None
+                    except (KeyError, TypeError, ValueError):
+                        value = None
+                    timing_values.append(
+                        value if value is not None and math.isfinite(value) and value >= 0 else None)
+                if all(value is not None for value in timing_values):
                     p["provider_timing_rounds"] += 1
-                    p["provider_duration_s"] += max(
-                        0.0, float(usage.get("provider_duration_s", 0) or 0))
-                    p["provider_wall_s"] += max(
-                        0.0, float(usage.get("provider_wall_s", 0) or 0))
+                    p["provider_duration_s"] += timing_values[0]
+                    p["provider_wall_s"] += timing_values[1]
                     p["provider_max_duration_s"] = max(
-                        p["provider_max_duration_s"],
-                        max(0.0, float(usage.get("provider_max_duration_s", 0) or 0)))
+                        p["provider_max_duration_s"], timing_values[2])
     return per
 
 
@@ -952,14 +958,16 @@ def print_report(jsonl_path: Path, langs: list[str] | None = None) -> None:
     order = langs or sorted(per)
     tot = {"n": 0, "p1": 0, "p2": 0, "agent_s": 0.0, "edit_fails": 0,
            "timeouts": 0, "input_tokens": 0, "output_tokens": 0,
-           "reasoning_tokens": 0, "usage_rounds": 0, "rounds": 0,
+           "reasoning_tokens": 0, "provider_requests": 0,
+           "usage_rounds": 0, "rounds": 0,
            "provider_duration_s": 0.0, "provider_wall_s": 0.0,
            "provider_max_duration_s": 0.0, "provider_timing_rounds": 0,
            "builtin_tool_s": 0.0, "builtin_tool_samples": 0,
            "builtin_timing_rounds": 0, "by_tool_us": {}, "by_tool_samples": {}}
     print(f"\n==== {Path(jsonl_path).name} ====")
     print(f"{'lang':11s} {'n':>4} {'pass@1':>14} {'pass@2':>14} {'avg_s':>7} "
-          f"{'prov_s':>7} {'tool_s':>7} {'avg_out':>9} {'editfail':>8} {'t/o':>4}")
+          f"{'prov_s':>7} {'other_s':>7} {'tool_s':>7} {'req/t':>6} {'avg_out':>9} "
+          f"{'out/req':>8} {'editfail':>8} {'t/o':>4}")
     for lang in order:
         p = per.get(lang)
         if not p:
@@ -975,25 +983,43 @@ def print_report(jsonl_path: Path, langs: list[str] | None = None) -> None:
         avg = p["agent_s"] / p["n"] if p["n"] else 0
         avg_out = (str(round(p["output_tokens"] / p["n"]))
                    if p["usage_rounds"] == p["rounds"] else "?")
+        avg_requests = (f"{p['provider_requests'] / p['n']:.1f}"
+                        if p["usage_rounds"] == p["rounds"] else "?")
+        output_per_request = (str(round(p["output_tokens"] / p["provider_requests"]))
+                              if (p["usage_rounds"] == p["rounds"]
+                                  and p["provider_requests"] > 0) else "?")
         avg_provider = (f"{p['provider_wall_s'] / p['n']:.0f}"
                         if p["provider_timing_rounds"] == p["rounds"] else "?")
+        avg_outside_provider = (
+            f"{max(0.0, p['agent_s'] - p['provider_wall_s']) / p['n']:.0f}"
+            if p["provider_timing_rounds"] == p["rounds"] else "?")
         avg_tool = (f"{p['builtin_tool_s'] / p['n']:.1f}"
                     if p["builtin_timing_rounds"] == p["rounds"] else "?")
         print(f"{lang:11s} {p['n']:4d} {p['p1']:4d} ({100*p['p1']/p['n']:5.1f}%) "
               f"{p['p2']:4d} ({100*p['p2']/p['n']:5.1f}%) {avg:7.0f} "
-              f"{avg_provider:>7} {avg_tool:>7} {avg_out:>9} "
+              f"{avg_provider:>7} {avg_outside_provider:>7} {avg_tool:>7} "
+              f"{avg_requests:>6} {avg_out:>9} {output_per_request:>8} "
               f"{p['edit_fails']:8d} {p['timeouts']:4d}")
     if tot["n"]:
         avg = tot["agent_s"] / tot["n"]
         avg_out = (str(round(tot["output_tokens"] / tot["n"]))
                    if tot["usage_rounds"] == tot["rounds"] else "?")
+        avg_requests = (f"{tot['provider_requests'] / tot['n']:.1f}"
+                        if tot["usage_rounds"] == tot["rounds"] else "?")
+        output_per_request = (str(round(tot["output_tokens"] / tot["provider_requests"]))
+                              if (tot["usage_rounds"] == tot["rounds"]
+                                  and tot["provider_requests"] > 0) else "?")
         avg_provider = (f"{tot['provider_wall_s'] / tot['n']:.0f}"
                         if tot["provider_timing_rounds"] == tot["rounds"] else "?")
+        avg_outside_provider = (
+            f"{max(0.0, tot['agent_s'] - tot['provider_wall_s']) / tot['n']:.0f}"
+            if tot["provider_timing_rounds"] == tot["rounds"] else "?")
         avg_tool = (f"{tot['builtin_tool_s'] / tot['n']:.1f}"
                     if tot["builtin_timing_rounds"] == tot["rounds"] else "?")
         print(f"{'TOTAL':11s} {tot['n']:4d} {tot['p1']:4d} ({100*tot['p1']/tot['n']:5.1f}%) "
               f"{tot['p2']:4d} ({100*tot['p2']/tot['n']:5.1f}%) {avg:7.0f} "
-              f"{avg_provider:>7} {avg_tool:>7} {avg_out:>9} "
+              f"{avg_provider:>7} {avg_outside_provider:>7} {avg_tool:>7} "
+              f"{avg_requests:>6} {avg_out:>9} {output_per_request:>8} "
               f"{tot['edit_fails']:8d} {tot['timeouts']:4d}")
         if tot["builtin_timing_rounds"] == tot["rounds"] and tot["by_tool_us"]:
             ranked = sorted(tot["by_tool_us"].items(), key=lambda item: (-item[1], item[0]))
@@ -1019,8 +1045,10 @@ def summary_line(rec: dict) -> str:
                                     and int(usage.get("requests", 0) or 0) > 0
                                     and usage.get("synchronized", True) is not False
                                     for usage in usages) else None)
-    token_text = f"  out={out_tokens}" if out_tokens is not None else ""
-    return f"{mark} {rec['lang']}/{rec['ex']}  solved@{rnd}  {t:.0f}s{token_text}  editfail={ef}"
+    requests = (sum(int((usage or {}).get("requests", 0) or 0) for usage in usages)
+                if out_tokens is not None else None)
+    usage_text = (f"  req={requests}  out={out_tokens}" if requests is not None else "")
+    return f"{mark} {rec['lang']}/{rec['ex']}  solved@{rnd}  {t:.0f}s{usage_text}  editfail={ef}"
 
 
 # ------------------------------------------------------------------- main -----

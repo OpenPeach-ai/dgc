@@ -53,20 +53,22 @@ def load(path: Path) -> dict:
     agent_s = sum(float((rd.get("agent") or rd.get("dgc") or {}).get("time") or 0) for rd in rounds)
     edit_fails = sum(int((rd.get("stats") or {}).get("edit_fails") or 0) for rd in rounds)
     usages = [((rd.get("agent") or rd.get("dgc") or {}).get("usage")) for rd in rounds]
-    usage_rounds = sum(isinstance(usage, dict)
-                       and int(usage.get("requests", 0) or 0) > 0
-                       and usage.get("synchronized", True) is not False
-                       for usage in usages)
-    input_tokens = sum(int((usage or {}).get("input_tokens", 0) or 0) for usage in usages)
-    output_tokens = sum(int((usage or {}).get("output_tokens", 0) or 0) for usage in usages)
-    reasoning_tokens = sum(int((usage or {}).get("reasoning_tokens", 0) or 0) for usage in usages)
+    attributed_usages = [
+        usage for usage in usages
+        if (isinstance(usage, dict) and int(usage.get("requests", 0) or 0) > 0
+            and usage.get("synchronized", True) is not False)
+    ]
+    usage_rounds = len(attributed_usages)
+    input_tokens = sum(int(usage.get("input_tokens", 0) or 0) for usage in attributed_usages)
+    output_tokens = sum(int(usage.get("output_tokens", 0) or 0) for usage in attributed_usages)
+    reasoning_tokens = sum(int(usage.get("reasoning_tokens", 0) or 0)
+                           for usage in attributed_usages)
     provider_requests = sum(
         max(0, int(usage.get("requests", 0) or 0))
-        for usage in usages
-        if isinstance(usage, dict) and usage.get("synchronized", True) is not False)
+        for usage in attributed_usages)
     provider_transports: dict[str, int] = {}
-    for usage in usages:
-        values = usage.get("provider_transports") if isinstance(usage, dict) else None
+    for usage in attributed_usages:
+        values = usage.get("provider_transports")
         if not isinstance(values, dict):
             continue
         for name in sorted(values):
@@ -75,17 +77,16 @@ def load(path: Path) -> dict:
             provider_transports[name] = provider_transports.get(name, 0) + max(
                 0, int(values.get(name, 0) or 0))
     def timing_value(usage: dict, key: str) -> float | None:
+        if key not in usage or usage.get(key) is None:
+            return None
         try:
-            value = float(usage.get(key, 0) or 0)
+            value = float(usage[key])
         except (TypeError, ValueError):
             return None
         return value if math.isfinite(value) and value >= 0 else None
 
     provider_timings = []
-    for usage in usages:
-        if (not isinstance(usage, dict) or int(usage.get("requests", 0) or 0) <= 0
-                or usage.get("synchronized", True) is False):
-            continue
+    for usage in attributed_usages:
         values = tuple(timing_value(usage, key) for key in
                        ("provider_duration_s", "provider_wall_s", "provider_max_duration_s"))
         if all(value is not None for value in values):
@@ -125,6 +126,42 @@ def load(path: Path) -> dict:
             "builtin_timing_rounds": builtin_timing_rounds,
             "builtin_tool_s": builtin_tool_s, "builtin_tool_samples": builtin_tool_samples,
             "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples}
+
+
+def efficiency_metrics(run: dict) -> dict[str, float | None]:
+    """Derive honest per-task/generation metrics only from complete attribution.
+
+    ``provider_wall_s`` is the union of active provider-request intervals, so subtracting it from
+    agent wall time exposes time spent in the harness, tools, approvals, and gaps between generations.
+    It deliberately does not pretend to assign that remainder to any one subsystem.
+    """
+    tasks = max(0, int(run.get("n") or 0))
+    rounds = max(0, int(run.get("rounds") or 0))
+    usage_complete = rounds > 0 and int(run.get("usage_rounds") or 0) == rounds
+    timing_complete = rounds > 0 and int(run.get("provider_timing_rounds") or 0) == rounds
+    requests = max(0, int(run.get("provider_requests") or 0))
+
+    def per_task(key: str) -> float | None:
+        return float(run.get(key) or 0) / tasks if usage_complete and tasks else None
+
+    outside_provider_s = max(
+        0.0, float(run.get("agent_s") or 0) - float(run.get("provider_wall_s") or 0))
+    return {
+        "provider_requests_per_task": requests / tasks if usage_complete and tasks else None,
+        "input_tokens_per_task": per_task("input_tokens"),
+        "output_tokens_per_task": per_task("output_tokens"),
+        "output_tokens_per_request": (
+            float(run.get("output_tokens") or 0) / requests
+            if usage_complete and requests else None),
+        "agent_s_per_request": (
+            float(run.get("agent_s") or 0) / requests
+            if usage_complete and requests else None),
+        "provider_wall_s_per_request": (
+            float(run.get("provider_wall_s") or 0) / requests
+            if timing_complete and requests else None),
+        "outside_provider_s_per_task": (
+            outside_provider_s / tasks if timing_complete and tasks else None),
+    }
 
 
 def publication_errors(runs: list[dict]) -> list[str]:
@@ -214,25 +251,34 @@ def main() -> None:
         parser.error("run provenance/settings differ for: " + ", ".join(incompatible))
 
     print(f"{'engine':12s} {'n':>4} {'pass@1 (95% CI)':>24} {'pass@2 (95% CI)':>24} "
-          f"{'avg_s':>8} {'prov_s':>8} {'tool_s':>8} {'avg_in':>9} {'avg_out':>9} "
-          f"{'t/o':>5} {'errors':>7} {'editfail':>9}")
+          f"{'avg_s':>8} {'prov_s':>8} {'other_s':>8} {'tool_s':>8} {'req/t':>6} "
+          f"{'avg_in':>9} {'avg_out':>9} {'out/req':>8} {'t/o':>5} {'errors':>7} "
+          f"{'editfail':>9}")
     comparison = []
     for run in sorted(runs, key=lambda r: (-r["p2"], r["agent_s"], r["engine"])):
         lo1, hi1 = wilson(run["p1"], run["n"])
         lo2, hi2 = wilson(run["p2"], run["n"])
         avg = run["agent_s"] / run["n"]
-        avg_in = (str(round(run["input_tokens"] / run["n"]))
-                  if run["usage_rounds"] == run["rounds"] else "?")
-        avg_out = (str(round(run["output_tokens"] / run["n"]))
-                   if run["usage_rounds"] == run["rounds"] else "?")
+        efficiency = efficiency_metrics(run)
+        avg_in = (str(round(efficiency["input_tokens_per_task"]))
+                  if efficiency["input_tokens_per_task"] is not None else "?")
+        avg_out = (str(round(efficiency["output_tokens_per_task"]))
+                   if efficiency["output_tokens_per_task"] is not None else "?")
+        avg_requests = (f"{efficiency['provider_requests_per_task']:.1f}"
+                        if efficiency["provider_requests_per_task"] is not None else "?")
+        output_per_request = (str(round(efficiency["output_tokens_per_request"]))
+                              if efficiency["output_tokens_per_request"] is not None else "?")
         avg_provider = (f"{run['provider_wall_s'] / run['n']:.1f}"
                         if run["provider_timing_rounds"] == run["rounds"] else "?")
+        avg_outside_provider = (f"{efficiency['outside_provider_s_per_task']:.1f}"
+                                if efficiency["outside_provider_s_per_task"] is not None else "?")
         avg_tool = (f"{run['builtin_tool_s'] / run['n']:.1f}"
                     if run["builtin_timing_rounds"] == run["rounds"] else "?")
         print(f"{run['engine']:12s} {run['n']:4d} "
               f"{100*run['p1']/run['n']:5.1f}% [{100*lo1:4.1f},{100*hi1:4.1f}] "
               f"{100*run['p2']/run['n']:5.1f}% [{100*lo2:4.1f},{100*hi2:4.1f}] "
-              f"{avg:8.1f} {avg_provider:>8} {avg_tool:>8} {avg_in:>9} {avg_out:>9} "
+              f"{avg:8.1f} {avg_provider:>8} {avg_outside_provider:>8} {avg_tool:>8} "
+              f"{avg_requests:>6} {avg_in:>9} {avg_out:>9} {output_per_request:>8} "
               f"{run['timeouts']:5d} {run['errors']:7d} {run['edit_fails']:9d}")
         comparison.append({k: run[k] for k in
                            ("engine", "n", "p1", "p2", "timeouts", "agent_s", "errors", "edit_fails",
@@ -244,10 +290,11 @@ def main() -> None:
                               "provider_requests", "provider_transports",
                               "by_tool_us", "by_tool_samples")}
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
+                             "efficiency": efficiency,
                              "source": str(run["path"])})
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps({"schema_version": 2, "task_count": len(baseline),
+        args.json.write_text(json.dumps({"schema_version": 3, "task_count": len(baseline),
                                          "runs": comparison}, indent=2) + "\n", encoding="utf-8")
 
 

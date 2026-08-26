@@ -45,7 +45,7 @@ the editor registries: those are external release actions that require a reviewe
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; provider-wire context budgeting that includes the exact state-aware native tool-schema snapshot, Responses conversion, and bounded dimension-based vision estimates instead of base64 transport bytes; day-stable system prefixes and compact text-tool catalogs for prefix/prefill efficiency; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; small catalogs remain direct while oversized catalogs use a bounded generation-scoped lexical index, deterministic inflection-aware selection, bounded untrusted `mcp_search`, next-request direct-schema activation, and approval-gated `mcp_call` fallback within a context-proportional budget; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, roots and stdio MCP with bounded UTF-8 frames, prompt blocks/text/images, signature-validated data-only images, and boundary-safe untrusted resource framing | Real-world large-catalog retrieval accuracy/latency, wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, installed-host migration/backend-restart/endpoint-invalidation evidence, typed selection/tab/diagnostic resources and canonical multi-root file mentions with display/path separation, acknowledged live multi-root grant reconciliation (including active-turn deferral and removal), accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, exact-wire validation with optional-field normalization, bounded startup/backpressure queues with priority decision/cancel frames, count/byte-bounded image paste plus backend signature validation, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake and live multi-root lifecycle evidence, and automated keyboard/ARIA/reduced-motion coverage | Cross-platform OS-keychain relaunch and installed-host decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
-| Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage and overlap-aware latency; crash-safe argument-free DGC built-in timing by bounded tool name; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from attributed traces |
+| Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage and overlap-aware latency; crash-safe argument-free DGC built-in timing by bounded tool name; per-task request burden, output per generation, and outside-provider wall-time attribution; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from attributed traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
 **Current verdict:** the code is a substantially safer and more capable release candidate, not yet
@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 862 / 862 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 865 / 865 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -148,20 +148,25 @@ transport-enforced reasoning off, two rounds, and 600 seconds per round. The str
 gate correctly rejected this limited corpus; the comparison below was generated only with the
 explicit `--allow-partial` diagnostic flag.
 
-| Engine | pass@1 | pass@2 | Average agent seconds/task | Timed-out rounds |
-|---|---:|---:|---:|---:|
-| Codex | 12 / 12 | 12 / 12 | 143.6 | 0 |
-| DGC (pre-trace-fix snapshot) | 12 / 12 | 12 / 12 | 216.2 | 1 |
-| Pi | 11 / 12 | 12 / 12 | 202.0 | 1 |
-| Goose | 11 / 12 | 11 / 12 | 190.4 | 0 |
-| OpenCode | 11 / 12 | 11 / 12 | 249.0 | 3 |
-| Aider | 7 / 12 | 9 / 12 | 661.2 | 6 |
+| Engine | pass@1 | pass@2 | Average agent seconds/task | Attributed provider requests/task | Timed-out rounds |
+|---|---:|---:|---:|---:|---:|
+| Codex | 12 / 12 | 12 / 12 | 143.6 | 5.5 | 0 |
+| DGC (pre-trace-fix snapshot) | 12 / 12 | 12 / 12 | 216.2 | ≥8.2 (11/12 rounds synchronized) | 1 |
+| Pi | 11 / 12 | 12 / 12 | 202.0 | 9.8 | 1 |
+| Goose | 11 / 12 | 11 / 12 | 190.4 | ≥9.2 (11/13 rounds synchronized) | 0 |
+| OpenCode | 11 / 12 | 11 / 12 | 249.0 | ≥6.0 (10/13 rounds synchronized) | 3 |
+| Aider | 7 / 12 | 9 / 12 | 661.2 | ≥5.7 (12/17 rounds synchronized) | 6 |
 
 The diagnostic establishes that DGC can match Codex's sample pass rate and already exceeds the
 other measured peers on at least one hard stress case. It also exposes a repeatable efficiency gap:
-Codex averaged 1.5× less wall time. DGC's old JavaScript alphametics files passed at the 600-second
-external kill after tests were already green, while Rust runs received contradictory shell status
-or had legitimate re-tests blocked.
+Codex averaged 1.5× less wall time and needed 5.5 generations per task, while the synchronized lower
+bound for DGC was 8.2. The old `rust/acronym` trace made the mechanism visible: Codex combined each
+candidate write and test in one shell request, while DGC repeatedly alternated one structured write
+and one test across separate generations. DGC already executes dependent tool calls in model order;
+the current auto-mode prompt now explicitly tells a confident local model to batch ordered edits and
+the verifier in one response. This remains a measured hypothesis until the replacement league runs.
+DGC's old JavaScript alphametics files passed at the 600-second external kill after tests were already
+green, while Rust runs received contradictory shell status or had legitimate re-tests blocked.
 
 A clean post-trace DGC snapshot (`4182c6e`) then reran the same 12 tasks. It scored 11/12 because a
 new stochastic Go alphametics trajectory failed both rounds, so its aggregate 222.6-second average
@@ -574,11 +579,13 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 862/862 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 865/865 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
-wall time, and DGC built-in tool-seconds with per-tool sample counts. Built-in timings contain no
+wall time, outside-provider agent wall time, and DGC built-in tool-seconds with per-tool sample
+counts. Reports also expose requests per task and output tokens per provider request, which makes
+generation-loop inflation visible independently of model verbosity. Built-in timings contain no
 arguments, commands, paths, prompts, or results; labels and counters are bounded, survive
 compaction/resume/crash journals, and use the existing activity persistence boundary rather than an
 extra write per execution. Round-two values are exact deltas of additive counters. Reports retain
@@ -883,7 +890,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 862/862 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 865/865 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

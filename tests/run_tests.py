@@ -2637,7 +2637,9 @@ def unit_tests(tmp: Path):
           and any("still failing" in message for message in _cap_ui.errors))
     check("system prompt specifies phase updates and outcome-first finals",
           "# Response cadence" in _ca.system_prompt() and "phase change" in _ca.system_prompt()
-          and "lead with the outcome" in _ca.system_prompt())
+          and "lead with the outcome" in _ca.system_prompt()
+          and "ordered edit call(s)" in _ca.system_prompt()
+          and "SAME response" in _ca.system_prompt())
 
     # --- time-triage (turn_budget_s): OFF by default (slow-model users get no pressure); when set, the
     #     grind cap tightens near the deadline and a last-good snapshot is restored on disk.
@@ -6978,7 +6980,10 @@ def test_benchmark_integrity():
                                       "by_tool_us": {"read_file": 50000, "bash": 200000},
                                       "by_tool_samples": {"read_file": 1, "bash": 1}}}]}),
             json.dumps({"lang": "python", "solved": False,
-                        "rounds": [{"dgc": {"time": 3, "timeout": True}, "stats": {
+                        "rounds": [{"dgc": {"time": 3, "timeout": True, "usage": {
+                            "requests": 2, "synchronized": True,
+                            "input_tokens": 6, "output_tokens": 3,
+                            "provider_transports": {"ollama_chat": 2}}}, "stats": {
                             "builtin_tool_us": 0, "builtin_tool_samples": 0,
                             "by_tool_us": {}, "by_tool_samples": {}}}]}),
         )))
@@ -6986,6 +6991,7 @@ def test_benchmark_integrity():
         check("benchmark aggregate reads versioned and legacy rounds",
               agg["n"] == 2 and agg["p1"] == 1 and agg["agent_s"] == 5 and agg["timeouts"] == 1
               and agg["provider_timing_rounds"] == 1 and agg["provider_wall_s"] == 1.5
+              and agg["usage_rounds"] == 2 and agg["provider_requests"] == 3
               and agg["builtin_timing_rounds"] == 2 and agg["builtin_tool_s"] == 0.25
               and agg["builtin_tool_samples"] == 2
               and agg["by_tool_us"] == {"read_file": 50000, "bash": 200000}
@@ -6995,8 +7001,10 @@ def test_benchmark_integrity():
         report_out = _StringIO()
         with _redirect_stdout(report_out):
             _RB.print_report(results)
-        check("benchmark report labels provider and overlapping tool timing explicitly",
-              "prov_s" in report_out.getvalue() and "tool_s" in report_out.getvalue()
+        check("benchmark report labels provider, generation, and overlapping tool timing explicitly",
+              "prov_s" in report_out.getvalue() and "other_s" in report_out.getvalue()
+              and "req/t" in report_out.getvalue() and "out/req" in report_out.getvalue()
+              and "tool_s" in report_out.getvalue()
               and "built-in tool-seconds (sum; parallel calls may overlap)" in report_out.getvalue())
         compare_results = root / "results-timing.jsonl"
         compare_results.write_bytes(results.read_bytes())
@@ -7006,10 +7014,51 @@ def test_benchmark_integrity():
               loaded_timing["provider_timing_rounds"] == 1
               and loaded_timing["provider_wall_s"] == 1.5
               and loaded_timing["provider_max_duration_s"] == 1.5
-              and loaded_timing["provider_requests"] == 1
-              and loaded_timing["provider_transports"] == {"ollama_chat": 1}
+              and loaded_timing["usage_rounds"] == 2
+              and loaded_timing["provider_requests"] == 3
+              and loaded_timing["provider_transports"] == {"ollama_chat": 3}
               and loaded_timing["builtin_tool_s"] == 0.25
               and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000})
+        unsynchronized_results = root / "results-unsynchronized.jsonl"
+        unsynchronized_results.write_text(json.dumps({
+            "lang": "python", "ex": "fixture", "engine": "dgc", "rounds": [{"agent": {
+                "time": 1, "usage": {"requests": 9, "synchronized": False,
+                                       "input_tokens": 900, "output_tokens": 90,
+                                       "provider_duration_s": 1, "provider_wall_s": 1,
+                                       "provider_max_duration_s": 1,
+                                       "provider_transports": {"ollama_chat": 9}}}}]}) + "\n")
+        (root / "manifest-unsynchronized.json").write_text(json.dumps({"schema_version": 3}))
+        ignored_usage = _BC.load(unsynchronized_results)
+        check("benchmark comparison excludes every field from unsynchronized provider usage",
+              ignored_usage["usage_rounds"] == 0
+              and ignored_usage["provider_timing_rounds"] == 0
+              and ignored_usage["provider_requests"] == 0
+              and ignored_usage["input_tokens"] == ignored_usage["output_tokens"] == 0
+              and ignored_usage["provider_transports"] == {})
+        partially_timed = _BC.efficiency_metrics(loaded_timing)
+        check("benchmark never treats missing provider timings as zero-second generations",
+              partially_timed["provider_requests_per_task"] == 1.5
+              and partially_timed["output_tokens_per_request"] == 7 / 3
+              and partially_timed["provider_wall_s_per_request"] is None
+              and partially_timed["outside_provider_s_per_task"] is None)
+        complete_efficiency = _BC.efficiency_metrics({
+            "n": 2, "rounds": 2, "usage_rounds": 2, "provider_timing_rounds": 2,
+            "provider_requests": 4, "input_tokens": 100, "output_tokens": 40,
+            "agent_s": 12, "provider_wall_s": 8})
+        check("benchmark comparison separates generation efficiency from outside-provider time",
+              complete_efficiency == {
+                  "provider_requests_per_task": 2.0,
+                  "input_tokens_per_task": 50.0,
+                  "output_tokens_per_task": 20.0,
+                  "output_tokens_per_request": 10.0,
+                  "agent_s_per_request": 3.0,
+                  "provider_wall_s_per_request": 2.0,
+                  "outside_provider_s_per_task": 2.0,
+              }
+              and all(value is None for value in _BC.efficiency_metrics({
+                  "n": 2, "rounds": 2, "usage_rounds": 1,
+                  "provider_timing_rounds": 1, "provider_requests": 1,
+              }).values()))
         round_delta = _RB._monotonic_stats_delta(
             {"tool_calls": 9, "builtin_tool_us": 9000, "builtin_tool_samples": 5,
              "by_tool_us": {"read_file": 3000, "bash": 6000},

@@ -1369,6 +1369,9 @@ class Agent:
                 "- Read what you need in as few calls as possible; don't re-read a file you already have.",
                 "- A `cargo test` / `go test` / `gradle test` is a COLD compile that can take a minute or "
                 "more. Make ALL your edits first, then run the test ONCE — never edit-one-line-then-test in a loop.",
+                "- When you are confident in a fix, put its ordered edit call(s) and that one verifier call "
+                "in the SAME response. DGC executes file-edit and shell calls in order, avoiding a slow model "
+                "round-trip between a known edit and its test.",
                 "- If an edit_file fails to match, don't retry variations — write the whole corrected file "
                 "in one write_file call and move on.",
             ]
