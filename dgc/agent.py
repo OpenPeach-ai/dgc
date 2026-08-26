@@ -61,6 +61,7 @@ _MAX_STEER_CHARS = 64_000
 _MAX_TIMING_NAMES = 64
 _MAX_TIMING_VALUE = (1 << 63) - 1
 _MAX_MCP_SEARCH_OUTPUT_CHARS = 16_000
+_MAX_VERIFIED_FINAL_CHARS = 512_000  # bounded across output-limit continuations
 
 _MCP_BROKER_SCHEMAS = [
     {"type": "function", "function": {
@@ -1184,7 +1185,8 @@ class Agent:
     def _safe_value(self, value):
         return redact_value(value, self._secret_values())
 
-    def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None):
+    def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
+              defer_text: bool = False):
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
             self.messages = repaired
@@ -1198,7 +1200,7 @@ class Agent:
 
         def emit_text(chunk) -> None:
             safe = text_stream.feed(chunk)
-            if safe:
+            if safe and not defer_text:
                 self.ui.on_text(safe)
 
         def emit_thinking(chunk) -> None:
@@ -1216,7 +1218,7 @@ class Agent:
                 final_text = text_stream.flush()
                 if final_thinking:
                     self.ui.on_thinking(final_thinking)
-                if final_text:
+                if final_text and not defer_text:
                     self.ui.on_text(final_text)
         finally:
             if old_timeout is not None:
@@ -1998,9 +2000,53 @@ class Agent:
         # verified state. It never serializes external-path authority and is restored transactionally.
         good_snapshot: WorkspaceSnapshot | None = None
         budget_nudged: set = set()  # which deadline reminders (70/85%) already fired
+        # Once this turn has mutated the checkout, a configured verifier owns the final-answer
+        # boundary. Provider text is still accumulated in ChatResult, but it is not published to any
+        # frontend until the controller accepts it. Length continuations remain one coherent visible
+        # answer; the explicit cap prevents a pathological provider from retaining unbounded text.
+        held_final_messages: list[dict] = []
+        held_final_parts: list[str] = []
+        held_final_chars = 0
+
+        def hold_final(message: dict) -> bool:
+            nonlocal held_final_chars
+            text = str(message.get("content") or "")
+            held_final_messages.append(message)
+            held_final_parts.append(text)
+            held_final_chars += len(text)
+            return held_final_chars <= _MAX_VERIFIED_FINAL_CHARS
+
+        def clear_held_final() -> None:
+            nonlocal held_final_chars
+            held_final_messages.clear()
+            held_final_parts.clear()
+            held_final_chars = 0
+
+        def withhold_final(marker: str = "", notice: str = "") -> None:
+            """Close a deferred stream without exposing its unaccepted completion claim."""
+            if held_final_messages:
+                for message in held_final_messages:
+                    message["content"] = ""
+                if marker:
+                    held_final_messages[-1]["content"] = marker
+            clear_held_final()
+            self.ui.end_stream()
+            if notice:
+                self.ui.info(notice)
+
+        def publish_final() -> None:
+            text = "".join(held_final_parts)
+            if text:
+                self.ui.on_text(text)
+            clear_held_final()
+            self.ui.end_stream()
 
         for _ in range(max_turns):
             if self.cancelled.is_set():
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the turn was cancelled before verification.]",
+                        "completion withheld — the turn was cancelled before verification")
                 self.ui.info("turn cancelled")
                 return True
             if deadline is not None and (deadline - time.monotonic()) <= 0.06 * budget:
@@ -2013,9 +2059,17 @@ class Agent:
                     self.ui.info("⏱ out of time — restored the exact last test-passing file state")
                 else:
                     self.ui.info("⏱ out of time — stopping")
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the turn ended before verification.]",
+                        "completion withheld — the turn ended before verification")
                 return True
             steered = self._drain_steer(
                 close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
+            if steered and held_final_messages:
+                withhold_final(
+                    "[Completion withheld by DGC: a newer user instruction continued the turn.]",
+                    "completion withheld — applying the newer user instruction")
             if summary_only and steered:
                 # The deterministic closeout was armed for the previously verified request.
                 # A queued interjection is newer user intent, so let the model process it and
@@ -2048,7 +2102,10 @@ class Agent:
             tools = self._tool_schemas() if self.client.tools_supported else None
             # Use one state-aware schema snapshot for both budgeting and the request. Besides being
             # exact, this avoids refreshing a large MCP catalog twice at the start of every turn.
-            self.maybe_compact(deadline=compact_deadline, tools=tools)
+            # Do not rewrite the transcript between pieces of one deferred length continuation: the
+            # held message references are also the exact provider context needed to continue it.
+            if not held_final_messages:
+                self.maybe_compact(deadline=compact_deadline, tools=tools)
             chat_cancel = self.cancelled
             chat_timeout = None
             if deadline is not None:
@@ -2058,8 +2115,12 @@ class Agent:
                 cutoff = deadline - 0.06 * budget
                 chat_cancel = _DeadlineCancel(self.cancelled, cutoff)
                 chat_timeout = max(1, int(cutoff - time.monotonic()))
+            defer_completion = bool(
+                mutating_total > 0 and self.config.get("verify_before_done")
+                and self.config.get("verify_command"))
             try:
-                result = self._chat(tools, effort, cancel=chat_cancel, read_timeout=chat_timeout)
+                result = self._chat(tools, effort, cancel=chat_cancel, read_timeout=chat_timeout,
+                                    defer_text=defer_completion)
             except ToolsUnsupportedError:
                 # The rejected request emitted no stream. Rebuild the system prompt with the
                 # fenced text-tool protocol before retrying; otherwise the first fallback answer
@@ -2072,12 +2133,22 @@ class Agent:
                 # killing the turn (as a reference agent does). If it overflows again, fall through as a normal error.
                 if not overflow_retried:
                     overflow_retried = True
-                    self.ui.end_stream()
+                    if held_final_messages:
+                        withhold_final(
+                            "[Incomplete completion withheld by DGC after a context overflow.]",
+                            "completion withheld — context overflowed before verification")
+                    else:
+                        self.ui.end_stream()
                     self.ui.info("↻ context overflowed — compacting and retrying")
                     # Aggressive compaction guarantees the retry is smaller.
                     self.maybe_compact(force=True, deadline=compact_deadline, tools=tools)
                     continue
-                self.ui.end_stream()
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the model exceeded its context before verification.]",
+                        "completion withheld — context overflowed before verification")
+                else:
+                    self.ui.end_stream()
                 return self._fail_turn(
                     "context window exceeded even after compaction — start a new session "
                     "(Ctrl+N) or lower context_size")
@@ -2088,19 +2159,35 @@ class Agent:
                     self.client = self._fallback_client(fb)
                     try:
                         result = self._chat(tools, effort, cancel=chat_cancel,
-                                            read_timeout=chat_timeout)
+                                            read_timeout=chat_timeout,
+                                            defer_text=defer_completion)
                     except ToolsUnsupportedError:
                         self._refresh_system()
                         self.ui.info("↻ fallback endpoint has no native tools — retrying with text tools")
                         continue
                     except LLMError as e2:
-                        self.ui.end_stream()
+                        if held_final_messages:
+                            withhold_final(
+                                "[Completion withheld by DGC: both model endpoints failed before verification.]",
+                                "completion withheld — model endpoints failed before verification")
+                        else:
+                            self.ui.end_stream()
                         return self._fail_turn(f"fallback model also failed: {e2}")
                 else:
-                    self.ui.end_stream()
+                    if held_final_messages:
+                        withhold_final(
+                            "[Completion withheld by DGC: the model failed before verification.]",
+                            "completion withheld — the model failed before verification")
+                    else:
+                        self.ui.end_stream()
                     return self._fail_turn(str(e))
             if (deadline is not None and chat_cancel.is_set() and not self.cancelled.is_set()):
-                self.ui.end_stream()
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the request timed out before verification.]",
+                        "completion withheld — the request timed out before verification")
+                else:
+                    self.ui.end_stream()
                 if good_snapshot:
                     if not self._restore_snapshot(good_snapshot, deadline):
                         return self._fail_turn(
@@ -2111,10 +2198,18 @@ class Agent:
                     self.ui.info("⏱ out of time — stopped the in-flight model request")
                 return True
             if result.finish_reason == "cancelled" or self.cancelled.is_set():
-                self.ui.end_stream()
                 partial = str(result.content or "")
                 if partial.strip():
-                    self.messages.append({"role": "assistant", "content": partial})
+                    cancelled_message = {"role": "assistant", "content": partial}
+                    self.messages.append(cancelled_message)
+                    if defer_completion:
+                        hold_final(cancelled_message)
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the turn was cancelled before verification.]",
+                        "completion withheld — the turn was cancelled before verification")
+                else:
+                    self.ui.end_stream()
                 self.ui.info("turn cancelled")
                 return True
             # Some local models emit valid tool calls but no user-facing text. Preserve genuine model
@@ -2123,8 +2218,20 @@ class Agent:
                     and not (result.content or "").strip()):
                 result.content = _tool_batch_preamble(
                     result.tool_calls, did_tools=did_tools, edited_before=edited_total > 0)
-                self.ui.on_text(result.content)
-            self.ui.end_stream()
+                if not defer_completion:
+                    self.ui.on_text(result.content)
+            if result.tool_calls:
+                # A tool call proves this is progress commentary, not an attempted final. Flush any
+                # prior incomplete final separately, then preserve commentary-before-tool ordering.
+                if held_final_messages:
+                    withhold_final(
+                        "[Incomplete completion withheld by DGC: the model continued with tool calls.]",
+                        "incomplete completion withheld — continuing with model tool calls")
+                if defer_completion and (result.content or ""):
+                    self.ui.on_text(result.content)
+                self.ui.end_stream()
+            elif not defer_completion:
+                self.ui.end_stream()
 
             native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
@@ -2142,6 +2249,12 @@ class Agent:
             self.messages.append(assistant)
 
             if not result.tool_calls:
+                if defer_completion and not hold_final(assistant):
+                    withhold_final(
+                        "[Completion withheld by DGC: the deferred response exceeded its safety limit.]",
+                        "completion withheld — deferred response exceeded the 512,000-character limit")
+                    return self._fail_turn(
+                        "stopped — the response awaiting verification exceeded the bounded display limit")
                 if result.finish_reason == "length":
                     if continues < _MAX_CONTINUE:
                         continues += 1          # reply cut off at the token limit — continue it
@@ -2149,6 +2262,10 @@ class Agent:
                             "Your previous response was cut off at the length limit. Continue exactly "
                             "where you left off — do not repeat what you already wrote."})
                         continue
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: the model repeatedly hit its output limit.]",
+                            "completion withheld — the model never produced a complete response")
                     return self._fail_turn(
                         "stopped — the model repeatedly hit the output-token limit before finishing; "
                         "raise max_tokens or ask for a smaller response")
@@ -2161,6 +2278,10 @@ class Agent:
                         "edits / run the commands) and mark each done with the `todo` tool — or, if a "
                         "todo genuinely can't be done, say why. Do not stop with silent open todos.\n"
                         "</system-reminder>"})
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: open todos required the turn to continue.]",
+                            "completion withheld — open todos still require action")
                     continue
                 if not (result.content or "").strip():
                     if not summary_nudged:
@@ -2174,10 +2295,18 @@ class Agent:
                             "<system-reminder>\n" + detail + " Respond now in the normal channel — give "
                             "a brief final summary (what you did / the answer), or take the next action "
                             "with a tool. Do not answer only in the thinking channel.\n</system-reminder>"})
+                        if defer_completion:
+                            withhold_final()
                         continue
+                    if defer_completion:
+                        withhold_final()
                     return self._fail_turn(
                         "stopped — the model ended twice without a user-facing response")
                 if self._drain_steer():     # user interjected as we were about to finish → keep going
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: a newer user instruction continued the turn.]",
+                            "completion withheld — applying the newer user instruction")
                     continue
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
                         and not goal_nudged and did_tools):  # standing /goal gate:
@@ -2187,10 +2316,18 @@ class Agent:
                         "\nBefore you stop: is that goal now FULLY met? If yes, say so and summarize how. "
                         "If not, take the next concrete step toward it now — don't stop with it unmet.\n"
                         "</system-reminder>"})
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: the active standing goal required another step.]",
+                            "completion withheld — checking the active standing goal")
                     continue
                 needs_verifier = (mutating_total > 0 and self.config.get("verify_before_done")
                                   and self.config.get("verify_command"))
                 if needs_verifier and verify_runs >= 2:
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: the configured verifier was still failing.]",
+                            "completion withheld — configured verifier is still failing")
                     return self._fail_turn(
                         "stopped — the configured verifier is still failing and the model stopped "
                         "again without taking corrective action")
@@ -2230,10 +2367,20 @@ class Agent:
                             "<system-reminder>\nverify_before_done: the configured verifier did not "
                             f"pass (`{safe_cmd}`). Fix the code or the verifier failure, then finish:\n"
                             + verify_out[-3000:] + "\n</system-reminder>"})
+                        if defer_completion:
+                            withhold_final(
+                                "[Completion withheld by DGC: the configured verifier did not pass.]",
+                                "completion withheld — configured verifier failed; continuing")
                         continue
                 if self._drain_steer(close_if_empty=True):
                     # Catch steering that arrived while the final configured verifier was running.
+                    if defer_completion:
+                        withhold_final(
+                            "[Completion withheld by DGC: a newer user instruction continued the turn.]",
+                            "completion withheld — applying the newer user instruction")
                     continue
+                if defer_completion:
+                    publish_final()
                 return True
 
             if result.finish_reason == "length" and result.tool_calls:
@@ -2498,6 +2645,10 @@ class Agent:
                     self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
                 else:                                                        # native: separate turn
                     self.messages.append({"role": "user", "content": note})
+        if held_final_messages:
+            withhold_final(
+                "[Completion withheld by DGC: the turn limit was reached before verification.]",
+                "completion withheld — the turn limit was reached before verification")
         return self._fail_turn(
             f"stopped after {max_turns} tool iterations (max_turns) — say 'continue' to keep going")
 

@@ -2639,8 +2639,17 @@ def unit_tests(tmp: Path):
           and _crash_metrics.get("timing") == {
               "builtin_tool_us": 123456, "builtin_tool_samples": 1,
               "by_tool_us": {"bash": 123456}, "by_tool_samples": {"bash": 1}})
+    class _VerifyVisibilityUI(_AgUI):
+        def __init__(self): self.events = []
+        def on_text(self, chunk): self.events.append(("text", str(chunk)))
+        def end_stream(self): self.events.append(("end", ""))
+        def tool_call(self, name, args, call_id=None): self.events.append(("tool", name))
+        def tool_result(self, name, out, call_id=None): self.events.append(("result", name))
+        def info(self, message): self.events.append(("info", str(message)))
+
     _verify_root = Path(tempfile.mkdtemp()); (_verify_root / "answer.txt").write_text("start\n")
-    _va = _Ag(_Cfg(_verify_root), _AgUI()); _va.config.data.update({
+    _verify_ui = _VerifyVisibilityUI()
+    _va = _Ag(_Cfg(_verify_root), _verify_ui); _va.config.data.update({
         "mode": "auto", "verify_before_done": True,
         "verify_command": "test \"$(cat answer.txt)\" = good",
     })
@@ -2654,17 +2663,101 @@ def unit_tests(tmp: Path):
                 return _ChatResult(tool_calls=[_ToolCall(
                     "v1", "write_file", {"path": "answer.txt", "content": "bad\n"})])
             if self.n == 2:
-                return _ChatResult(content="Done.")
+                kwargs["on_text"]("Done — the requested change is verified.")
+                return _ChatResult(content="Done — the requested change is verified.")
             if self.n == 3:
                 self.saw_failure = any("verify_before_done" in str(m.get("content", ""))
                                        for m in messages)
-                return _ChatResult(tool_calls=[_ToolCall(
+                text = "I found the verification failure; correcting it now."
+                kwargs["on_text"](text)
+                return _ChatResult(content=text, tool_calls=[_ToolCall(
                     "v2", "write_file", {"path": "answer.txt", "content": "good\n"})])
-            return _ChatResult(content="Done.")
+            kwargs["on_text"]("Implemented and verified.")
+            return _ChatResult(content="Implemented and verified.")
     _va.client = _VerifyClient(); _va.run_turn("make the answer good")
+    _verify_text = "".join(value for kind, value in _verify_ui.events if kind == "text")
+    _corrective_text_i = _verify_ui.events.index(
+        ("text", "I found the verification failure; correcting it now."))
+    _corrective_tool_i = _verify_ui.events.index(("tool", "write_file"), _corrective_text_i)
     check("authoritative verifier rejects a premature final and feeds failure back",
           _va.client.saw_failure and _va.client.n == 4
           and (_verify_root / "answer.txt").read_text() == "good\n")
+    check("failed completion text is withheld from every shared Agent UI",
+          "Done — the requested change is verified." not in _verify_text
+          and _verify_text.count("Implemented and verified.") == 1
+          and any(kind == "info" and "completion withheld" in value.lower()
+                  for kind, value in _verify_ui.events))
+    check("withheld completion is not preserved as visible durable assistant history",
+          all("Done — the requested change is verified." not in str(message.get("content") or "")
+              for message in _va.messages)
+          and any("completion withheld" in str(message.get("content") or "").lower()
+                  for message in _va.messages if message.get("role") == "assistant"))
+    check("verified-final buffering preserves commentary-before-tool cadence",
+          _corrective_text_i < _corrective_tool_i)
+
+    _continued_root = Path(tempfile.mkdtemp())
+    _continued_ui = _VerifyVisibilityUI()
+    _continued = _Ag(_Cfg(_continued_root), _continued_ui); _continued.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "test \"$(cat answer.txt)\" = good",
+    })
+    class _ContinuedFinalClient:
+        tools_supported = True
+        n = 0
+        partial_was_hidden = False
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "continued-edit", "write_file",
+                    {"path": "answer.txt", "content": "good\n"})])
+            if self.n == 2:
+                kwargs["on_text"]("Implemented the requested change; verification ")
+                return _ChatResult(content="Implemented the requested change; verification ",
+                                   finish_reason="length")
+            self.partial_was_hidden = not any(
+                "Implemented the requested change" in value
+                for kind, value in _continued_ui.events if kind == "text")
+            kwargs["on_text"]("passed.")
+            return _ChatResult(content="passed.")
+    _continued.client = _ContinuedFinalClient()
+    _continued.run_turn("make the answer good and summarize it")
+    _continued_text = "".join(
+        value for kind, value in _continued_ui.events if kind == "text")
+    check("truncated verified finals stay hidden until their continuation is accepted",
+          _continued.client.n == 3 and _continued.client.partial_was_hidden
+          and _continued_text.count(
+              "Implemented the requested change; verification passed.") == 1)
+
+    import dgc.agent as _verified_agent_mod
+    _saved_final_limit = _verified_agent_mod._MAX_VERIFIED_FINAL_CHARS
+    _bounded_root = Path(tempfile.mkdtemp())
+    _bounded_ui = _VerifyVisibilityUI()
+    _bounded = _Ag(_Cfg(_bounded_root), _bounded_ui); _bounded.config.data.update({
+        "mode": "auto", "verify_before_done": True, "verify_command": "true",
+    })
+    class _OversizedFinalClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "bounded-edit", "write_file", {"path": "answer.txt", "content": "good\n"})])
+            kwargs["on_text"]("too-large")
+            return _ChatResult(content="too-large")
+    _bounded.client = _OversizedFinalClient()
+    try:
+        _verified_agent_mod._MAX_VERIFIED_FINAL_CHARS = 8
+        _bounded_outcome = _bounded.run_turn("exercise the final display bound")
+    finally:
+        _verified_agent_mod._MAX_VERIFIED_FINAL_CHARS = _saved_final_limit
+    check("verified-final buffering fails closed at its aggregate display ceiling",
+          _bounded_outcome is False and _bounded.client.n == 2
+          and not any("too-large" in value for kind, value in _bounded_ui.events if kind == "text")
+          and "bounded display limit" in _bounded._last_turn_error
+          and any("safety limit" in str(message.get("content") or "")
+                  for message in _bounded.messages if message.get("role") == "assistant"))
     _rearm_root = Path(tempfile.mkdtemp()); (_rearm_root / "answer.txt").write_text("start\n")
     _rearm = _Ag(_Cfg(_rearm_root), _AgUI()); _rearm.config.data.update({
         "mode": "auto", "verify_before_done": True,
