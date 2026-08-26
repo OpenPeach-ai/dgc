@@ -33,6 +33,26 @@ assert.match(panelSrc, /path: uri\.fsPath/,
 assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
   "approving a plan into auto mode must pass an explicit warning gate");
 
+function relativeLuminance(hex) {
+  const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);
+  const linear = channels.map((value) => value <= 0.04045
+    ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+function contrastRatio(foreground, background) {
+  const light = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+  const dark = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+  return (light + 0.05) / (dark + 0.05);
+}
+
+function rootHex(name) {
+  const root = mainCss.match(/:root\s*\{([\s\S]*?)\}/)?.[1] || "";
+  const value = root.match(new RegExp(`${name}\\s*:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
+  assert.ok(value, `missing hex palette token ${name}`);
+  return value;
+}
+
 // Pull the real HTML template out of panel.ts's html() and neutralise the
 // `${nonce}` / `${css}` / `${csp}` interpolations so the markup stays in sync
 // with what ships — the test never hand-rolls its own DOM.
@@ -83,11 +103,14 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   // tool card 1 — read_file (glyph →)
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/auth.ts", call_id: "c1" } });
+  assert.equal(doc.querySelector(".tool .tool-status").textContent, "running");
+  assert.equal(doc.querySelector(".tool .dot").getAttribute("aria-hidden"), "true");
   send({ type: "event", event: { type: "tool_progress", name: "read_file", call_id: "c1",
     message: "Indexing symbols", progress: 1, total: 2 } });
   assert.equal(doc.querySelector(".tool .badge").textContent, "50%", "tool progress percentage");
   assert.match(doc.querySelector(".tool .body pre").textContent, /Indexing symbols/);
   send({ type: "event", event: { type: "tool_result", call_id: "c1", name: "read_file", output: "line one\nline two", is_diff: false } });
+  assert.equal(doc.querySelector(".tool .tool-status").textContent, "completed");
 
   // Protocol call IDs are nullable. The name fallback must still update one card in place.
   send({ type: "event", event: { type: "tool_call", name: "mcp__fixture__scan", summary: "workspace" } });
@@ -335,6 +358,8 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
     type: "tool_result", name: "bash", call_id: "same-name-2", output: "exit code: 1", is_error: true,
   } });
   assert.ok(doc.querySelector(".tool .dot.err"), "failed tool must not render as successful");
+  assert.equal(doc.querySelector(".tool .tool-status").textContent, "failed",
+    "failed tool state must be available without relying on color");
 
   send({ type: "event", event: { type: "plan_proposal", id: "plan-1", plan: "1. Change it" } });
   const plan = [...doc.querySelectorAll(".card")].at(-1);
@@ -491,6 +516,41 @@ test("provider runtime settings and actual usage round-trip through the webview"
   dom.window.close();
 });
 
+test("webview palette meets text contrast and forced-colors keeps state non-color-only", () => {
+  const backgrounds = ["--bg", "--surface", "--surface2", "--code", "--term"];
+  for (const foreground of ["--text", "--text-strong", "--muted", "--faint", "--accent-text", "--err"]) {
+    for (const background of backgrounds) {
+      const ratio = contrastRatio(rootHex(foreground), rootHex(background));
+      assert.ok(ratio >= 4.5,
+        `${foreground} against ${background} has ${ratio.toFixed(2)}:1 contrast`);
+    }
+  }
+  assert.ok(contrastRatio("#FFFFFF", rootHex("--accent-fill")) >= 4.5,
+    "white text on the primary accent fill must meet normal-text contrast");
+
+  const forcedAt = mainCss.indexOf("@media (forced-colors: active)");
+  assert.notEqual(forcedAt, -1, "webview needs an explicit forced-colors contract");
+  const forced = mainCss.slice(forcedAt);
+  for (const systemColor of ["Canvas", "CanvasText", "ButtonFace", "Highlight",
+    "HighlightText", "GrayText", "LinkText"]) {
+    assert.match(forced, new RegExp(`\\b${systemColor}\\b`),
+      `forced-colors contract is missing ${systemColor}`);
+  }
+  assert.match(forced, /:focus-visible\s*\{[^}]*outline:\s*2px solid Highlight/s);
+  assert.match(forced, /\.diff \.add\s*\{[^}]*border-left:\s*3px solid Highlight/s);
+  assert.match(forced, /\.diff \.del\s*\{[^}]*border-left:\s*3px dashed CanvasText/s);
+  assert.match(forced, /\.card\.resolved\s*\{[^}]*border-style:\s*dashed/s);
+  assert.match(forced, /\.tool \.dot\.err\s*\{[^}]*border-radius:\s*0/s);
+  assert.match(forced, /button\.act\.primary[\s\S]*forced-color-adjust:\s*none/);
+  assert.match(forced, /\.csend\[data-mode="auto"\][\s\S]*background:\s*Highlight;\s*color:\s*HighlightText/,
+    "auto-mode send must not override its forced-colors foreground/background pair");
+  const universal = forced.match(/\*,\s*\*::before,\s*\*::after\s*\{([^}]*)\}/)?.[1] || "";
+  assert.doesNotMatch(universal, /forced-color-adjust/,
+    "forced-color-adjust must stay narrow instead of overriding every control");
+  assert.doesNotMatch(mainCss, /var\(--input-background\)/,
+    "decision inputs must use VS Code's namespaced input token with a local fallback");
+});
+
 test("webview controls expose keyboard, focus, and assistive-technology semantics", () => {
   const { dom, errors, send, doc } = makeDom();
   const key = (target, value, extra = {}) => target.dispatchEvent(
@@ -554,8 +614,17 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
   assert.equal(reasoning.getAttribute("aria-expanded"), "true");
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "a.ts", call_id: "a11y" } });
   const toolToggle = doc.querySelector(".tool-toggle");
+  assert.equal(toolToggle.querySelector(".tool-status").textContent, "running");
   toolToggle.click();
   assert.equal(toolToggle.getAttribute("aria-expanded"), "true");
+  send({ type: "event", event: { type: "tool_denied", name: "read_file", call_id: "a11y",
+    reason: "not approved" } });
+  assert.equal(toolToggle.querySelector(".tool-status").textContent, "denied");
+  send({ type: "event", event: { type: "tool_call", name: "bash", summary: "pending", call_id: "unfinished" } });
+  const unfinished = [...doc.querySelectorAll(".tool")].at(-1);
+  send({ type: "event", event: { type: "turn_end" } });
+  assert.equal(unfinished.querySelector(".tool-status").textContent, "stopped",
+    "turn end must not leave an unresolved tool announced as running");
 
   const settingsButton = doc.getElementById("btn-settings");
   settingsButton.focus();

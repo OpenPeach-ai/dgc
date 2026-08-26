@@ -150,6 +150,11 @@
   function endTurn() {
     if (!turn) return;
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
+    turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
+      setToolStatus(card, "stopped");
+      const dot = card.querySelector(".dot");
+      if (dot) dot.className = "dot deny";
+    });
     clearInterval(turn.timer);
     turn.act.classList.add("done");
     turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
@@ -171,6 +176,13 @@
     return b;
   }
 
+  function setToolStatus(card, status) {
+    const value = String(status || "");
+    card.dataset.status = value;
+    const label = card.querySelector(".tool-status");
+    if (label) label.textContent = value;
+  }
+
   function toolCard(ev) {
     const c = el("div", "tool");
     const bodyId = `tool-output-${++disclosureId}`;
@@ -182,8 +194,12 @@
       toggle.setAttribute("aria-expanded", String(open));
     };
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
-    head.appendChild(el("span", "dot run"));
+    const status = el("span", "sr-only tool-status", "running");
+    toggle.appendChild(status);
+    const dot = el("span", "dot run"); dot.setAttribute("aria-hidden", "true");
+    head.appendChild(dot);
     head.appendChild(el("span", "badge"));
+    setToolStatus(c, "running");
     turn.block.appendChild(c); breakText(); scroll(); return c;
   }
   function renderDiff(diff) {
@@ -287,6 +303,7 @@
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
+        setToolStatus(c, ev.is_error ? "failed" : "completed");
         if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
@@ -296,7 +313,8 @@
         turn._tools = turn._tools || {};
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
-        c.querySelector(".dot").className = "dot deny"; break;
+        c.querySelector(".dot").className = "dot deny";
+        setToolStatus(c, "denied"); break;
       }
       case "permission_request": {
         ensureTurn();
