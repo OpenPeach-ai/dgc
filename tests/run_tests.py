@@ -1421,6 +1421,36 @@ def unit_tests(tmp: Path):
     ui._overlay_switch_tab(1); ui._render_overlay()  # click the MCP tab → list rebuilds
     check("overlay tab switch rebuilds", ov["tab"] == 1 and [r["label"] for r in ui._overlay_rows()] == ["m0"])
 
+    # Every TUI geometry path must use terminal cells rather than Python code-point counts. Wide CJK,
+    # combining accents, and joined emoji otherwise spill past the user band and desynchronize jump,
+    # overlay hit maps, and composer height.
+    from rich.text import Text as _CellText
+    ov["tabs"], ov["tab"] = ["技能", "MCP"], 0
+    ui._render_overlay()
+    _wide_tab_x0, _wide_tab_x1, _ = ov["_tabmap"][0]
+    check("TUI overlay hit maps count wide Unicode cells",
+          _wide_tab_x1 - _wide_tab_x0 == _CellText(" 技能 ").cell_len
+          and ui._overlay_tab_at((_wide_tab_x0 + _wide_tab_x1) // 2, ov["_tab_y"]) == 0)
+    _saved_rich, _saved_width = ui._rich, ui._width
+    ui._rich = lambda renderable: renderable
+    ui._width, ui._height = 14, 30
+    _wide_prompt = "界" * 8 + " e\u0301 👩🏽‍💻"
+    _wide_band = ui._user_band(_wide_prompt)
+    _wide_rows = _wide_band.plain.splitlines()
+    _wide_expected = ui._user_band_layout(_wide_prompt)[3]
+    check("TUI user prompt band wraps and pads Unicode by terminal cells",
+          len(_wide_rows) == len(_wide_expected) + 2
+          and all(_CellText(row).cell_len == 12 for row in _wide_rows)
+          and _wide_band.plain.count("界") == 8
+          and "e\u0301" in _wide_band.plain and "👩🏽‍💻" in _wide_band.plain)
+    check("TUI jump geometry reuses the exact Unicode prompt-band row plan",
+          ui._block_lines({"kind": "user", "text": _wide_prompt}) == len(_wide_rows))
+    ui.input_buf = type("B", (), {"text": "界" * 8})()
+    ui._width, ui._height = 12, 30
+    check("TUI composer height counts wide Unicode cells", ui._composer_height() == 2)
+    ui._rich, ui._width = _saved_rich, _saved_width
+    ui._height = 30
+
     # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls 
     import dgc.docs as _docs
     check("docs library", len(_docs.DOCS) >= 8 and _docs.find("Plan mode") is not None)

@@ -51,6 +51,16 @@ _MAX_QUEUED_FOLLOWUP_CHARS = 64_000
 _MAX_TRANSITIONAL_FOLLOWUP_CHARS = 128_000  # queued + one older accepted steer batch
 
 
+def _cell_len(value: str) -> int:
+    """Terminal cells occupied by plain Unicode text (wide/combining/emoji aware)."""
+    return Text(str(value)).cell_len
+
+
+def _ansi_cell_len(value: str) -> int:
+    """Terminal cells occupied by Rich-rendered ANSI text."""
+    return Text.from_ansi(str(value)).cell_len
+
+
 def _session_generation_guard(agent) -> dict:
     """CAS fields for sidecar changes; test doubles and legacy agents stay unguarded."""
     if hasattr(agent, "_session_revision") and hasattr(agent, "_session_exists"):
@@ -645,7 +655,7 @@ class TUI:
             scroll = max(0, scroll)
         ov["scroll"] = scroll
         visible = rows[scroll:scroll + cap]
-        labw = min(max((len(r.get("label", "")) for r in rows), default=8), 34)
+        labw = min(max((_cell_len(r.get("label", "")) for r in rows), default=8), 34)
         # Hit-map recorded during render : screen-y → row index, and the
         # tab strip's x-ranges. Panel line 0 is the top border, so the k-th content line
         # sits at screen y = 1 + k. Every content line is kept to ONE screen row (truncated,
@@ -665,16 +675,17 @@ class TUI:
             cx = XOFF
             for i, t in enumerate(ov["tabs"]):
                 seg = f" {t} "
+                segw = _cell_len(seg)
                 if i == ov["tab"]:
                     stl = f"bold {th.bg} on {th.accent}"
                 elif i == ov.get("_tab_hover"):
                     stl = f"bold {th.text} on {th.surface2}"     # hover feedback
                 else:
                     stl = th.muted
-                ov["_tabmap"].append((cx, cx + len(seg), i))
+                ov["_tabmap"].append((cx, cx + segw, i))
                 strip.append(seg, style=stl)
                 strip.append(" ")
-                cx += len(seg) + 1
+                cx += segw + 1
             lines.append(strip)                          # (2 short tabs never wrap)
             emit(Text("─" * inner, style=th.border))
         elif ov.get("title"):
@@ -696,10 +707,11 @@ class TUI:
             hot = (scroll + i == sel)
             line = Text()
             line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
-            lbl = r.get("label", "")
-            if len(lbl) > labw:                          # keep the label in its column so the desc
-                lbl = lbl[:labw - 1] + "…"               #   (e.g. a long artifact URL) stays visible
-            line.append(lbl.ljust(labw), style="bold" if hot else th.text)
+            label = Text(str(r.get("label", "")), style="bold" if hot else th.text)
+            label.truncate(labw, overflow="ellipsis")   # keep Unicode labels in their cell column
+            if label.cell_len < labw:                    # (e.g. an artifact or Unicode session name)
+                label.append(" " * (labw - label.cell_len))
+            line.append_text(label)
             if r.get("desc"):
                 line.append("  " + r["desc"], style=th.muted)   # readable (not dim faint) either way
             line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
@@ -1036,7 +1048,7 @@ class TUI:
                               f"{_esc(nm)}{_esc(ws)}[/]")
             chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter 
             right = self._rich(chip)
-            lw = len(re.sub(r"\x1b\[[0-9;?]*m", "", left))
+            lw = _ansi_cell_len(left)
             gap = max(2, self._width - lw - cw - 1)
             self._ctx_x0, self._ctx_x1 = lw + gap, lw + gap + cw   # record for hover/click
             return ANSI(left + " " * gap + right)
@@ -1106,7 +1118,9 @@ class TUI:
         if isinstance(blk, dict) and blk.get("kind") == "think":
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "user":
-            return 2 + len((blk.get("text", "").rstrip("\n") or "").split("\n"))  # top+bottom vpad + text lines
+            _, compact, _, rows = self._user_band_layout(
+                blk.get("text", ""), blk.get("tag", ""))
+            return len(rows) + (0 if compact else 2)
         if isinstance(blk, dict) and blk.get("kind") == "tool":
             if blk.get("diff"):
                 return 1 + blk["diff"].count("\n") + 1          # header + rendered diff lines
@@ -1452,11 +1466,11 @@ class TUI:
             content.append(text)
 
         def mrow(lbl, key, slash, h):
-            right = len(key) + 2 + len(slash)
+            right = _cell_len(key) + 2 + _cell_len(slash)
             t = Text()
             t.append("› " if h else "  ", style=f"bold {th.accent}")
             t.append(lbl, style=f"bold {th.accent}" if h else "bold")
-            t.append(" " * max(2, text_w - 2 - len(lbl) - right))
+            t.append(" " * max(2, text_w - 2 - _cell_len(lbl) - right))
             t.append(key, style=th.accent if h else th.faint); t.append("  ")
             t.append(slash, style=f"bold {th.accent_bright}" if h else th.accent_dim)
             return t
@@ -1554,10 +1568,9 @@ class TUI:
     def _pad_lr(self, left: str, right: str, indent: str = "  "):
         """One row with `left` markup at the start and `right` markup flush to the terminal edge —
         the status layout (activity left; timer + tokens + [stop] right)."""
-        import re
         L, R = self._rich(left), self._rich(right)
-        vis = lambda s: len(re.sub(r"\x1b\[[0-9;?]*m", "", s))   # visible width (ANSI stripped)
-        gap = max(2, self._width - len(indent) - vis(L) - vis(R) - 1)
+        gap = max(2, self._width - _cell_len(indent) - _ansi_cell_len(L)
+                  - _ansi_cell_len(R) - 1)
         return ANSI(indent + L + " " * gap + R)
 
     # ---- composer info line (model · mode) ----
@@ -1585,7 +1598,7 @@ class TUI:
         th = style_mod.theme()
         c, dim, rst = style_mod.ansi_fg(self._border_color()), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
         info = f" {self.config.model} {glyphs.MIDDOT} {self.agent.mode} "
-        n = w - 3 - len(info)
+        n = w - 3 - _cell_len(info)
         if n < 2:
             return ANSI(f"{c}╰{'─' * (w - 2)}╯{rst}")
         return ANSI(f"{c}╰{'─' * n}{rst}{dim}{info}{c}─╯{rst}")
@@ -2240,7 +2253,7 @@ class TUI:
         w = max(8, self._width - 5)                     # inside the │ borders, minus the `❯ ` prefix
         rows = 0
         for ln in self.input_buf.text.split("\n"):
-            rows += max(1, -(-len(ln) // w))            # ceil(len / width) visual rows per logical line
+            rows += max(1, math.ceil(_cell_len(ln) / w))  # visual cells, not Unicode code points
         # CAP it to the terminal: always leave >=2 rows for the transcript/header + the fixed
         # chrome (status 1 + box borders 2 + shortcut 1) so a long prompt on a SMALL phone screen
         # grows + scrolls INSIDE the box instead of overflowing the layout ("window too small").
@@ -3885,6 +3898,29 @@ class TUI:
                     self.input_buf.insert_text(str(n))
         return kb
 
+    def _user_band_layout(self, text: str, tag: str = ""):
+        """Return the cell-aware row plan shared by rendering and jump geometry."""
+        W = max(8, self._width - 2)
+        compact = 0 < getattr(self, "_height", 0) <= self._AUTO_COMPACT_ROWS
+        arrow = "" if compact else f"{glyphs.ARROW} "
+        indent = "" if compact else "  "
+        cw = max(1, W - _cell_len(arrow))
+        tag_s = f"   {tag}" if tag else ""
+        # A tag is secondary metadata. Drop it when a tiny terminal cannot retain at least one text
+        # cell beside it instead of letting the background band overflow its promised width.
+        if tag_s and _cell_len(tag_s) >= cw:
+            tag_s = ""
+        console = self._console()
+        visual: list[tuple[str, str, bool]] = []
+        for li, ln in enumerate((text.rstrip("\n") or "").split("\n")):
+            first = li == 0
+            avail = max(1, cw - (_cell_len(tag_s) if first else 0))
+            wrapped = Text(ln).wrap(console, avail, overflow="fold") or [Text("")]
+            for j, segment in enumerate(wrapped):
+                visual.append((arrow if (first and j == 0) else indent,
+                               segment.plain, first and j == 0))
+        return W, compact, tag_s, visual
+
     def _user_band(self, text: str, tag: str = ""):
         """The user's prompt as a full-width, bg-tinted band with a ❯ prefix — a highlighted block
         that reads distinctly from the assistant text. Every visual row is padded to the exact band
@@ -3895,33 +3931,21 @@ class TUI:
         the text (the untinted breathing room around it is the transcript's inter-block gap). On a
         SHORT terminal (height ≤ _AUTO_COMPACT_ROWS) the band auto-compacts: it drops those tinted
         vpad rows AND the ❯ prefix, keeping only the tint — so a small window isn't eaten by padding."""
-        import textwrap
-        from rich.text import Text
         th = style_mod.theme()
-        W = max(8, self._width - 2)                   # the transcript content width — NOT floored at 30
-        compact = 0 < getattr(self, "_height", 0) <= self._AUTO_COMPACT_ROWS   # short window → tight band
-        arrow = "" if compact else f"{glyphs.ARROW} "  # compact drops the arrow (tint alone marks the turn)
-        indent = "" if compact else "  "              # continuation rows line up under the arrow (none if compact)
-        prefix_w = len(arrow)
-        tag_s = f"   {tag}" if tag else ""
-        cw = max(1, W - prefix_w)                     # text width after the prefix, floored so wrap progresses
-        visual: list[tuple[str, str, bool]] = []      # (prefix, segment, is_first_row)
-        for li, ln in enumerate((text.rstrip("\n") or "").split("\n")):
-            avail = max(1, cw - (len(tag_s) if li == 0 else 0))    # reserve room for the tag on row 0
-            for j, seg in enumerate(textwrap.wrap(ln, avail, break_long_words=True,
-                                                  break_on_hyphens=False) or [""]):
-                visual.append((arrow if (li == 0 and j == 0) else indent, seg, li == 0 and j == 0))
+        W, compact, tag_s, visual = self._user_band_layout(text, tag)
         t = Text()
         if not compact:
             t.append(" " * W + "\n")                  # tinted vpad — top (skipped when compact)
         for pre, seg, is_first in visual:
-            t.append(pre, style=f"bold {th.accent}")
-            t.append(seg, style=th.text_strong)
-            used = len(pre) + len(seg)
+            row = Text()
+            row.append(pre, style=f"bold {th.accent}")
+            row.append(seg, style=th.text_strong)
             if is_first and tag_s:
-                t.append(tag_s, style=th.faint); used += len(tag_s)
-            if used < W:
-                t.append(" " * (W - used))            # pad the row so the tint reaches the right edge
+                row.append(tag_s, style=th.faint)
+            row.truncate(W, overflow="ellipsis")
+            if row.cell_len < W:
+                row.append(" " * (W - row.cell_len))  # pad in terminal cells so the tint reaches the edge
+            t.append_text(row)
             t.append("\n")
         if not compact:
             t.append(" " * W)                         # tinted vpad — bottom (skipped when compact)
@@ -4235,7 +4259,9 @@ def _tui_help() -> str:
     for name, rows in groups:
         out.append(f"[{th.muted}]{name}[/]")
         for c, d in rows:
-            out.append(f"  [bold]{_esc(c)}[/]{' ' * max(2, 30 - len(c))}[{th.faint}]{_esc(d)}[/]")
+            out.append(
+                f"  [bold]{_esc(c)}[/]{' ' * max(2, 30 - _cell_len(c))}"
+                f"[{th.faint}]{_esc(d)}[/]")
     out.append(f"[{th.faint}]  /rewind, /init, /search live in the classic REPL: dgc --classic[/]")
     return "\n".join(out)
 

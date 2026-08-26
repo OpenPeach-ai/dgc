@@ -1012,7 +1012,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 986/986 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 990/990 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1174,6 +1174,10 @@ The provider-runtime slice is also implemented and contract-tested:
     never serialized. Natural hook batches emit command-free start and exactly one terminal status to
     terminal/headless/editor clients, while ACP maps them onto standard tool-call lifecycle updates.
     Hostile catalog/status metadata remains inert in the webview.
+20. TUI layout now measures terminal cells rather than Unicode code points at its user-visible width
+    boundaries. Wide CJK, combining characters, and joined emoji wrap and pad inside the exact prompt
+    band; jump-to-turn geometry reuses that same row plan; composer growth, overlay columns/tab hit
+    maps, headers, status alignment, and model/mode borders use the same cell-aware measurement.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;
