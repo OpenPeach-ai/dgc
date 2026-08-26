@@ -588,7 +588,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 879/879 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 880/880 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Windows confinement remains deliberately unavailable rather than emulated by a shell prefix. The
@@ -628,8 +628,10 @@ failure is never mislabeled as a speed win. Missing or unsynchronized task usage
 JSON `null`, so the next league can be triaged without ad hoc scripts or accidental partial
 attribution. A budgeted turn now closes immediately with a bounded outcome-first summary after a
 recognized verifier passes (the controlled league supplies the exact authoritative command), avoiding
-one evidence-free provider generation and its deadline risk; normal interactive turns remain
-model-authored. Built-in
+one evidence-free provider generation and its deadline risk. A user interjection queued during that
+final edit/test batch supersedes the armed closeout, re-enters the model/tool loop with the exact
+steering message, and requires any subsequent mutation to establish a fresh green state; it is never
+discarded behind a stale completion claim. Normal interactive turns remain model-authored. Built-in
 timings contain no
 arguments, commands, paths, prompts, or results; labels and counters are bounded, survive
 compaction/resume/crash journals, and use the existing activity persistence boundary rather than an

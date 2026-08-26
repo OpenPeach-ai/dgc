@@ -2723,6 +2723,45 @@ def unit_tests(tmp: Path):
           and "Implemented and verified" in _green_agent.messages[-1]["content"]
           and "`answer.txt`" in _green_agent.messages[-1]["content"]
           and "test command passed" in _green_agent.messages[-1]["content"])
+    _steered_green_root = Path(tempfile.mkdtemp())
+    _steered_green_agent = _Ag(_Cfg(_steered_green_root), _AgUI())
+    _steered_green_agent.config.data.update({
+        "mode": "auto", "turn_budget_s": 60,
+        "verify_before_done": True, "verify_command": "test -f answer.txt",
+    })
+    class _SteeredGreenClient:
+        tools_supported = True
+        n = 0
+        saw_interjection = False
+        def chat(self, messages, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                # Simulate a TUI follow-up arriving while the edit/test batch is in flight.
+                _steered_green_agent.steer("also add the requested follow-up file")
+                return _ChatResult(tool_calls=[
+                    _ToolCall("steered-green-edit", "write_file", {
+                        "path": "answer.txt", "content": "green\n"}),
+                    _ToolCall("steered-green-test", "bash", {
+                        "command": "test -f answer.txt"}),
+                ])
+            self.saw_interjection = any(
+                "also add the requested follow-up file" in str(message.get("content") or "")
+                for message in messages)
+            return _ChatResult(tool_calls=[
+                _ToolCall("steered-follow-up-edit", "write_file", {
+                    "path": "follow-up.txt", "content": "handled\n"}),
+                _ToolCall("steered-follow-up-test", "bash", {
+                    "command": "test -f answer.txt"}),
+            ])
+    _steered_green_agent.client = _SteeredGreenClient()
+    _steered_green_agent.run_turn("write and verify the answer")
+    check("queued steering supersedes a provider-free green closeout",
+          _steered_green_agent.client.n == 2
+          and _steered_green_agent.client.saw_interjection
+          and (_steered_green_root / "answer.txt").read_text() == "green\n"
+          and (_steered_green_root / "follow-up.txt").read_text() == "handled\n"
+          and "Implemented and verified" in _steered_green_agent.messages[-1]["content"]
+          and "`follow-up.txt`" in _steered_green_agent.messages[-1]["content"])
     _ordered_root = Path(tempfile.mkdtemp())
     _ordered_agent = _Ag(_Cfg(_ordered_root), _AgUI())
     _ordered_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})

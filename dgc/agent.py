@@ -1980,7 +1980,12 @@ class Agent:
                 else:
                     self.ui.info("⏱ out of time — stopping")
                 return True
-            self._drain_steer()             # inject anything the user typed mid-turn
+            steered = self._drain_steer()   # inject anything the user typed mid-turn
+            if summary_only and steered:
+                # The deterministic closeout was armed for the previously verified request.
+                # A queued interjection is newer user intent, so let the model process it and
+                # require any resulting mutation to establish a fresh green state.
+                summary_only = False
             if summary_only:
                 labels = []
                 root = Path(self.config.project_root).absolute()
