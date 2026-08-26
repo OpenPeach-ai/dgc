@@ -460,6 +460,9 @@ class AgentContext:
     todos: list = field(default_factory=list)
     on_todo: object = None
     cancelled: threading.Event | None = None
+    # Process-local tool handles (background jobs and retained command output) must not be readable
+    # by another headless/editor session merely because it guessed a short handle such as ``out1``.
+    tool_owner: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass(frozen=True)

@@ -116,6 +116,10 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
   overflow is rejected visibly, and a prompt sent while a cancelled turn unwinds is not stranded.
   Editor, ACP, and terminal interrupts also remain effective during worker startup.
 - **Tools** — `read_file` · `repo_map` · `code_intel` · `glob` · `grep` · `write_file` · `edit_file` · `multi_edit` · `apply_patch` · `bash` · `bash_output` · `bash_kill` · `web_fetch` · `web_search` · `todo` · `skill` · `add_skill` · `task` · `artifact` · `save_memory` · `present_plan` · `propose_options` · `update_goal`.
+  Foreground command output is drained continuously through credential masking into a bounded,
+  process-local result; oversized results can be searched literally or paged with `bash_output`
+  without relying on a host `/tmp` path that may be invisible inside the sandbox. Background and
+  retained-result handles are isolated to the originating agent session and expire after 30 minutes.
 
 ## REPL conveniences
 

@@ -292,7 +292,159 @@ def unit_tests(tmp: Path):
     out = execute("bash", {"command": "false | tail -n 1"}, ctx)
     check("bash pipelines cannot hide an earlier failure", out.startswith("exit code: 1"), out)
     import re as _re_bg
+    import shlex as _shlex_tools
+    import time as _time_tools
     import dgc.tools as _tools_bg
+
+    _timeout_program = (
+        "import subprocess,sys\n"
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print('Q' * 5000)\n"
+        "print(f'CHILD_PID={p.pid}', flush=True)\n"
+    )
+    _timeout_command = (f"{_shlex_tools.quote(sys.executable)} -c "
+                        f"{_shlex_tools.quote(_timeout_program)}")
+    _timeout_started = _time_tools.monotonic()
+    _timeout_out = execute("bash", {"command": _timeout_command, "timeout": 1}, ctx)
+    _timeout_elapsed = _time_tools.monotonic() - _timeout_started
+    _timeout_pid_match = _re_bg.search(r"CHILD_PID=(\d+)", _timeout_out)
+    _timeout_output_match = _re_bg.search(r"bounded output retained as (out\d+)", _timeout_out)
+    _timeout_child_alive = False
+    if _timeout_pid_match:
+        _timeout_pid = int(_timeout_pid_match.group(1))
+        try:
+            os.kill(_timeout_pid, 0)
+            _timeout_stat = Path(f"/proc/{_timeout_pid}/stat")
+            if _timeout_stat.exists():
+                _timeout_zombie = _timeout_stat.read_text().split()[2] == "Z"
+            else:
+                try:
+                    _timeout_ps = subprocess.run(
+                        ["ps", "-o", "stat=", "-p", str(_timeout_pid)],
+                        capture_output=True, text=True, timeout=1, check=False)
+                    _timeout_zombie = _timeout_ps.stdout.strip().startswith("Z")
+                except (OSError, subprocess.SubprocessError):
+                    _timeout_zombie = False
+            _timeout_child_alive = not _timeout_zombie
+        except (OSError, ProcessLookupError):
+            pass
+    _timeout_output_id = _timeout_output_match.group(1) if _timeout_output_match else ""
+    _timeout_saved = execute("bash_output", {"id": _timeout_output_id,
+                                              "query": "CHILD_PID="}, ctx)
+    check("foreground timeout includes pipe-holding descendants, reaps the process group, and retains output",
+          _timeout_elapsed < 3 and "did NOT finish" in _timeout_out
+          and bool(_timeout_pid_match) and not _timeout_child_alive
+          and "CHILD_PID=" in _timeout_saved and "timed out" in _timeout_saved,
+          f"elapsed={_timeout_elapsed:.2f} alive={_timeout_child_alive} out={_timeout_out[-500:]}")
+
+    class _ToolSecretCfg:
+        def __init__(self, secret): self.secret = secret
+        def get(self, key, default=None):
+            return self.secret if key == "api_key" else default
+
+    _tool_secret = "toolOutputCredential-fixture-123456"
+    _output_ctx = Ctx(tmp)
+    _output_ctx.config = _ToolSecretCfg(_tool_secret)
+    _output_ctx.tool_owner = "long-output-owner"
+    _long_program = (
+        "import sys\n"
+        f"secret={_tool_secret!r}\n"
+        # Deliberately split the credential across the collector's 16 KiB read boundary, then
+        # exceed the 2 MB retention ceiling to prove collection itself (not only storage) is bounded.
+        "sys.stdout.write('H' * 16370 + secret + '\\n')\n"
+        "for i in range(23000):\n"
+        " print(f'row-{i:04d}-' + ('MIDDLE-NEEDLE-' if i == 333 else '') + 'x' * 80)\n"
+        "sys.stdout.write('T' * 16000 + '\\n')\n"
+    )
+    _long_command = (f"{_shlex_tools.quote(sys.executable)} -c "
+                     f"{_shlex_tools.quote(_long_program)}")
+    _long_out = execute("bash", {"command": _long_command}, _output_ctx)
+    _out_match = _re_bg.search(r"bounded output retained as (out\d+)", _long_out)
+    _out_id = _out_match.group(1) if _out_match else ""
+    check("long bash output has an in-process continuation instead of an inaccessible host temp file",
+          bool(_out_id) and "/tmp/dgc-bash-" not in _long_out
+          and "full output saved to" not in _long_out and "No host file was created" in _long_out,
+          _long_out[-500:])
+    check("bash output is redacted before head-tail clipping and retention",
+          _tool_secret not in _long_out and _tool_secret[:16] not in _long_out
+          and bool(_out_id) and _tool_secret not in _tools_bg._OUTPUTS[_out_id]["text"]
+          and len(_tools_bg._OUTPUTS[_out_id]["text"]) <= _tools_bg.MAX_BASH_RETAIN_CHARS
+          and _tools_bg._OUTPUTS[_out_id]["source_chars"] > _tools_bg.MAX_BASH_RETAIN_CHARS
+          and _tools_bg._OUTPUTS[_out_id]["omitted_chars"] > 0,
+          _long_out[:300])
+    _found_middle = execute("bash_output", {"id": _out_id, "query": "middle-needle"}, _output_ctx)
+    check("bash_output literal search recovers errors from an elided middle",
+          "MIDDLE-NEEDLE" in _found_middle and "1 matching line" in _found_middle,
+          _found_middle[:500])
+    _page = execute("bash_output", {"id": _out_id, "offset": 2, "limit": 2}, _output_ctx)
+    check("bash_output pages retained foreground output with stable line numbers",
+          "2\trow-0000" in _page and "3\trow-0001" in _page and "offset=4" in _page,
+          _page[:500])
+    _other_output_ctx = Ctx(tmp)
+    _other_output_ctx.tool_owner = "different-output-owner"
+    check("retained bash handles are isolated between agent sessions",
+          execute("bash_output", {"id": _out_id}, _other_output_ctx)
+          == f"no bash output '{_out_id}' (available: none)")
+    _old_retain_cap = _tools_bg.MAX_BASH_RETAIN_CHARS
+    try:
+        _tools_bg.MAX_BASH_RETAIN_CHARS = 200
+        _bounded_text, _bounded_omitted = _tools_bg._bounded_retained_text("a" * 1000)
+    finally:
+        _tools_bg.MAX_BASH_RETAIN_CHARS = _old_retain_cap
+    check("retained bash results enforce their per-result memory ceiling",
+          len(_bounded_text) <= 200 and _bounded_omitted > 0
+          and "source characters omitted" in _bounded_text)
+
+    _secret_line = "p" * 1995 + _tool_secret + "q" * 40
+    (tmp / "tool-secret.txt").write_text(_secret_line + "\n")
+    _secret_read = execute("read_file", {"path": "tool-secret.txt"}, _output_ctx)
+    _secret_grep = execute("grep", {"pattern": "toolOutputCredential", "path": "tool-secret.txt"},
+                           _output_ctx)
+    check("read and grep sanitize complete lines before their local display ceilings",
+          _tool_secret not in _secret_read + _secret_grep
+          and _tool_secret[:16] not in _secret_read + _secret_grep
+          and "[REDACTED]" in _secret_read + _secret_grep)
+
+    _private_body = "private-body-fixture-123456"
+    _private_key = ("-----BEGIN PRIVATE KEY-----\n" + _private_body +
+                    "\n-----END PRIVATE KEY-----")
+    _diff_content = "\n".join([*(f"filler-{i}" for i in range(76)), _private_key, "tail"]) + "\n"
+    _diff_out = execute("write_file", {"path": "redacted-diff.txt", "content": _diff_content},
+                        _output_ctx)
+    check("edit diffs redact complete credential blocks before the diff line ceiling",
+          _private_body not in _diff_out and "[REDACTED]" in _diff_out
+          and _private_body in (tmp / "redacted-diff.txt").read_text(), _diff_out[-500:])
+
+    _old_fetch = _tools_bg._fetch_public_text
+    _tools_bg._fetch_public_text = lambda url, **kwargs: (
+        "https://example.com/final", "z" * 7995 + _tool_secret + "tail")
+    try:
+        _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
+    finally:
+        _tools_bg._fetch_public_text = _old_fetch
+    check("web fetch redacts before its character ceiling",
+          _tool_secret not in _secret_fetch and _tool_secret[:16] not in _secret_fetch
+          and "[REDACTED]" in _secret_fetch)
+
+    _bg_secret_command = f"printf '%s\\n' {_shlex_tools.quote(_tool_secret)}"
+    _bg_secret_start = execute("bash", {"command": _bg_secret_command, "background": True},
+                               _output_ctx)
+    _bg_secret_match = _re_bg.search(r"background task (bg\d+)", _bg_secret_start)
+    _bg_secret_id = _bg_secret_match.group(1) if _bg_secret_match else ""
+    _bg_secret_out = ""
+    for _ in range(100):
+        _bg_secret_out = execute("bash_output", {"id": _bg_secret_id}, _output_ctx)
+        if "exited 0" in _bg_secret_out and "[REDACTED]" in _bg_secret_out:
+            break
+        _time_tools.sleep(0.01)
+    check("background commands and buffered output are redacted before bounded retention",
+          bool(_bg_secret_id) and _tool_secret not in _bg_secret_start + _bg_secret_out
+          and "[REDACTED]" in _bg_secret_start and "[REDACTED]" in _bg_secret_out,
+          _bg_secret_start + "\n" + _bg_secret_out)
+    check("background task handles are isolated between agent sessions",
+          execute("bash_output", {"id": _bg_secret_id}, _other_output_ctx)
+          == f"no bash output '{_bg_secret_id}' (available: none)")
+
     out = execute("bash", {"command": "sleep 30 & wait", "background": True}, ctx)
     _bgm = _re_bg.search(r"background task (bg\d+)", out)
     _bgid = _bgm.group(1) if _bgm else ""
