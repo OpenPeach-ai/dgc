@@ -7083,6 +7083,18 @@ def test_benchmark_integrity():
               and loaded_timing["provider_transports"] == {"ollama_chat": 3}
               and loaded_timing["builtin_tool_s"] == 0.25
               and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000})
+        duplicate_results = root / "results-duplicate.jsonl"
+        duplicate_results.write_text(
+            "\n".join([results.read_text().splitlines()[0]] * 2) + "\n")
+        (root / "manifest-duplicate.json").write_text(json.dumps({
+            "schema_version": 3, "settings": {"engine": "dgc"}}))
+        duplicate_rejected = False
+        try:
+            _BC.load(duplicate_results)
+        except ValueError as exc:
+            duplicate_rejected = "duplicate scored task" in str(exc)
+        check("benchmark comparison rejects duplicate task identities before pairing",
+              duplicate_rejected)
         unsynchronized_results = root / "results-unsynchronized.jsonl"
         unsynchronized_results.write_text(json.dumps({
             "lang": "python", "ex": "fixture", "engine": "dgc", "rounds": [{"agent": {
@@ -7147,24 +7159,103 @@ def test_benchmark_integrity():
               len(selected_outliers) == 1
               and selected_outliers[0]["exercise"] == "legacy"
               and selected_outliers[0]["signals"] == ["requests", "slow"])
-        comparison_json = root / "comparison-v4.json"
+        peer_records = json.loads(json.dumps(mixed_records))
+        for record in peer_records:
+            record["engine"] = "codex"
+        peer_timed = peer_records[0]
+        peer_timed["rounds"][0]["agent"] = {
+            "time": 1, "timeout": False, "usage": {
+                "requests": 1, "synchronized": True,
+                "input_tokens": 8, "output_tokens": 2,
+                "provider_transports": {"responses": 1},
+                "provider_duration_s": .75, "provider_wall_s": .75,
+                "provider_max_duration_s": .75}}
+        peer_timed["rounds"][0]["stats"].update({"tool_calls": 2, "edit_fails": 0})
+        peer_legacy = peer_records[1]
+        peer_legacy.update({"solved": True, "solved_round": 1})
+        peer_legacy["rounds"][0]["agent"] = {
+            "time": 1, "timeout": False, "usage": {
+                "requests": 1, "synchronized": True,
+                "input_tokens": 4, "output_tokens": 1,
+                "provider_transports": {"responses": 1}}}
+        peer_legacy["rounds"][0].pop("dgc")
+        peer_legacy["rounds"][0]["stats"].update(
+            {"tool_calls": 2, "edits": 1, "edit_fails": 0})
+        paired_deltas = _BC.paired_task_deltas([
+            {"engine": "dgc", "records": mixed_records},
+            {"engine": "codex", "records": peer_records},
+        ])
+        paired_by_exercise = {row["exercise"]: row for row in paired_deltas}
+        check("benchmark pairs exact tasks without inventing missing efficiency attribution",
+              len(paired_deltas) == 2
+              and paired_by_exercise["timed"]["quality"] == "both"
+              and paired_by_exercise["timed"]["agent_s_delta"] == 1
+              and paired_by_exercise["timed"]["provider_requests_delta"] == 0
+              and paired_by_exercise["timed"]["output_tokens_delta"] == 2
+              and paired_by_exercise["timed"]["outside_provider_s_delta"] == .25
+              and paired_by_exercise["legacy"]["quality"] == "peer_only"
+              and paired_by_exercise["legacy"]["baseline_result"] == "fail"
+              and paired_by_exercise["legacy"]["peer_result"] == "p1"
+              and paired_by_exercise["legacy"]["quality_tier_delta"] == -2
+              and paired_by_exercise["legacy"]["p1_delta"] == -1
+              and paired_by_exercise["legacy"]["provider_requests_delta"] == 1
+              and paired_by_exercise["legacy"]["outside_provider_s_delta"] is None
+              and paired_by_exercise["legacy"]["timeout_rounds_delta"] == 1)
+        paired_summary = _BC.paired_summaries(paired_deltas)
+        paired_regressions = _BC.paired_regressions(paired_deltas, 1)
+        quality_win = dict(paired_by_exercise["legacy"],
+                           quality="baseline_only", quality_tier_delta=2,
+                           baseline_solved=True, peer_solved=False,
+                           agent_s_delta=999, provider_requests_delta=9)
+        regressions_by_exercise = {row["exercise"]: row for row in paired_regressions}
+        check("benchmark paired summaries expose coverage and bounded regression reasons",
+              paired_summary == [{
+                  "baseline_engine": "dgc", "peer_engine": "codex", "tasks": 2,
+                  "baseline_p1": 1, "peer_p1": 2, "baseline_p2": 1, "peer_p2": 2,
+                  "baseline_only_solved": 0, "peer_only_solved": 1,
+                  "both_solved": 1, "neither_solved": 0, "agent_s_delta": 3,
+                  "baseline_quality_wins": 0, "peer_quality_wins": 1,
+                  "equal_quality": 1,
+                  "request_paired_tasks": 2, "provider_requests_delta": 1,
+                  "output_paired_tasks": 2, "output_tokens_delta": 4,
+                  "outside_provider_paired_tasks": 1, "outside_provider_s_delta": .25,
+                  "timeout_rounds_delta": 1,
+              }]
+              and len(paired_regressions) == 2
+              and regressions_by_exercise["legacy"]["signals"] == ["quality"]
+              and regressions_by_exercise["timed"]["signals"] == ["slow"]
+              and _BC.paired_regressions([quality_win], 1) == [])
+        peer_results = root / "results-codex.jsonl"
+        peer_results.write_text("\n".join(json.dumps(record) for record in peer_records) + "\n")
+        (root / "manifest-codex.json").write_text(json.dumps({
+            "schema_version": 3,
+            "settings": {"engine": "codex", "exercises": "timed,legacy"},
+            "preflight": {"tasks": {"python": 2}},
+        }))
+        comparison_json = root / "comparison-v5.json"
         comparison_stdout = _StringIO()
         original_argv = sys.argv
         try:
             sys.argv = ["compare.py", "--allow-partial", "--top-tasks", "1",
-                        "--json", str(comparison_json), str(compare_results)]
+                        "--json", str(comparison_json), str(compare_results), str(peer_results)]
             with _redirect_stdout(comparison_stdout):
                 _BC.main()
         finally:
             sys.argv = original_argv
         comparison_payload = json.loads(comparison_json.read_text())
-        check("benchmark comparison CLI writes schema-v4 task rows and bounded outliers",
-              comparison_payload["schema_version"] == 4
+        check("benchmark comparison CLI writes schema-v5 paired diagnostics and bounded outliers",
+              comparison_payload["schema_version"] == 5
               and comparison_payload["task_count"] == 2
-              and len(comparison_payload["runs"]) == 1
-              and [row["exercise"] for row in comparison_payload["tasks"]]
-                  == ["legacy", "timed"]
+              and comparison_payload["baseline_engine"] == "dgc"
+              and len(comparison_payload["runs"]) == 2
+              and [(row["engine"], row["exercise"])
+                   for row in comparison_payload["tasks"]]
+                  == [("codex", "legacy"), ("codex", "timed"),
+                      ("dgc", "legacy"), ("dgc", "timed")]
+              and len(comparison_payload["paired_summaries"]) == 1
+              and len(comparison_payload["paired_task_deltas"]) == 2
               and "task outliers" in comparison_stdout.getvalue()
+              and "paired dgc regressions" in comparison_stdout.getvalue()
               and "python/legacy" in comparison_stdout.getvalue())
         round_delta = _RB._monotonic_stats_delta(
             {"tool_calls": 9, "builtin_tool_us": 9000, "builtin_tool_samples": 5,

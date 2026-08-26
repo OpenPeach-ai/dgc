@@ -152,8 +152,9 @@ variables still override those binaries.
 ```bash
 python3 report.py results/results-<engine>-<model>-<tag>.jsonl
 
-# compare controlled engines and show the top five slow/request-heavy tasks per engine
-python3 compare.py --top-tasks 5 --json results/comparison-<model>-<tag>.json \
+# compare controlled engines, using DGC as the paired task baseline, and show the top five outliers
+python3 compare.py --baseline-engine dgc --top-tasks 5 \
+  --json results/comparison-<model>-<tag>.json \
   results/results-<engine>-<model>-<tag>.jsonl ...
 ```
 
@@ -166,10 +167,17 @@ TOTAL        225  ...
 
 `tool_s` is available only for instrumented DGC rounds. The report also prints the eight largest
 built-in tool totals with sample counts; the JSONL remains authoritative for every per-round and
-per-tool value. Comparison JSON schema v4 adds a bounded, trace-free `tasks` array with pass state,
+per-tool value. Comparison JSON schema v5 adds a bounded, trace-free `tasks` array with pass state,
 rounds, timeouts, attributed requests/tokens/timings, outside-provider time, and available activity
-counters for every engine/exercise. A task with incomplete or unsynchronized provider attribution
-uses JSON `null` for affected totals instead of mixing partial work into a seemingly exact number.
+counters for every engine/exercise. It also emits `paired_summaries` and `paired_task_deltas` for
+each peer on the exact shared task set selected by `--baseline-engine`. Pass@1, pass@2, and a
+three-tier first-round/second-round/fail comparison keep quality differences explicit. Delta values
+are baseline minus peer, so positive time, request, token, timeout, tool, or edit values mean the
+baseline used more. `--top-tasks` prints a bounded union of both per-engine outliers and paired
+baseline quality regressions; latency and request regressions are selected only between equally
+successful quality tiers, never by rewarding an earlier failure. A task with incomplete or
+unsynchronized provider attribution uses JSON `null` for affected totals; paired sums carry an
+explicit coverage count and never mix partial work into a seemingly exact number.
 
 Key flags: `--langs` (subset), `-n/--limit` (cap per language), `--rounds`,
 `--dgc-timeout`, `--test-timeout`, `--tag`, `--keep-work`, `--dry-run`.

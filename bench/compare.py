@@ -61,8 +61,25 @@ def load(path: Path) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if int(manifest.get("schema_version") or 0) < 3:
         raise ValueError(f"controlled comparison requires a schema-v3 manifest: {manifest_path}")
-    engine = str(records[0].get("engine") or path.stem)
-    tasks = {(str(r.get("lang")), str(r.get("ex"))) for r in records}
+    record_engines = {str(record.get("engine") or path.stem) for record in records}
+    if len(record_engines) != 1:
+        raise ValueError(f"mixed engine records in {path}")
+    engine = next(iter(record_engines))
+    declared_engine = (manifest.get("settings") or {}).get("engine")
+    if declared_engine and str(declared_engine) != engine:
+        raise ValueError(f"manifest engine {declared_engine!r} does not match {engine!r} in {path}")
+    task_rows = [(str(record.get("lang")), str(record.get("ex"))) for record in records]
+    tasks = set(task_rows)
+    if len(tasks) != len(task_rows):
+        seen: set[tuple[str, str]] = set()
+        duplicate = ("", "")
+        for task in task_rows:
+            if task in seen:
+                duplicate = task
+                break
+            seen.add(task)
+        label = re.sub(r"[\x00-\x1f\x7f]", "?", f"{duplicate[0]}/{duplicate[1]}")[:80]
+        raise ValueError(f"duplicate scored task in {path}: {label}")
     p1 = sum(bool(r.get("solved") and r.get("solved_round") == 1) for r in records)
     p2 = sum(bool(r.get("solved")) for r in records)
     rounds = [rd for r in records for rd in (r.get("rounds") or [])]
@@ -278,6 +295,142 @@ def task_outliers(runs: list[dict], limit: int) -> list[dict]:
     return selected
 
 
+def paired_task_deltas(runs: list[dict], baseline_engine: str = "dgc") -> list[dict]:
+    """Join exact task identities and compute baseline-minus-peer diagnostic deltas."""
+    rows_by_engine: dict[str, dict[tuple[str, str], dict]] = {}
+    for run in runs:
+        engine = str(run.get("engine") or "")
+        rows_by_engine[engine] = {
+            (row["lang"], row["exercise"]): row
+            for row in (task_metrics(engine, record) for record in run.get("records") or [])}
+    baseline = rows_by_engine.get(str(baseline_engine))
+    if not baseline:
+        return []
+
+    deltas: list[dict] = []
+    for peer_engine in sorted(engine for engine in rows_by_engine if engine != baseline_engine):
+        peer = rows_by_engine[peer_engine]
+        for key in sorted(set(baseline) & set(peer)):
+            base_row, peer_row = baseline[key], peer[key]
+
+            def delta(field: str) -> float | int | None:
+                left, right = base_row.get(field), peer_row.get(field)
+                return left - right if left is not None and right is not None else None
+
+            base_solved, peer_solved = base_row["solved"], peer_row["solved"]
+            quality = ("both" if base_solved and peer_solved else
+                       "baseline_only" if base_solved else
+                       "peer_only" if peer_solved else "neither")
+            base_result = (f"p{base_row['solved_round']}"
+                           if base_row["solved_round"] else "fail")
+            peer_result = (f"p{peer_row['solved_round']}"
+                           if peer_row["solved_round"] else "fail")
+            base_quality = (2 if base_row["solved_round"] == 1 else
+                            1 if base_solved else 0)
+            peer_quality = (2 if peer_row["solved_round"] == 1 else
+                            1 if peer_solved else 0)
+            deltas.append({
+                "baseline_engine": str(baseline_engine), "peer_engine": peer_engine,
+                "lang": key[0], "exercise": key[1], "quality": quality,
+                "baseline_result": base_result, "peer_result": peer_result,
+                "quality_tier_delta": base_quality - peer_quality,
+                "baseline_solved": base_solved, "peer_solved": peer_solved,
+                "baseline_solved_round": base_row["solved_round"],
+                "peer_solved_round": peer_row["solved_round"],
+                "p1_delta": (int(base_row["solved_round"] == 1)
+                             - int(peer_row["solved_round"] == 1)),
+                "p2_delta": int(base_solved) - int(peer_solved),
+                "agent_s_delta": delta("agent_s"),
+                "provider_requests_delta": delta("provider_requests"),
+                "input_tokens_delta": delta("input_tokens"),
+                "output_tokens_delta": delta("output_tokens"),
+                "outside_provider_s_delta": delta("outside_provider_s"),
+                "timeout_rounds_delta": delta("timeout_rounds"),
+                "tool_calls_delta": delta("tool_calls"), "edits_delta": delta("edits"),
+                "edit_fails_delta": delta("edit_fails"),
+            })
+    return deltas
+
+
+def paired_summaries(deltas: list[dict]) -> list[dict]:
+    """Aggregate task-paired quality and efficiency without filling missing attribution."""
+    summaries: list[dict] = []
+    peers = sorted({(row["baseline_engine"], row["peer_engine"]) for row in deltas})
+    for baseline_engine, peer_engine in peers:
+        rows = [row for row in deltas
+                if row["baseline_engine"] == baseline_engine and row["peer_engine"] == peer_engine]
+        request_rows = [row for row in rows if row["provider_requests_delta"] is not None]
+        output_rows = [row for row in rows if row["output_tokens_delta"] is not None]
+        outside_rows = [row for row in rows if row["outside_provider_s_delta"] is not None]
+        summaries.append({
+            "baseline_engine": baseline_engine, "peer_engine": peer_engine,
+            "tasks": len(rows),
+            "baseline_p1": sum(row["baseline_solved_round"] == 1 for row in rows),
+            "peer_p1": sum(row["peer_solved_round"] == 1 for row in rows),
+            "baseline_p2": sum(row["baseline_solved"] for row in rows),
+            "peer_p2": sum(row["peer_solved"] for row in rows),
+            "baseline_only_solved": sum(row["quality"] == "baseline_only" for row in rows),
+            "peer_only_solved": sum(row["quality"] == "peer_only" for row in rows),
+            "both_solved": sum(row["quality"] == "both" for row in rows),
+            "neither_solved": sum(row["quality"] == "neither" for row in rows),
+            "baseline_quality_wins": sum(row["quality_tier_delta"] > 0 for row in rows),
+            "peer_quality_wins": sum(row["quality_tier_delta"] < 0 for row in rows),
+            "equal_quality": sum(row["quality_tier_delta"] == 0 for row in rows),
+            "agent_s_delta": sum(row["agent_s_delta"] for row in rows),
+            "request_paired_tasks": len(request_rows),
+            "provider_requests_delta": (sum(row["provider_requests_delta"] for row in request_rows)
+                                        if request_rows else None),
+            "output_paired_tasks": len(output_rows),
+            "output_tokens_delta": (sum(row["output_tokens_delta"] for row in output_rows)
+                                    if output_rows else None),
+            "outside_provider_paired_tasks": len(outside_rows),
+            "outside_provider_s_delta": (
+                sum(row["outside_provider_s_delta"] for row in outside_rows)
+                if outside_rows else None),
+            "timeout_rounds_delta": sum(row["timeout_rounds_delta"] for row in rows),
+        })
+    return summaries
+
+
+def paired_regressions(deltas: list[dict], limit: int) -> list[dict]:
+    """Select a bounded union of baseline quality, latency, and request regressions per peer."""
+    limit = max(0, min(20, int(limit)))
+    if limit == 0:
+        return []
+    selected: list[dict] = []
+    peers = sorted({row["peer_engine"] for row in deltas})
+    for peer in peers:
+        rows = [row for row in deltas if row["peer_engine"] == peer]
+        by_key = {(row["lang"], row["exercise"]): row for row in rows}
+        signals: dict[tuple[str, str], set[str]] = {}
+        quality_rows = sorted(
+            (row for row in rows if row["quality_tier_delta"] < 0),
+            key=lambda row: (row["quality_tier_delta"], row["lang"], row["exercise"]))[:limit]
+        for row in quality_rows:
+            signals.setdefault((row["lang"], row["exercise"]), set()).add("quality")
+        comparable_rows = [row for row in rows
+                           if row["quality_tier_delta"] == 0 and row["baseline_solved"]]
+        slow_rows = sorted(
+            (row for row in comparable_rows if row["agent_s_delta"] > 0),
+            key=lambda row: (-row["agent_s_delta"], row["lang"], row["exercise"]))[:limit]
+        for row in slow_rows:
+            signals.setdefault((row["lang"], row["exercise"]), set()).add("slow")
+        request_rows = sorted(
+            (row for row in comparable_rows
+             if row["provider_requests_delta"] is not None
+             and row["provider_requests_delta"] > 0),
+            key=lambda row: (-row["provider_requests_delta"],
+                             -row["agent_s_delta"], row["lang"], row["exercise"]))[:limit]
+        for row in request_rows:
+            signals.setdefault((row["lang"], row["exercise"]), set()).add("requests")
+        for key in sorted(signals, key=lambda item: (
+                "quality" not in signals[item],
+                -(by_key[item]["provider_requests_delta"] or 0),
+                -by_key[item]["agent_s_delta"], item)):
+            selected.append(dict(by_key[key], signals=sorted(signals[key])))
+    return selected
+
+
 def publication_errors(runs: list[dict]) -> list[str]:
     """Return every reason a league is unsuitable for a public frontier claim."""
     errors: list[str] = []
@@ -329,6 +482,8 @@ def main() -> None:
                         help="allow incomplete task sets (never use for published claims)")
     parser.add_argument("--top-tasks", type=int, default=0, metavar="N",
                         help="show the N slowest and highest-request tasks per engine (0-20)")
+    parser.add_argument("--baseline-engine", default="dgc", metavar="ENGINE",
+                        help="engine used for paired task deltas (default: dgc)")
     args = parser.parse_args()
     if not 0 <= args.top_tasks <= 20:
         parser.error("--top-tasks must be between 0 and 20")
@@ -427,13 +582,35 @@ def main() -> None:
             print(f"{row['engine']:12.12s} {task:34s} {result:>7} {row['agent_s']:8.1f} "
                   f"{requests:>5} {output:>7} {outside:>8} {edits:>6} {edit_fails:>4} "
                   f"{row['timeout_rounds']:4d} {'+'.join(row['signals']):>13}")
+    baseline_engine = (args.baseline_engine
+                       if args.baseline_engine in {run["engine"] for run in runs} else None)
+    paired = paired_task_deltas(runs, baseline_engine) if baseline_engine else []
+    paired_summary = paired_summaries(paired)
+    regressions = paired_regressions(paired, args.top_tasks)
+    if regressions:
+        print(f"\npaired {baseline_engine} regressions (positive deltas mean baseline used more)")
+        print(f"{'peer':12s} {'task':34s} {'base/peer':>13} {'agent_Δs':>9} {'req_Δ':>6} "
+              f"{'out_Δ':>8} {'t/o_Δ':>6} {'signal':>21}")
+        for row in regressions:
+            request_delta = (f"{row['provider_requests_delta']:+g}"
+                             if row["provider_requests_delta"] is not None else "?")
+            output_delta = (f"{row['output_tokens_delta']:+g}"
+                            if row["output_tokens_delta"] is not None else "?")
+            task = re.sub(r"[\x00-\x1f\x7f]", "?", f"{row['lang']}/{row['exercise']}")[:34]
+            results = f"{row['baseline_result']}/{row['peer_result']}"
+            print(f"{row['peer_engine']:12.12s} {task:34s} {results:>13} "
+                  f"{row['agent_s_delta']:+9.1f} {request_delta:>6} {output_delta:>8} "
+                  f"{row['timeout_rounds_delta']:+6g} {'+'.join(row['signals']):>21}")
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         tasks = sorted((task_metrics(run["engine"], record) for run in runs
                         for record in run["records"]),
                        key=lambda row: (row["engine"], row["lang"], row["exercise"]))
-        args.json.write_text(json.dumps({"schema_version": 4, "task_count": len(baseline),
-                                         "runs": comparison, "tasks": tasks},
+        args.json.write_text(json.dumps({"schema_version": 5, "task_count": len(baseline),
+                                         "baseline_engine": baseline_engine,
+                                         "runs": comparison, "tasks": tasks,
+                                         "paired_summaries": paired_summary,
+                                         "paired_task_deltas": paired},
                                         indent=2) + "\n", encoding="utf-8")
 
 
