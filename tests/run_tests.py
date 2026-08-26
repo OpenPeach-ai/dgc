@@ -4877,6 +4877,22 @@ def test_worktree_git_runner():
           flooded.returncode == 125 and len(flooded.stdout) == 1024
           and b"stdout exceeded 1024 bytes" in flooded.stderr)
 
+    # Deterministically model the scheduler window where the loop's optimistic overflow property
+    # check happens before the reader's final feed, but process/readers completion is observed after
+    # it. The post-drain total must remain authoritative even if the in-loop signal is missed.
+    exceeded_property = _worktree._GitCapture.exceeded
+    os.environ["PATH"] = str(external_bin) + os.pathsep + old_path
+    try:
+        _worktree._GitCapture.exceeded = property(lambda _capture: False)
+        late_flooded = _worktree._run_git(
+            ["status"], root, timeout=2, max_stdout=1024, text=False)
+    finally:
+        _worktree._GitCapture.exceeded = exceeded_property
+        os.environ["PATH"] = old_path
+    check("internal Git reconciles a late stdout overflow after reader completion",
+          late_flooded.returncode == 125 and len(late_flooded.stdout) == 1024
+          and b"stdout exceeded 1024 bytes" in late_flooded.stderr)
+
     tracked = root / "tracked.txt"
     tracked.write_text("base\n")
     add = _worktree._git(["add", "tracked.txt"], root)

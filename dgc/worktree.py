@@ -211,6 +211,14 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
         out_reader.join(timeout=1)
         err_reader.join(timeout=1)
 
+    # The reader can cross the ceiling after the loop checks ``stdout.exceeded`` but before the
+    # adjacent process/readers-finished check becomes true.  Reconcile the final drained byte count
+    # directly: otherwise that scheduling window returns Git's zero status with a silently truncated
+    # payload.  At this point a no-failure path has observed process exit and joined both readers, so
+    # ``total`` is the authoritative final count and no extra process termination is needed.
+    if not failure and stdout.total > stdout.limit:
+        failure = f"git stdout exceeded {max_stdout} bytes"
+
     out = stdout.bytes()
     err = stderr.bytes()
     if failure or reader_errors:

@@ -1038,7 +1038,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 1011/1011 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 1012/1012 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1086,6 +1086,9 @@ The stratified diagnostic added trace-backed runtime controls after this interac
    verify-before-done gate. Build-only probes no longer trigger a false green closeout, prompts state
    that canonical expectations are reference-validated, and the varied-failure cap tightens only in
    the final 10% of the turn budget rather than discarding useful correction time at 80%.
+10. Internal Git output enforcement now reconciles the final byte count after both pipe readers
+    drain. This closes a measured 1-in-500 scheduling race that could return exit zero with a
+    silently truncated path/status payload despite the operation-specific ceiling.
 
 The provider-runtime slice is also implemented and contract-tested:
 
