@@ -16,8 +16,10 @@ Isolation: every DGC call runs under a throwaway $HOME, so the benchmark never
 reads or writes your real ~/.dgc (config, sessions, skills, memory).
 
 Usage:
-  python3 run_bench.py --model qwen3.8:27b-q4km --out results/ --langs python --limit 3
-  python3 run_bench.py --model qwen122b-code:latest --base-url http://localhost:11434/v1 --out results/
+  python3 run_bench.py --model qwen3.8-bench-64k --context-size 65536 \
+    --out results/ --langs python --limit 3
+  python3 run_bench.py --model qwen122b-code-bench --context-size 65536 \
+    --base-url http://localhost:11434/v1 --out results/
 """
 from __future__ import annotations
 import argparse, hashlib, json, math, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time
@@ -25,10 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 RESULT_SCHEMA_VERSION = 3
 TRACE_LIMIT = 120_000
+MODEL_METADATA_LIMIT = 2 * 1024 * 1024
 EXPECTED_PROVIDER_TRANSPORTS = {
     "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
@@ -182,6 +185,86 @@ def _safe_base_url(value: str) -> str:
     if p.port:
         host += f":{p.port}"
     return urlunsplit((p.scheme, host, p.path, "", ""))
+
+
+def provider_context_preflight(base_url: str, model: str, api_key: str,
+                               requested: int) -> dict:
+    """Verify a baked Ollama context so every transport uses the same model allocation.
+
+    OpenAI-compatible requests cannot set Ollama's ``num_ctx``. A publishable league therefore
+    uses a dedicated model alias whose Modelfile declares the context, while the proxy pins native
+    requests to the same value. Metadata is bounded and never includes the key or model body.
+    """
+    try:
+        expected = int(requested or 0)
+    except (TypeError, ValueError, OverflowError):
+        expected = 0
+    result = {"status": "unverified", "source": "ollama_show",
+              "requested_context": expected, "configured_context": 0,
+              "model_context_limit": 0}
+    if not 2_048 <= expected <= 10_000_000:
+        result["error"] = "set --context-size to 2048..10000000"
+        return result
+    parsed = urlsplit(str(base_url).rstrip("/"))
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None):
+        result["status"] = "failed"
+        result["error"] = "provider endpoint must be http(s) without embedded credentials"
+        return result
+    root_path = parsed.path.rstrip("/")
+    if root_path.lower().endswith("/v1"):
+        root_path = root_path[:-3]
+    endpoint = urlunsplit((parsed.scheme, parsed.netloc, root_path + "/api/show", "", ""))
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = Request(endpoint, data=json.dumps({"model": model, "verbose": False}).encode(),
+                      headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=10) as response:
+            body = response.read(MODEL_METADATA_LIMIT + 1)
+        if len(body) > MODEL_METADATA_LIMIT:
+            result["status"], result["error"] = "failed", "model metadata exceeded 2 MiB"
+            return result
+        value = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        result["status"] = "failed"
+        result["error"] = f"model metadata unavailable ({type(exc).__name__})"
+        return result
+    if not isinstance(value, dict):
+        result["status"], result["error"] = "failed", "model metadata had an invalid shape"
+        return result
+    parameters = value.get("parameters")
+    match = (re.search(r"(?im)^\s*num_ctx\s+(\d+)\s*$", parameters)
+             if isinstance(parameters, str) and len(parameters) <= 64_000 else None)
+    configured = int(match.group(1)) if match else 0
+    info = value.get("model_info") if isinstance(value.get("model_info"), dict) else {}
+    limits = []
+    for index, (key, raw) in enumerate(info.items()):
+        if index >= 4_096:
+            break
+        normalized = str(key).lower()
+        if (not normalized.endswith(".context_length")
+                or ".vision." in normalized or ".mm." in normalized):
+            continue
+        try:
+            limit = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if 0 < limit <= 10_000_000:
+            limits.append(limit)
+    trained = max(limits, default=0)
+    result.update(configured_context=configured, model_context_limit=trained)
+    if configured != expected:
+        result["status"] = "failed"
+        result["error"] = (f"model alias declares num_ctx={configured or 'none'}, "
+                           f"expected {expected}")
+    elif trained and expected > trained:
+        result["status"] = "failed"
+        result["error"] = f"requested context {expected} exceeds model limit {trained}"
+    else:
+        result["status"] = "pass"
+    return result
 
 
 def _trace_record(stdout: str, stderr: str = "", secrets=()) -> dict:
@@ -376,7 +459,9 @@ def build_manifest(a, langs: list[str], preflight: dict) -> dict:
         "test_timeout_s": a.test_timeout,
         "thinking": os.environ.get("DGC_BENCH_THINKING_POLICY", "harness-default"),
         "usage_source": os.environ.get("DGC_BENCH_USAGE_SOURCE", "harness-output-if-available"),
-        "context_tokens": 32768, "home_isolation": "per-exercise",
+        "context_tokens": int(a.context_size or 0),
+        "context_policy": "baked-model-alias+native-proxy",
+        "home_isolation": "per-exercise",
         "round_two_context": "resume-harness-session",
     }
     runner, dataset = _git_revision(REPO.parent), _git_revision(DATA)
@@ -584,7 +669,8 @@ def preflight_environment(langs: list[str], engine: str, env: dict, dry_run: boo
 
 # ---------------------------------------------------------------------- DGC ---
 def seed_home(home: Path, model: str, base_url: str, api_key: str, max_turns: int = 40,
-              turn_budget_s: int = 0, verify_command: str = "") -> None:
+              turn_budget_s: int = 0, verify_command: str = "",
+              context_size: int = 32768) -> None:
     home.mkdir(parents=True, exist_ok=True)
     try:
         home.chmod(0o700)
@@ -611,7 +697,8 @@ def seed_home(home: Path, model: str, base_url: str, api_key: str, max_turns: in
         "api_mode": "ollama",
         "thinking": "off", "suggest": False, "logo_animation": False,
         "artifact_autostart": False, "background": "inherit",
-        "show_reasoning": False, "max_turns": max_turns, "context_size": 32768,
+        "show_reasoning": False, "max_turns": max_turns,
+        "context_size": max(2_048, int(context_size)),
         # Let DGC stop and persist the last verified state before the external process-group kill.
         # AgentRuntime reserves the final 6% of this budget for graceful convergence/restore.
         "turn_budget_s": internal_budget,
@@ -843,7 +930,8 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> d
     # Every exercise gets a private HOME. This prevents model/config/session state from one task
     # leaking into another while preserving the same harness session across round 1 and round 2.
     exercise_home = home / lang / ex
-    seed_home(exercise_home, a.model, a.base_url, a.api_key, a.max_turns, a.dgc_timeout, tcmd)
+    seed_home(exercise_home, a.model, a.base_url, a.api_key, a.max_turns, a.dgc_timeout,
+              tcmd, context_size=a.context_size)
     work = make_workdir(lang, ex)
     prep_workdir(exdir, work)
     solved = False
@@ -1109,6 +1197,9 @@ def main() -> None:
     ap.add_argument("--exercises", default="", help="explicit comma list (use with a single --langs)")
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--max-turns", type=int, default=40, help="DGC tool-use iterations per session")
+    ap.add_argument("--context-size", type=int,
+                    default=os.environ.get("DGC_BENCH_CONTEXT_SIZE", "0"),
+                    help="verified baked model context shared by every harness (required for scoring)")
     ap.add_argument("--dgc-timeout", type=int, default=600)
     ap.add_argument("--test-timeout", type=int, default=300)
     ap.add_argument("--out", required=True)
@@ -1127,11 +1218,23 @@ def main() -> None:
     langs = LANGS if a.langs == "all" else [l.strip() for l in a.langs.split(",") if l.strip()]
     if a.exercises and len(langs) != 1:
         ap.error("--exercises requires exactly one selected language")
+    if not 2_048 <= a.context_size <= 10_000_000:
+        ap.error("--context-size is required and must be between 2048 and 10000000")
     env = bench_env()
     try:
         preflight = preflight_environment(langs, a.engine, env, dry_run=a.dry_run)
     except RuntimeError as exc:
         ap.error(str(exc))
+    if a.dry_run:
+        preflight["provider_context"] = {
+            "status": "not-run", "source": "ollama_show",
+            "requested_context": a.context_size}
+    else:
+        provider_context = provider_context_preflight(
+            a.base_url, a.model, a.api_key, a.context_size)
+        preflight["provider_context"] = provider_context
+        if provider_context.get("status") != "pass":
+            ap.error(str(provider_context.get("error") or "provider context preflight failed"))
     outdir = Path(a.out)
     outdir.mkdir(parents=True, exist_ok=True)
     safe_model = re.sub(r"[^A-Za-z0-9._-]", "_", a.model)

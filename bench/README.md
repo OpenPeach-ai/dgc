@@ -64,26 +64,42 @@ contacts no model endpoint.
 
 ## Run
 
+All harnesses must use a dedicated Ollama model alias with the same baked context. OpenAI-compatible
+requests cannot set Ollama's `num_ctx`, so a raw model tag is not a controlled comparison. Create a
+small Modelfile such as:
+
+```dockerfile
+FROM qwen3.8:27b-q4_K_M
+PARAMETER num_ctx 65536
+```
+
+Then run `ollama create qwen3.8-bench-64k -f Modelfile.bench`. The runner verifies that exact
+`num_ctx` through bounded `/api/show` metadata before any scored task, and the accounting proxy pins
+native DGC/Goose requests to it as well. A missing or mismatched value fails before model generation.
+
 ```bash
 # a quick taste — 3 python exercises on a local ollama model
-python3 run_bench.py --model qwen3.8:27b-q4km \
+python3 run_bench.py --model qwen3.8-bench-64k --context-size 65536 \
   --base-url http://localhost:11434/v1 --langs python -n 3 --out results/
 
 # the full 225, two-round protocol
-python3 run_bench.py --model <model> --base-url <openai-compatible-url> \
+python3 run_bench.py --model <baked-context-model-alias> --context-size 65536 \
+  --base-url <openai-compatible-url> \
   --langs all --rounds 2 --out results/ --tag run1
 
 # publishable same-model league (validates references, then runs all six harnesses)
 export DGC_BENCH_MODEL_DIGEST=<immutable-model-digest>
 export DGC_BENCH_HARDWARE=<stable-machine-label>
 export DGC_BENCH_ACCELERATOR=<gpu-or-accelerator-description>
-bash run_league.sh <model> <openai-compatible-url> run1
+export DGC_BENCH_CONTEXT_SIZE=65536
+bash run_league.sh <baked-context-model-alias> <openai-compatible-url> run1
 
 # one-task protocol canary (explicitly non-publishable)
 export DGC_BENCH_ALLOW_DIRTY=1 DGC_BENCH_ALLOW_PARTIAL=1
 export DGC_BENCH_SKIP_REFERENCE_VALIDATION=1
 export DGC_BENCH_LANGS=python DGC_BENCH_EXERCISES=proverb DGC_BENCH_ROUNDS=1
-bash run_league.sh <model> <openai-compatible-url> canary1
+export DGC_BENCH_CONTEXT_SIZE=65536
+bash run_league.sh <baked-context-model-alias> <openai-compatible-url> canary1
 ```
 
 For a keyed endpoint, set `DGC_BENCH_API_KEY` in the environment. To use a
@@ -238,6 +254,7 @@ unsynchronized provider attribution uses JSON `null` for affected totals; paired
 explicit coverage count and never mix partial work into a seemingly exact number.
 
 Key flags: `--langs` (subset), `-n/--limit` (cap per language), `--rounds`,
-`--dgc-timeout`, `--test-timeout`, `--tag`, `--keep-work`, `--dry-run`.
+`--context-size` (required baked model context), `--dgc-timeout`, `--test-timeout`, `--tag`,
+`--keep-work`, `--dry-run`.
 
 [pg]: https://github.com/Aider-AI/polyglot-benchmark

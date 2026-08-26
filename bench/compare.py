@@ -482,6 +482,19 @@ def publication_errors(runs: list[dict]) -> list[str]:
             missing.append("transport reasoning normalization")
         if settings.get("usage_source") != "provider-proxy":
             missing.append("provider-side usage")
+        context_preflight = (manifest.get("preflight") or {}).get("provider_context") or {}
+        try:
+            context_tokens = int(settings.get("context_tokens") or 0)
+            requested_context = int(context_preflight.get("requested_context") or 0)
+            configured_context = int(context_preflight.get("configured_context") or 0)
+        except (TypeError, ValueError, OverflowError):
+            context_tokens = requested_context = configured_context = 0
+        if (settings.get("context_policy") != "baked-model-alias+native-proxy"
+                or context_tokens < 2_048
+                or context_preflight.get("status") != "pass"
+                or requested_context != context_tokens
+                or configured_context != context_tokens):
+            missing.append("verified shared provider context")
         expected_transport = EXPECTED_PROVIDER_TRANSPORTS[run["engine"]]
         if manifest.get("provider_transport") != expected_transport:
             missing.append(f"declared {expected_transport} provider transport")

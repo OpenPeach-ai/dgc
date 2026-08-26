@@ -146,7 +146,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 path = urlsplit(self.path).path.rstrip("/")
                 if path.endswith("/api/chat") or path.endswith("/api/generate"):
                     payload["think"] = False
-                    normalization = "think=false"
+                    normalized = ["think=false"]
+                    context_size = max(0, int(getattr(self.server, "context_size", 0) or 0))
+                    if context_size:
+                        options = payload.get("options")
+                        if not isinstance(options, dict):
+                            options = {}
+                            payload["options"] = options
+                        options["num_ctx"] = context_size
+                        normalized.append(f"num_ctx={context_size}")
+                    normalization = ";".join(normalized)
                     transport = "ollama_chat"
                 elif path.endswith("/chat/completions"):
                     payload["reasoning_effort"] = "none"
@@ -234,15 +243,21 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--ready-file", type=Path, required=True)
     parser.add_argument("--usage-log", type=Path, required=True)
+    parser.add_argument("--context-size", type=int, default=0,
+                        help="pin native Ollama requests to a pre-verified baked model context")
     args = parser.parse_args()
     upstream = urlsplit(args.upstream.rstrip("/").removesuffix("/v1"))
-    if upstream.scheme not in ("http", "https") or not upstream.hostname or upstream.username:
+    if (upstream.scheme not in ("http", "https") or not upstream.hostname
+            or upstream.username is not None or upstream.password is not None):
         parser.error("upstream must be an http(s) origin without embedded credentials")
+    if args.context_size and not 2_048 <= args.context_size <= 10_000_000:
+        parser.error("--context-size must be between 2048 and 10000000")
     args.usage_log.parent.mkdir(parents=True, exist_ok=True)
     args.usage_log.touch(mode=0o600, exist_ok=True)
     server = ProxyServer(("127.0.0.1", args.port), ProxyHandler)
     server.upstream = upstream  # type: ignore[attr-defined]
     server.usage_log = args.usage_log  # type: ignore[attr-defined]
+    server.context_size = max(0, args.context_size)  # type: ignore[attr-defined]
     args.ready_file.write_text(str(server.server_port) + "\n", encoding="utf-8")
     try:
         args.ready_file.chmod(0o600)

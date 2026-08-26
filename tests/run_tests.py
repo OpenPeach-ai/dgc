@@ -7696,12 +7696,17 @@ def test_benchmark_integrity():
         publish_manifest = {
             "settings": {"model_digest": "sha256:model", "thinking": "transport-reasoning-off",
                          "usage_source": "provider-proxy", "langs": sorted(_BC.REQUIRED_LANGS),
-                         "limit": 0, "exercises": "", "rounds": 2},
+                         "limit": 0, "exercises": "", "rounds": 2,
+                         "context_tokens": 32768,
+                         "context_policy": "baked-model-alias+native-proxy"},
             "environment": {"hardware_label": "fixture"},
             "runner": {"commit": "runner-sha", "dirty": False},
             "dataset": {"commit": "dataset-sha", "dirty": False},
             "preflight": {"tasks": {"cpp": 26, "go": 39, "java": 47,
-                                      "javascript": 49, "python": 34, "rust": 30}},
+                                      "javascript": 49, "python": 34, "rust": 30},
+                          "provider_context": {"status": "pass",
+                                               "requested_context": 32768,
+                                               "configured_context": 32768}},
         }
         publish_runs = []
         for engine in sorted(_BC.REQUIRED_ENGINES):
@@ -7725,6 +7730,12 @@ def test_benchmark_integrity():
         publish_runs[0]["manifest"]["runner"]["dirty"] = True
         check("benchmark publication gate rejects dirty evidence",
               any("clean runner revision" in error
+                  for error in _BC.publication_errors(publish_runs)))
+        publish_runs[0]["manifest"]["runner"]["dirty"] = False
+        publish_runs[0]["manifest"]["preflight"]["provider_context"][
+            "configured_context"] = 16384
+        check("benchmark publication gate rejects an unverified cross-harness context",
+              any("verified shared provider context" in error
                   for error in _BC.publication_errors(publish_runs)))
         import validate_harness as _VH
         reference = root / "reference"; meta = reference / ".meta"
@@ -8033,13 +8044,14 @@ def test_benchmark_integrity():
 
         budget_home = root / "budget-home"
         _RB.seed_home(budget_home, "m", "http://localhost:11434/v1", "ollama", 40, 600,
-                      "pytest -q")
+                      "pytest -q", context_size=65536)
         budget_cfg = json.loads((budget_home / ".dgc" / "config.json").read_text())
         check("benchmark external timeout reserves a graceful persistence window",
               budget_cfg["turn_budget_s"] == 585)
         check("benchmark config makes the official test command an authoritative stop gate",
               budget_cfg["verify_before_done"] is True
-              and budget_cfg["verify_command"] == "pytest -q")
+              and budget_cfg["verify_command"] == "pytest -q"
+              and budget_cfg["context_size"] == 65536)
         check("benchmark pins DGC to native Ollama behind the identity-obscuring usage proxy",
               budget_cfg["api_mode"] == "ollama")
         check("benchmark round-two prompt requires a focused API-preserving correction",
@@ -8135,7 +8147,8 @@ def test_benchmark_integrity():
                     reply = {"done": True, "prompt_eval_count": 5, "eval_count": 2}
                 elif self.path.endswith("/api/show"):
                     reply = {"capabilities": ["completion", "tools"],
-                             "model_info": {"fixture.context_length": 32768}}
+                             "parameters": "temperature 0.7\nnum_ctx 32768",
+                             "model_info": {"fixture.context_length": 131072}}
                 else:
                     reply = {"usage": {"input_tokens": 8, "output_tokens": 3,
                                        "output_tokens_details": {"reasoning_tokens": 0}}}
@@ -8151,12 +8164,19 @@ def test_benchmark_integrity():
         proxy = _PP.ProxyServer(("127.0.0.1", 0), _PP.ProxyHandler)
         proxy.upstream = _urlsplit(f"http://127.0.0.1:{upstream.server_port}")
         proxy.usage_log = proxy_log
+        proxy.context_size = 32768
         threads = [threading.Thread(target=server.serve_forever, daemon=True)
                    for server in (upstream, proxy)]
         for thread in threads:
             thread.start()
         round_usage = None
         try:
+            context_probe = _RB.provider_context_preflight(
+                f"http://127.0.0.1:{upstream.server_port}/v1", "fixture", "ollama", 32768)
+            context_mismatch = _RB.provider_context_preflight(
+                f"http://127.0.0.1:{upstream.server_port}/v1", "fixture", "ollama", 65536)
+            context_unsafe = _RB.provider_context_preflight(
+                "https://user:secret@example.com/v1", "fixture", "ollama", 32768)
             conn = _HC.HTTPConnection("127.0.0.1", proxy.server_port, timeout=5)
             secret_prompt = "TOP-SECRET-BENCH-PROMPT"
             for path in ("/v1/chat/completions", "/api/chat", "/v1/responses", "/api/show"):
@@ -8188,13 +8208,23 @@ def test_benchmark_integrity():
               by_path["/v1/chat/completions"]["reasoning_effort"] == "none"
               and by_path["/v1/responses"]["reasoning_effort"] == "none")
         check("benchmark proxy enforces native Ollama thinking off",
-              by_path["/api/chat"]["think"] is False)
+              by_path["/api/chat"]["think"] is False
+              and by_path["/api/chat"]["options"]["num_ctx"] == 32768)
+        check("benchmark verifies a baked context before scoring any provider generation",
+              context_probe == {"status": "pass", "source": "ollama_show",
+                                "requested_context": 32768, "configured_context": 32768,
+                                "model_context_limit": 131072}
+              and context_mismatch["status"] == "failed"
+              and "expected 65536" in context_mismatch["error"]
+              and context_unsafe["status"] == "failed"
+              and "embedded credentials" in context_unsafe["error"])
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
               and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 0]
               and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 0]
               and [record["transport"] for record in records]
               == ["chat_completions", "ollama_chat", "responses", None]
+              and records[1]["normalization"] == "think=false;num_ctx=32768"
               and all(record.get("started_at", 0) > 0
                       and record.get("duration_s", -1) >= 0 for record in records))
         check("benchmark accounting excludes metadata discovery from generation totals",
