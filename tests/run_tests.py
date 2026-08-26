@@ -3141,6 +3141,105 @@ def test_hook_runtime():
           not held_blocked and held_output == "lease-held")
 
 
+def test_worktree_git_runner():
+    """Internal Git is pinned, non-interactive, bounded, and reaps timed-out descendants."""
+    import shlex
+    import time as _time
+    from dgc import worktree as _worktree
+
+    root = Path(tempfile.mkdtemp())
+    init = _worktree._git(["init", "-q"], root)
+    if init.returncode != 0:
+        check("worktree Git runner fixture initializes", False, init.stderr)
+        return
+    fake_inside = root / "bin" / "git"
+    fake_inside.parent.mkdir()
+    fake_inside.write_text("#!/bin/sh\nprintf model-controlled\n")
+    fake_inside.chmod(0o700)
+    old_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = str(fake_inside.parent) + os.pathsep + old_path
+    try:
+        shadowed = _worktree._git(["status", "--short"], root)
+    finally:
+        os.environ["PATH"] = old_path
+    check("internal Git rejects a PATH-shadowed executable inside the writable repository",
+          shadowed.returncode == 127 and "outside the repository" in shadowed.stderr
+          and "model-controlled" not in shadowed.stdout)
+
+    external_bin = Path(tempfile.mkdtemp())
+    fake_external = external_bin / "git"
+    child_code = ("import subprocess,sys,time;"
+                  "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+                  "print('CHILD='+str(p.pid),flush=True);time.sleep(30)")
+    fake_external.write_text(
+        "#!/bin/sh\n"
+        "printf 'ENV=%s,%s,%s,%s\\n' \"$GIT_TERMINAL_PROMPT\" \"$GCM_INTERACTIVE\" "
+        "\"$GIT_PAGER\" \"$LC_ALL\"\n"
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(child_code)}\n")
+    fake_external.chmod(0o700)
+    os.environ["PATH"] = str(external_bin) + os.pathsep + old_path
+    try:
+        timed = _worktree._git(["status"], root, timeout=0.2)
+    finally:
+        os.environ["PATH"] = old_path
+    child_match = __import__("re").search(r"CHILD=(\d+)", timed.stdout)
+    child_pid = int(child_match.group(1)) if child_match else 0
+    child_alive = bool(child_pid)
+    deadline = _time.monotonic() + 2
+    while child_alive and _time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+            if sys.platform.startswith("linux"):
+                child_alive = Path(f"/proc/{child_pid}/stat").read_text().split()[2] != "Z"
+        except (OSError, ProcessLookupError, FileNotFoundError):
+            child_alive = False
+        if child_alive:
+            _time.sleep(0.02)
+    check("internal Git is non-interactive and timeout reaps its complete POSIX process group",
+          timed.returncode == 124 and "ENV=0,never,cat,C" in timed.stdout
+          and "git timed out" in timed.stderr and child_pid > 0
+          and (not child_alive if os.name == "posix" else True),
+          f"pid={child_pid} alive={child_alive} stdout={timed.stdout!r} stderr={timed.stderr!r}")
+
+    flood_external = external_bin / "git"
+    flood_external.write_text(
+        "#!/bin/sh\n"
+        f"exec {shlex.quote(sys.executable)} -c "
+        f"{shlex.quote('import sys;sys.stdout.buffer.write(b\"x\"*4096);sys.stdout.flush()')}\n")
+    flood_external.chmod(0o700)
+    os.environ["PATH"] = str(external_bin) + os.pathsep + old_path
+    try:
+        flooded = _worktree._run_git(
+            ["status"], root, timeout=2, max_stdout=1024, text=False)
+    finally:
+        os.environ["PATH"] = old_path
+    check("internal Git aborts and reports stdout beyond its operation-specific ceiling",
+          flooded.returncode == 125 and len(flooded.stdout) == 1024
+          and b"stdout exceeded 1024 bytes" in flooded.stderr)
+
+    tracked = root / "tracked.txt"
+    tracked.write_text("base\n")
+    add = _worktree._git(["add", "tracked.txt"], root)
+    commit = _worktree._git([
+        "-c", "user.name=DGC Test", "-c", "user.email=dgc@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"], root)
+    hook_marker = root / "post-checkout-ran"
+    hook = root / ".git" / "hooks" / "post-checkout"
+    hook.write_text(f"#!/bin/sh\ntouch {shlex.quote(str(hook_marker))}\n")
+    hook.chmod(0o700)
+    checkout = Path(tempfile.mkdtemp()) / "isolated"
+    added = _worktree._git(
+        ["worktree", "add", "--quiet", "-b", "dgc-hook-test", str(checkout), "HEAD"], root)
+    hook_suppressed = (add.returncode == 0 and commit.returncode == 0
+                       and added.returncode == 0 and checkout.is_dir()
+                       and not hook_marker.exists())
+    if added.returncode == 0:
+        _worktree._git(["worktree", "remove", "--force", str(checkout)], root)
+        _worktree._git(["branch", "-D", "dgc-hook-test"], root)
+    check("internal worktree operations suppress repository checkout hooks",
+          hook_suppressed, added.stderr or commit.stderr or add.stderr)
+
+
 def test_mcp_protocol():
     """MCP negotiates both protocol eras, uses modern per-request metadata/MRTR, reports progress,
     sanitizes routes and environments, propagates cancellation, and reaps every stdio process."""
@@ -8277,6 +8376,7 @@ def main():
         test_context_prune()
         test_supply_chain_guard()
         test_hook_runtime()
+        test_worktree_git_runner()
         test_mcp_protocol()
         test_cross_process_workspace_leases()
         test_code_intel_lsp()

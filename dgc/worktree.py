@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
+import shutil
+import signal
 import stat
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,32 +28,213 @@ _MAX_TASK_FILES = 4096
 _MAX_TASK_BYTES = 64 * 1024 * 1024
 _MAX_RETAINED_METADATA_BYTES = 1024 * 1024
 _GIT_TIMEOUT = 30.0
+_MAX_GIT_TEXT_BYTES = 4 * 1024 * 1024
+_MAX_GIT_PATH_BYTES = 20 * 1024 * 1024
+_MAX_GIT_STDERR_BYTES = 64 * 1024
 _RETAINED_SCHEMA = 2
 _FLEET_SCHEMA = 1
 _RETAINED_LEASE_WAIT_S = 2.0
 
 
+class _GitCapture:
+    """Drain a Git stream while retaining either an exact prefix or bounded head/tail."""
+
+    def __init__(self, limit: int, *, tail: bool = False):
+        self.limit = max(1, int(limit))
+        self.tail_mode = tail
+        self.head = bytearray()
+        self.tail = bytearray()
+        self.total = 0
+
+    @property
+    def exceeded(self) -> bool:
+        return self.total > self.limit
+
+    def feed(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self.total += len(chunk)
+        if not self.tail_mode:
+            remaining = self.limit - len(self.head)
+            if remaining > 0:
+                self.head.extend(chunk[:remaining])
+            return
+        half = self.limit // 2
+        remaining = half - len(self.head)
+        if remaining > 0:
+            self.head.extend(chunk[:remaining])
+            chunk = chunk[remaining:]
+        if chunk:
+            self.tail.extend(chunk)
+            if len(self.tail) > self.limit - half:
+                del self.tail[:len(self.tail) - (self.limit - half)]
+
+    def bytes(self) -> bytes:
+        if not self.tail_mode or not self.exceeded:
+            return bytes(self.head + self.tail)
+        omitted = self.total - len(self.head) - len(self.tail)
+        return (bytes(self.head) + f"\n… [{omitted} git-output bytes omitted] …\n".encode()
+                + bytes(self.tail))
+
+
+def _git_timeout(value) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = _GIT_TIMEOUT
+    if not math.isfinite(parsed):
+        parsed = _GIT_TIMEOUT
+    return max(0.1, min(300.0, parsed))
+
+
+def _repo_hint(path: Path) -> Path:
+    """Find the nearest lexical Git boundary without executing a repository-controlled binary."""
+    resolved = path.resolve(strict=False)
+    for candidate in (resolved, *resolved.parents):
+        try:
+            if (candidate / ".git").exists():
+                return candidate
+        except OSError:
+            continue
+    return resolved
+
+
+def _git_executable(cwd) -> Path | None:
+    candidate = shutil.which("git")
+    if not candidate:
+        return None
+    try:
+        executable = Path(candidate).resolve(strict=True)
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            return None
+        executable.relative_to(_repo_hint(Path(cwd)))
+        return None  # Never execute a model-writable repository's PATH-shadowed `git`.
+    except ValueError:
+        return executable
+    except OSError:
+        return None
+
+
+def _terminate_git(proc: subprocess.Popen) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:  # Windows Job Object coverage remains in the cross-platform soak gap.
+            proc.kill()
+    except (OSError, ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except (OSError, ValueError):
+            pass
+
+
+def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
+             text: bool) -> subprocess.CompletedProcess:
+    executable = _git_executable(cwd)
+    display_args = ["git", *args]
+    if executable is None:
+        error = b"trusted git executable was not found outside the repository"
+        return subprocess.CompletedProcess(
+            display_args, 127, "" if text else b"", error.decode() if text else error)
+    argv = [str(executable), "--no-pager", "-c", "core.hooksPath=",
+            "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false",
+            "-c", "gc.auto=0", *args]
+    from .guards import mcp_process_env
+    env, _ = mcp_process_env(None)
+    env.update({
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+        "GIT_ASKPASS": "", "SSH_ASKPASS_REQUIRE": "never",
+        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true",
+        "GIT_PAGER": "cat", "PAGER": "cat", "GIT_LITERAL_PATHSPECS": "1",
+        "LC_ALL": "C",
+    })
+    popen_kwargs = {
+        "cwd": str(cwd), "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+    elif os.name == "nt":  # pragma: no cover - Windows full-suite runner remains outstanding
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        proc = subprocess.Popen(argv, **popen_kwargs)
+    except OSError as exc:
+        error = os.fsencode(str(exc))
+        return subprocess.CompletedProcess(
+            display_args, 127, "" if text else b"", error.decode(errors="replace") if text else error)
+
+    stdout = _GitCapture(max_stdout)
+    stderr = _GitCapture(_MAX_GIT_STDERR_BYTES, tail=True)
+    reader_errors: list[str] = []
+
+    def drain(stream, capture: _GitCapture) -> None:
+        try:
+            if stream is not None:
+                while True:
+                    chunk = stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    capture.feed(chunk)
+        except (OSError, ValueError) as exc:
+            reader_errors.append(type(exc).__name__)
+
+    out_reader = threading.Thread(target=drain, args=(proc.stdout, stdout), daemon=True)
+    err_reader = threading.Thread(target=drain, args=(proc.stderr, stderr), daemon=True)
+    out_reader.start()
+    err_reader.start()
+    deadline = time.monotonic() + _git_timeout(timeout)
+    failure = ""
+    while True:
+        if stdout.exceeded:
+            failure = f"git stdout exceeded {max_stdout} bytes"
+            break
+        if proc.poll() is not None and not out_reader.is_alive() and not err_reader.is_alive():
+            break
+        if time.monotonic() >= deadline:
+            failure = "git timed out"
+            break
+        time.sleep(0.005)
+    if failure:
+        _terminate_git(proc)
+    out_reader.join(timeout=1)
+    err_reader.join(timeout=1)
+    if out_reader.is_alive() or err_reader.is_alive():
+        _terminate_git(proc)
+        failure = failure or "git output pipes did not close"
+        out_reader.join(timeout=1)
+        err_reader.join(timeout=1)
+
+    out = stdout.bytes()
+    err = stderr.bytes()
+    if failure or reader_errors:
+        detail = failure or f"git output read failed ({', '.join(reader_errors[:2])})"
+        suffix = (b"\n" if err else b"") + detail.encode()
+        err = err[:max(0, _MAX_GIT_STDERR_BYTES - len(suffix))] + suffix
+        returncode = 124 if detail == "git timed out" else 125
+    else:
+        returncode = int(proc.returncode or 0)
+    from .redaction import redact_text, secret_values
+    safe_error = redact_text(err.decode(errors="replace"), secret_values())
+    if text:
+        return subprocess.CompletedProcess(
+            display_args, returncode, out.decode(errors="replace"), safe_error)
+    return subprocess.CompletedProcess(display_args, returncode, out, safe_error.encode("utf-8"))
+
+
 def _git(args: list[str], cwd, *, timeout: float = _GIT_TIMEOUT) -> subprocess.CompletedProcess:
-    try:
-        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True,
-                              timeout=max(0.1, float(timeout)))
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode(errors="replace")
-        return subprocess.CompletedProcess(["git", *args], 124, stdout, "git timed out")
-    except OSError as exc:
-        return subprocess.CompletedProcess(["git", *args], 127, "", str(exc))
+    return _run_git(args, cwd, timeout=timeout, max_stdout=_MAX_GIT_TEXT_BYTES, text=True)
 
 
-def _git_bytes(args: list[str], cwd, *, timeout: float = _GIT_TIMEOUT) -> subprocess.CompletedProcess:
-    try:
-        return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                              timeout=max(0.1, float(timeout)))
-    except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(["git", *args], 124, exc.stdout or b"", b"git timed out")
-    except OSError as exc:
-        return subprocess.CompletedProcess(["git", *args], 127, b"", os.fsencode(str(exc)))
+def _git_bytes(args: list[str], cwd, *, timeout: float = _GIT_TIMEOUT,
+               max_stdout: int = _MAX_GIT_PATH_BYTES) -> subprocess.CompletedProcess:
+    return _run_git(args, cwd, timeout=timeout, max_stdout=max_stdout, text=False)
 
 
 def repo_root(path) -> Path | None:
@@ -91,6 +276,8 @@ def list_worktrees(path) -> list[dict]:
         if line.startswith("worktree "):
             if cur:
                 out.append(cur)
+                if len(out) > _MAX_TASK_FILES:
+                    return []
             cur = {"path": line[len("worktree "):]}
         elif line.startswith("branch "):
             cur["branch"] = line[len("branch "):].replace("refs/heads/", "")
@@ -98,6 +285,8 @@ def list_worktrees(path) -> list[dict]:
             cur["bare"] = True
     if cur:
         out.append(cur)
+    if len(out) > _MAX_TASK_FILES:
+        return []
     return out
 
 
@@ -251,6 +440,8 @@ def _nul_paths(result: subprocess.CompletedProcess) -> list[str]:
         if parsed.is_absolute() or ".." in parsed.parts or path in ("", ".git"):
             raise TaskWorkspaceError(f"unsafe repository path: {path!r}")
         paths.append(path)
+        if len(paths) > _MAX_TASK_FILES:
+            raise TaskWorkspaceError(f"git path query exceeded {_MAX_TASK_FILES} entries")
     return paths
 
 
@@ -289,7 +480,8 @@ def _checked_target(root: Path, repo_path: str) -> Path:
 def _dirty_paths(repo: Path, base_commit: str, project_rel: Path) -> set[str]:
     pathspec = str(project_rel) if project_rel != Path(".") else "."
     tracked = _nul_paths(_git_bytes(
-        ["diff", "--name-only", "-z", "--no-renames", base_commit, "--", pathspec], repo))
+        ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames",
+         base_commit, "--", pathspec], repo))
     untracked = _nul_paths(_git_bytes(
         ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec], repo))
     return {path for path in (*tracked, *untracked) if _inside_project(path, project_rel)}
@@ -309,7 +501,8 @@ def _head_state(repo: Path, base_commit: str, repo_path: str) -> _FileState:
         raise TaskWorkspaceError(f"invalid git tree record for {repo_path}") from exc
     if kind != b"blob":
         raise TaskWorkspaceError(f"submodules are not supported in isolated task integration: {repo_path}")
-    blob = _git_bytes(["cat-file", "blob", oid.decode("ascii")], repo)
+    blob = _git_bytes(["cat-file", "blob", oid.decode("ascii")], repo,
+                      max_stdout=_MAX_TASK_BYTES + 1)
     if blob.returncode != 0:
         raise TaskWorkspaceError(f"could not read task baseline blob: {repo_path}")
     data = bytes(blob.stdout or b"")
