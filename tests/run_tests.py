@@ -8888,6 +8888,77 @@ def test_ollama_adapter():
           with_mcp - without_mcp > 2400,
           detail=repr((without_mcp, with_mcp)))
 
+    # Image payload bytes are provider transport, not language tokens. Keep the estimate tied to
+    # bounded visual dimensions across all three transports so a screenshot does not trigger
+    # premature compaction merely because its PNG compression is poor.
+    image_width, image_height = 2048, 1024
+    png_header = (b"\x89PNG\r\n\x1a\n" + b"\0" * 8
+                  + image_width.to_bytes(4, "big") + image_height.to_bytes(4, "big"))
+    dimension_headers = [
+        png_header,
+        b"GIF89a" + image_width.to_bytes(2, "little") + image_height.to_bytes(2, "little"),
+        b"BM" + b"\0" * 16 + image_width.to_bytes(4, "little", signed=True)
+        + image_height.to_bytes(4, "little", signed=True),
+        b"RIFF" + b"\0" * 4 + b"WEBPVP8X" + b"\0" * 8
+        + (image_width - 1).to_bytes(3, "little")
+        + (image_height - 1).to_bytes(3, "little"),
+        (b"\xff\xd8\xff\xe0\x00\x04\x00\x00\xff\xc0\x00\x07\x08"
+         + image_height.to_bytes(2, "big") + image_width.to_bytes(2, "big")),
+    ]
+    check("multimodal estimator reads dimensions from every accepted image family",
+          all(_llm._image_dimensions(header) == (image_width, image_height)
+              for header in dimension_headers),
+          detail=repr([_llm._image_dimensions(header) for header in dimension_headers]))
+
+    import base64 as _base64
+    compact_payload = _base64.b64encode(png_header + b"x" * 32).decode("ascii")
+    large_payload = _base64.b64encode(png_header + b"x" * 1_000_000).decode("ascii")
+    expected_visual_tokens = ((image_width + 27) // 28) * ((image_height + 27) // 28)
+    check("known image dimensions make context cost independent of compressed byte size",
+          _llm._estimate_base64_image_tokens(compact_payload) == expected_visual_tokens
+          and _llm._estimate_base64_image_tokens(large_payload) == expected_visual_tokens,
+          detail=repr((_llm._estimate_base64_image_tokens(compact_payload),
+                       _llm._estimate_base64_image_tokens(large_payload))))
+
+    image_uri = "data:image/png;base64," + large_payload
+    image_messages = [{"role": "user", "content": [
+        {"type": "text", "text": "inspect this screenshot"},
+        {"type": "image_url", "image_url": {"url": image_uri, "detail": "auto"}},
+    ]}]
+    original_image_messages = json.dumps(image_messages, sort_keys=True)
+    image_estimates = {
+        "ollama": native.estimate_input_tokens(image_messages, []),
+        "responses": responses_client.estimate_input_tokens(image_messages, []),
+        "chat": chat_client.estimate_input_tokens(image_messages, []),
+    }
+    naive_base64_tokens = len(json.dumps(image_messages)) // 4
+    check("all providers budget vision tokens instead of base64 transport characters",
+          naive_base64_tokens > 300_000
+          and all(expected_visual_tokens <= value < expected_visual_tokens + 200
+                  for value in image_estimates.values())
+          and max(image_estimates.values()) - min(image_estimates.values()) < 100,
+          detail=repr((naive_base64_tokens, image_estimates)))
+
+    _, image_response_items = responses_client._responses_input(image_messages)
+    response_image = image_response_items[0]["content"][1]["image_url"]
+    check("context estimation leaves canonical and provider image payloads intact",
+          json.dumps(image_messages, sort_keys=True) == original_image_messages
+          and native._ollama_messages(image_messages)[0]["images"] == [large_payload]
+          and response_image == image_uri)
+
+    invalid_image = [{"type": "image_url",
+                      "image_url": {"url": "data:image/png;base64,A"}}]
+    scrubbed_invalid, invalid_tokens = _llm._scrub_multimodal_images(invalid_image)
+    check("invalid base64 remains in ordinary text accounting instead of being under-counted",
+          invalid_tokens == 0 and scrubbed_invalid == invalid_image)
+
+    image_agent = object.__new__(_Agent)
+    image_agent.client = chat_client
+    image_agent.messages = image_messages
+    image_agent_tokens = image_agent.estimate_tokens(tools=[])
+    check("a normal screenshot no longer forces premature 4K-context compaction",
+          image_agent_tokens < int(4096 * 0.85), detail=str(image_agent_tokens))
+
     class _TaggedResponse(_NativeResponse):
         def iter_lines(self, decode_unicode=True):
             yield json.dumps({"message": {"role": "assistant",

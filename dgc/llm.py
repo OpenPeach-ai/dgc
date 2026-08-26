@@ -3,6 +3,8 @@ native tool calling, and a text-protocol fallback for models without
 tool support (common with small local models)."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import hashlib
 import math
@@ -14,6 +16,148 @@ from datetime import timezone
 from email.utils import parsedate_to_datetime
 
 import requests
+
+
+_DATA_IMAGE_RE = re.compile(
+    r"\Adata:image/[a-z0-9.+-]+;base64,([A-Za-z0-9+/]*={0,2})\Z", re.IGNORECASE)
+_IMAGE_PREFIX_BYTES = 256 * 1024
+_IMAGE_PATCH_PIXELS = 28
+_MAX_ESTIMATED_IMAGE_TOKENS = 16_384
+
+
+def _decoded_base64_size(payload: str) -> int:
+    if not payload or len(payload) % 4:
+        return 0
+    padding = len(payload) - len(payload.rstrip("="))
+    return max(0, (len(payload) * 3) // 4 - padding)
+
+
+def _image_prefix(payload: str) -> bytes:
+    # Decode only enough for common dimension headers. Context estimation runs every model round;
+    # re-decoding a validated multi-megabyte attachment here would itself become a performance bug.
+    encoded = payload[:4 * ((_IMAGE_PREFIX_BYTES + 2) // 3)]
+    encoded = encoded[:len(encoded) - (len(encoded) % 4)]
+    try:
+        return base64.b64decode(encoded, validate=True) if encoded else b""
+    except (binascii.Error, ValueError):
+        return b""
+
+
+def _image_dimensions(data: bytes) -> tuple[int, int] | None:
+    width = height = 0
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    elif len(data) >= 10 and data.startswith((b"GIF87a", b"GIF89a")):
+        width, height = int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little")
+    elif len(data) >= 26 and data.startswith(b"BM"):
+        width = abs(int.from_bytes(data[18:22], "little", signed=True))
+        height = abs(int.from_bytes(data[22:26], "little", signed=True))
+    elif len(data) >= 30 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        if data[12:16] == b"VP8X" and len(data) >= 30:
+            width = 1 + int.from_bytes(data[24:27], "little")
+            height = 1 + int.from_bytes(data[27:30], "little")
+        elif data[12:16] == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+            bits = int.from_bytes(data[21:25], "little")
+            width, height = 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)
+        elif data[12:16] == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+            width = int.from_bytes(data[26:28], "little") & 0x3FFF
+            height = int.from_bytes(data[28:30], "little") & 0x3FFF
+    elif len(data) >= 12 and data.startswith(b"\xff\xd8\xff"):
+        offset = 2
+        sof = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB,
+               0xCD, 0xCE, 0xCF}
+        while offset + 9 <= len(data):
+            if data[offset] != 0xFF:
+                offset += 1
+                continue
+            while offset < len(data) and data[offset] == 0xFF:
+                offset += 1
+            if offset >= len(data):
+                break
+            marker = data[offset]
+            offset += 1
+            if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+                continue
+            if offset + 2 > len(data):
+                break
+            length = int.from_bytes(data[offset:offset + 2], "big")
+            if length < 2 or offset + length > len(data):
+                break
+            if marker in sof and length >= 7:
+                height = int.from_bytes(data[offset + 3:offset + 5], "big")
+                width = int.from_bytes(data[offset + 5:offset + 7], "big")
+                break
+            offset += length
+    if 0 < width <= 1_000_000 and 0 < height <= 1_000_000:
+        return width, height
+    return None
+
+
+def _estimate_base64_image_tokens(payload: str) -> int:
+    decoded_size = _decoded_base64_size(payload)
+    if decoded_size <= 0:
+        return 0
+    dimensions = _image_dimensions(_image_prefix(payload))
+    if dimensions:
+        width, height = dimensions
+        # Common vision adapters operate on a resized patch/tile grid. Compressed file size does
+        # not consume language tokens, so once dimensions are known it must not inflate context.
+        estimate = max(
+            256,
+            math.ceil(width / _IMAGE_PATCH_PIXELS)
+            * math.ceil(height / _IMAGE_PATCH_PIXELS),
+        )
+    else:
+        # Valid ingress is signature-checked, but a malformed/unsupported header can still lack
+        # dimensions. Keep a bounded conservative fallback instead of treating base64 as prose.
+        estimate = max(256, math.ceil(decoded_size / 768))
+    return min(_MAX_ESTIMATED_IMAGE_TOKENS, estimate)
+
+
+def _scrub_multimodal_images(value) -> tuple[object, int]:
+    if isinstance(value, list):
+        output, tokens = [], 0
+        for item in value:
+            clean, item_tokens = _scrub_multimodal_images(item)
+            output.append(clean); tokens += item_tokens
+        return output, tokens
+    if not isinstance(value, dict):
+        return value, 0
+    kind = value.get("type")
+    if kind in ("image_url", "input_image"):
+        key = "image_url" if "image_url" in value else "image"
+        slot = value.get(key)
+        uri = slot.get("url") if isinstance(slot, dict) else slot
+        match = _DATA_IMAGE_RE.fullmatch(str(uri or ""))
+        if match:
+            tokens = _estimate_base64_image_tokens(match.group(1))
+            if tokens:
+                clean = dict(value)
+                if isinstance(slot, dict):
+                    clean[key] = {**slot, "url": "[image]"}
+                else:
+                    clean[key] = "[image]"
+                return clean, tokens
+    output, tokens = {}, 0
+    for key, item in value.items():
+        clean, item_tokens = _scrub_multimodal_images(item)
+        output[key] = clean; tokens += item_tokens
+    return output, tokens
+
+
+def _scrub_ollama_images(messages: list[dict]) -> tuple[list[dict], int]:
+    output, tokens = [], 0
+    for message in messages:
+        clean = dict(message)
+        images = message.get("images")
+        if isinstance(images, list):
+            clean["images"] = []
+            for payload in images:
+                image_tokens = _estimate_base64_image_tokens(str(payload or ""))
+                tokens += image_tokens
+                clean["images"].append("[image]" if image_tokens else str(payload or ""))
+        output.append(clean)
+    return output, tokens
 
 
 def _raw_socket(resp):
@@ -681,21 +825,25 @@ class LLMClient:
         server-side continuation can make the HTTP body smaller: the earlier context still occupies
         the model's context window.
         """
+        image_tokens = 0
         if self.api_mode == "ollama":
             wire = self._ollama_messages(messages)
+            wire, image_tokens = _scrub_ollama_images(wire)
             wire_tools = tools
         elif self.api_mode == "responses":
             instructions, items = self._responses_input(messages)
             wire = {"instructions": instructions, "input": items}
+            wire, image_tokens = _scrub_multimodal_images(wire)
             wire_tools = self._responses_tools(tools)
         else:
             wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
                     for message in messages]
+            wire, image_tokens = _scrub_multimodal_images(wire)
             wire_tools = tools
         chars = len(json.dumps(wire, default=str))
         if wire_tools and self.tools_supported:
             chars += len(json.dumps(wire_tools, default=str))
-        return chars // 4
+        return chars // 4 + image_tokens
 
     def _reset_response_state(self) -> None:
         self._response_id = ""
