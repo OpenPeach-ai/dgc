@@ -314,6 +314,12 @@ def unit_tests(tmp: Path):
     import time as _time_tools
     import dgc.tools as _tools_bg
     import dgc.workspace as _workspace_safe
+    _oversized_command = ("touch oversized-command-ran #" +
+                          "x" * _tools_bg.MAX_BASH_COMMAND_CHARS)
+    _oversized_out = execute("bash", {"command": _oversized_command}, ctx)
+    check("bash rejects an oversized command before launching a shell",
+          "command exceeds" in _oversized_out
+          and not (tmp / "oversized-command-ran").exists(), _oversized_out)
 
     def _late_parent_swap_case(number, tool_name, tool_args):
         _late_parent = tmp / f"late-tool-parent-{number}"
@@ -770,6 +776,149 @@ def unit_tests(tmp: Path):
           and bool(_timeout_pid_match) and not _timeout_child_alive
           and "CHILD_PID=" in _timeout_saved and "timed out" in _timeout_saved,
           f"elapsed={_timeout_elapsed:.2f} alive={_timeout_child_alive} out={_timeout_out[-500:]}")
+
+    def _live_process(pid: int, wait: float = 2.0) -> bool:
+        alive = bool(pid)
+        deadline = _time_tools.monotonic() + wait
+        while alive and _time_tools.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+                proc_stat = Path(f"/proc/{pid}/stat")
+                if proc_stat.exists() and proc_stat.read_text().split()[2] == "Z":
+                    alive = False
+            except (OSError, ProcessLookupError, FileNotFoundError, ValueError):
+                alive = False
+            if alive:
+                _time_tools.sleep(0.02)
+        return alive
+
+    _cancel_ctx = Ctx(tmp)
+    _cancel_ctx.cancelled = threading.Event()
+    _cancel_program = (
+        "import subprocess,sys,time\n"
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print(f'CANCEL_CHILD={p.pid}', flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    _cancel_command = (f"{_shlex_tools.quote(sys.executable)} -c "
+                       f"{_shlex_tools.quote(_cancel_program)}")
+    _cancel_timer = threading.Timer(0.25, _cancel_ctx.cancelled.set)
+    _cancel_started = _time_tools.monotonic()
+    _cancel_timer.start()
+    try:
+        _cancel_out = execute("bash", {"command": _cancel_command, "timeout": 20}, _cancel_ctx)
+    finally:
+        _cancel_timer.cancel()
+    _cancel_elapsed = _time_tools.monotonic() - _cancel_started
+    _cancel_match = _re_bg.search(r"CANCEL_CHILD=(\d+)", _cancel_out)
+    _cancel_pid = int(_cancel_match.group(1)) if _cancel_match else 0
+    _cancel_child_alive = _live_process(_cancel_pid)
+    check("foreground Bash honors live cancellation and reaps the complete process group",
+          _cancel_elapsed < 3 and "command was cancelled" in _cancel_out
+          and _cancel_pid > 0 and (not _cancel_child_alive if os.name == "posix" else True),
+          f"elapsed={_cancel_elapsed:.2f} pid={_cancel_pid} alive={_cancel_child_alive} "
+          f"out={_cancel_out[-500:]}")
+    if _cancel_child_alive:
+        try:
+            os.kill(_cancel_pid, 9)
+        except OSError:
+            pass
+
+    _detached_program = (
+        "import subprocess,sys\n"
+        "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "print(f'DETACHED_CHILD={p.pid}', flush=True)\n"
+    )
+    _detached_command = (f"{_shlex_tools.quote(sys.executable)} -c "
+                         f"{_shlex_tools.quote(_detached_program)}")
+    _detached_out = execute("bash", {"command": _detached_command, "timeout": 5}, ctx)
+    _detached_match = _re_bg.search(r"DETACHED_CHILD=(\d+)", _detached_out)
+    _detached_pid = int(_detached_match.group(1)) if _detached_match else 0
+    _detached_child_alive = _live_process(_detached_pid)
+    check("successful foreground Bash sweeps pipe-detached descendants before returning",
+          _detached_out.startswith("exit code: 0") and _detached_pid > 0
+          and (not _detached_child_alive if os.name == "posix" else True),
+          f"pid={_detached_pid} alive={_detached_child_alive} out={_detached_out[-500:]}")
+    if _detached_child_alive:
+        try:
+            os.kill(_detached_pid, 9)
+        except OSError:
+            pass
+
+    from dgc.scheduler import workspace_mutation_lock as _direct_workspace_lock
+    _direct_ctx = Ctx(tmp)
+    _direct_ctx.cancelled = threading.Event()
+    _held_direct_lease = _direct_workspace_lock(tmp)
+    _held_direct_lease.acquire()
+    _direct_timer = threading.Timer(0.2, _direct_ctx.cancelled.set)
+    _direct_timer.start()
+    try:
+        _direct_wait = _tools_bg.direct_bash("touch direct-shell-should-not-run", _direct_ctx)
+    finally:
+        _direct_timer.cancel()
+        _held_direct_lease.release()
+    check("direct terminal shell waits on the shared write lease and is cancellable",
+          "cancelled while waiting" in _direct_wait
+          and not (tmp / "direct-shell-should-not-run").exists(), _direct_wait)
+
+    import io as _io_shell
+    from types import SimpleNamespace as _ShellNamespace
+    from rich.console import Console as _ShellConsole
+    from dgc.cli import CLI as _ClassicCLI
+    _direct_ctx.cancelled.clear()
+    _classic_shell = object.__new__(_ClassicCLI)
+    _classic_shell.agent = _ShellNamespace(cancelled=_direct_ctx.cancelled, ctx=_direct_ctx)
+    _classic_capture = _io_shell.StringIO()
+    _classic_shell.console = _ShellConsole(
+        file=_classic_capture, force_terminal=True, color_system="standard", width=120)
+    _classic_shell.run_bang("printf '[bold red]literal[/bold red]'")
+    _classic_rendered = _classic_capture.getvalue()
+    check("classic ! commands use the shared runtime and render output as literal text",
+          "exit code: 0" in _classic_rendered and "[bold red]literal[/bold red]" in _classic_rendered
+          and "\x1b[" not in _classic_rendered, repr(_classic_rendered))
+
+    import inspect as _inspect_shell
+    from dgc.tui import TUI as _ShellTUI
+    _direct_ctx.cancelled.clear()
+    _tui_session = _ShellNamespace(
+        id="direct-shell-test", agent=_ShellNamespace(ctx=_direct_ctx),
+        blocks=[], _turn_marks=[], _scroll_off=0, _follow=True,
+        _turn=threading.Event(), _cancel=_direct_ctx.cancelled, _turn_t0=0.0,
+        _suggestion=None, _worker_thread=None, _closing=False, last_activity=0.0)
+    _tui_shell = object.__new__(_ShellTUI)
+    _tui_shell._sessions = [_tui_session]
+    _tui_shell._active_idx = 0
+    _tui_shell._tls = threading.local()
+    _tui_shell._cancel_auxiliary = lambda: None
+    _tui_shell._foreground_aux_barrier = lambda: None
+    _tui_shell._invalidate = lambda: None
+    _tui_shell._flash = lambda _message: None
+    _tui_shell.error = lambda message: _tui_session.blocks.append("ERROR " + message)
+    _tui_shell._append = lambda value: _tui_session.blocks.append(str(value))
+    _tui_shell._rich = lambda value: str(value)
+    _tui_shell_gate = threading.Event()
+    _real_direct_bash = _tools_bg.direct_bash
+
+    def _tui_direct_bash(_command, _ctx):
+        _tui_shell_gate.wait(2)
+        return "exit code: 0\ntui-direct"
+
+    _tools_bg.direct_bash = _tui_direct_bash
+    try:
+        _tui_shell._submit_shell("printf tui-direct")
+        _tui_worker = _tui_session._worker_thread
+        _tui_shell_gate.set()
+        _tui_worker.join(3)
+    finally:
+        _tools_bg.direct_bash = _real_direct_bash
+    _tui_text = "\n".join(str(block) for block in _tui_session.blocks)
+    _tui_key_source = _inspect_shell.getsource(_ShellTUI._keys)
+    check("full-screen TUI routes advertised ! commands directly instead of prompting the model",
+          not _tui_worker.is_alive() and not _tui_session._turn.is_set()
+          and "direct shell" in _tui_text and "tui-direct" in _tui_text
+          and 'text.startswith("!")' in _tui_key_source and "_submit_shell" in _tui_key_source,
+          _tui_text[-500:])
 
     class _ToolSecretCfg:
         def __init__(self, secret): self.secret = secret

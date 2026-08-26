@@ -120,13 +120,15 @@ Approval prompts always offer **allow once / always allow (saves a rule) / deny*
   process-local result; oversized results can be searched literally or paged with `bash_output`
   without relying on a host `/tmp` path that may be invisible inside the sandbox. Background and
   retained-result handles are isolated to the originating agent session and expire after 30 minutes.
+  An explicit terminal `!cmd` uses the same sandbox, bounded output, cancellation, checkout lease,
+  and process-tree cleanup without asking the model to interpret the command.
 
 ## REPL conveniences
 
 ```
 just type            ask DGC — it uses tools to act on your project
 #fact                quick-add a memory to DGC.md
-!cmd                 run a shell command directly
+!cmd                 run directly with DGC's shell boundary (Esc cancels in the TUI)
 @path/to/file        attach a file's contents to your message
 Tab / →              accept the ghost-text next-prompt suggestion
 /help                every command      ·  /keys  keyboard cheatsheet

@@ -34,6 +34,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
 from rich.console import Console
+from rich.text import Text
 
 from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
 from .update import cached_update
@@ -3705,6 +3706,9 @@ class TUI:
                 return
             if text.startswith("/") and self._handle_slash(text):
                 return
+            if text.startswith("!"):
+                self._submit_shell(text[1:])
+                return
             self._submit(text)
 
         @kb.add("escape")
@@ -3956,6 +3960,60 @@ class TUI:
 
         sess._worker_thread = threading.Thread(
             target=work, name=f"dgc-turn-{sess.id}", daemon=True)
+        sess._worker_thread.start()
+
+    def _submit_shell(self, command: str) -> None:
+        """Execute an explicitly entered ``!`` command without routing it through the model."""
+        command = str(command or "").strip()
+        if not command:
+            self._flash("enter a command after !")
+            return
+        sess = self._cur_session()
+        sess.last_activity = time.monotonic()
+        self._cancel_auxiliary()
+        self._cancel.clear()
+        self._suggestion = None
+        shown = "!" + command
+        self.blocks.append({"kind": "user", "text": shown, "tag": "direct shell"})
+        self._turn_marks.append((len(self.blocks) - 1, shown.replace("\n", " ")[:70]))
+        self._scroll_off = 0
+        self._follow = True
+        self._turn.set()
+        self._turn_t0 = time.monotonic()
+
+        def work() -> None:
+            self._tls.session = sess
+            succeeded = False
+            try:
+                self._foreground_aux_barrier()
+                from .tools import direct_bash
+                result = direct_bash(command, self.agent.ctx)
+                succeeded = not result.startswith("error:")
+                th = style_mod.theme()
+                self._append(self._rich(Text(
+                    result, style=th.faint if succeeded else th.err)))
+            except Exception as exc:
+                self.error(f"{type(exc).__name__}: {exc}")
+            finally:
+                self._turn.clear()
+                sess.last_activity = time.monotonic()
+                elapsed = time.monotonic() - self._turn_t0
+                th = style_mod.theme()
+                verb = ("stopped" if self._cancel.is_set() else
+                        ("done" if succeeded else "failed"))
+                self._append(self._rich(
+                    f"[{th.faint}]{glyphs.MIDDOT} {verb} · {elapsed:.0f}s · direct shell[/]"))
+                self._invalidate()
+                if sess._closing:
+                    result = self._finalize_session_workspace(sess, "fleet session stopped")
+                    sess._worker_thread = None
+                    if result is not None and result.status != "cleaned":
+                        self._flash(f"retained {result.branch} at {result.path}")
+                    return
+                sess._worker_thread = None
+
+        sess._worker_thread = threading.Thread(
+            target=work, name=f"dgc-shell-{sess.id}", daemon=True)
         sess._worker_thread.start()
 
     def _shutdown_fleet(self) -> None:

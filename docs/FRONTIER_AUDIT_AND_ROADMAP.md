@@ -40,7 +40,7 @@ the editor registries: those are external release actions that require a reviewe
 |---|---|---|
 | Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including bounded descendant discovery, exact model-visible grep reads, and late parent swaps across structured files, repository maps, static code intelligence, checkpoints and recovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network; an explicitly requested sandbox fails closed if its backend is unavailable, inside the writable workspace, or resolves to a non-executable; runtime-injection environment names cannot be opted back in | Windows implementation; macOS integration runner and seccomp/resource quotas |
-| Runtime correctness | Atomic file/session writes with bounded post-crash temp reclamation, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted lifecycle-hook output, bounded internal-Git diagnostics, and bounded redacted foreground/background command output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader cross-platform crash-fuzz campaigns |
+| Runtime correctness | Atomic file/session writes with bounded post-crash temp reclamation, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted lifecycle-hook output, bounded internal-Git diagnostics, and bounded/redacted/cancellable foreground, background, and direct-terminal command output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader cross-platform crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, lifecycle hooks serialized under the same checkout lease with one cancellable batch deadline, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees whose internal Git is pinned outside the repository, non-interactive, hook-suppressed, output-bounded, and process-group reaped, exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
@@ -82,6 +82,9 @@ release rehearsal—not another round of unmeasured feature claims.
   grouped tool cards, readable diffs, context display, dashboard/fleet UI, artifacts, documentation,
   settings, and session controls.
 - The classic CLI gives a useful fallback for terminals that cannot support the full-screen UI.
+- Explicit `!` commands in classic and full-screen terminal modes now use the same sandbox policy,
+  checkout lease, output/redaction ceilings, cancellation, and process-tree cleanup as agent Bash;
+  the full-screen surface no longer misroutes its advertised shortcut into a model prompt.
 - The live website accurately communicates the product's strongest visual differentiator and is
   responsive at desktop and phone widths.
 
@@ -106,7 +109,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 773 / 773 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 779 / 779 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -552,7 +555,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 773/773 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 779/779 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -569,7 +572,12 @@ the collector, preview, result store, or line ceiling sees them; read/grep/diff/
 the same mask-before-truncate ordering. Oversized foreground results stay searchable/pageable through
 the existing `bash_output` tool, while per-result/global/TTL caps and per-agent ownership prevent the
 continuation store from becoming an unbounded or cross-session side channel. Timeout accounting
-includes descendants that keep an inherited output pipe open and reaps their process group.
+includes descendants that keep an inherited output pipe open and reaps their process group. Live
+terminal/agent cancellation uses interruptible process waits rather than a fixed post-command poll;
+the measured local `true` fast path averaged 3.38 ms across 40 invocations on the audit host. A
+successful foreground shell also sweeps pipe-detached descendants on POSIX before releasing its
+checkout lease, while explicit background tools retain that lease until their managed process exits;
+complete descendant cleanup on Windows remains part of the cross-platform process-tree gap.
 
 Implementation note for step 8: verified-done is now an ordered, fail-closed state rather than a
 test-keyword substring. Shell-aware recognition removes comments, requires a real test-runner
@@ -800,7 +808,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 773/773 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 779/779 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

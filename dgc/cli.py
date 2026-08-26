@@ -7,7 +7,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 import threading
 import time
@@ -1088,14 +1087,12 @@ class CLI:
         return text
 
     def run_bang(self, command: str) -> None:
-        try:
-            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                  timeout=int(self.config.get("bash_timeout", 120)),
-                                  cwd=str(self.config.project_root), executable="/bin/bash")
-            out = (proc.stdout + proc.stderr).strip()
-            self.console.print(out or f"[dim](exit {proc.returncode}, no output)[/dim]")
-        except subprocess.TimeoutExpired:
-            self.ui.error("command timed out")
+        from .tools import direct_bash
+        self.agent.cancelled.clear()
+        out = direct_bash(command, self.agent.ctx)
+        # Shell output is data, never Rich markup. This also keeps terminal control text from being
+        # interpreted as a DGC status/card even when a build dependency prints hostile diagnostics.
+        self.console.print(out, markup=False, highlight=False, soft_wrap=True)
 
     # ---------------------------------------------------------------- loop ---
     def repl(self) -> None:

@@ -10,6 +10,7 @@ import html
 import ipaddress
 import itertools as _itertools
 import json
+import math
 import os
 import re
 import shutil
@@ -47,6 +48,8 @@ MAX_BASH_RETAINED_RESULTS = 16
 MAX_BASH_PAGE_LINES = 1000
 MAX_BASH_QUERY_CHARS = 256
 MAX_BASH_COMMAND_LABEL = 1000
+MAX_BASH_COMMAND_CHARS = 65_536
+MAX_BASH_TIMEOUT_S = 3600.0
 MAX_GREP_MATCHES = 200
 MAX_GLOB_RESULTS = 100
 MAX_SEARCH_FILES = 100_000
@@ -1104,11 +1107,23 @@ def _render_output(oid: str, entry: dict, args: dict, *, background: bool) -> st
 
 def bash(args: dict, ctx) -> str:
     command = str(args.get("command", ""))
+    if not command.strip():
+        return "error: bash command is empty"
+    if len(command) > MAX_BASH_COMMAND_CHARS:
+        return f"error: bash command exceeds {MAX_BASH_COMMAND_CHARS} characters"
     if args.get("background"):
         return _bash_background(command, ctx)
-    timeout = int(args.get("timeout") or ctx.config.get("bash_timeout", 120))
+    raw_timeout = args.get("timeout")
+    if raw_timeout is None:
+        raw_timeout = ctx.config.get("bash_timeout", 120)
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError, OverflowError):
+        timeout = 120.0
+    if not math.isfinite(timeout):
+        timeout = 120.0
+    timeout = max(0.1, min(MAX_BASH_TIMEOUT_S, timeout))
     from . import sandbox
-    import signal
     sandbox_requested = sandbox.requested(ctx.config)
     argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
     if sandbox_requested and argv is None:
@@ -1145,33 +1160,54 @@ def bash(args: dict, ctx) -> str:
     reader.start()
     deadline = time.monotonic() + timeout
     timed_out = False
+    was_cancelled = False
+    cancelled = getattr(ctx, "cancelled", None)
     try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-    if not timed_out:
-        reader.join(timeout=max(0.0, deadline - time.monotonic()))
-        # A shell can exit while a grandchild keeps its output pipe open. That process tree is still
-        # running from the caller's perspective and must obey the same deadline.
-        timed_out = reader.is_alive()
-    if timed_out:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)   # start_new_session makes pid the process-group id
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-        try:
-            proc.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        while True:
+            # A shell can exit while a grandchild keeps its output pipe open. That tree is still
+            # running from the caller's perspective and must obey the same deadline/cancellation.
+            if cancelled is not None and cancelled.is_set():
+                was_cancelled = True
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            if proc.poll() is None:
+                try:
+                    # wait() returns immediately for fast commands; the short ceiling merely creates
+                    # cancellation checkpoints for a still-running build.
+                    proc.wait(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired:
+                    continue
+            if not reader.is_alive():
+                break
+            # Once the shell exits, wait directly on output drainage instead of imposing a fixed
+            # polling sleep on every small compiler/search command.
+            reader.join(timeout=min(0.05, remaining))
+    except BaseException:
+        # KeyboardInterrupt in the classic REPL must not strand a compiler/test child tree.
+        _terminate_background(proc, sweep_exited_group=True)
+        if proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except (OSError, ValueError):
+                pass
+        reader.join(timeout=1)
+        raise
+    # Sweep the process group even after a zero exit: a foreground shell can otherwise daemonize a
+    # pipe-detached child and release the workspace lease while that child is still mutating files.
+    _terminate_background(proc, sweep_exited_group=True)
+    if timed_out or was_cancelled:
         reader.join(timeout=5)
     if reader.is_alive() and proc.stdout is not None:
         try:
             proc.stdout.close()
-        except OSError:
+        except (OSError, ValueError):
             pass
         reader.join(timeout=1)
     out, source_chars, omitted_chars = capture.result()
-    if timed_out:
+    if timed_out or was_cancelled:
         partial = ""
         if source_chars > 2000:
             oid = _store_output(_safe_command_label(command, ctx), out, None, ctx,
@@ -1180,10 +1216,13 @@ def bash(args: dict, ctx) -> str:
                        f"\n[bounded output retained as {oid}; inspect it with bash_output]")
         else:
             partial = out
+        if was_cancelled:
+            hint = "error: the command was cancelled and its complete process group was killed"
+            return hint + (f"\n--- output before cancellation ---\n{partial}" if partial.strip() else "")
         # A killed command DIDN'T terminate — steer the model to fix the non-termination, not re-run it.
         # (This is what breaks interpreter/parser exercises like Forth: an infinite eval loop hangs the
         # test binary, gets SIGKILLed, and a raw "timed out" reads like a normal failure so it's never fixed.)
-        hint = (f"error: the command did NOT finish within {timeout}s and was killed — it is stuck, this is "
+        hint = (f"error: the command did NOT finish within {timeout:g}s and was killed — it is stuck, this is "
                 "NOT a normal test failure. If you ran the tests, your code most likely has an INFINITE LOOP "
                 "or a call that never returns (a frequent bug in parsers, interpreters, and recursion). Find "
                 "the non-terminating path and add a terminating condition or bound the iteration, THEN re-run. "
@@ -1195,6 +1234,30 @@ def bash(args: dict, ctx) -> str:
         out = _long_output_preview(_safe_command_label(command, ctx), out, proc.returncode, ctx,
                                    source_chars=source_chars, already_omitted=omitted_chars)
     return f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}"
+
+
+def direct_bash(command: str, ctx) -> str:
+    """Run an explicitly user-entered shell command under DGC's normal runtime boundary.
+
+    Direct terminal input does not need model permission approval, but it still shares the checkout
+    mutation lease, sandbox policy, cancellation, credential redaction, output ceilings, and process
+    cleanup used by the model-facing Bash tool.
+    """
+    command = str(command or "")
+    if not command.strip():
+        return "error: enter a command after !"
+    if len(command) > MAX_BASH_COMMAND_CHARS:
+        return f"error: shell command exceeds {MAX_BASH_COMMAND_CHARS} characters"
+    from .scheduler import acquire_cancellable, workspace_mutation_lock
+    lease = workspace_mutation_lock(ctx.project_root)
+    cancelled = getattr(ctx, "cancelled", None)
+    if not acquire_cancellable(lease, cancelled):
+        return (f"error: {lease.last_error}" if lease.last_error else
+                "error: command cancelled while waiting for the workspace write lease")
+    try:
+        return bash({"command": command}, ctx)
+    finally:
+        lease.release()
 
 
 def _bash_background(command: str, ctx) -> str:
