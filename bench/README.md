@@ -57,7 +57,10 @@ The local candidate accepts 19,560 cases (99.84%), up from 17,443 (89.04%), with
 The remaining 31 cases are safe refusals: DGC cannot uniquely corroborate their normalized target.
 `WRONG` is the release-gate number. The scorer counts any application to an expected ambiguous/miss
 case as wrong, regardless of the resulting text, and exits nonzero whenever that count is nonzero.
-This benchmark is deterministic and contacts no model endpoint.
+The same command also constructs 14,197 in-memory duplicate-target transformations across every
+positive exact and tolerant case. All 14,197 currently refuse safely (14,174 explicit ambiguities
+plus 23 clean refusals); any application is a gate failure. This benchmark is deterministic and
+contacts no model endpoint.
 
 ## Run
 

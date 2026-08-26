@@ -7493,6 +7493,35 @@ def test_benchmark_integrity():
               _EM.verdict("ambiguous", "wrong_apply") == "WRONG"
               and _EM.verdict("miss", "apply_success") == "WRONG"
               and _EM.verdict("miss", "clean_miss") == "ok")
+        _edit_base = {
+            "lang": "python", "ex": "fixture",
+            "content": "def f():\n    actual = 1\n    return value\n",
+            "new_string": "def f():\n    actual = 1\n    return value + 1",
+            "expected_after": "def f():\n    actual = 1\n    return value + 1\n",
+            "replace_all": False, "expect": "apply",
+        }
+        _edit_cases = [
+            {**_edit_base, "id": "fixture/none",
+             "old_string": "def f():\n    actual = 1\n    return value",
+             "perturbation": "none"},
+            {**_edit_base, "id": "fixture/drift",
+             "old_string": "def f():\n    stale = 1\n    return value",
+             "perturbation": "interior_line_changed"},
+        ]
+        _dup_counts, _dup_applies = _EM.duplicate_target_gate(_edit_cases)
+        check("edit metamorphic gate duplicates exact and fuzzy targets without applying",
+              not _dup_applies
+              and _dup_counts["none"] == {
+                  "n": 1, "ambiguous": 1, "refused": 0, "APPLIED": 0}
+              and _dup_counts["interior_line_changed"] == {
+                  "n": 1, "ambiguous": 1, "refused": 0, "APPLIED": 0})
+        _missing_edit_base_rejected = False
+        try:
+            _EM.duplicate_target_gate(_edit_cases[1:])
+        except ValueError:
+            _missing_edit_base_rejected = True
+        check("edit metamorphic gate rejects an incomplete corpus group",
+              _missing_edit_base_rejected)
         _prompt_probe = _PS.run_probe()
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1

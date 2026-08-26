@@ -77,7 +77,9 @@ release rehearsal—not another round of unmeasured feature claims.
 - The frozen 19,591-case edit corpus currently reports 19,560 accepted cases (99.84%) with zero
   wrong-applies. Its remaining 31 cases fail closed because the normalized region is duplicated or
   lacks enough corroborating evidence. The scorer treats *every* negative-case application as wrong,
-  even when the produced text cannot equal that case's deliberately absent expected output.
+  even when the produced text cannot equal that case's deliberately absent expected output. A
+  second metamorphic gate duplicates the canonical target behind all 14,197 positive exact/fuzzy
+  cases; 14,174 raise ambiguity, 23 refuse cleanly, and none apply.
 - Long command output is drained through streaming credential masking into a bounded in-process
   head/tail result. `bash_output` exposes line paging and case-insensitive literal search, works
   independently of the command sandbox's `/tmp`, isolates handles between agent sessions, expires
@@ -123,13 +125,13 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 924 / 924 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 926 / 926 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
 | Extension tests | 2 / 2 | 19 / 19 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
-| Edit microbenchmark | 17,443 / 19,591 | 19,560 / 19,591 | Acceptance improved from 89.04% to 99.84%; all negative applications are scored as dangerous and wrong-applies remain zero. |
+| Edit microbenchmark | 17,443 / 19,591 | 19,560 / 19,591 + 14,197 duplicate transforms | Acceptance improved from 89.04% to 99.84%; wrong-applies and duplicate-target applications both remain zero. |
 | Release preflight | None | Previous clean candidate passed; current rerun deferred | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates must pass together after the explicit release freeze is lifted. |
 | Polyglot run | 40 / 52 pass@2 | Not rerun | 76.9% on 26 C++ + 26 Go tasks only; not a complete or comparative benchmark. |
 | Polyglot agent timeouts | 28 / 67 rounds | Not rerun | Original main operational failure; the new convergence/runtime work must be measured. |
@@ -994,7 +996,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 924/924 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 926/926 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
