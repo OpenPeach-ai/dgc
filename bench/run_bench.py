@@ -29,6 +29,11 @@ from urllib.request import urlopen
 
 RESULT_SCHEMA_VERSION = 3
 TRACE_LIMIT = 120_000
+EXPECTED_PROVIDER_TRANSPORTS = {
+    "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
+    "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
+}
+_PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
 
 
 class UsageSynchronizationError(RuntimeError):
@@ -260,6 +265,7 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
               "cached_input_tokens": 0, "requests": 0,
               "client_disconnected_requests": 0, "provider_duration_s": 0.0,
               "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
+              "provider_transports": {},
               "synchronized": synchronized}
     try:
         with path.open("r", encoding="utf-8") as stream:
@@ -295,6 +301,10 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
             provider_intervals.append((finished - duration, finished))
         usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
         totals["requests"] += 1
+        transport = str(record.get("transport") or "")
+        if transport in _PROVIDER_TRANSPORTS:
+            transports = totals["provider_transports"]
+            transports[transport] = transports.get(transport, 0) + 1
         if record.get("client_disconnected") is True:
             totals["client_disconnected_requests"] += 1
         for key in ("input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens"):
@@ -364,11 +374,13 @@ def build_manifest(a, langs: list[str], preflight: dict) -> dict:
     }
     runner, dataset = _git_revision(REPO.parent), _git_revision(DATA)
     evidence = {"settings": settings, "runner": runner, "dataset": dataset,
-                "engine": preflight.get("engine", {})}
+                "engine": preflight.get("engine", {}),
+                "provider_transport": EXPECTED_PROVIDER_TRANSPORTS.get(a.engine)}
     fingerprint = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()
     return {
         "schema_version": RESULT_SCHEMA_VERSION, "run_id": fingerprint[:16],
         "created_at": datetime.now(timezone.utc).isoformat(), "settings": settings,
+        "provider_transport": EXPECTED_PROVIDER_TRANSPORTS.get(a.engine),
         "runner": runner, "dataset": dataset, "environment": _hardware(), "preflight": preflight,
     }
 
@@ -586,6 +598,10 @@ def seed_home(home: Path, model: str, base_url: str, api_key: str, max_turns: in
     internal_budget = max(1, external_budget - cleanup_reserve) if external_budget else 0
     cfg = {
         "base_url": base_url, "api_key": api_key, "model": model, "mode": "auto",
+        # The controlled provider is an Ollama origin behind a loopback accounting proxy. Its URL
+        # cannot identify the upstream family, so auto mode would silently benchmark generic Chat
+        # Completions instead of DGC's native local-model transport.
+        "api_mode": "ollama",
         "thinking": "off", "suggest": False, "logo_animation": False,
         "artifact_autostart": False, "background": "inherit",
         "show_reasoning": False, "max_turns": max_turns, "context_size": 32768,

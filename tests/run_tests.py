@@ -6888,10 +6888,25 @@ def test_benchmark_integrity():
             "preflight": {"tasks": {"cpp": 26, "go": 39, "java": 47,
                                       "javascript": 49, "python": 34, "rust": 30}},
         }
-        publish_runs = [{"engine": engine, "manifest": json.loads(json.dumps(publish_manifest))}
-                        for engine in sorted(_BC.REQUIRED_ENGINES)]
+        publish_runs = []
+        for engine in sorted(_BC.REQUIRED_ENGINES):
+            manifest = json.loads(json.dumps(publish_manifest))
+            transport = _BC.EXPECTED_PROVIDER_TRANSPORTS[engine]
+            manifest["provider_transport"] = transport
+            publish_runs.append({"engine": engine, "manifest": manifest,
+                                 "provider_requests": 2,
+                                 "provider_transports": {transport: 2}})
         check("benchmark publication gate accepts only complete clean controlled evidence",
               _BC.publication_errors(publish_runs) == [])
+        expected_first_transport = _BC.EXPECTED_PROVIDER_TRANSPORTS[publish_runs[0]["engine"]]
+        unexpected_transport = next(
+            name for name in set(_BC.EXPECTED_PROVIDER_TRANSPORTS.values())
+            if name != expected_first_transport)
+        publish_runs[0]["provider_transports"] = {unexpected_transport: 2}
+        check("benchmark publication gate rejects an unexpected or partially attributed transport",
+              any("observed" in error and "provider transport" in error
+                  for error in _BC.publication_errors(publish_runs)))
+        publish_runs[0]["provider_transports"] = {expected_first_transport: 2}
         publish_runs[0]["manifest"]["runner"]["dirty"] = True
         check("benchmark publication gate rejects dirty evidence",
               any("clean runner revision" in error
@@ -6912,6 +6927,7 @@ def test_benchmark_integrity():
                         "rounds": [{"agent": {"time": 2, "timeout": False, "usage": {
                             "requests": 1, "synchronized": True,
                             "input_tokens": 10, "output_tokens": 4,
+                            "provider_transports": {"ollama_chat": 1},
                             "provider_duration_s": 1.5, "provider_wall_s": 1.5,
                             "provider_max_duration_s": 1.5}},
                             "stats": {"builtin_tool_us": 250000,
@@ -6947,6 +6963,8 @@ def test_benchmark_integrity():
               loaded_timing["provider_timing_rounds"] == 1
               and loaded_timing["provider_wall_s"] == 1.5
               and loaded_timing["provider_max_duration_s"] == 1.5
+              and loaded_timing["provider_requests"] == 1
+              and loaded_timing["provider_transports"] == {"ollama_chat": 1}
               and loaded_timing["builtin_tool_s"] == 0.25
               and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000})
         round_delta = _RB._monotonic_stats_delta(
@@ -7001,6 +7019,8 @@ def test_benchmark_integrity():
         check("benchmark config makes the official test command an authoritative stop gate",
               budget_cfg["verify_before_done"] is True
               and budget_cfg["verify_command"] == "pytest -q")
+        check("benchmark pins DGC to native Ollama behind the identity-obscuring usage proxy",
+              budget_cfg["api_mode"] == "ollama")
         check("benchmark round-two prompt requires a focused API-preserving correction",
               "smallest focused correction" in _RB.FIX_PROMPT
               and "Preserve working code and the tested public API" in _RB.FIX_PROMPT)
@@ -7115,7 +7135,7 @@ def test_benchmark_integrity():
         try:
             conn = _HC.HTTPConnection("127.0.0.1", proxy.server_port, timeout=5)
             secret_prompt = "TOP-SECRET-BENCH-PROMPT"
-            for path in ("/v1/chat/completions", "/api/chat"):
+            for path in ("/v1/chat/completions", "/api/chat", "/v1/responses"):
                 conn.request("POST", path,
                              json.dumps({"model": "fixture", "messages": [
                                  {"role": "user", "content": secret_prompt}]}),
@@ -7141,23 +7161,28 @@ def test_benchmark_integrity():
         log_text = proxy_log.read_text()
         records = [json.loads(line) for line in log_text.splitlines()]
         check("benchmark proxy enforces OpenAI reasoning off",
-              by_path["/v1/chat/completions"]["reasoning_effort"] == "none")
+              by_path["/v1/chat/completions"]["reasoning_effort"] == "none"
+              and by_path["/v1/responses"]["reasoning_effort"] == "none")
         check("benchmark proxy enforces native Ollama thinking off",
               by_path["/api/chat"]["think"] is False)
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
-              and [record["usage"]["input_tokens"] for record in records] == [8, 5]
-              and [record["usage"]["output_tokens"] for record in records] == [3, 2]
+              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8]
+              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3]
+              and [record["transport"] for record in records]
+              == ["chat_completions", "ollama_chat", "responses"]
               and all(record.get("started_at", 0) > 0
                       and record.get("duration_s", -1) >= 0 for record in records))
         check("benchmark runner synchronizes and attributes provider usage by round",
               {key: round_usage[key] for key in (
                   "input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens",
                   "requests", "client_disconnected_requests", "synchronized")} == {
-                      "input_tokens": 13, "output_tokens": 5,
+                      "input_tokens": 21, "output_tokens": 8,
                       "reasoning_tokens": 0, "cached_input_tokens": 0,
-                      "requests": 2, "client_disconnected_requests": 0,
+                      "requests": 3, "client_disconnected_requests": 0,
                       "synchronized": True}
+              and round_usage["provider_transports"] == {
+                  "chat_completions": 1, "ollama_chat": 1, "responses": 1}
               and round_usage["provider_duration_s"] >= round_usage["provider_wall_s"] >= 0
               and round_usage["provider_duration_s"] >=
               round_usage["provider_max_duration_s"] >= 0)
@@ -7210,6 +7235,7 @@ def test_benchmark_integrity():
                       "cached_input_tokens": 0, "requests": 1,
                       "client_disconnected_requests": 0, "provider_duration_s": 0.0,
                       "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
+                      "provider_transports": {},
                       "synchronized": True})
         finally:
             _RB.urlopen = old_urlopen

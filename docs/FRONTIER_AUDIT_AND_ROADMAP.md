@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 823 / 823 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 825 / 825 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -562,7 +562,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 823/823 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 825/825 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -572,6 +572,13 @@ compaction/resume/crash journals, and use the existing activity persistence boun
 extra write per execution. Round-two values are exact deltas of additive counters. Reports retain
 legacy timing as unknown and explicitly avoid treating parallel tool-seconds as subtractable wall
 time. This makes confinement regressions attributable without weakening the P0 boundary first.
+The controlled DGC profile now explicitly selects native Ollama behind the accounting proxy; the
+proxy URL previously obscured the upstream family and made `api_mode: auto` measure generic Chat
+Completions instead. Every provider request is now labeled as native Ollama, Chat Completions, or
+Responses, the expected route is fingerprinted in each engine manifest, and the publication gate
+rejects missing, mixed, or partially attributed transport evidence. The next full league therefore
+measures DGC's production local-model path and makes cross-harness wire differences auditable rather
+than implicit.
 
 Implementation note for command-output continuity: foreground pipes are drained continuously rather
 than accumulated without a bound. Exact credentials are masked across arbitrary reader chunks before
@@ -834,7 +841,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 823/823 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 825/825 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

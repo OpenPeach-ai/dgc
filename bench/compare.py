@@ -10,6 +10,11 @@ from pathlib import Path
 
 REQUIRED_ENGINES = {"dgc", "aider", "codex", "goose", "opencode", "pi"}
 REQUIRED_LANGS = {"cpp", "go", "java", "javascript", "python", "rust"}
+EXPECTED_PROVIDER_TRANSPORTS = {
+    "dgc": "ollama_chat", "goose": "ollama_chat", "codex": "responses",
+    "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
+}
+_PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
 
 
 def wilson(successes: int, total: int, z: float = 1.959963984540054) -> tuple[float, float]:
@@ -55,6 +60,20 @@ def load(path: Path) -> dict:
     input_tokens = sum(int((usage or {}).get("input_tokens", 0) or 0) for usage in usages)
     output_tokens = sum(int((usage or {}).get("output_tokens", 0) or 0) for usage in usages)
     reasoning_tokens = sum(int((usage or {}).get("reasoning_tokens", 0) or 0) for usage in usages)
+    provider_requests = sum(
+        max(0, int(usage.get("requests", 0) or 0))
+        for usage in usages
+        if isinstance(usage, dict) and usage.get("synchronized", True) is not False)
+    provider_transports: dict[str, int] = {}
+    for usage in usages:
+        values = usage.get("provider_transports") if isinstance(usage, dict) else None
+        if not isinstance(values, dict):
+            continue
+        for name in sorted(values):
+            if name not in _PROVIDER_TRANSPORTS:
+                continue
+            provider_transports[name] = provider_transports.get(name, 0) + max(
+                0, int(values.get(name, 0) or 0))
     def timing_value(usage: dict, key: str) -> float | None:
         try:
             value = float(usage.get(key, 0) or 0)
@@ -102,6 +121,7 @@ def load(path: Path) -> dict:
             "provider_timing_rounds": provider_timing_rounds,
             "provider_duration_s": provider_duration_s, "provider_wall_s": provider_wall_s,
             "provider_max_duration_s": provider_max_duration_s,
+            "provider_requests": provider_requests, "provider_transports": provider_transports,
             "builtin_timing_rounds": builtin_timing_rounds,
             "builtin_tool_s": builtin_tool_s, "builtin_tool_samples": builtin_tool_samples,
             "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples}
@@ -127,6 +147,13 @@ def publication_errors(runs: list[dict]) -> list[str]:
             missing.append("transport reasoning normalization")
         if settings.get("usage_source") != "provider-proxy":
             missing.append("provider-side usage")
+        expected_transport = EXPECTED_PROVIDER_TRANSPORTS[run["engine"]]
+        if manifest.get("provider_transport") != expected_transport:
+            missing.append(f"declared {expected_transport} provider transport")
+        observed_transports = run.get("provider_transports") or {}
+        if (set(observed_transports) != {expected_transport}
+                or sum(observed_transports.values()) != int(run.get("provider_requests") or 0)):
+            missing.append(f"observed {expected_transport} provider transport")
         if (not manifest.get("runner", {}).get("commit")
                 or manifest.get("runner", {}).get("dirty") is not False):
             missing.append("clean runner revision")
@@ -214,6 +241,7 @@ def main() -> None:
                              ("provider_timing_rounds", "provider_duration_s", "provider_wall_s",
                               "provider_max_duration_s", "builtin_timing_rounds",
                               "builtin_tool_s", "builtin_tool_samples",
+                              "provider_requests", "provider_transports",
                               "by_tool_us", "by_tool_samples")}
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
                              "source": str(run["path"])})

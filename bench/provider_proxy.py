@@ -135,6 +135,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         model = None
         normalization = None
+        transport = None
         if body and "json" in self.headers.get("Content-Type", "application/json").lower():
             try:
                 payload = json.loads(body)
@@ -146,13 +147,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if path.endswith("/api/chat") or path.endswith("/api/generate"):
                     payload["think"] = False
                     normalization = "think=false"
-                elif path.endswith("/chat/completions") or path.endswith("/responses"):
+                    transport = "ollama_chat"
+                elif path.endswith("/chat/completions"):
                     payload["reasoning_effort"] = "none"
                     normalization = "reasoning_effort=none"
-                    if path.endswith("/chat/completions") and payload.get("stream"):
+                    transport = "chat_completions"
+                    if payload.get("stream"):
                         stream_options = payload.setdefault("stream_options", {})
                         if isinstance(stream_options, dict):
                             stream_options["include_usage"] = True
+                elif path.endswith("/responses"):
+                    payload["reasoning_effort"] = "none"
+                    normalization = "reasoning_effort=none"
+                    transport = "responses"
                 body = json.dumps(payload, separators=(",", ":")).encode()
 
         upstream = self.server.upstream  # type: ignore[attr-defined]
@@ -209,6 +216,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                       "duration_s": round(time.monotonic() - started_monotonic, 3),
                       "method": self.command, "path": urlsplit(self.path).path,
                       "model": model, "status": status, "normalization": normalization,
+                      "transport": transport,
                       "client_disconnected": disconnected, "usage": usage}
             log_path = self.server.usage_log  # type: ignore[attr-defined]
             if log_path:

@@ -105,7 +105,8 @@ unchanged. This prevents a recovery turn from chasing files that no longer exist
 
 Each run first preflights the selected harness, language toolchains, dataset, and C++ Boost
 dependency. It then writes a schema-v3 manifest with executable/toolchain hashes and versions,
-exact settings, runner/dataset commits, hardware, and a deterministic run ID. Set
+exact settings, runner/dataset commits, hardware, the engine's expected provider transport, and a
+deterministic run ID. Set
 `DGC_BENCH_MODEL_DIGEST`, `DGC_BENCH_CAPABILITIES`, `DGC_BENCH_HARDWARE`, and
 `DGC_BENCH_ACCELERATOR` to make controlled-run provenance complete. Bounded,
 credential-redacted stdout/stderr traces survive non-zero exits and wall timeouts. Official tests
@@ -123,6 +124,11 @@ and Pi sequentially, then writes a task-set/provenance-checked comparison with W
 intervals. By default it starts a loopback provider proxy that enforces reasoning off at the actual
 Ollama/OpenAI transport, drains final usage events, and records request metadata/usage without
 prompts or responses. `DGC_BENCH_NORMALIZE_THINKING=0` disables it only for a documented diagnostic.
+The isolated DGC profile explicitly selects native Ollama because the accounting proxy's URL hides
+the upstream family; otherwise `api_mode: auto` would measure generic Chat Completions instead of
+DGC's native local-model path. The proxy labels every generation as `ollama_chat`,
+`chat_completions`, or `responses`, and the publication gate requires every recorded request to match
+the transport declared for that harness.
 If a deadline-cancelled harness disconnects while the provider is still generating, the runner waits
 for the proxy to drain that request before taking the next round's log offset. It aborts fail-closed
 if quiescence cannot be proven. DGC rows independently reconcile provider requests with the
