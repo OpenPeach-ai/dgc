@@ -2893,24 +2893,28 @@ class TUI:
                     self._flash("background → auto (applies on next launch)")
         elif cmd == "sandbox":
             from . import sandbox
-            if not sandbox.available():
-                self._flash("no sandbox tool found — install bubblewrap (bwrap) on Linux")
+            val = rest.strip().lower()
+            if val in ("off", "false", "0"):
+                cfg.set("sandbox", False); self._flash("sandbox OFF")
+            elif val in ("on", "true", "1") and not sandbox.available():
+                cfg.set("sandbox", False)
+                self._flash("sandbox remains OFF — no supported confinement backend found")
+            elif val in ("on", "true", "1"):
+                cfg.set("sandbox", True)
+                self._flash("sandbox ON — project writable, private home/tmp, network blocked; approvals unchanged")
+            elif val in ("network on", "net on"):
+                cfg.set("sandbox_network", True)
+                self._flash("sandbox network ON — commands still require normal approval")
+            elif val in ("network off", "net off"):
+                cfg.set("sandbox_network", False)
+                self._flash("sandbox network OFF")
             else:
-                val = rest.strip().lower()
-                if val in ("on", "true", "1"):
-                    cfg.set("sandbox", True)
-                    self._flash("sandbox ON — project writable, private home/tmp, network blocked; approvals unchanged")
-                elif val in ("off", "false", "0"):
-                    cfg.set("sandbox", False); self._flash("sandbox OFF")
-                elif val in ("network on", "net on"):
-                    cfg.set("sandbox_network", True)
-                    self._flash("sandbox network ON — commands still require normal approval")
-                elif val in ("network off", "net off"):
-                    cfg.set("sandbox_network", False)
-                    self._flash("sandbox network OFF")
-                else:
-                    net = "on" if cfg.get("sandbox_network", False) else "off"
-                    self._flash(f"sandbox: {'on' if cfg.get('sandbox') else 'off'}, network: {net} — /sandbox on|off|network on|network off")
+                net = "on" if cfg.get("sandbox_network", False) else "off"
+                backend = sandbox.available() or "unavailable"
+                state = "on" if cfg.get("sandbox") else "off"
+                self._flash(
+                    f"sandbox: {state}, network: {net}, backend: {backend} — "
+                    "/sandbox on|off|network on|network off")
         elif cmd == "mode":
             if rest in ("default", "acceptEdits", "plan", "auto"):
                 self._request_mode(rest)

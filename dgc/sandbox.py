@@ -28,8 +28,13 @@ def available() -> str | None:
     return None
 
 
+def requested(config) -> bool:
+    """Return whether confinement was explicitly requested, backend availability aside."""
+    return bool(config and config.get("sandbox"))
+
+
 def active(config) -> bool:
-    return bool(config and config.get("sandbox")) and available() is not None
+    return requested(config) and available() is not None
 
 
 def process_env(config=None) -> dict[str, str]:

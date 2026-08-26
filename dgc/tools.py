@@ -1109,16 +1109,16 @@ def bash(args: dict, ctx) -> str:
     timeout = int(args.get("timeout") or ctx.config.get("bash_timeout", 120))
     from . import sandbox
     import signal
-    sandboxed = sandbox.active(ctx.config)
-    argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandboxed else None
-    if sandboxed and argv is None:
+    sandbox_requested = sandbox.requested(ctx.config)
+    argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
+    if sandbox_requested and argv is None:
         return "error: sandbox policy cannot safely confine this workspace; command was not run"
     # Run in its OWN session/process group so a timeout kills the WHOLE tree — a build's grandchildren
     # (cargo / go test / gradlew / cmake) would otherwise orphan on the box and keep stealing CPU,
     # slowing every later command. (subprocess.run's timeout only kills the direct child.)
     popen_kw = dict(cwd=str(ctx.project_root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace", start_new_session=True,
-                    env=sandbox.process_env(ctx.config) if sandboxed else None)
+                    env=sandbox.process_env(ctx.config) if sandbox_requested else None)
     try:
         if argv:                                   # confined: writable project dir + /tmp only
             proc = subprocess.Popen(argv, **popen_kw)
@@ -1207,15 +1207,15 @@ def _bash_background(command: str, ctx) -> str:
                 "error: background command was cancelled while waiting for the workspace write lease")
     try:
         from . import sandbox
-        sandboxed = sandbox.active(ctx.config)
-        argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandboxed else None
-        if sandboxed and argv is None:
+        sandbox_requested = sandbox.requested(ctx.config)
+        argv = sandbox.wrap(command, ctx.project_root, ctx.config) if sandbox_requested else None
+        if sandbox_requested and argv is None:
             workspace_lock.release()
             return "error: sandbox policy cannot safely confine this workspace; background command was not run"
         popen_kw = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                         encoding="utf-8", errors="replace",
                         cwd=str(ctx.project_root), start_new_session=True,
-                        env=sandbox.process_env(ctx.config) if sandboxed else None)
+                        env=sandbox.process_env(ctx.config) if sandbox_requested else None)
         if argv:
             proc = subprocess.Popen(argv, **popen_kw)
         else:

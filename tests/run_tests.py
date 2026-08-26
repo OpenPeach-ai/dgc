@@ -1047,6 +1047,31 @@ def unit_tests(tmp: Path):
     _captured["on_pick"]({"value": "yes"})
     check("TUI auto mode applies only after confirmation", _mode_calls == ["auto"])
 
+    _sandbox_values = {"sandbox": True, "sandbox_network": False}
+    _sandbox_flashes = []
+    _sandbox_ui = object.__new__(TUI)
+    _sandbox_ui.config = type("SandboxCfg", (), {
+        "get": lambda self, key, default=None: _sandbox_values.get(key, default),
+        "set": lambda self, key, value: _sandbox_values.__setitem__(key, value),
+    })()
+    _sandbox_ui._flash = _sandbox_flashes.append
+    _sandbox_ui._invalidate = lambda: None
+    from dgc import sandbox as _sandbox
+    _real_sandbox_available = _sandbox.available
+    try:
+        _sandbox.available = lambda: None
+        _sandbox_ui._handle_slash("/sandbox off")
+        _sandbox_disabled_without_backend = _sandbox_values["sandbox"] is False
+        _sandbox_values["sandbox"] = True
+        _sandbox_ui._handle_slash("/sandbox on")
+    finally:
+        _sandbox.available = _real_sandbox_available
+    check("TUI can disable a persisted sandbox when its backend is unavailable",
+          _sandbox_disabled_without_backend)
+    check("TUI cannot retain an enabled sandbox when its backend is unavailable",
+          _sandbox_values["sandbox"] is False
+          and "no supported confinement backend" in _sandbox_flashes[-1])
+
     _connection = object.__new__(TUI); _connection_values = {}; _secret_prompt = {}
     _connection.config = type("ConnectCfg", (), {
         "set": lambda self, key, value: _connection_values.__setitem__(key, value),
@@ -3608,34 +3633,49 @@ def test_mcp_protocol():
             os.environ["DGC_PARENT_ONLY_SECRET"] = old_secret
 
     from dgc import sandbox
-    if sandbox.available():                    # skip where no bwrap/sandbox-exec
+    from dgc.tools import bash
+
+    class _SCfg:
+        def __init__(self, network=False, env_allow=None):
+            self.network, self.env_allow = network, env_allow or []
+        def get(self, k, d=None):
+            return {"sandbox": True, "sandbox_network": self.network,
+                    "sandbox_env_allow": self.env_allow, "bash_timeout": 30}.get(k, d)
+
+    class _SCtx:
+        def __init__(self, root, cfg=None): self.project_root = root; self.config = cfg or _SCfg()
+
+    unavailable_root = Path(tempfile.mkdtemp())
+    real_available = sandbox.available
+    try:
+        sandbox.available = lambda: None
+        unavailable_foreground = bash({"command": ":"}, _SCtx(unavailable_root))
+        unavailable_background = bash({"command": ":", "background": True},
+                                      _SCtx(unavailable_root))
+    finally:
+        sandbox.available = real_available
+    check("requested sandbox fails closed when no backend can confine foreground bash",
+          unavailable_foreground ==
+          "error: sandbox policy cannot safely confine this workspace; command was not run")
+    check("requested sandbox fails closed when no backend can confine background bash",
+          unavailable_background ==
+          "error: sandbox policy cannot safely confine this workspace; background command was not run")
+
+    if sandbox.available():                    # skip live isolation where no bwrap/sandbox-exec
         import shlex as _shlex
-        import tempfile as _tf
-        from pathlib import Path as _P
-        from dgc.tools import bash
 
-        class _SCfg:
-            def __init__(self, network=False, env_allow=None):
-                self.network, self.env_allow = network, env_allow or []
-            def get(self, k, d=None):
-                return {"sandbox": True, "sandbox_network": self.network,
-                        "sandbox_env_allow": self.env_allow, "bash_timeout": 30}.get(k, d)
-
-        class _SCtx:
-            def __init__(self, root, cfg=None): self.project_root = root; self.config = cfg or _SCfg()
-
-        proj = _P(_tf.mkdtemp())
+        proj = Path(tempfile.mkdtemp())
         check("sandbox allows a project write", "hi" in bash({"command": "echo hi > x && cat x"}, _SCtx(proj)))
-        host_probe = _P.home() / f".dgc_sandbox_probe_{os.getpid()}"
+        host_probe = Path.home() / f".dgc_sandbox_probe_{os.getpid()}"
         host_probe.write_text("ambient-home-secret")
         try:
             read_probe = bash({"command": f"cat {_shlex.quote(str(host_probe))} 2>/dev/null || echo hidden"}, _SCtx(proj))
             check("sandbox hides the ambient user home", "ambient-home-secret" not in read_probe)
         finally:
             host_probe.unlink(missing_ok=True)
-        bash({"command": f"echo evil > {_shlex.quote(str(_P.home() / '.dgc_escape_test'))} 2>&1; true"}, _SCtx(proj))
-        escaped = (_P.home() / ".dgc_escape_test").exists()
-        (_P.home() / ".dgc_escape_test").unlink(missing_ok=True)
+        bash({"command": f"echo evil > {_shlex.quote(str(Path.home() / '.dgc_escape_test'))} 2>&1; true"}, _SCtx(proj))
+        escaped = (Path.home() / ".dgc_escape_test").exists()
+        (Path.home() / ".dgc_escape_test").unlink(missing_ok=True)
         check("sandbox blocks a write outside the project", not escaped)
         old_ambient = os.environ.get("DGC_PARENT_ONLY_SECRET")
         os.environ["DGC_PARENT_ONLY_SECRET"] = "must-not-leak"
