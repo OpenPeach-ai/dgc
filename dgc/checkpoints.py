@@ -40,16 +40,42 @@ class _Snapshot:
     mode: int = 0
 
 
-def _capture(path: Path) -> _Snapshot:
+@dataclass(frozen=True)
+class WorkspaceSnapshot:
+    """Exact ephemeral state for project files touched in the current turn.
+
+    Unlike durable rewind points, this is never serialized and never carries external-path
+    authority across a process boundary. Relative paths bind it to one canonical checkout root.
+    """
+    root: str
+    files: tuple[tuple[str, _Snapshot], ...]
+
+
+def _capture(path: Path, max_bytes: int | None = None) -> _Snapshot:
     try:
         info = path.lstat()
     except FileNotFoundError:
         return _Snapshot("missing")
     if stat.S_ISLNK(info.st_mode):
-        return _Snapshot("symlink", os.fsencode(os.readlink(path)), 0o777)
+        data = os.fsencode(os.readlink(path))
+        if max_bytes is not None and len(data) > max(0, max_bytes):
+            raise OSError(f"checkpoint target exceeds its remaining snapshot budget: {path}")
+        return _Snapshot("symlink", data, 0o777)
     if not stat.S_ISREG(info.st_mode):
         raise OSError(f"checkpoint target is not a regular file: {path}")
-    return _Snapshot("file", path.read_bytes(), stat.S_IMODE(info.st_mode))
+    if max_bytes is None:
+        data = path.read_bytes()
+    else:
+        limit = max(0, max_bytes)
+        if info.st_size > limit:
+            raise OSError(f"checkpoint target exceeds its remaining snapshot budget: {path}")
+        # Read at most one byte beyond the budget so a file growing after lstat cannot cause an
+        # unbounded allocation before the post-read check.
+        with path.open("rb") as handle:
+            data = handle.read(limit + 1)
+        if len(data) > limit:
+            raise OSError(f"checkpoint target grew beyond its remaining snapshot budget: {path}")
+    return _Snapshot("file", data, stat.S_IMODE(info.st_mode))
 
 
 def _restore(path: Path, snapshot: _Snapshot) -> bool:
@@ -258,7 +284,7 @@ class CheckpointManager:
         if self._lexically_within_project(path) and self._relative_project_path(path) is None:
             return False
         try:
-            snapshot = _capture(p)
+            snapshot = _capture(p, _MAX_SNAPSHOT_BYTES - self._snapshot_bytes_total)
         except (OSError, ValueError):
             return False
         if self._snapshot_bytes_total + len(snapshot.data) > _MAX_SNAPSHOT_BYTES:
@@ -269,6 +295,92 @@ class CheckpointManager:
             files.pop(path, None)
             self._snapshot_bytes_total -= len(snapshot.data)
             return False
+        return True
+
+    def capture_touched_workspace(self) -> WorkspaceSnapshot | None:
+        """Capture exact current state for project paths touched in the active turn.
+
+        External paths may exist in the in-memory rewind point after one explicit approval, but
+        automatic timeout recovery never inherits that authority. A project path whose parent now
+        escapes through a symlink fails the entire capture instead of weakening the snapshot.
+        """
+        if self.project_root is None or not self.points or self._pending_rewind is not None:
+            return None
+        captured: dict[str, _Snapshot] = {}
+        snapshot_bytes = 0
+        for raw_path in sorted(self.points[-1]["files"]):
+            relative = self._relative_project_path(raw_path)
+            if relative is None:
+                if self._lexically_within_project(raw_path):
+                    return None
+                continue                         # explicit external grants stay outside auto-recovery
+            path = self._project_path(relative)
+            if path is None:
+                return None
+            try:
+                snapshot = _capture(path, _MAX_SNAPSHOT_BYTES - snapshot_bytes)
+            except (OSError, ValueError):
+                return None
+            snapshot_bytes += len(snapshot.data)
+            if snapshot_bytes > _MAX_SNAPSHOT_BYTES:
+                return None
+            captured[relative] = snapshot
+        return WorkspaceSnapshot(str(self.project_root), tuple(sorted(captured.items())))
+
+    def restore_workspace_snapshot(self, snapshot: WorkspaceSnapshot) -> bool:
+        """Transactionally restore an exact ephemeral snapshot inside this checkout.
+
+        Every target and rollback image is validated before the first write. Changed paths are
+        restored atomically through ``_restore``; a later failure rolls earlier paths back to their
+        state at entry. Unchanged files are not rewritten, preserving mtimes.
+        """
+        if (self.project_root is None or not isinstance(snapshot, WorkspaceSnapshot)
+                or snapshot.root != str(self.project_root)
+                or len(snapshot.files) > _MAX_FILES_PER_POINT):
+            return False
+        targets: list[tuple[str, Path, _Snapshot]] = []
+        rollback: dict[str, _Snapshot] = {}
+        snapshot_bytes = 0
+        rollback_bytes = 0
+        seen: set[str] = set()
+        for relative, target in snapshot.files:
+            if (not isinstance(relative, str) or relative in seen
+                    or not isinstance(target, _Snapshot)
+                    or target.kind not in ("missing", "file", "symlink")
+                    or not isinstance(target.data, bytes)
+                    or isinstance(target.mode, bool) or not isinstance(target.mode, int)
+                    or target.mode < 0 or target.mode > 0o7777
+                    or (target.kind == "missing" and target.data)):
+                return False
+            seen.add(relative)
+            snapshot_bytes += len(target.data)
+            if snapshot_bytes > _MAX_SNAPSHOT_BYTES:
+                return False
+            path = self._project_path(relative)
+            if path is None or self._relative_project_path(str(path)) != relative:
+                return False
+            try:
+                current = _capture(path, _MAX_SNAPSHOT_BYTES - rollback_bytes)
+            except (OSError, ValueError):
+                return False
+            rollback_bytes += len(current.data)
+            rollback[relative] = current
+            if current != target:
+                targets.append((relative, path, target))
+
+        applied: list[tuple[str, Path]] = []
+        for relative, path, target in targets:
+            try:
+                if not _restore(path, target):
+                    raise OSError("workspace snapshot restore refused the target")
+                applied.append((relative, path))
+            except (OSError, ValueError):
+                for changed_relative, changed_path in reversed(applied):
+                    try:
+                        _restore(changed_path, rollback[changed_relative])
+                    except (OSError, ValueError):
+                        pass
+                return False
         return True
 
     def listing(self) -> list[tuple[int, str, int]]:
@@ -341,13 +453,16 @@ class CheckpointManager:
         # particular, a project-relative path loaded from disk must not become an external write
         # merely because one of its parents was replaced with a symlink after resume.
         rollback: dict[str, _Snapshot] = {}
+        rollback_bytes = 0
         for path, (_prior, durable) in restore.items():
             lexical_inside = self._lexically_within_project(path)
             if ((durable and not lexical_inside)
                     or (lexical_inside and self._relative_project_path(path) is None)):
                 return (-1, 0, None)
             try:
-                rollback[path] = _capture(Path(path))
+                rollback[path] = _capture(
+                    Path(path), _MAX_SNAPSHOT_BYTES - rollback_bytes)
+                rollback_bytes += len(rollback[path].data)
             except (OSError, ValueError):
                 return (-1, 0, None)
 

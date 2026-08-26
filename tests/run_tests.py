@@ -1842,15 +1842,112 @@ def unit_tests(tmp: Path):
     check("landed edits keep evolving repair cycles alive past the varied-failure cap",
           _repair_agent.client.n == 8
           and (_repair_root / "attempt.txt").read_text() == "fixed\n")
-    _d = _tf.mkdtemp(); _f = Path(_d) / "sol.py"
-    _f.write_text("BROKEN")                                    # current on-disk = a broken later edit
-    _p._restore_snapshot({str(_f): "GOOD"})                    # snapshot from the last green run
-    check("snapshot restore rewrites changed file", _f.read_text() == "GOOD")
-    _mt = _f.stat().st_mtime
-    _p._restore_snapshot({str(_f): "GOOD"})                    # already matches → must NOT rewrite
-    check("snapshot restore skips unchanged file", _f.stat().st_mtime == _mt)
-    _p._restore_snapshot({"/no/such/path/x": "y"})             # bad path → must not raise
-    check("snapshot restore ignores missing paths", True)
+    # Last-known-good recovery shares the exact checkpoint primitives: binary bytes, mode,
+    # symlink identity, and absence survive; it is project-bound, transactional, and skips rewrites.
+    import stat as _stat_snapshot
+    import dgc.checkpoints as _checkpoint_mod
+    _snapshot_root = Path(_tf.mkdtemp())
+    _snapshot_agent = _Ag(_Cfg(_snapshot_root), _AgUI())
+    _snapshot_agent.checkpoints.open(0, "exact recovery", [])
+    _binary = _snapshot_root / "binary.bin"
+    _binary.write_bytes(b"old")
+    _link = _snapshot_root / "current-link"
+    _link.symlink_to("old-target")
+    _absent = _snapshot_root / "must-be-absent"
+    check("last-good setup records every candidate before mutation",
+          all(_snapshot_agent.checkpoints.record_file(str(path))
+              for path in (_binary, _link, _absent)))
+    _binary.write_bytes(b"\x00GOOD\r\n")
+    _binary.chmod(0o751)
+    _link.unlink(); _link.symlink_to("good-target")
+    _exact_good = _snapshot_agent._capture_good_snapshot(_tm.monotonic() + 5)
+    _binary.write_bytes(b"BAD")
+    _binary.chmod(0o600)
+    _link.unlink(); _link.write_text("not a symlink")
+    _absent.write_text("should disappear")
+    check("last-good recovery restores bytes, mode, symlink, and absence exactly",
+          _exact_good is not None and _snapshot_agent._restore_snapshot(
+              _exact_good, _tm.monotonic() + 5)
+          and _binary.read_bytes() == b"\x00GOOD\r\n"
+          and _stat_snapshot.S_IMODE(_binary.stat().st_mode) == 0o751
+          and _link.is_symlink() and os.readlink(_link) == "good-target"
+          and not _absent.exists())
+    _snapshot_mtime = _binary.stat().st_mtime_ns
+    check("last-good recovery does not rewrite an already exact file",
+          _snapshot_agent._restore_snapshot(_exact_good, _tm.monotonic() + 5)
+          and _binary.stat().st_mtime_ns == _snapshot_mtime)
+
+    _external_root = Path(_tf.mkdtemp())
+    _external_file = _external_root / "approved-once.txt"
+    _external_file.write_text("external")
+    _external_recorded = _snapshot_agent.checkpoints.record_file(str(_external_file))
+    _project_only_snapshot = _snapshot_agent.checkpoints.capture_touched_workspace()
+    check("automatic last-good capture never inherits external-path authority",
+          _external_recorded and _project_only_snapshot is not None
+          and len(_project_only_snapshot.files) == 3
+          and all(not relative.endswith("approved-once.txt")
+                  for relative, _state in _project_only_snapshot.files))
+    _other_root = Path(_tf.mkdtemp())
+    _other_agent = _Ag(_Cfg(_other_root), _AgUI())
+    check("last-good snapshots are bound to one canonical checkout",
+          not _other_agent._restore_snapshot(_exact_good, _tm.monotonic() + 5))
+
+    _escape_root = Path(_tf.mkdtemp())
+    _escape_agent = _Ag(_Cfg(_escape_root), _AgUI())
+    _escape_parent = _escape_root / "safe-parent"
+    _escape_parent.mkdir()
+    _escape_file = _escape_parent / "answer.txt"
+    _escape_file.write_text("old")
+    _escape_agent.checkpoints.open(0, "symlink race", [])
+    _escape_agent.checkpoints.record_file(str(_escape_file))
+    _escape_file.write_text("GOOD")
+    _escape_good = _escape_agent._capture_good_snapshot(_tm.monotonic() + 5)
+    _escape_file.unlink(); _escape_parent.rmdir()
+    _outside_parent = Path(_tf.mkdtemp())
+    (_outside_parent / "answer.txt").write_text("outside-safe")
+    _escape_parent.symlink_to(_outside_parent, target_is_directory=True)
+    check("last-good recovery fails closed after a parent-symlink escape",
+          _escape_good is not None
+          and not _escape_agent._restore_snapshot(_escape_good, _tm.monotonic() + 5)
+          and (_outside_parent / "answer.txt").read_text() == "outside-safe")
+
+    _txn_root = Path(_tf.mkdtemp())
+    _txn_agent = _Ag(_Cfg(_txn_root), _AgUI())
+    _txn_a, _txn_b = _txn_root / "a.bin", _txn_root / "b.bin"
+    _txn_a.write_bytes(b"old-a"); _txn_b.write_bytes(b"old-b")
+    _txn_agent.checkpoints.open(0, "transactional recovery", [])
+    _txn_agent.checkpoints.record_file(str(_txn_a))
+    _txn_agent.checkpoints.record_file(str(_txn_b))
+    _txn_a.write_bytes(b"good-a"); _txn_b.write_bytes(b"good-b")
+    _txn_good = _txn_agent._capture_good_snapshot(_tm.monotonic() + 5)
+    _txn_a.write_bytes(b"bad-a"); _txn_b.write_bytes(b"bad-b")
+    _real_restore = _checkpoint_mod._restore
+    def _fail_second_restore(path, state):
+        if path == _txn_b and path.read_bytes() == b"bad-b":
+            return False
+        return _real_restore(path, state)
+    _checkpoint_mod._restore = _fail_second_restore
+    try:
+        _txn_restored = _txn_agent._restore_snapshot(_txn_good, _tm.monotonic() + 5)
+    finally:
+        _checkpoint_mod._restore = _real_restore
+    check("last-good restore rolls back earlier paths if a later exact restore fails",
+          not _txn_restored and _txn_a.read_bytes() == b"bad-a"
+          and _txn_b.read_bytes() == b"bad-b")
+
+    _limit_root = Path(_tf.mkdtemp())
+    _limit_agent = _Ag(_Cfg(_limit_root), _AgUI())
+    _limit_file = _limit_root / "too-large.bin"
+    _limit_file.write_bytes(b"0123456789")
+    _limit_agent.checkpoints.open(0, "bounded capture", [])
+    _real_snapshot_limit = _checkpoint_mod._MAX_SNAPSHOT_BYTES
+    try:
+        _checkpoint_mod._MAX_SNAPSHOT_BYTES = 8
+        _oversized_rejected = not _limit_agent.checkpoints.record_file(str(_limit_file))
+    finally:
+        _checkpoint_mod._MAX_SNAPSHOT_BYTES = _real_snapshot_limit
+    check("checkpoint capture rejects an oversized file before retaining its bytes",
+          _oversized_rejected and not _limit_agent.checkpoints.points[-1]["files"])
 
     # --- /goal: set → # Standing goal in the prompt; persists to the session + restores on resume
     _goal_root = Path(tempfile.mkdtemp())

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .checkpoints import CheckpointManager
+from .checkpoints import CheckpointManager, WorkspaceSnapshot
 from .config import Config
 from .hooks import run_hooks
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
@@ -1627,15 +1627,30 @@ class Agent:
             notify(self.goal, self.goal_status)
         return True
 
-    def _restore_snapshot(self, snap: dict) -> None:
-        """Write back the last test-passing file contents (captured on a green run) — only for paths we
-        actually read, and only when the current on-disk content differs. Best-effort, never raises."""
-        for p, content in snap.items():
-            try:
-                if Path(p).read_text() != content:
-                    Path(p).write_text(content)
-            except OSError:
-                pass
+    def _capture_good_snapshot(self, deadline: float | None = None) -> WorkspaceSnapshot | None:
+        """Capture exact current state for checkpoint-known project mutations under the write lease."""
+        lease = workspace_mutation_lock(self.config.project_root)
+        cancel = (self.cancelled if deadline is None else
+                  _DeadlineCancel(self.cancelled, deadline))
+        if not acquire_cancellable(lease, cancel):
+            return None
+        try:
+            return self.checkpoints.capture_touched_workspace()
+        finally:
+            lease.release()
+
+    def _restore_snapshot(self, snapshot: WorkspaceSnapshot,
+                          deadline: float | None = None) -> bool:
+        """Transactionally restore exact last-known-good state under the checkout write lease."""
+        lease = workspace_mutation_lock(self.config.project_root)
+        cancel = (self.cancelled if deadline is None else
+                  _DeadlineCancel(self.cancelled, deadline))
+        if not acquire_cancellable(lease, cancel):
+            return False
+        try:
+            return self.checkpoints.restore_workspace_snapshot(snapshot)
+        finally:
+            lease.release()
 
     def _fail_turn(self, message: str) -> bool:
         """Record and render one handled terminal failure for every frontend."""
@@ -1696,8 +1711,9 @@ class Agent:
         except (TypeError, ValueError):
             budget = 0.0
         deadline = (time.monotonic() + budget) if budget > 0 else None
-        edited_paths: set = set()   # abs paths DGC wrote/edited this turn (for last-good snapshots)
-        good_snapshot: dict | None = None   # {abs_path: content} at the last test/build PASS — restored if time runs out
+        # Exact ephemeral bytes/modes/symlinks for checkpoint-known project mutations at the last
+        # verified state. It never serializes external-path authority and is restored transactionally.
+        good_snapshot: WorkspaceSnapshot | None = None
         budget_nudged: set = set()  # which deadline reminders (70/85%) already fired
 
         for _ in range(max_turns):
@@ -1708,8 +1724,10 @@ class Agent:
                 # ~94% of the budget spent → stop before the external kill; restore the last version that
                 # passed so the on-disk files are self-consistent (a mid-grind kill would leave 0 credit).
                 if good_snapshot:
-                    self._restore_snapshot(good_snapshot)
-                    self.ui.info("⏱ out of time — restored the last test-passing version of the files")
+                    if not self._restore_snapshot(good_snapshot, deadline):
+                        return self._fail_turn(
+                            "out of time — the last test-passing state could not be restored safely")
+                    self.ui.info("⏱ out of time — restored the exact last test-passing file state")
                 else:
                     self.ui.info("⏱ out of time — stopping")
                 return True
@@ -1771,8 +1789,11 @@ class Agent:
             if (deadline is not None and chat_cancel.is_set() and not self.cancelled.is_set()):
                 self.ui.end_stream()
                 if good_snapshot:
-                    self._restore_snapshot(good_snapshot)
-                    self.ui.info("⏱ out of time — restored the last test-passing version of the files")
+                    if not self._restore_snapshot(good_snapshot, deadline):
+                        return self._fail_turn(
+                            "out of time — the in-flight model request stopped, but the last "
+                            "test-passing state could not be restored safely")
+                    self.ui.info("⏱ out of time — restored the exact last test-passing file state")
                 else:
                     self.ui.info("⏱ out of time — stopped the in-flight model request")
                 return True
@@ -2034,53 +2055,49 @@ class Agent:
                     # meaningless code churn must still trip the hard no-progress guard.
                     fail_streak, fail_nudged = 0, False
                     _forget_mutation_sensitive_signatures(sig_count)
-                if deadline is not None and call.name in ("write_file", "edit_file", "multi_edit", "apply_patch") \
-                        and not out.lstrip().lower().startswith("error"):
-                    pth = call.arguments.get("path") or call.arguments.get("file_path")
-                    if pth:                                          # remember it so we can snapshot on a green run
-                        ap = Path(pth)
-                        if not ap.is_absolute():
-                            ap = self.config.project_root / ap
-                        try:
-                            edited_paths.add(str(ap.resolve()))
-                        except OSError:
-                            pass
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
             flush_text_results()
 
-            if deadline is not None and batch_verified and edited_paths:
-                # a test/build just passed → snapshot the edited files so we can restore this known-good
-                # state if the model later breaks it and time runs out (converts a 0-credit timeout to a pass).
-                snap = {}
-                for p in edited_paths:
-                    try:
-                        snap[p] = Path(p).read_text()
-                    except OSError:
-                        pass
-                if snap:
-                    good_snapshot = snap
+            if (deadline is not None and batch_verified
+                    and edited_total + batch_landed_edits > 0):
+                # A verifier just passed: capture the exact current state of every project path the
+                # turn checkpoint knows was mutated (including task integrations). The checkout lease
+                # prevents another DGC process from mutating that state while it is being captured.
+                cutoff = deadline - 0.06 * budget
+                captured = self._capture_good_snapshot(cutoff)
+                if captured is not None and captured.files:
+                    good_snapshot = captured
+                else:
+                    good_snapshot = None
+                    self.ui.info("last test-passing state could not be captured safely; auto-restore disabled")
             if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
-                if good_snapshot:
-                    self._restore_snapshot(good_snapshot)
+                restore_failed = (good_snapshot is not None
+                                  and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(
-                    f"stopped — the same command failure repeated {same_fail}× with no progress")
+                    f"stopped — the same command failure repeated {same_fail}× with no progress"
+                    + ("; the last test-passing state could not be restored safely"
+                       if restore_failed else ""))
             if deadline is not None and fail_streak >= _grind_cap(budget, deadline):
                 # budgeted run only: a VARIED-error grind (dodges the same_fail identical-fingerprint guard,
                 # which needs 7 identical errors). Abort early — tighter as the deadline nears — and restore
                 # the last good state instead of grinding to max_turns and getting killed mid-edit.
-                if good_snapshot:
-                    self._restore_snapshot(good_snapshot)
+                restore_failed = (good_snapshot is not None
+                                  and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(
-                    f"stopped — {fail_streak} commands failed in a row with no progress (time budget)")
+                    f"stopped — {fail_streak} commands failed in a row with no progress (time budget)"
+                    + ("; the last test-passing state could not be restored safely"
+                       if restore_failed else ""))
             if edit_fail_streak >= _EDIT_FAIL_HARD:     # F3: an edit grind that never lands → abort
-                if good_snapshot:
-                    self._restore_snapshot(good_snapshot)
+                restore_failed = (good_snapshot is not None
+                                  and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(
                     f"stopped — {edit_fail_streak} edits in a row failed to match; "
-                    "rewrite the file with write_file and try again")
+                    "rewrite the file with write_file and try again"
+                    + ("; the last test-passing state could not be restored safely"
+                       if restore_failed else ""))
 
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
