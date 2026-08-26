@@ -7209,6 +7209,29 @@ def test_benchmark_integrity():
     sys.path.insert(0, str(bench_dir))
     try:
         import run_bench as _RB
+        import runtime_micro as _RM
+        check("runtime overhead probe reports deterministic nearest-rank distributions",
+              _RM.summarize_ms([4, 1, 3, 2]) == {
+                  "samples": 4, "median_ms": 2.5, "p95_ms": 4.0, "mean_ms": 2.5})
+        _empty_probe_rejected = False
+        try:
+            _RM.summarize_ms([])
+        except ValueError:
+            _empty_probe_rejected = True
+        check("runtime overhead probe rejects an empty evidence set", _empty_probe_rejected)
+        _runtime_probe = subprocess.run(
+            [sys.executable, str(bench_dir / "runtime_micro.py"),
+             "--fast-samples", "1", "--write-samples", "1",
+             "--command-samples", "1", "--json"],
+            cwd=str(PROJECT), text=True, capture_output=True, timeout=30)
+        _runtime_payload = (json.loads(_runtime_probe.stdout)
+                            if _runtime_probe.returncode == 0 else {})
+        check("runtime overhead probe executes offline with bounded sample counts",
+              _runtime_payload.get("schema_version") == 1
+              and _runtime_payload.get("kind") == "dgc_runtime_microbenchmark"
+              and all(value is None or value.get("samples") == 1
+                      for value in _runtime_payload.get("measurements", {}).values()),
+              detail=_runtime_probe.stderr[-500:])
         root = _P(_tf.mkdtemp()); source = root / "source"; work = root / "work"
         grade = root / "grade"; source.mkdir(); work.mkdir()
         (source / "solution.py").write_text("answer = 0\n")

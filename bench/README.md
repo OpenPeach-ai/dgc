@@ -100,6 +100,25 @@ named tool total points at execution, sandbox, or filesystem cost; `other_s` inc
 permission/lease waits, external tools, process startup, and unmeasured frontend work. Legacy or
 incompletely synchronized records render affected metrics as `?`, never a misleading zero.
 
+## Endpoint-free runtime overhead probe
+
+Use the deterministic local microbenchmark when a safety change is suspected of slowing the harness:
+
+```bash
+python3 runtime_micro.py
+# compact machine-readable output with fewer samples
+python3 runtime_micro.py --quick --json
+```
+
+The probe never contacts a model and confines fixture, session, and lock writes to one disposable
+temporary directory. It reports median/p95/mean milliseconds for the crash-safe workspace lease,
+an exact 768-byte read, an approximately 800-byte atomic write, one crash-safe activity-journal
+update, an ordinary `true` shell, sandbox-policy construction, and a confined `true` shell when a
+backend exists. These are fixed local costs, not task-quality or league evidence. Compare their
+scale with provider request-seconds and generations per task before weakening a permission,
+filesystem, process, or sandbox boundary; a few dozen milliseconds of process startup cannot by
+itself explain a multi-minute model trajectory.
+
 Round-two compiler/test diagnostics are path-normalized before they are returned to a harness. The
 official grader runs in a disposable clean fixture, so absolute paths from that deleted fixture are
 mapped to `./...` in the still-live exercise worktree; diagnostic text and line numbers are otherwise
