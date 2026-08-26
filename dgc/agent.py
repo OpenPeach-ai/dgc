@@ -107,15 +107,42 @@ _MCP_BROKER_SCHEMAS = [
 ]
 _MCP_BROKER_SCHEMA_CHARS = len(json.dumps(_MCP_BROKER_SCHEMAS, default=str))
 
-# Keep the core coding catalog available on every execution turn. Product-specific and network
-# tools activate from explicit user/goal intent, avoiding repeated irrelevant prefill for small
-# local models. ``tool_profile: full`` remains an escape hatch.
+# Keep compact edit/search tools available on every turn. Open-scope work retains navigation, while
+# an explicit narrow-file scope can suppress its heavyweight schemas unless navigation is requested.
+# Product/network tools activate from explicit user/goal intent. Plan mode retains navigation breadth
+# and ``tool_profile: full`` remains an escape hatch.
 _OPTIONAL_TOOL_INTENT = {
+    "repo_map": "repo_navigation", "code_intel": "code_navigation",
     "web_fetch": "web", "web_search": "web",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "task": "delegate",
 }
 _TOOL_INTENT_PATTERNS = {
+    "narrow_scope": re.compile(
+        r"\bedit(?:ing)?\s+only\s+(?:this|these)\b.{0,24}\bfiles?\b|"
+        r"\b(?:edit|modify|change|touch|write|implement)\b.{0,24}\bonly\s+"
+        r"(?:the\s+)?(?:files?|paths?)\s*(?::|`|[A-Za-z0-9_.-]+[/\\][^\s,;]+\.)|"
+        r"\bonly\s+(?:this|these)\s+(?:files?|paths?)\b",
+        re.IGNORECASE | re.DOTALL),
+    "repo_navigation": re.compile(
+        r"\brepo_map\b|\brepository map\b|"
+        r"\b(?:understand|map|survey|explore|onboard)\b.{0,32}"
+        r"\b(?:repo(?:sitory)?|codebase|project)\b|"
+        r"\b(?:repo(?:sitory)?|codebase|project)\b.{0,32}"
+        r"\b(?:structure|architecture|layout|overview)\b|"
+        r"\b(?:multi[- ]file|across\s+(?:the\s+)?(?:repo(?:sitory)?|codebase|project))\b",
+        re.IGNORECASE | re.DOTALL),
+    "code_navigation": re.compile(
+        r"\bcode_intel\b|"
+        r"\b(?:find|locate|show|trace|where)\b.{0,48}"
+        r"\b(?:definitions?|references?|symbols?|callers?|implementations?|usages?|"
+        r"defined|used|called|implemented)\b|"
+        r"\b(?:definitions?|references?|symbols?|callers?|implementations?)\b.{0,32}"
+        r"\b(?:find|locate|show|trace|where|all|exact)\b|"
+        r"\b(?:rename|refactor)\b.{0,64}"
+        r"\b(?:symbol|class|function|method|across|project|repo(?:sitory)?|codebase)\b|"
+        r"\b(?:language server|lsp|syntax diagnostics?)\b",
+        re.IGNORECASE | re.DOTALL),
     "web": re.compile(
         r"https?://|\bwww\.|\b(?:browse|internet|online|web[_ -]?search|search the web|"
         r"look up|latest|news|(?:api|official|online)\s+docs?)\b|"
@@ -1140,10 +1167,13 @@ class Agent:
         if profile != "full":
             active = set(getattr(self, "_active_tool_intents", set()))
             schemas = [tool for tool in schemas
-                       if (tool.get("function", {}).get("name", "").startswith("mcp__")
-                           or tool.get("function", {}).get("name") not in _OPTIONAL_TOOL_INTENT
-                           or _OPTIONAL_TOOL_INTENT[tool["function"]["name"]] in active
-                           or (tool["function"]["name"] == "artifact" and self.mode == "plan"
+                       if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
+                           or name not in _OPTIONAL_TOOL_INTENT
+                           or _OPTIONAL_TOOL_INTENT[name] in active
+                           or (name in {"repo_map", "code_intel"}
+                               and "narrow_scope" not in active)
+                           or (self.mode == "plan" and name in {"repo_map", "code_intel"})
+                           or (name == "artifact" and self.mode == "plan"
                                and self.config.get("artifact_in_plan", False)))]
             if not self._skill_catalog():
                 schemas = [tool for tool in schemas
@@ -1406,6 +1436,20 @@ class Agent:
     # ------------------------------------------------------ system prompt ---
     def system_prompt(self) -> str:
         cfg = self.config
+        mode = self.mode
+        profile = str(cfg.get("tool_profile", "adaptive") or "adaptive").lower()
+        active_tools = set(getattr(self, "_active_tool_intents", set()))
+        navigation_guidance = []
+        if (mode == "plan" or profile == "full" or "repo_navigation" in active_tools
+                or "narrow_scope" not in active_tools):
+            navigation_guidance.append(
+                "- On an unfamiliar multi-file project, use repo_map once to locate relevant "
+                "files and symbols.")
+        if (mode == "plan" or profile == "full" or "code_navigation" in active_tools
+                or "narrow_scope" not in active_tools):
+            navigation_guidance.append(
+                "- Use code_intel for exact definitions, references, symbols, and diagnostics "
+                "when that is more targeted than broad text search.")
         parts = [
             "You are DGC, an interactive coding-agent CLI running on the user's machine, "
             "powered by a local LLM. You help with software engineering tasks by taking real "
@@ -1423,9 +1467,7 @@ class Agent:
             "# How to work",
             "- Use tools to act. Never print code in chat as a substitute for writing it to a file.",
             "- Read a file before editing it. Make minimal, focused changes to EXISTING content.",
-            "- On an unfamiliar multi-file project, use repo_map once to locate relevant files and symbols.",
-            "- Use code_intel for exact definitions, references, symbols, and diagnostics when that is more "
-            "targeted than broad text search.",
+            *navigation_guidance,
             "- Do exactly what was asked — no more. Don't add unrequested features, options, "
             "abstractions, or defensive scaffolding; the simplest change that satisfies the request wins.",
             "- Implementing a stub or writing a new/near-empty file? Write the whole file with "
@@ -1470,7 +1512,6 @@ class Agent:
             parts += ["", "# Goal record", f"The session goal is {goal_status}: {goal}",
                       "Do not resume work on it unless the user reactivates or replaces it."]
 
-        mode = self.mode
         parts += ["", f"# Permission mode: {mode}", MODE_DESCRIPTIONS[mode]]
         if mode == "plan":
             parts += [
@@ -1509,7 +1550,6 @@ class Agent:
         # live — i.e. the shared server is set to autostart. A headless/scripted run with artifacts off
         # (e.g. the benchmark) never reaches them, so this reclaims per-turn prefill instead of re-sending
         # instructions that can't fire. Plan-mode opt-in still shows them when enabled.
-        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
         artifacts_live = ("artifact" in getattr(self, "_active_tool_intents", set())
                           or (profile == "full" and bool(self.config.get("artifact_autostart", True))))
         if (mode != "plan" and artifacts_live) or self.config.get("artifact_in_plan", False):

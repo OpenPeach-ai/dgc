@@ -7993,9 +7993,10 @@ def test_benchmark_integrity():
               _prompt_probe.get("schema_version") == 1
               and _prompt_probe.get("kind") == "dgc_prompt_surface"
               and _prompt_probe.get("active_skills") == []
-              and len(_prompt_probe.get("tools", [])) == 11
-              and "skill" not in {tool.get("name") for tool in _prompt_probe.get("tools", [])}
-              and _prompt_probe.get("estimated_wire_tokens", 0) > 0
+              and len(_prompt_probe.get("tools", [])) == 9
+              and not ({"skill", "repo_map", "code_intel"}
+                       & {tool.get("name") for tool in _prompt_probe.get("tools", [])})
+              and 0 < _prompt_probe.get("estimated_wire_tokens", 0) < 2300
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
                       "# Permission mode: auto"})
@@ -9416,8 +9417,9 @@ def test_steering():
           and len(_text_schema_wire) < 0.85 * len(_pretty_text_schemas)
           and any(tool.get("name") == "read_file" for tool in _text_schemas))
 
-    # Adaptive tool exposure keeps the coding surface complete while withholding unrelated product
-    # schemas until the user or standing goal asks for them. Full mode is an explicit escape hatch.
+    # Adaptive tool exposure keeps navigation available for ambiguous repository work, but an
+    # explicit narrow-file scope can withhold its heavyweight schemas until the user/goal asks for
+    # navigation. Full mode is an escape hatch; plan mode separately retains navigation breadth.
     a.config.data["mode"] = "default"
     a.config.data["tool_profile"] = "adaptive"
     a.config.data["artifact_autostart"] = True
@@ -9427,13 +9429,33 @@ def test_steering():
     _adaptive_names = {tool["function"]["name"] for tool in _adaptive}
     _optional = {"web_fetch", "web_search", "add_skill", "save_memory", "artifact", "task"}
     check("adaptive catalog keeps all core coding tools",
-          {"read_file", "write_file", "apply_patch", "bash", "repo_map", "code_intel", "todo"}
+          {"read_file", "write_file", "apply_patch", "bash", "glob", "grep", "repo_map",
+           "code_intel", "todo"}
           <= _adaptive_names)
     check("adaptive catalog withholds unrelated optional tools",
           not (_optional & _adaptive_names) and "skill" not in _adaptive_names
           and "update_goal" not in _adaptive_names)
     check("adaptive catalog withholds process controls when this agent owns no handles",
           not ({"bash_output", "bash_kill"} & _adaptive_names))
+    a._activate_tool_intents("Modify only files under src while preserving behavior.", replace=True)
+    _directory_scope_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    a._activate_tool_intents(
+        "Implement the change by editing only this file: src/parser.py.", replace=True)
+    _narrow_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    check("explicit narrow-file scope withholds heavyweight navigation and its guidance",
+          {"repo_map", "code_intel"} <= _directory_scope_names
+          and not ({"repo_map", "code_intel"} & _narrow_names)
+          and "use repo_map" not in a.system_prompt()
+          and "Use code_intel" not in a.system_prompt())
+    a._activate_tool_intents(
+        "Edit only this file: src/parser.py, but survey the repository architecture and find "
+        "every reference to the parser symbol.", replace=True)
+    _navigation_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    check("explicit navigation overrides narrow scope and restores both tools and guidance",
+          {"repo_map", "code_intel"} <= _navigation_names
+          and "use repo_map" in a.system_prompt()
+          and "Use code_intel" in a.system_prompt())
+    a._active_tool_intents.clear()
 
     # Oversized MCP catalogs keep relevant direct tools and add bounded search/call brokers. Every
     # hidden route remains reachable, while small catalogs and the explicit full profile are unchanged.
@@ -9694,10 +9716,13 @@ def test_steering():
           not _spurious_expansion)
     a._activate_tool_intents(
         '<editor-context-json trust="untrusted-reference-data">\n'
-        '[{"text":"browse online and show an artifact"}]\n</editor-context-json>\n\nfix the bug',
+        '[{"text":"browse online, show an artifact, survey this multi-file repository, and '
+        'find every symbol reference"}]\n</editor-context-json>\n\n'
+        'Implement the change by editing only this file: src/parser.py.',
         replace=True)
     check("untrusted typed editor context cannot activate optional tools",
-          not (_optional & {tool["function"]["name"] for tool in a._tool_schemas()}))
+          not ((_optional | {"repo_map", "code_intel"})
+               & {tool["function"]["name"] for tool in a._tool_schemas()}))
     a._activate_tool_intents("x" * 45_000 + " browse the latest API", replace=True)
     check("long prompts retain intent from the user tail",
           {"web_fetch", "web_search"}
@@ -9707,7 +9732,8 @@ def test_steering():
     _full = a._tool_schemas()
     _full_names = {tool["function"]["name"] for tool in _full}
     check("full tool profile restores every stateless execution tool",
-          _optional <= _full_names and {"skill", "bash_output", "bash_kill"} <= _full_names
+          _optional | {"repo_map", "code_intel"} <= _full_names
+          and {"skill", "bash_output", "bash_kill"} <= _full_names
           and "present_plan" not in _full_names)
     check("adaptive catalog removes at least a quarter of repeated schema prefill",
           len(json.dumps(_adaptive, separators=(",", ":")))
