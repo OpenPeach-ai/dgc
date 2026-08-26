@@ -3812,6 +3812,41 @@ def test_edit_tiers():
     r, out = edit("def area(w, h):\n    completely different\n    unrelated stuff\n    return a\n",
                   "def area(w, h):\n    x = 1\n    y = 2\n    return a", "X")
     check("edit block-anchor misses when interior is unrelated", out is None, detail=repr(r))
+    # corroborated line drift: two exact boundary lines + new_string's real context recover a
+    # short block that has one stale interior line (too little interior for a similarity guess).
+    r, out = edit("def f():\n    actual = 1\n    return actual\n",
+                  "def f():\n    stale = 1\n    return actual",
+                  "def f():\n    actual = 1\n    return actual + 1")
+    check("edit corroborates one stale context line against new_string",
+          out == "def f():\n    actual = 1\n    return actual + 1\n", detail=repr(out))
+    # If old/new both carry the stale line, preserve the real file line while applying the
+    # independently corroborated change.  Fuzzy context must never overwrite newer source.
+    r, out = edit("def f():\n    actual = 1\n    return actual\n",
+                  "def f():\n    stale = 1\n    return actual",
+                  "def f():\n    stale = 1\n    return actual + 1")
+    check("edit preserves a stale context line copied into the replacement",
+          out == "def f():\n    actual = 1\n    return actual + 1\n", detail=repr(out))
+    # A third version of the mismatched line is not corroborated by old_string or the file.
+    r, out = edit("def f():\n    actual = 1\n    return actual\n",
+                  "def f():\n    stale = 1\n    return actual",
+                  "def f():\n    invented = 1\n    return actual + 1")
+    check("edit refuses an uncorroborated third version of a stale line", out is None,
+          detail=repr(r))
+    # new_string may disambiguate otherwise identical stale-context windows, but if it carries the
+    # same stale line into both candidates the matcher must still refuse to guess.
+    repeated = ("def f():\n    actual_a = 1\n    return value\n\n"
+                "def f():\n    actual_b = 1\n    return value\n")
+    r, out = edit(repeated,
+                  "def f():\n    stale = 1\n    return value",
+                  "def f():\n    stale = 1\n    return value + 1")
+    check("edit refuses ambiguous stale-context windows",
+          out is None and "matches 2 times" in r, detail=repr(r))
+    r, out = edit(repeated,
+                  "def f():\n    stale = 1\n    return value",
+                  "def f():\n    actual_b = 1\n    return value + 1")
+    check("edit uses new_string to disambiguate stale-context windows",
+          out == ("def f():\n    actual_a = 1\n    return value\n\n"
+                  "def f():\n    actual_b = 1\n    return value + 1\n"), detail=repr(out))
     # elision (B3): a lazy `... existing code ...` SEARCH bounding a UNIQUE region → applies
     r, out = edit("def f(x):\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n",
                   "def f(x):\n... existing code ...\n    return a + b + c",
@@ -3822,6 +3857,35 @@ def test_edit_tiers():
     r, out = edit("def f():\n    return 0\n    return 0\n",
                   "def f():\n... existing code ...\n    return 0", "X")
     check("edit elision refuses an ambiguous region", out is None, detail=repr(r))
+    # A common one-character anchor is acceptable only when the full replacement body uniquely
+    # corroborates every line except the intended delta.
+    body = ("{\n    keep_one();\n    old();\n}\n"
+            "{\n    keep_two();\n    old();\n}\n")
+    r, out = edit(body, "{\n... existing code ...\n    old();",
+                  "{\n    keep_two();\n    changed();")
+    check("edit uses the replacement body to corroborate weak elision anchors",
+          out == ("{\n    keep_one();\n    old();\n}\n"
+                  "{\n    keep_two();\n    changed();\n}\n"), detail=repr(out))
+    r, out = edit("{\n    keep();\n    old();\n}\n{\n    keep();\n    old();\n}\n",
+                  "{\n... existing code ...\n    old();",
+                  "{\n    keep();\n    changed();")
+    check("edit refuses duplicate replacement-corroborated elision regions",
+          out is None and "matches 2 times" in r, detail=repr(r))
+    r, out = edit("{\n    keep();\n    old();\n}\n{\n    keep();\n    old();\n}\n",
+                  "{\n... existing code ...\n    old();",
+                  "{\n    keep();\n    changed();", replace_all=True)
+    check("edit replace_all applies non-overlapping corroborated elision regions",
+          out == "{\n    keep();\n    changed();\n}\n{\n    keep();\n    changed();\n}\n",
+          detail=repr(out))
+    # JavaScript spread syntax starts with three dots but is real replacement content, not an
+    # instruction to retain an elided middle.
+    r, out = edit("function f(numbers) {\n  const out = [\n    ...numbers,\n  ];\n  return out;\n}\n",
+                  "  const out = [\n... existing code ...\n  return out;",
+                  "  const out = [\n    ...numbers,\n    1,\n  ];\n  return out;")
+    check("edit does not mistake JavaScript spread syntax for an elision placeholder",
+          out == ("function f(numbers) {\n  const out = [\n    ...numbers,\n    1,\n"
+                  "  ];\n  return out;\n}\n"),
+          detail=repr(out))
     # already-applied detection (B5): old_string is gone but new_string is already present
     r, out = edit("def f():\n    return 2\n", "def f():\n    return 1", "def f():\n    return 2")
     check("edit detects an already-applied edit", out is None and "already applied" in r, detail=repr(r))
@@ -7422,8 +7486,13 @@ def test_benchmark_integrity():
     sys.path.insert(0, str(bench_dir))
     try:
         import run_bench as _RB
+        import edit_micro as _EM
         import prompt_surface as _PS
         import runtime_micro as _RM
+        check("edit corpus treats every negative-case application as a wrong apply",
+              _EM.verdict("ambiguous", "wrong_apply") == "WRONG"
+              and _EM.verdict("miss", "apply_success") == "WRONG"
+              and _EM.verdict("miss", "clean_miss") == "ok")
         _prompt_probe = _PS.run_probe()
         check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
               _prompt_probe.get("schema_version") == 1

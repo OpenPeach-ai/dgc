@@ -70,10 +70,14 @@ release rehearsal—not another round of unmeasured feature claims.
 ### Editing
 
 - `edit_file` tolerates quote confusables, CRLF drift, reindentation, a changed interior line, and
-  elisions while refusing ambiguous matches.
+  elisions while refusing ambiguous matches. Bounded corroborated tiers use `new_string` as evidence
+  for exactly one stale context line or one elided-body delta, preserve file lines that the model
+  copied stale, and refuse an uncorroborated third version rather than guessing.
 - `multi_edit` lets a model submit several edits in one call.
-- The 19,591-case edit corpus currently reports 17,443 accepted cases (89.0%) with zero recorded
-  wrong-applies. The corpus is valuable and should become a required CI artifact.
+- The frozen 19,591-case edit corpus currently reports 19,560 accepted cases (99.84%) with zero
+  wrong-applies. Its remaining 31 cases fail closed because the normalized region is duplicated or
+  lacks enough corroborating evidence. The scorer treats *every* negative-case application as wrong,
+  even when the produced text cannot equal that case's deliberately absent expected output.
 - Long command output is drained through streaming credential masking into a bounded in-process
   head/tail result. `bash_output` exposes line paging and case-insensitive literal search, works
   independently of the command sandbox's `/tmp`, isolates handles between agent sessions, expires
@@ -119,13 +123,13 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 914 / 914 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 924 / 924 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
 | Extension tests | 2 / 2 | 19 / 19 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
-| Edit microbenchmark | 17,443 / 19,591 | 17,443 / 19,591 | 89.0% accepted and zero wrong-applies; unchanged corpus baseline. |
+| Edit microbenchmark | 17,443 / 19,591 | 19,560 / 19,591 | Acceptance improved from 89.04% to 99.84%; all negative applications are scored as dangerous and wrong-applies remain zero. |
 | Release preflight | None | Previous clean candidate passed; current rerun deferred | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates must pass together after the explicit release freeze is lifted. |
 | Polyglot run | 40 / 52 pass@2 | Not rerun | 76.9% on 26 C++ + 26 Go tasks only; not a complete or comparative benchmark. |
 | Polyglot agent timeouts | 28 / 67 rounds | Not rerun | Original main operational failure; the new convergence/runtime work must be measured. |
@@ -990,11 +994,11 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 914/914 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 924/924 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
-the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component
+the 19,591-case edit corpus (19,560 applied, zero wrong applies), type/package checks, a 441-component
 SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed
 a `pipefail`/SIGPIPE failure in archive membership validation; two subsequent builds were
 byte-identical and checksum-valid. Authoritative reviewed-commit release evidence and the clean full

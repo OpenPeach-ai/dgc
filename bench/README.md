@@ -44,6 +44,21 @@ bash install_harnesses.sh
 python3 validate_harness.py all 999
 ```
 
+## Endpoint-free edit-primitive gate
+
+Before spending model time, run the frozen 19,591-case edit corpus against DGC's exact and tolerant
+match tiers:
+
+```bash
+python3 edit_micro.py edit_corpus/all.jsonl
+```
+
+The local candidate accepts 19,560 cases (99.84%), up from 17,443 (89.04%), with zero wrong applies.
+The remaining 31 cases are safe refusals: DGC cannot uniquely corroborate their normalized target.
+`WRONG` is the release-gate number. The scorer counts any application to an expected ambiguous/miss
+case as wrong, regardless of the resulting text, and exits nonzero whenever that count is nonzero.
+This benchmark is deterministic and contacts no model endpoint.
+
 ## Run
 
 ```bash

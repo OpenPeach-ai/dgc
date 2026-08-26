@@ -458,6 +458,10 @@ class _Ambiguous(Exception):
         self.count = count
 
 
+_FUZZY_REFUSE = object()
+_MAX_CORROBORATED_EDIT_LINES = 64
+
+
 def _occ(hay: str, needle: str) -> list[int]:
     out, i = [], 0
     while needle:
@@ -502,13 +506,22 @@ def _apply_edit(content: str, old: str, new: str, replace_all: bool):
     r = _lineflex(content, old, new, replace_all)
     if r is not None:
         return r
-    # Tier 5: block anchor — first/last line + interior similarity (a drifted interior line)
+    # Tier 5: exactly one stale context line, corroborated by the replacement and every other
+    # line.  This is deliberately stronger than an unconstrained fuzzy match: `new` must either
+    # contain the file's real line or leave the model's stale line unchanged (in which case the
+    # real file line is preserved).  A third, uncorroborated version fails closed.
+    r = _corroborated_line_drift(content, old, new, replace_all)
+    if r is _FUZZY_REFUSE:
+        return None
+    if r is not None:
+        return r
+    # Tier 6: block anchor — first/last line + interior similarity (a drifted interior line)
     r = _blockanchor(content, old, new, replace_all)
     if r is not None:
         return r
-    # Tier 6: elision — a lazy `...`/`... existing code ...` SEARCH bounding a unique region
+    # Tier 7: elision — a lazy `...`/`... existing code ...` SEARCH bounding a unique region
     return _elision(content, old, new, replace_all)
-    # (A whole-block fuzzy Tier 7 was evaluated on the micro-benchmark and DROPPED: it caught
+    # (A whole-block fuzzy tier was evaluated on the micro-benchmark and DROPPED: it caught
     #  ~0.1% of misses, introduced a wrong_apply, and slowed every failed edit — a net negative.)
 
 
@@ -552,6 +565,91 @@ def _lineflex(content: str, old: str, new: str, replace_all: bool):
         else:
             out.append(clines[k]); k += 1
     return "".join(out), len(targets), "flexible whitespace"
+
+
+def _corroborated_line_drift(content: str, old: str, new: str, replace_all: bool):
+    """Match a fixed-size block with exactly one stale interior context line.
+
+    All other normalized lines must match, the combined exact anchors must be meaningful, and
+    `new` must disambiguate the stale line.  If the model copied its stale line unchanged into
+    `new`, retain the real file line rather than silently overwriting it.  This makes the tier a
+    bounded, evidence-backed near match rather than a best-effort similarity guess.
+    """
+    clines = content.splitlines(keepends=True)
+    olines, nlines = old.splitlines(), new.splitlines()
+    n = len(olines)
+    if (n < 3 or n > _MAX_CORROBORATED_EDIT_LINES or len(nlines) != n
+            or len(clines) < n or any(_is_elision(line) for line in olines)):
+        return None
+
+    def key(s: str) -> str:
+        return _norm1(s).strip()
+
+    def indent(s: str) -> str:
+        return s[:len(s) - len(s.lstrip())]
+
+    okeys, nkeys = [key(l) for l in olines], [key(l) for l in nlines]
+    nb = [i for i, k in enumerate(okeys) if k]
+    if len(nb) < 3:
+        return None
+    ckeys = [key(l) for l in clines]
+    candidates: list[tuple[int, int, bool]] = []  # start, mismatched line, preserve file line
+    unsafe_found = False
+    for start in range(len(clines) - n + 1):
+        mismatches = []
+        for offset, old_key in enumerate(okeys):
+            if ckeys[start + offset] != old_key:
+                mismatches.append(offset)
+                if len(mismatches) > 1:
+                    break
+        if len(mismatches) != 1:
+            continue
+        mismatch = mismatches[0]
+        if mismatch <= nb[0] or mismatch >= nb[-1]:
+            continue
+        anchors = [okeys[i] for i in range(n) if i != mismatch and okeys[i]]
+        if len(anchors) < 2 or sum(len(anchor) for anchor in anchors) < 8:
+            continue
+        file_key = ckeys[start + mismatch]
+        if nkeys[mismatch] == file_key:
+            candidates.append((start, mismatch, False))
+        elif nkeys[mismatch] == okeys[mismatch]:
+            candidates.append((start, mismatch, True))
+        else:
+            unsafe_found = True
+
+    if not candidates:
+        return _FUZZY_REFUSE if unsafe_found else None
+    if not replace_all and len(candidates) > 1:
+        raise _Ambiguous(len(candidates))
+    if replace_all and unsafe_found:
+        return _FUZZY_REFUSE                    # replace_all must not silently skip unsafe matches
+    chosen = sorted(candidates if replace_all else candidates[:1])
+    if any(chosen[i - 1][0] + n > chosen[i][0] for i in range(1, len(chosen))):
+        return _FUZZY_REFUSE                    # overlapping fuzzy replacements are not independent
+
+    o_ind = indent(next((line for line in olines if line.strip()), ""))
+    out, cursor = [], 0
+    for start, mismatch, preserve in chosen:
+        out.extend(clines[cursor:start])
+        c_ind = next((indent(clines[start + i]) for i in range(n)
+                      if clines[start + i].strip()), "")
+        extra = c_ind[:len(c_ind) - len(o_ind)] if len(c_ind) >= len(o_ind) else ""
+        for offset, line in enumerate(nlines):
+            # Context that already agrees with `new` stays byte-for-byte identical.  This avoids
+            # turning indentation/trailing-space drift in a model's context into unrelated edits.
+            if nkeys[offset] == ckeys[start + offset] or (preserve and offset == mismatch):
+                out.append(clines[start + offset])
+                continue
+            rendered = extra + line if line.strip() else line
+            if clines[start + offset].endswith("\n"):
+                rendered += "\n"
+            out.append(rendered)
+        cursor = start + n
+    out.extend(clines[cursor:])
+    updated = "".join(out)
+    return (_FUZZY_REFUSE if updated == content
+            else (updated, len(chosen), "corroborated line drift"))
 
 
 _BLOCKANCHOR_RATIO = 0.5       # interior LINE-similarity floor for the block-anchor tier
@@ -627,11 +725,20 @@ def _blockanchor(content: str, old: str, new: str, replace_all: bool):
 def _is_elision(line: str) -> bool:
     """A lazy `...` / `# ... existing code ...` / `// ...` placeholder line."""
     core = line.strip().lstrip("#").lstrip("/").lstrip("*").strip()
-    return core.startswith("...")
+    if core == "...":
+        return True
+    # Require whitespace plus placeholder language after the dots.  JavaScript/TypeScript spread
+    # expressions such as `...numbers,` and `...Array(2)` are source code, not omitted content.
+    if not re.match(r"^\.\.\.\s+", core):
+        return False
+    words = set(re.findall(r"[a-z]+", core[3:].lower()))
+    return bool(words & {"existing", "unchanged", "omitted", "remaining"}) or {
+        "rest", "code"
+    }.issubset(words)
 
 
 def _elision(content: str, old: str, new: str, replace_all: bool):
-    """Tier 6: the model wrote a lazy SEARCH with a single `...` line eliding the middle.
+    """Tier 7: the model wrote a lazy SEARCH with a single `...` line eliding the middle.
     Anchor on the head + tail segments; replace the region they bound with `new` ONLY if that
     region is unique. Fails closed on anything ambiguous — an elided segment is never fuzzed."""
     olines = old.split("\n")
@@ -649,8 +756,6 @@ def _elision(content: str, old: str, new: str, replace_all: bool):
     tail = [key(l) for l in olines[m + 1:] if l.strip()]
     if not head or not tail:
         return None
-    if any(len(k) < 3 for k in (head[0], head[-1], tail[0], tail[-1])):
-        return None                                  # weak anchors would bind anywhere
     clines = content.splitlines(keepends=True)
     ckeys = [key(l) for l in clines]
 
@@ -660,6 +765,64 @@ def _elision(content: str, old: str, new: str, replace_all: bool):
     hstarts, tstarts = occs(head), occs(tail)
     if not hstarts or not tstarts:
         return None
+    nlines = new.split("\n")
+    nnb = [i for i, l in enumerate(nlines) if l.strip()]
+    if not nnb:
+        return None
+    ncore = nlines[nnb[0]:nnb[-1] + 1]
+
+    # The full replacement often contains the context hidden behind the elision.  When it differs
+    # from exactly one bounded candidate line, that body is stronger evidence than the exposed
+    # anchors alone—even if an anchor is a common `}`.  Apply only that one changed line and retain
+    # every corroborating file line byte-for-byte.  Multiple corroborated regions remain ambiguous.
+    corroborated: list[tuple[int, int, int]] = []  # start, end, changed-line offset
+    if 3 <= len(ncore) <= _MAX_CORROBORATED_EDIT_LINES:
+        nkeys = [key(line) for line in ncore]
+        span = len(ncore)
+        for hs in hstarts:
+            ts = hs + span - len(tail)
+            if (ts < hs + len(head) or ts < 0 or ts + len(tail) > len(ckeys)
+                    or ckeys[ts:ts + len(tail)] != tail):
+                continue
+            mismatches = []
+            for offset, new_key in enumerate(nkeys):
+                if ckeys[hs + offset] != new_key:
+                    mismatches.append(offset)
+                    if len(mismatches) > 1:
+                        break
+            if len(mismatches) == 1:
+                corroborated.append((hs, hs + span, mismatches[0]))
+    if corroborated:
+        if not replace_all and len(corroborated) > 1:
+            raise _Ambiguous(len(corroborated))
+        chosen = sorted(corroborated if replace_all else corroborated[:1])
+        if any(chosen[i - 1][1] > chosen[i][0] for i in range(1, len(chosen))):
+            return None                              # overlapping fuzzy regions are not independent
+
+        def indent(s: str) -> str:
+            return s[:len(s) - len(s.lstrip())]
+
+        o_base = indent(next((l for l in olines[:m] if l.strip()), ""))
+        changes: dict[int, str] = {}
+        for start, _end, changed in chosen:
+            target = start + changed
+            c_base = next((indent(clines[start + i]) for i in range(len(ncore))
+                           if clines[start + i].strip()), "")
+            extra = c_base[:len(c_base) - len(o_base)] if len(c_base) >= len(o_base) else ""
+            rendered = extra + ncore[changed] if ncore[changed].strip() else ncore[changed]
+            if clines[target].endswith("\n"):
+                rendered += "\n"
+            previous = changes.get(target)
+            if previous is not None:
+                return None                         # two interpretations target the same source line
+            changes[target] = rendered
+        out = list(clines)
+        for target, rendered in changes.items():
+            out[target] = rendered
+        return "".join(out), len(chosen), "corroborated elision"
+
+    if any(len(k) < 3 for k in (head[0], head[-1], tail[0], tail[-1])):
+        return None                                  # weak anchors need full-body corroboration
     if replace_all:                                  # every head with a single tail after it
         regions = []
         for hs in hstarts:
@@ -682,11 +845,6 @@ def _elision(content: str, old: str, new: str, replace_all: bool):
     def indent(s: str) -> str:
         return s[:len(s) - len(s.lstrip())]
 
-    nlines = new.split("\n")
-    nnb = [i for i, l in enumerate(nlines) if l.strip()]
-    if not nnb:
-        return None
-    ncore = nlines[nnb[0]:nnb[-1] + 1]
     o_base = indent(next((l for l in olines[:m] if l.strip()), ""))
     out, k, si = [], 0, 0
     while k < len(clines):

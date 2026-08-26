@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""B1 Layer 1 — the edit-primitive micro-benchmark (no model, <1s).
+"""B1 Layer 1 — the deterministic edit-primitive micro-benchmark (no model).
 
 Runs a frozen corpus through dgc's `_apply_edit` and scores per perturbation:
   ok    — behaved correctly (applied→expected, or safely refused an ambiguous/miss)
@@ -34,7 +34,7 @@ def verdict(expect, out):
         return {"apply_success": "ok", "clean_miss": "miss",
                 "ambiguous": "miss", "wrong_apply": "WRONG"}[out]
     # expect in (ambiguous, miss): applying is the danger; refusing is safe
-    return "WRONG" if out == "apply_success" else "ok"
+    return "WRONG" if out in {"apply_success", "wrong_apply"} else "ok"
 
 
 def main():
@@ -58,7 +58,7 @@ def main():
     order = ["none", "reindent", "trailing_ws", "confusable", "interior_line_changed",
              "elide", "drop_leading_blank", "duplicate", "garble"]
     print(f"\n== edit-primitive micro-benchmark ({len(cases)} cases) ==")
-    print(f"{'perturbation':22} {'n':>4} {'ok':>5} {'miss':>5} {'WRONG':>6}   ok%")
+    print(f"{'perturbation':22} {'n':>4} {'ok':>5} {'miss':>5} {'WRONG':>6}      ok%")
     tot = {"n": 0, "ok": 0, "miss": 0, "WRONG": 0}
     for k in order + [k for k in byp if k not in order]:
         p = byp.get(k)
@@ -66,8 +66,10 @@ def main():
             continue
         for f in tot:
             tot[f] += p[f]
-        print(f"{k:22} {p['n']:>4} {p['ok']:>5} {p['miss']:>5} {p['WRONG']:>6}   {100*p['ok']/p['n']:4.0f}%")
-    print(f"{'TOTAL':22} {tot['n']:>4} {tot['ok']:>5} {tot['miss']:>5} {tot['WRONG']:>6}   {100*tot['ok']/tot['n']:4.0f}%")
+        print(f"{k:22} {p['n']:>4} {p['ok']:>5} {p['miss']:>5} {p['WRONG']:>6}   "
+              f"{100*p['ok']/p['n']:6.2f}%")
+    print(f"{'TOTAL':22} {tot['n']:>4} {tot['ok']:>5} {tot['miss']:>5} {tot['WRONG']:>6}   "
+          f"{100*tot['ok']/tot['n']:6.2f}%")
     print("\ntier that won each apply:", dict(sorted(tiers.items(), key=lambda x: -x[1])))
     print("WRONG (must be 0):", tot["WRONG"])
     for wid, exp, out in wrong_ids[:15]:
