@@ -1087,6 +1087,100 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "mcp_tools"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "servers": {
+              "type": "array"
+            },
+            "tools": {
+              "type": "array"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "servers",
+            "tools",
+            "total",
+            "offset",
+            "next_offset"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mcp_call_complete"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "denied",
+                "cancelled",
+                "error"
+              ]
+            },
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "call_id",
+            "name",
+            "status",
+            "output"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "queued"
             },
             "seq": {
@@ -1608,6 +1702,55 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list_mcp_tools"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "limit": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "call_mcp_tool"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "arguments"
           ],
           "additionalProperties": false
         },

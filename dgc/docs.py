@@ -195,6 +195,10 @@ response is disclosed. Unsupported modes are not advertised and fail closed.
 
 Servers are stored in your config under `mcp_servers`, so they reconnect on the
 next launch.
+
+Headless controllers can enumerate them with the typed `list_mcp_tools` command and invoke one
+exact returned route with `call_mcp_tool`. Calls still pass through permission requests, lifecycle
+hooks, the workspace lease, cancellation, progress/input consent, redaction, and output bounds.
 """.strip()),
 
     ("Skills", "reusable instruction packages", """

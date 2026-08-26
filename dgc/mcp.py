@@ -1637,6 +1637,38 @@ class MCPManager:
                                 on_progress=on_progress, on_log=on_log,
                                 input_handler=input_handler)
 
+    def has_route(self, full_name: str) -> bool:
+        """Check one exposed route without broadening it or refreshing the catalog."""
+        with self._catalog_state_lock:
+            return str(full_name) in self._routes
+
+    def status(self) -> list[dict]:
+        """Return bounded structured connection state for non-interactive frontends."""
+        rows = []
+        for name, server in sorted(list(self.servers.items()), key=lambda item: item[0]):
+            live = server.proc is not None and server.proc.poll() is None
+            row = {
+                "name": str(name)[:128],
+                "state": "connected" if live else "disconnected",
+                "tool_count": len(server.tools),
+                "protocol_version": str(server.protocol_version or "")[:64],
+                "protocol_era": str(server.protocol_era or "")[:32],
+                "catalog": ("subscribed" if server._subscription_live()
+                            else str(server.tools_cache_scope or "cached"))[:32],
+                "dropped_env": [str(value)[:128] for value in server._env_dropped[:64]],
+            }
+            if not live:
+                row["error"] = str(
+                    server.error or server._diagnostic_tail() or "process exited")[:500]
+            rows.append(row)
+        connected = set(self.servers)
+        for name, error in sorted(list(self.failures.items()), key=lambda item: item[0]):
+            if name not in connected:
+                rows.append({"name": str(name)[:128], "state": "failed", "tool_count": 0,
+                             "protocol_version": "", "protocol_era": "", "catalog": "",
+                             "dropped_env": [], "error": str(error)[:500]})
+        return rows
+
     def summary(self) -> str:
         if not self.servers and not self.failures:
             return "no MCP servers connected"

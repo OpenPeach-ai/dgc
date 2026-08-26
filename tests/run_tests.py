@@ -1793,8 +1793,20 @@ def unit_tests(tmp: Path):
                               "action": "drop", "confirm": True}) is None
           and _command_error({"type": "mcp_input_response", "id": "m1",
                               "action": "accept", "content": {"name": "Ada"}}) is None
+          and _command_error({"type": "list_mcp_tools", "request_id": "catalog-1",
+                              "offset": 0, "limit": 20}) is None
+          and _command_error({"type": "call_mcp_tool", "request_id": "mcp-1",
+                              "call_id": "call-1", "name": "mcp__fixture__echo",
+                              "arguments": {"text": "hello"}}) is None
           and _event_error({"type": "mcp_input_request", "seq": 1, "id": "m1",
                             "server": "fixture", "kind": "elicitation", "payload": {}}) is None
+          and _event_error({"type": "mcp_tools", "seq": 2, "request_id": "catalog-1",
+                            "servers": [], "tools": [], "total": 0, "offset": 0,
+                            "next_offset": None}) is None
+          and _event_error({"type": "mcp_call_complete", "seq": 3,
+                            "request_id": "mcp-1", "call_id": "call-1",
+                            "name": "mcp__fixture__echo", "status": "completed",
+                            "output": "hello"}) is None
           and _event_error({"type": "retained_tasks", "seq": 2, "items": [], "errors": []}) is None
           and "prompt" in _COMMAND_FIELDS)
 
@@ -1939,6 +1951,105 @@ def unit_tests(tmp: Path):
     class _Capture:
         def __init__(self): self.events = []
         def emit(self, typ, **fields): self.events.append({"type": typ, **fields})
+
+    class _HeadlessMCPManager:
+        def tool_schemas(self):
+            return [{"type": "function", "function": {
+                "name": "mcp__fixture__echo", "description": "Echo one value",
+                "parameters": {"type": "object", "required": ["text"], "properties": {
+                    "text": {"type": "string", "description": "value to echo"},
+                    "large": {"type": "string", "enum": ["x" * 2000] * 20},
+                }}}}]
+        def status(self):
+            return [{"name": "fixture", "state": "connected", "tool_count": 1}]
+        def has_route(self, name): return name == "mcp__fixture__echo"
+    class _HeadlessMCPAgent:
+        def __init__(self, ui):
+            self.ui = ui; self.mcp = _HeadlessMCPManager(); self.cancelled = _th.Event()
+            self.started = _th.Event(); self.calls = []
+        def execute_mcp_tool(self, name, arguments, call_id):
+            self.started.set(); self.calls.append((name, arguments, call_id))
+            if self.ui.approve(name, arguments, call_id) == "no":
+                return "The user DENIED this action."
+            self.ui.tool_call(name, arguments, call_id)
+            self.ui.tool_result(name, "headless MCP ok", call_id)
+            return "headless MCP ok"
+    class _HeadlessMCPCapture(_Capture):
+        def __init__(self): super().__init__(); self.done = _th.Event()
+        def emit(self, typ, **fields):
+            super().emit(typ, **fields)
+            if typ in ("mcp_tools", "mcp_call_complete"): self.done.set()
+
+    _direct_cap = _HeadlessMCPCapture(); _direct_pending = PendingRequests()
+    _direct_ui = HeadlessUI(_direct_cap, _direct_pending, approval_timeout_s=1)
+    _direct_agent = _HeadlessMCPAgent(_direct_ui)
+    _direct_backend = object.__new__(Backend)
+    _direct_backend.em = _direct_cap; _direct_backend.pending = _direct_pending
+    _direct_backend.ui = _direct_ui; _direct_backend.agent = _direct_agent
+    _direct_backend._worker = None; _direct_backend._mcp_worker = None
+    _direct_backend._queue = []; _direct_backend._turn_lock = _th.RLock()
+    _direct_backend.dispatch({"type": "call_mcp_tool", "request_id": "unknown-7",
+                              "name": "mcp__fixture__missing", "arguments": {}})
+    check("headless direct MCP calls reject routes outside the connected catalog before approval",
+          _direct_cap.events[-1].get("type") == "mcp_call_complete"
+          and _direct_cap.events[-1].get("status") == "error"
+          and _direct_cap.events[-1].get("request_id") == "unknown-7"
+          and not any(event.get("type") == "permission_request"
+                      for event in _direct_cap.events))
+    _direct_cap.done.clear()
+    _direct_backend.dispatch({"type": "list_mcp_tools", "request_id": "catalog-7",
+                              "offset": 0, "limit": 10})
+    _direct_cap.done.wait(2)
+    _listed_worker = _direct_backend._mcp_worker
+    if isinstance(_listed_worker, _th.Thread): _listed_worker.join(1)
+    _catalog_event = next((event for event in _direct_cap.events
+                           if event["type"] == "mcp_tools"), {})
+    check("headless MCP catalog listing is correlated, structured, and schema-bounded",
+          _catalog_event.get("request_id") == "catalog-7"
+          and _catalog_event.get("servers", [{}])[0].get("state") == "connected"
+          and _catalog_event.get("tools", [{}])[0].get("name") == "mcp__fixture__echo"
+          and _catalog_event.get("tools", [{}])[0].get("parameters", {}).get(
+              "property_names") == ["large", "text"]
+          and _catalog_event.get("next_offset") is None)
+
+    _direct_cap.done.clear(); _direct_agent.started.clear()
+    _direct_backend.dispatch({"type": "call_mcp_tool", "request_id": "invoke-7",
+                              "call_id": "fixture-call", "name": "mcp__fixture__echo",
+                              "arguments": {"text": "hello"}})
+    _direct_agent.started.wait(1)
+    _direct_backend.dispatch({"type": "prompt", "text": "must not overlap"})
+    _permission_event = next((event for event in _direct_cap.events
+                              if event["type"] == "permission_request"), {})
+    _direct_backend.dispatch({"type": "permission_response", "id": _permission_event.get("id"),
+                              "decision": "once"})
+    _direct_cap.done.wait(2)
+    _called_worker = _direct_backend._mcp_worker
+    if isinstance(_called_worker, _th.Thread): _called_worker.join(1)
+    _complete_event = next((event for event in reversed(_direct_cap.events)
+                            if event["type"] == "mcp_call_complete"), {})
+    check("headless exact MCP invocation keeps approval/cancel input responsive and serializes turns",
+          _direct_agent.calls == [("mcp__fixture__echo", {"text": "hello"}, "fixture-call")]
+          and any(event.get("type") == "command_rejected"
+                  and event.get("reason") == "turn_in_progress"
+                  for event in _direct_cap.events)
+          and _complete_event.get("status") == "completed"
+          and _complete_event.get("output") == "headless MCP ok"
+          and [event.get("call_id") for event in _direct_cap.events
+               if event.get("type") in ("tool_call", "tool_result")]
+              == ["fixture-call", "fixture-call"])
+
+    _direct_cap.done.clear(); _direct_agent.started.clear()
+    _direct_backend.dispatch({"type": "call_mcp_tool", "request_id": "cancel-7",
+                              "name": "mcp__fixture__echo", "arguments": {}})
+    _direct_agent.started.wait(1)
+    _direct_backend.dispatch({"type": "cancel"})
+    _direct_cap.done.wait(2)
+    _cancelled_complete = next((event for event in reversed(_direct_cap.events)
+                                if event["type"] == "mcp_call_complete"), {})
+    check("headless cancel terminates a pending direct MCP consent lifecycle",
+          _cancelled_complete.get("request_id") == "cancel-7"
+          and _cancelled_complete.get("status") == "cancelled")
+
     _cap = _Capture(); _hb = object.__new__(Backend)
     _hb.em = _cap; _hb._worker = type("Alive", (), {"is_alive": lambda self: True})()
     _hb.dispatch({"type": "set_mode", "mode": "auto"})
@@ -4770,6 +4881,12 @@ def test_mcp_protocol():
               and modern_server.protocol_era == "modern"
               and modern_server.server_info.get("name") == "fixture",
               detail=repr(routes))
+        modern_status = mgr.status()
+        check("MCP manager exposes bounded structured connection state to headless clients",
+              modern_status[0].get("name") == "fixture name"
+              and modern_status[0].get("state") == "connected"
+              and modern_status[0].get("tool_count") == 2
+              and modern_status[0].get("protocol_era") == "modern")
         check("MCP tool routes are provider-safe and collision-free",
               routes == ["mcp__fixture_name__odd_tool", "mcp__fixture_name__odd_tool_2"], repr(routes))
         initial_list_requests = sum(

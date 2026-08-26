@@ -32,6 +32,9 @@ _PLAN_MODES = ("auto", "acceptEdits", "default")
 _MAX_QUEUED_TURNS = 32
 _MAX_QUEUED_TURN_BYTES = 16 * 1024 * 1024
 _MAX_PROMPT_CHARS = 1_000_000
+_MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
+_MAX_MCP_LIST_BYTES = 1024 * 1024
+_MAX_MCP_LIST_LIMIT = 100
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
@@ -47,6 +50,14 @@ def _turn_payload_bytes(text, images, context) -> int:
                               separators=(",", ":")).encode("utf-8"))
     except (TypeError, ValueError, UnicodeError):
         return _MAX_QUEUED_TURN_BYTES + 1
+
+
+def _json_payload_bytes(value) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"),
+                              allow_nan=False).encode("utf-8"))
+    except (RecursionError, TypeError, ValueError, UnicodeError):
+        return _MAX_MCP_ARGUMENT_BYTES + 1
 
 
 def _editor_context_json(value) -> str:
@@ -289,6 +300,7 @@ class Backend:
         self.ui._rule_hook = self._add_rule
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
+        self._mcp_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
@@ -307,7 +319,8 @@ class Backend:
             "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
                           "goal_state": True, "saved_plan": True, "command_registry": True,
-                          "provider_model_discovery": True},
+                          "provider_model_discovery": True, "headless_mcp_catalog": True,
+                          "headless_mcp_call": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             subagent_base_url=self.config.get("subagent_base_url", ""),
@@ -339,7 +352,8 @@ class Backend:
             # empty FIFO.  Do not use Thread.is_alive(): a prompt can otherwise arrive after the
             # worker's final queue check but before the thread has technically exited and become
             # stranded forever.
-            return self._worker is not None
+            return (getattr(self, "_worker", None) is not None
+                    or getattr(self, "_mcp_worker", None) is not None)
 
     def _turn_state_lock(self) -> threading.RLock:
         """Return the queue lock (lazy only for small object.__new__ protocol fixtures)."""
@@ -352,6 +366,8 @@ class Backend:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         lock = self._turn_state_lock()
         with lock:
+            if getattr(self, "_mcp_worker", None) is not None:
+                return "busy", 0
             if getattr(self, "_worker", None) is not None:
                 pending_bytes = sum(_turn_payload_bytes(*item) for item in self._queue)
                 if (len(self._queue) >= _MAX_QUEUED_TURNS
@@ -420,6 +436,97 @@ class Backend:
             with self._turn_state_lock():
                 if self._worker is current:
                     self._worker = None
+
+    def _start_mcp_worker(self, operation) -> bool:
+        """Reserve the foreground operation slot while keeping stdin responses responsive."""
+        lock = self._turn_state_lock()
+        with lock:
+            if (getattr(self, "_worker", None) is not None
+                    or getattr(self, "_mcp_worker", None) is not None):
+                return False
+            self.agent.cancelled.clear()
+
+            def run():
+                current = threading.current_thread()
+                try:
+                    operation()
+                finally:
+                    with self._turn_state_lock():
+                        if self._mcp_worker is current:
+                            self._mcp_worker = None
+
+            worker = threading.Thread(target=run, daemon=True, name="dgc-headless-mcp")
+            self._mcp_worker = worker
+            worker.start()
+            return True
+
+    def _list_mcp_tools(self, request_id: str, offset: int, limit: int) -> None:
+        try:
+            schemas = self.agent.mcp.tool_schemas()
+            rows = []
+            used = 2
+            for schema in schemas[offset:offset + limit]:
+                fn = schema.get("function") if isinstance(schema, dict) else {}
+                fn = fn if isinstance(fn, dict) else {}
+                parameters = Agent._mcp_parameter_summary(fn.get("parameters"))
+                row = {"name": str(fn.get("name") or "")[:512],
+                       "description": str(fn.get("description") or "")[:1000],
+                       "parameters": parameters}
+                encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":"),
+                                     allow_nan=False).encode("utf-8")
+                if len(encoded) > 16 * 1024:
+                    row["parameters"] = {
+                        "type": parameters.get("type", "object"),
+                        "required": parameters.get("required", []),
+                        "property_names": list(parameters.get("properties", {})),
+                    }
+                    encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":"),
+                                         allow_nan=False).encode("utf-8")
+                if rows and used + len(encoded) + 1 > _MAX_MCP_LIST_BYTES:
+                    break
+                rows.append(row)
+                used += len(encoded) + 1
+            statuses = getattr(self.agent.mcp, "status", lambda: [])()
+            next_offset = offset + len(rows)
+            self.em.emit("mcp_tools", request_id=request_id,
+                         servers=list(statuses)[:100], tools=rows, total=len(schemas), offset=offset,
+                         next_offset=(next_offset if next_offset < len(schemas) else None))
+        except Exception as exc:
+            self.em.emit("mcp_tools", request_id=request_id, servers=[], tools=[], total=0,
+                         offset=offset, next_offset=None,
+                         error=f"MCP catalog listing failed ({type(exc).__name__})")
+
+    def _call_mcp_tool(self, request_id: str, call_id: str,
+                       name: str, arguments: dict) -> None:
+        status = "completed"
+        try:
+            output = self.agent.execute_mcp_tool(name, arguments, call_id)
+            low = str(output or "").lstrip().lower()
+            if self.agent.cancelled.is_set():
+                status = "cancelled"
+            elif low.startswith(("permission denied", "the user denied", "blocked by")):
+                status = "denied"
+            elif tool_output_is_error(output):
+                status = "error"
+        except Exception as exc:
+            output = f"error: MCP tool call failed ({type(exc).__name__})"
+            status = "error"
+        self.em.emit("mcp_call_complete", request_id=request_id, call_id=call_id,
+                     name=name, status=status, output=str(output))
+
+    def close(self) -> None:
+        """Cancel foreground work and release pending controller decisions on backend exit."""
+        with self._turn_state_lock():
+            self.agent.cancelled.set()
+            self._queue.clear()
+            workers = [getattr(self, "_worker", None), getattr(self, "_mcp_worker", None)]
+        self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
+        for worker in workers:
+            if isinstance(worker, threading.Thread) and worker is not threading.current_thread():
+                worker.join(timeout=2)
+        manager = getattr(self.agent, "mcp", None)
+        if manager is not None:
+            manager.stop_all()
 
     def _emit_context(self) -> None:
         try:
@@ -538,6 +645,9 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
                              message=("follow-up queue reached its count or aggregate byte limit "
                                       f"({count} queued); cancel it or wait for a turn to finish"))
+            elif state == "busy":
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="an MCP operation is running; cancel or wait for it to finish")
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
@@ -558,6 +668,60 @@ class Backend:
                     self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
                                  message=(f"follow-up queue is full ({_MAX_QUEUED_TURNS}); "
                                           "cancel it or wait for a turn to finish"))
+                elif state == "busy":
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="an MCP operation is running; cancel or wait for it to finish")
+
+        elif t == "list_mcp_tools":
+            request_id = str(cmd.get("request_id") or "")
+            offset = cmd.get("offset", 0)
+            limit = cmd.get("limit", 50)
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
+            if offset < 0 or offset > 1_000_000 or limit < 1 or limit > _MAX_MCP_LIST_LIMIT:
+                self.em.emit("command_rejected", command=t, reason="invalid_page",
+                             message=(f"offset must be 0-1000000 and limit 1-"
+                                      f"{_MAX_MCP_LIST_LIMIT}"))
+                return
+            if not self._start_mcp_worker(
+                    lambda: self._list_mcp_tools(request_id, offset, limit)):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="a prompt or MCP operation is already running; cancel or wait")
+
+        elif t == "call_mcp_tool":
+            request_id = str(cmd.get("request_id") or "")
+            name = str(cmd.get("name") or "")
+            call_id = str(cmd.get("call_id") or f"mcp:{request_id}")
+            arguments = cmd.get("arguments")
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
+            if not call_id or len(call_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_call_id",
+                             message="call_id must contain 1-128 characters")
+                return
+            if not name.startswith("mcp__") or len(name) > 512:
+                self.em.emit("command_rejected", command=t, reason="invalid_mcp_route",
+                             message="name must be an exact bounded mcp__server__tool route")
+                return
+            route_check = getattr(self.agent.mcp, "has_route", None)
+            if not callable(route_check) or not route_check(name):
+                self.em.emit("mcp_call_complete", request_id=request_id, call_id=call_id,
+                             name=name, status="error",
+                             output="error: route is not in the connected MCP tool catalog")
+                return
+            if _json_payload_bytes(arguments) > _MAX_MCP_ARGUMENT_BYTES:
+                self.em.emit("command_rejected", command=t, reason="arguments_too_large",
+                             message=("MCP arguments must be valid JSON within the "
+                                      f"{_MAX_MCP_ARGUMENT_BYTES}-byte limit"))
+                return
+            if not self._start_mcp_worker(
+                    lambda: self._call_mcp_tool(request_id, call_id, name, arguments)):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="a prompt or MCP operation is already running; cancel or wait")
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
@@ -850,4 +1014,4 @@ def serve(config: Config) -> None:
                 sys.stderr.write(traceback.format_exc())    # full trace → the extension's stderr channel
     except (KeyboardInterrupt, BrokenPipeError):
         pass
-    backend.agent.cancelled.set()  # release any in-flight turn on the way out
+    backend.close()

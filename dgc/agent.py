@@ -2866,6 +2866,14 @@ class Agent:
             self.ui.tool_result(call.name, outputs[i], call.id)
         return outputs
 
+    def execute_mcp_tool(self, route: str, arguments: dict, call_id: str) -> str:
+        """Execute one exact MCP route through DGC's complete tool security boundary."""
+        if not isinstance(route, str) or not route.startswith("mcp__"):
+            return "error: an exact mcp__server__tool route is required"
+        if not isinstance(arguments, dict):
+            return "error: MCP tool arguments must be an object"
+        return self._handle_call(ToolCall(id=str(call_id), name=route, arguments=arguments))
+
     def _handle_call(self, call: ToolCall) -> str:
         name, args = call.name, call.arguments
         call_id = call.id

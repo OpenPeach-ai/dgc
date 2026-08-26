@@ -7,8 +7,8 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
-export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
+export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
+export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
 
@@ -885,6 +885,89 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     }
   },
+  "mcp_tools": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "servers": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "tools": {
+      "types": [
+        "array"
+      ],
+      "required": true
+    },
+    "total": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "offset": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "next_offset": {
+      "types": [
+        "null",
+        "integer"
+      ],
+      "required": true
+    },
+    "error": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "mcp_call_complete": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "call_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "status": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "completed",
+        "denied",
+        "cancelled",
+        "error"
+      ]
+    },
+    "output": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    }
+  },
   "queued": {
     "count": {
       "types": [
@@ -1228,6 +1311,52 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    }
+  },
+  "list_mcp_tools": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "offset": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
+    "limit": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    }
+  },
+  "call_mcp_tool": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "call_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "arguments": {
+      "types": [
+        "object"
+      ],
+      "required": true
     }
   },
   "set_think": {

@@ -128,6 +128,15 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(), "ids": _A(), "base_url": _S(),
         "api_mode": _S(False), "error": _S(False),
     },
+    "mcp_tools": {
+        "request_id": _S(), "servers": _A(), "tools": _A(), "total": _I(),
+        "offset": _I(), "next_offset": _f("null", "integer"), "error": _S(False),
+    },
+    "mcp_call_complete": {
+        "request_id": _S(), "call_id": _S(), "name": _S(),
+        "status": _f("string", enum=("completed", "denied", "cancelled", "error")),
+        "output": _S(),
+    },
     "queued": {"count": _I(), "text": _S()},
     "command_rejected": {
         "message": _S(), "command": _S(False), "reason": _S(False), "count": _I(False),
@@ -175,6 +184,12 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "clear_stored_api_key": _B(False),
     },
     "list_models": {"request_id": _S(False)},
+    "list_mcp_tools": {
+        "request_id": _S(), "offset": _I(False), "limit": _I(False),
+    },
+    "call_mcp_tool": {
+        "request_id": _S(), "call_id": _S(False), "name": _S(), "arguments": _O(),
+    },
     "set_think": {"level": _f("string", enum=("off", "low", "medium", "high"))},
     "set_goal": {
         "text": _S(False),
