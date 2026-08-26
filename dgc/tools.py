@@ -898,6 +898,33 @@ def _tool_owner(ctx) -> str:
     return str(getattr(ctx, "tool_owner", "") or f"context-{id(ctx)}")
 
 
+def bash_handle_tools(ctx) -> set[str]:
+    """Return only the process-control schemas currently useful to this exact agent context."""
+    _reap_background()
+    _reap_outputs()
+    owner = _tool_owner(ctx)
+    has_output = False
+    has_running = False
+    with _BG_LOCK:
+        for entry in _BG.values():
+            if entry.get("owner") != owner:
+                continue
+            has_output = True
+            proc = entry.get("proc")
+            try:
+                if proc is not None and proc.poll() is None:
+                    has_running = True
+            except Exception:
+                pass
+    if not has_output:
+        with _OUTPUT_LOCK:
+            has_output = any(entry.get("owner") == owner for entry in _OUTPUTS.values())
+    tools = {"bash_output"} if has_output else set()
+    if has_running:
+        tools.add("bash_kill")
+    return tools
+
+
 def _reap_outputs(now: float | None = None) -> None:
     cutoff = (time.time() if now is None else now) - _OUTPUT_RETAIN_S
     with _OUTPUT_LOCK:

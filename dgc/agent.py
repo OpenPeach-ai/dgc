@@ -286,7 +286,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
 
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
-from .tools import TOOL_SCHEMAS, execute
+from .tools import TOOL_SCHEMAS, bash_handle_tools, execute
 
 THINK_LEVELS = ("off", "low", "medium", "high")
 THINK_INSTRUCTIONS = {
@@ -1000,6 +1000,12 @@ class Agent:
             # execution modes prevents a confused model from reopening the approval gate mid-build.
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "present_plan"]
+            if self.mode == "auto":
+                # Full-auto explicitly promises autonomous execution. A blocking choice prompt in
+                # this mode adds a model/UI round-trip and contradicts that boundary; the user can
+                # switch to default/acceptEdits when they want interactive alternatives.
+                schemas = [tool for tool in schemas
+                           if tool.get("function", {}).get("name") != "propose_options"]
         profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
         if profile != "full":
             active = set(getattr(self, "_active_tool_intents", set()))
@@ -1012,6 +1018,11 @@ class Agent:
             if not self._skill_catalog():
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "skill"]
+            useful_process_tools = bash_handle_tools(self.ctx)
+            schemas = [tool for tool in schemas
+                       if (tool.get("function", {}).get("name") not in
+                           {"bash_output", "bash_kill"}
+                           or tool.get("function", {}).get("name") in useful_process_tools)]
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]

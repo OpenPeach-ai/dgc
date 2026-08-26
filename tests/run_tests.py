@@ -7665,6 +7665,43 @@ def test_steering():
     check("adaptive catalog withholds unrelated optional tools",
           not (_optional & _adaptive_names) and "skill" not in _adaptive_names
           and "update_goal" not in _adaptive_names)
+    check("adaptive catalog withholds process controls when this agent owns no handles",
+          not ({"bash_output", "bash_kill"} & _adaptive_names))
+    import dgc.tools as _stateful_tools
+    import time as _state_time
+    _state_output_id = "out-stateful-schema"
+    with _stateful_tools._OUTPUT_LOCK:
+        _stateful_tools._OUTPUTS[_state_output_id] = {
+            "owner": a.ctx.tool_owner, "created": _state_time.time(), "text": "retained",
+            "command": "fixture", "returncode": 0, "source_chars": 8, "omitted_chars": 0,
+        }
+    try:
+        _retained_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    finally:
+        with _stateful_tools._OUTPUT_LOCK:
+            _stateful_tools._OUTPUTS.pop(_state_output_id, None)
+    check("a retained foreground result activates output inspection but not process killing",
+          "bash_output" in _retained_names and "bash_kill" not in _retained_names)
+
+    _state_bg_id = "bg-stateful-schema"
+    _running_proc = type("RunningProcess", (), {"poll": lambda self: None})()
+    with _stateful_tools._BG_LOCK:
+        _stateful_tools._BG[_state_bg_id] = {
+            "owner": a.ctx.tool_owner, "proc": _running_proc, "finished": None,
+        }
+    try:
+        _background_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    finally:
+        with _stateful_tools._BG_LOCK:
+            _stateful_tools._BG.pop(_state_bg_id, None)
+    check("a running owned background task activates output and kill controls together",
+          {"bash_output", "bash_kill"} <= _background_names)
+    a.config.data["mode"] = "auto"
+    _auto_names = {tool["function"]["name"] for tool in a._tool_schemas()}
+    a.config.data["mode"] = "default"
+    check("full-auto mode removes the blocking options round-trip but interactive modes retain it",
+          "propose_options" not in _auto_names
+          and "propose_options" in {tool["function"]["name"] for tool in a._tool_schemas()})
     _plain_prompt = a.system_prompt()
     check("adaptive prompt omits dormant skill metadata and its unusable schema",
           "# Skills" not in _plain_prompt and "skill" not in _adaptive_names)
@@ -7720,7 +7757,8 @@ def test_steering():
     _full = a._tool_schemas()
     _full_names = {tool["function"]["name"] for tool in _full}
     check("full tool profile restores every stateless execution tool",
-          _optional <= _full_names and "skill" in _full_names and "present_plan" not in _full_names)
+          _optional <= _full_names and {"skill", "bash_output", "bash_kill"} <= _full_names
+          and "present_plan" not in _full_names)
     check("adaptive catalog removes at least a quarter of repeated schema prefill",
           len(json.dumps(_adaptive, separators=(",", ":")))
           < 0.75 * len(json.dumps(_full, separators=(",", ":"))))

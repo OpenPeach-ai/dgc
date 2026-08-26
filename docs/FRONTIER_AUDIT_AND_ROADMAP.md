@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 819 / 819 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 823 / 823 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -562,7 +562,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 819/819 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 823/823 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -621,6 +621,15 @@ reader, names/descriptions/body/arguments are bounded, and URL installs use an a
 write. A focused inspect/test/edit/retest loop also no longer receives the late todo reminder merely
 because shell calls inflated its mutation count; the reminder remains for repeated edits spanning
 multiple files.
+
+Process-control schemas are state-aware as well: `bash_output` appears only while the exact agent
+owns a recent background/retained result, and `bash_kill` only while one of its background processes
+is still running. A successful background launch or oversized foreground result therefore restores
+the required schema on the next model iteration without advertising roughly 900 irrelevant
+characters on every ordinary request. Full-auto mode also withholds the blocking `propose_options`
+round-trip while default, accept-edits, and plan workflows retain it. Together these changes reduce
+the benchmark-like auto catalog from 7,014 to 5,555 serialized characters without removing any
+capability at the point it becomes usable.
 
 ### Milestone 3 — one coherent product across terminal and editor (P1)
 
@@ -825,7 +834,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 819/819 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 823/823 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
