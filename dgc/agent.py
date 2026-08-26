@@ -1242,6 +1242,47 @@ class Agent:
     def _safe_value(self, value):
         return redact_value(value, self._secret_values())
 
+    def _run_lifecycle_hooks(self, event: str, payload: dict, *, timeout=20,
+                             cancelled=None, lease_held: bool = False) -> tuple[bool, str]:
+        """Run one configured hook batch and expose bounded command-free lifecycle status."""
+        raw = self.config.get("hooks") or {}
+        # This is a tool-boundary hot path. Preserve the original zero-cost no-hook behavior rather
+        # than rebuilding a public catalog on every call in ordinary benchmark/coding sessions.
+        if isinstance(raw, dict):
+            if event not in raw or not raw.get(event):
+                return False, ""
+        report = True
+        configured_hooks = raw.get(event) if isinstance(raw, dict) else None
+        configured = min(len(configured_hooks), 32) if isinstance(configured_hooks, list) else 0
+        callback = getattr(self.ui, "hook_activity", None)
+
+        def notify(status: str, *, duration_ms: int = 0, message: str = "") -> None:
+            if not report or not callable(callback):
+                return
+            try:
+                callback(event, status, configured=configured,
+                         duration_ms=max(0, min((1 << 31) - 1, int(duration_ms))),
+                         message=self._safe_text(message)[:500])
+            except Exception:
+                pass
+
+        notify("started")
+        started = time.monotonic()
+        try:
+            blocked, output = run_hooks(
+                event, payload, self.config, self.config.project_root, timeout=timeout,
+                cancelled=cancelled, lease_held=lease_held)
+        except Exception as exc:
+            elapsed = int((time.monotonic() - started) * 1000)
+            notify("error", duration_ms=elapsed,
+                   message=f"hook runtime failed ({type(exc).__name__})")
+            raise
+        elapsed = int((time.monotonic() - started) * 1000)
+        status = ("cancelled" if blocked and cancelled is not None and cancelled.is_set()
+                  else "blocked" if blocked else "completed")
+        notify(status, duration_ms=elapsed, message=output if blocked else "")
+        return blocked, output
+
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
               defer_text: bool = False, request_reason: str = "other"):
         repaired, changed = _repair_tool_transcript(self.messages)
@@ -1692,8 +1733,9 @@ class Agent:
                     self.cancelled.clear()
                 if not self._session_started:   # SessionStart hook fires once per session
                     self._session_started = True
-                    run_hooks("SessionStart", {"project": str(self.config.project_root)},
-                              self.config, self.config.project_root, cancelled=self.cancelled)
+                    self._run_lifecycle_hooks(
+                        "SessionStart", {"project": str(self.config.project_root)},
+                        cancelled=self.cancelled)
             with self._steer_lock:
                 self.steer_queue.clear()        # drop stale interjections from a prior turn
                 self._accepting_steer = True
@@ -1724,8 +1766,8 @@ class Agent:
                                              or "could not persist this session")
                     self.ui.error(self._last_turn_error)
                 if self.depth == 0:             # Stop lifecycle hook (turn finished)
-                    run_hooks("Stop", {"prompt": safe_user_text},
-                              self.config, self.config.project_root, cancelled=self.cancelled)
+                    self._run_lifecycle_hooks(
+                        "Stop", {"prompt": safe_user_text}, cancelled=self.cancelled)
             if completed is False and not self._last_turn_error:
                 self._last_turn_error = (self._last_persist_error
                                          or "the turn stopped before it completed")
@@ -2095,9 +2137,8 @@ class Agent:
     def _run_turn(self, user_text: str) -> bool:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
-            blocked, hout = run_hooks("UserPromptSubmit", {"prompt": user_text},
-                                      self.config, self.config.project_root,
-                                      cancelled=self.cancelled)
+            blocked, hout = self._run_lifecycle_hooks(
+                "UserPromptSubmit", {"prompt": user_text}, cancelled=self.cancelled)
             if blocked:
                 return self._fail_turn(f"prompt blocked by a UserPromptSubmit hook: {hout}")
             if not self.checkpoints.open(
@@ -3123,10 +3164,9 @@ class Agent:
                 if path_error:
                     out = path_error
                 else:
-                    blocked, hout = run_hooks("PreToolUse", {"tool": name, "args": args},
-                                              self.config, self.config.project_root,
-                                              cancelled=self.cancelled,
-                                              lease_held=lease is not None)
+                    blocked, hout = self._run_lifecycle_hooks(
+                        "PreToolUse", {"tool": name, "args": args},
+                        cancelled=self.cancelled, lease_held=lease is not None)
                     if blocked:
                         self.ui.tool_denied(name, display_args, "PreToolUse hook", call_id)
                         return (f"BLOCKED by a PreToolUse hook: {hout or '(no output)'}. "
@@ -3188,8 +3228,9 @@ class Agent:
                 if lease is not None:
                     lease.release()
         out = _clamp(redact_text(out, secrets))  # credential boundary before the central ceiling
-        _, post = run_hooks("PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
-                            self.config, self.config.project_root, cancelled=self.cancelled)
+        _, post = self._run_lifecycle_hooks(
+            "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
+            cancelled=self.cancelled)
         if post:
             out = redact_text(f"{out}\n[hook] {post}", secrets)
         self.ui.tool_result(name, out, call_id)
@@ -3737,8 +3778,8 @@ class Agent:
                 calls = f" [tools: {rendered}]" if rendered else ""
             transcript_lines.append(f"{role}{calls}: {content}")
         # PreCompact lifecycle hook — a user hook can snapshot state before context is summarized.
-        run_hooks("PreCompact", {"messages": len(self.messages)}, self.config,
-                  self.config.project_root, cancelled=self.cancelled)
+        self._run_lifecycle_hooks(
+            "PreCompact", {"messages": len(self.messages)}, cancelled=self.cancelled)
         # Structured + MERGED summary (pi): a fixed schema, and fold the PREVIOUS brief in rather than
         # restart — so facts established before an earlier compaction aren't lost on the next one.
         source_limit = max(4_000, min(60_000, context_size * 2))

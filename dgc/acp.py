@@ -587,6 +587,7 @@ class _ACPUi:
         self._last_tool = None
         self._announced: set[str] = set()
         self._tool_paths: dict[str, str] = {}
+        self._hook_calls: dict[str, list[str]] = {}
         self._rule_hook = None
         self.plan_feedback = ""
 
@@ -664,6 +665,24 @@ class _ACPUi:
         self._update({"sessionUpdate": "plan", "entries": [
             {"content": t.get("content", ""), "priority": "medium",
              "status": _TODO_STATUS.get(t.get("status"), "pending")} for t in todos]})
+
+    def hook_activity(self, event, status, *, configured=0, duration_ms=0, message=""):
+        if status == "started":
+            tcid = f"hook{next(self._tc)}"
+            self._hook_calls.setdefault(str(event), []).append(tcid)
+            self._update({"sessionUpdate": "tool_call", "toolCallId": tcid,
+                          "title": f"Hook: {event}", "kind": "execute",
+                          "status": "in_progress", "rawInput": {"event": event},
+                          "content": [{"type": "content", "content": {
+                              "type": "text", "text": f"{configured} hook(s) configured"}}]})
+            return
+        pending = self._hook_calls.get(str(event), [])
+        tcid = pending.pop() if pending else f"hook{next(self._tc)}"
+        detail = message or f"{duration_ms}ms"
+        self._update({"sessionUpdate": "tool_call_update", "toolCallId": tcid,
+                      "status": "completed" if status == "completed" else "failed",
+                      "content": [{"type": "content", "content": {
+                          "type": "text", "text": self.s._safe_text(detail)[:1000]}}]})
 
     # decisions
     def approve(self, name, args, call_id=None):

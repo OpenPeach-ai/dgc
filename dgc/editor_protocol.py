@@ -138,6 +138,16 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "output": _S(),
     },
     "skill_catalog": {"request_id": _S(), "items": _A(), "total": _I()},
+    "hook_catalog": {
+        "request_id": _S(), "items": _A(), "total": _I(), "invalid": _I(),
+    },
+    "hook_activity": {
+        "event": _f("string", enum=("SessionStart", "UserPromptSubmit", "PreToolUse",
+                                     "PostToolUse", "PreCompact", "Stop")),
+        "status": _f("string", enum=("started", "completed", "blocked",
+                                      "cancelled", "error")),
+        "configured": _I(), "duration_ms": _I(), "message": _NS(False),
+    },
     "handoff_started": {"request_id": _S()},
     "handoff": {
         "request_id": _S(),
@@ -198,6 +208,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(), "call_id": _S(False), "name": _S(), "arguments": _O(),
     },
     "list_skills": {"request_id": _S()},
+    "list_hooks": {"request_id": _S()},
     "generate_handoff": {"request_id": _S(), "save": _B(False)},
     "set_think": {"level": _f("string", enum=("off", "low", "medium", "high"))},
     "set_goal": {

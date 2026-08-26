@@ -1754,6 +1754,14 @@ class TUI:
         th = style_mod.theme()
         self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} {_esc(msg)}[/]"))
 
+    def hook_activity(self, event: str, status: str, *, configured: int = 0,
+                      duration_ms: int = 0, message: str = "") -> None:
+        if status == "started":
+            return
+        suffix = f" · {message}" if message else ""
+        self.info(
+            f"hook {event} {status} · {configured} configured · {duration_ms}ms{suffix}")
+
     def goal_changed(self, goal: str, status: str) -> None:
         self._flash(f"standing goal → {status}: {goal[:70]}")
 
@@ -2972,6 +2980,21 @@ class TUI:
                     self._flash(f"no MCP server named '{sub[1]}'")
             else:
                 self._extensions_modal(tab=1)           # open the tabbed Skills/MCP modal on MCP
+        elif cmd == "hooks":
+            from .hooks import hook_catalog
+            catalog = hook_catalog(cfg)
+            lines = []
+            for item in catalog["items"]:
+                matchers = ", ".join(item["matchers"]) or "—"
+                state = "ready" if item["valid"] else "invalid"
+                lines.append(
+                    f"  [{th.accent}]{item['event']}[/]  [{th.text}]{item['configured']}[/]  "
+                    f"[{th.faint}]{_esc(matchers)} · {state}[/]")
+            if catalog["invalid"]:
+                lines.append(
+                    f"  [{th.err}]{catalog['invalid']} invalid or unsupported entry(s)[/]")
+            self._append(self._rich(
+                f"[bold {th.accent}]lifecycle hooks[/]\n" + "\n".join(lines)))
         elif cmd == "agents":
             sm = cfg.get("subagent_model") or f"(inherit: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit: {cfg.base_url})"

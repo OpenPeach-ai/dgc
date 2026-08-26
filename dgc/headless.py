@@ -25,6 +25,7 @@ from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error,
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
 from .redaction import redact_value, secret_values
+from .hooks import hook_catalog
 from .skills import skill_catalog
 from .tools import TOOL_SCHEMAS
 from .ui import arg_summary, split_diff, tool_output_is_error
@@ -202,6 +203,12 @@ class HeadlessUI:
     def on_todo(self, todos: list) -> None:
         self.em.emit("todos", todos=todos)
 
+    def hook_activity(self, event: str, status: str, *, configured: int = 0,
+                      duration_ms: int = 0, message: str = "") -> None:
+        self.em.emit("hook_activity", event=event, status=status,
+                     configured=max(0, int(configured)),
+                     duration_ms=max(0, int(duration_ms)), message=message or None)
+
     def artifact_ready(self, art) -> None:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
@@ -322,7 +329,8 @@ class Backend:
                           "goal_state": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
-                          "headless_handoff": True},
+                          "headless_handoff": True, "headless_hook_catalog": True,
+                          "hook_activity": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             subagent_base_url=self.config.get("subagent_base_url", ""),
@@ -528,6 +536,10 @@ class Backend:
     def _emit_skill_catalog(self, request_id: str) -> None:
         rows = skill_catalog(self.agent.skills, self.config.project_root)
         self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
+
+    def _emit_hook_catalog(self, request_id: str) -> None:
+        catalog = hook_catalog(self.config)
+        self.em.emit("hook_catalog", request_id=request_id, **catalog)
 
     def _generate_handoff(self, request_id: str, save: bool):
         self.em.emit("handoff_started", request_id=request_id)
@@ -780,6 +792,14 @@ class Backend:
                 return
             self._emit_skill_catalog(request_id)
 
+        elif t == "list_hooks":
+            request_id = str(cmd.get("request_id") or "")
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
+            self._emit_hook_catalog(request_id)
+
         elif t == "generate_handoff":
             request_id = str(cmd.get("request_id") or "")
             if not request_id or len(request_id) > 128:
@@ -901,7 +921,7 @@ class Backend:
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
-            if status == "none" or (not text and status == "active"):
+            if status == "none":
                 ok = self.agent.set_goal("")
             elif text:
                 ok = self.agent.set_goal(

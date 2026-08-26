@@ -91,6 +91,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 "settings", aliases=("config", "prefs", "preferences")),
     CommandSpec("handoff", "generate a complete continuation handoff", _TCE, "handoff",
                 aliases=("handover",)),
+    CommandSpec("hooks", "inspect configured lifecycle hooks", _TCE, "hooks",
+                aliases=("hook",)),
     CommandSpec("mcp", "inspect and manage MCP servers", _TC),
     CommandSpec("agents", "sub-agent configuration", _TC),
     CommandSpec("skills", "installed skills", _TCE, "skills",

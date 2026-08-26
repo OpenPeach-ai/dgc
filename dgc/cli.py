@@ -190,6 +190,16 @@ class UI:
         self.stop_working()
         self.console.print(f"[bold red]✗ {name} denied[/bold red] [{DIM}]{reason}[/]", highlight=False)
 
+    def hook_activity(self, event: str, status: str, *, configured: int = 0,
+                      duration_ms: int = 0, message: str = "") -> None:
+        if status == "started":
+            return
+        detail = f" · {message}" if message else ""
+        self.console.print(
+            f"  · hook {event} {status} · {configured} configured · {duration_ms}ms{detail}",
+            style="red" if status not in ("completed",) else DIM,
+            markup=False, highlight=False)
+
     @staticmethod
     def _arg_summary(name: str, args: dict) -> str:
         for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
@@ -728,6 +738,17 @@ class CLI:
         elif cmd == "mcp":
             self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
             self.console.print(self.agent.mcp.summary())
+        elif cmd == "hooks":
+            from .hooks import hook_catalog
+            catalog = hook_catalog(cfg)
+            table = Table("event", "configured", "matchers", "state")
+            for item in catalog["items"]:
+                table.add_row(item["event"], str(item["configured"]),
+                              Text(", ".join(item["matchers"]) or "—"),
+                              "ready" if item["valid"] else "invalid")
+            self.console.print(table)
+            if catalog["invalid"]:
+                self.ui.error(f"hook configuration has {catalog['invalid']} invalid or unsupported entry(s)")
         elif cmd == "skill":
             args = rest.split(None, 1)
             sk = self.agent.skills.get(args[0]) if args else None

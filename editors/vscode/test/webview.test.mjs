@@ -371,7 +371,7 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   dom.window.close();
 });
 
-test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands without prompting the model", () => {
+test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff commands without prompting the model", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: {
     type: "ready",
@@ -380,6 +380,7 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands
       { name: "view-plan", description: "saved plan", action: "viewPlan", aliases: ["viewplan"] },
       { name: "artifact", description: "previews", action: "artifacts", aliases: ["artifacts"] },
       { name: "skills", description: "installed skills", action: "skills", aliases: ["extensions"] },
+      { name: "hooks", description: "lifecycle hooks", action: "hooks", aliases: ["hook"] },
       { name: "handoff", description: "continuation document", action: "handoff", aliases: ["handover"] },
     ],
     custom_commands: ["review-api"],
@@ -406,10 +407,12 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands
 
   input.value = "/extensions";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  input.value = "/hook";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   input.value = "/handover";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  assert.deepEqual(posted.filter((m) => m.type === "slashText").slice(-2).map((m) => m.text),
-    ["/extensions", "/handover"]);
+  assert.deepEqual(posted.filter((m) => m.type === "slashText").slice(-3).map((m) => m.text),
+    ["/extensions", "/hook", "/handover"]);
 
   doc.getElementById("btn-cmd").click();
   assert.match(doc.getElementById("pop").textContent, /standing objective/);
@@ -422,6 +425,11 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands
   ] } });
   send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
     items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
+  send({ type: "event", event: { type: "hook_catalog", request_id: "hooks-1", total: 1, invalid: 0,
+    items: [{ event: "PreToolUse", configured: 1,
+      matchers: ["<img src=x onerror=hookBad()>"], valid: true, truncated: false }] } });
+  send({ type: "event", event: { type: "hook_activity", event: "PreToolUse", status: "completed",
+    configured: 1, duration_ms: 7, message: "<script>hookBad()</script>" } });
   send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
   send({ type: "event", event: { type: "handoff", request_id: "handoff-1", status: "completed",
     markdown: "# Handoff\n\nContinue with **tests**. <script>bad()</script>", path: "HANDOFF-safe.md" } });
@@ -429,9 +437,11 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
   assert.match(doc.getElementById("log").textContent, /matrix-fixture.*project.*Loaded/s);
+  assert.match(doc.getElementById("log").textContent, /Lifecycle hooks.*PreToolUse.*hookBad/s);
+  assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
   assert.equal(doc.getElementById("log").querySelector("img"), null,
-    "skill and handoff metadata must remain inert text");
+    "skill, hook, and handoff metadata must remain inert text");
   assert.equal(doc.getElementById("log").querySelector("script"), null,
     "handoff markdown must not synthesize executable elements");
   assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");

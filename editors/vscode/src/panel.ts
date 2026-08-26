@@ -546,6 +546,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "skills": this.ensureBackend().send({
         type: "list_skills", request_id: `skills-${Date.now()}-${++this.featureRequest}`,
       }); break;
+      case "hooks": this.ensureBackend().send({
+        type: "list_hooks", request_id: `hooks-${Date.now()}-${++this.featureRequest}`,
+      }); break;
       case "handoff": {
         const accepted = this.ensureBackend().send({
           type: "generate_handoff", request_id: `handoff-${Date.now()}-${++this.featureRequest}`,
@@ -596,7 +599,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       "view-plan": "viewPlan", artifact: "artifacts", status: "status", compact: "compact",
       clear: "clear", new: "new", resume: "resume", rewind: "rewind", connect: "connect",
       subagent: "subagent", tasks: "retainedTasks", settings: "settings", bug: "bug",
-      skills: "skills", handoff: "handoff",
+      skills: "skills", hooks: "hooks", handoff: "handoff",
     };
     if (direct[name]) { this.slash(direct[name]); return; }
     be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error

@@ -1883,12 +1883,18 @@ def unit_tests(tmp: Path):
     _hui.tool_call("bash", {"command": "false"}, "call-7")
     _hui.tool_progress("bash", "halfway", progress=1, total=2, call_id="call-7")
     _hui.tool_result("bash", "exit code: 1\nfailed", "call-7")
+    _hui.hook_activity("PreToolUse", "started", configured=1)
+    _hui.hook_activity("PreToolUse", "completed", configured=1, duration_ms=7)
     _events = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
     check("headless tool lifecycle events preserve call IDs and typed progress",
-          [e.get("call_id") for e in _events] == ["call-7", "call-7", "call-7"]
+          [e.get("call_id") for e in _events[:3]] == ["call-7", "call-7", "call-7"]
           and _events[1].get("type") == "tool_progress"
           and _events[1].get("progress") == 1 and _events[1].get("total") == 2)
-    check("headless marks failed tool results", _events[-1].get("is_error") is True)
+    check("headless marks failed tool results", _events[2].get("is_error") is True)
+    check("headless hook activity is structured and command-free",
+          [event.get("status") for event in _events[3:]] == ["started", "completed"]
+          and _events[-1].get("event") == "PreToolUse"
+          and _events[-1].get("duration_ms") == 7)
     _verdict = _hui.approve("bash", {"command": "echo no"}, "call-8")
     _expiry = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
     _rid = next(e["id"] for e in _expiry if e["type"] == "permission_request")
@@ -2058,7 +2064,8 @@ def unit_tests(tmp: Path):
         "matrix-fixture", "Independent matrix fixture", "fixture", _surface_skill_path)
     class _SurfaceConfig:
         project_root = _surface_root
-        def get(self, key, default=None): return default
+        values = {"hooks": {"SessionStart": [{"command": "printf loaded"}]}}
+        def get(self, key, default=None): return self.values.get(key, default)
     class _SurfaceAgent:
         def __init__(self):
             self.skills = {"matrix-fixture": _surface_skill}
@@ -2080,6 +2087,15 @@ def unit_tests(tmp: Path):
                             "items": [{"name": "matrix-fixture",
                                        "description": "Independent matrix fixture",
                                        "source": "project"}]})
+    _surface_backend.dispatch({"type": "list_hooks", "request_id": "hooks-7"})
+    _hooks_event = _surface_cap.events[-1]
+    check("headless hook catalog is correlated and never exposes configured commands",
+          _hooks_event.get("type") == "hook_catalog"
+          and _hooks_event.get("request_id") == "hooks-7"
+          and _hooks_event.get("total") == 1 and _hooks_event.get("invalid") == 0
+          and next(item for item in _hooks_event.get("items", [])
+                   if item.get("event") == "SessionStart").get("configured") == 1
+          and "printf" not in _json2.dumps(_hooks_event))
     _surface_cap.done.clear()
     _surface_backend.dispatch({"type": "generate_handoff", "request_id": "handoff-7",
                                "save": False})
@@ -3655,9 +3671,11 @@ def unit_tests(tmp: Path):
     _gb.em = _gbcap; _gb._worker = None; _gb.agent = _g4; _gb.config = _g4.config
     _gb.dispatch({"type": "set_goal", "text": "finish typed protocol", "status": "active"})
     _gb.dispatch({"type": "set_goal", "status": "completed"})
+    _gb.dispatch({"type": "set_goal", "status": "active"})
     check("headless typed goal state round-trips without model slash text",
-          _g4.goal == "finish typed protocol" and _g4.goal_status == "completed"
-          and [e["status"] for e in _gbcap.events if e["type"] == "goal_changed"][-1] == "completed")
+          _g4.goal == "finish typed protocol" and _g4.goal_status == "active"
+          and [e["status"] for e in _gbcap.events if e["type"] == "goal_changed"][-2:]
+          == ["completed", "active"])
 
     # --- /handoff: generate_handoff builds a sectioned doc from the whole session (for another agent)
     _h = _Ag(_Cfg(), _AgUI())
@@ -4439,18 +4457,56 @@ def test_hook_runtime():
     import shlex
     import time as _time
     from dgc import sandbox
-    from dgc.hooks import _MAX_OUTPUT_BYTES, run_hooks
+    from dgc.hooks import _MAX_OUTPUT_BYTES, hook_catalog, run_hooks
     from dgc.scheduler import workspace_mutation_lock
 
     root = Path(tempfile.mkdtemp())
 
     class _HookConfig:
         def __init__(self, event, command, *, sandboxed=False, **values):
+            self.project_root = root
             self.values = {"hooks": {event: [{"command": command}]},
                            "sandbox": sandboxed, "sandbox_network": False,
                            "sandbox_env_allow": [], **values}
         def get(self, key, default=None):
             return self.values.get(key, default)
+
+    catalog_secret = "sk-hook-catalog-fixture-123456"
+    catalog_cfg = _HookConfig(
+        "PreToolUse", f"printf {catalog_secret}", api_key=catalog_secret)
+    catalog_cfg.values["hooks"]["PreToolUse"][0]["matcher"] = catalog_secret
+    catalog_cfg.values["hooks"]["UnknownEvent"] = [{"command": "printf ignored"}]
+    catalog = hook_catalog(catalog_cfg)
+    encoded_catalog = json.dumps(catalog)
+    check("hook catalog exposes supported counts and redacted matchers without command text",
+          catalog["total"] == 1 and catalog["invalid"] == 1
+          and next(item for item in catalog["items"]
+                   if item["event"] == "PreToolUse")["matchers"] == ["[REDACTED]"]
+          and catalog_secret not in encoded_catalog and "printf" not in encoded_catalog)
+
+    from dgc.agent import Agent as _HookAgent
+    hook_events = []
+    hook_probe = object.__new__(_HookAgent)
+    hook_probe.config = _HookConfig("SessionStart", "printf observed")
+    hook_probe.cancelled = threading.Event()
+    hook_probe.ui = type("HookUI", (), {
+        "hook_activity": lambda self, event, status, **fields:
+            hook_events.append({"event": event, "status": status, **fields}),
+    })()
+    lifecycle_blocked, lifecycle_output = hook_probe._run_lifecycle_hooks(
+        "SessionStart", {"project": str(root)}, cancelled=hook_probe.cancelled)
+    check("agent hook lifecycle reports bounded start and terminal status without command details",
+          not lifecycle_blocked and lifecycle_output == "observed"
+          and [event["status"] for event in hook_events] == ["started", "completed"]
+          and all(event["event"] == "SessionStart" and event["configured"] == 1
+                  for event in hook_events)
+          and "printf" not in json.dumps(hook_events))
+    hook_probe.config.values["hooks"]["SessionStart"] = []
+    hook_events.clear()
+    empty_blocked, empty_output = hook_probe._run_lifecycle_hooks(
+        "SessionStart", {"project": str(root)}, cancelled=hook_probe.cancelled)
+    check("empty lifecycle hook lists retain the zero-work fast path",
+          not empty_blocked and empty_output == "" and hook_events == [])
 
     output_script = ("import sys;sys.stdin.buffer.read();"
                      "sys.stdout.buffer.write(b'HOOK-HEAD'+b'x'*100000+b'HOOK-TAIL');"

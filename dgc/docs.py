@@ -201,6 +201,24 @@ exact returned route with `call_mcp_tool`. Calls still pass through permission r
 hooks, the workspace lease, cancellation, progress/input consent, redaction, and output bounds.
 """.strip()),
 
+    ("Lifecycle hooks", "run observable commands at agent boundaries", """
+# Lifecycle hooks
+
+Configure hook commands under `hooks` in `~/.dgc/config.json`. DGC calls six lifecycle events:
+`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, and `Stop`.
+
+- **/hooks** — show every supported event, its bounded configured count, redacted exact tool
+  matchers, and invalid configuration state. Shell commands and environment values are never shown.
+- `PreToolUse` and `UserPromptSubmit` can block an action with a non-zero exit. `PostToolUse`
+  output is returned to the model as bounded feedback.
+- Hook batches share the workspace mutation lease, own a process group, have one bounded deadline,
+  drain a bounded redacted head/tail, and honor `/sandbox`.
+- Headless controllers use `{"type":"list_hooks","request_id":"hooks-1"}` and receive
+  `hook_catalog`. Natural execution emits `hook_activity` with `started` and exactly one terminal
+  status; there is deliberately no command that executes a hook outside its lifecycle boundary.
+- ACP represents configured hook runs as ordinary command-free tool-call lifecycle updates.
+""".strip()),
+
     ("Skills", "reusable instruction packages", """
 # Skills
 

@@ -827,7 +827,10 @@ drift, declared-event coverage, invalid enums/fields, concurrent ordering, and s
 are regression-tested. Typed `list_skills` reports the winning project/user/builtin precedence layer
 without absolute paths, and typed `generate_handoff` provides one correlated cancellable lifecycle
 with optional atomic saving. `/skills` and `/handoff` are now genuine editor routes rather than model
-text; their webview output remains escaped and inert.
+text; their webview output remains escaped and inert. The same contract exposes command-free
+`list_hooks` metadata and natural `hook_activity` start/terminal events. `/hooks` never discloses
+configured shell text or environment values, while ACP represents each configured run through its
+standard tool lifecycle.
 
 Implementation note for step 6: the local `test:host` gate launches the already-installed VS Code
 Electron executable with isolated user/extension directories, updates/telemetry/background networking
@@ -1009,7 +1012,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 981/981 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 986/986 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1165,6 +1168,12 @@ The provider-runtime slice is also implemented and contract-tested:
     the checkout lease without following links, and emits its terminal event only after the reusable
     foreground slot is released. The editor advertises and renders both built-ins through typed routes;
     hostile skill metadata and handoff Markdown stay inert.
+19. Lifecycle hooks are now discoverable and observable without creating an out-of-band execution
+    endpoint. `/hooks` and typed `list_hooks` return only the six runtime event names, bounded counts,
+    redacted exact matchers, and invalid-entry counts; configured commands and environment values are
+    never serialized. Natural hook batches emit command-free start and exactly one terminal status to
+    terminal/headless/editor clients, while ACP maps them onto standard tool-call lifecycle updates.
+    Hostile catalog/status metadata remains inert in the webview.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

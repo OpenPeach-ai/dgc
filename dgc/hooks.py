@@ -20,6 +20,7 @@ import signal
 import subprocess
 import threading
 import time
+import unicodedata
 
 
 _MAX_HOOKS = 32
@@ -27,6 +28,74 @@ _MAX_COMMAND_CHARS = 16_384
 _MAX_PAYLOAD_BYTES = 1024 * 1024
 _MAX_OUTPUT_BYTES = 64 * 1024
 _OUTPUT_HALF = _MAX_OUTPUT_BYTES // 2
+HOOK_EVENTS = (
+    "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "Stop",
+)
+_MAX_CATALOG_MATCHERS = 32
+_MAX_MATCHER_CHARS = 128
+
+
+def hook_catalog(config) -> dict:
+    """Return bounded hook metadata without disclosing configured shell commands.
+
+    Hook commands may contain paths, arguments, or inline credentials. The public catalog therefore
+    exposes only the six lifecycle names DGC actually calls, bounded entry counts, and redacted exact
+    tool matchers. Invalid/unknown configuration is counted rather than echoed.
+    """
+    from .redaction import redact_text, secret_values
+
+    raw = config.get("hooks") or {}
+    if not isinstance(raw, dict):
+        return {"items": [
+            {"event": event, "configured": 0, "matchers": [],
+             "valid": False, "truncated": False}
+            for event in HOOK_EVENTS
+        ], "total": 0, "invalid": 1}
+    items = []
+    total = 0
+    invalid = min(1_000_000, sum(1 for key in raw if key not in HOOK_EVENTS))
+    secrets = secret_values(config)
+    for event in HOOK_EVENTS:
+        configured = raw.get(event, []) or []
+        if not isinstance(configured, list):
+            items.append({"event": event, "configured": 0, "matchers": [],
+                          "valid": False, "truncated": False})
+            invalid = min(1_000_000, invalid + 1)
+            continue
+        count = min(len(configured), _MAX_HOOKS)
+        total += count
+        matchers = []
+        valid = True
+        for hook in configured[:_MAX_HOOKS]:
+            if not isinstance(hook, dict):
+                valid = False
+                invalid = min(1_000_000, invalid + 1)
+                continue
+            command = hook.get("command")
+            if (not isinstance(command, str) or not command.strip()
+                    or len(command) > _MAX_COMMAND_CHARS or "\x00" in command):
+                valid = False
+                invalid = min(1_000_000, invalid + 1)
+            matcher = hook.get("matcher")
+            if matcher is None:
+                matcher = "*"
+            if not isinstance(matcher, str) or "\x00" in matcher:
+                valid = False
+                invalid = min(1_000_000, invalid + 1)
+                continue
+            safe = "".join(
+                " " if unicodedata.category(ch) in ("Cc", "Cf") else ch
+                for ch in redact_text(matcher, secrets))
+            safe = " ".join(safe.split())[:_MAX_MATCHER_CHARS]
+            if safe and safe not in matchers and len(matchers) < _MAX_CATALOG_MATCHERS:
+                matchers.append(safe)
+        truncated = len(configured) > _MAX_HOOKS
+        if truncated:
+            invalid = min(1_000_000, invalid + len(configured) - _MAX_HOOKS)
+        items.append({"event": event, "configured": count, "matchers": matchers,
+                      "valid": valid and not truncated, "truncated": truncated})
+    return {"items": items, "total": min(total, len(HOOK_EVENTS) * _MAX_HOOKS),
+            "invalid": min(invalid, 1_000_000)}
 
 
 class _BoundedOutput:

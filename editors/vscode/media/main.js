@@ -488,6 +488,24 @@
         decisionCard(`<div class="q"><span class="codicon codicon-library"></span> Installed skills · ${items.length}</div><pre>${esc(rows)}</pre>`, "Installed skills");
         break;
       }
+      case "hook_catalog": {
+        const items = Array.isArray(ev.items) ? ev.items : [];
+        const rows = items.map((hook) => {
+          const matchers = Array.isArray(hook.matchers) && hook.matchers.length
+            ? hook.matchers.join(", ") : "—";
+          return `${String(hook.event || "")}  ${Number(hook.configured || 0)}  ${matchers}  ${hook.valid ? "ready" : "invalid"}`;
+        }).join("\n");
+        const warning = Number(ev.invalid || 0)
+          ? `<div class="err">${Number(ev.invalid)} invalid or unsupported hook entries</div>` : "";
+        decisionCard(`<div class="q"><span class="codicon codicon-run-all"></span> Lifecycle hooks · ${Number(ev.total || 0)}</div><pre>${esc(rows)}</pre>${warning}`, "Lifecycle hooks");
+        break;
+      }
+      case "hook_activity":
+        if (ev.status !== "started") {
+          sysLine(`Hook ${ev.event} ${ev.status} · ${ev.configured} configured · ${ev.duration_ms}ms${ev.message ? ` · ${ev.message}` : ""}`,
+            ev.status !== "completed");
+        }
+        break;
       case "handoff": {
         ensureTurn();
         const markdown = String(ev.markdown || "");

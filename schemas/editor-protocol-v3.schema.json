@@ -1210,6 +1210,97 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "hook_catalog"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "invalid": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "items",
+            "total",
+            "invalid"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "hook_activity"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "event": {
+              "type": "string",
+              "enum": [
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "PreCompact",
+                "Stop"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "started",
+                "completed",
+                "blocked",
+                "cancelled",
+                "error"
+              ]
+            },
+            "configured": {
+              "type": "integer"
+            },
+            "duration_ms": {
+              "type": "integer"
+            },
+            "message": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "event",
+            "status",
+            "configured",
+            "duration_ms"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "handoff_started"
             },
             "seq": {
@@ -1863,6 +1954,22 @@
           "properties": {
             "type": {
               "const": "list_skills"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list_hooks"
             },
             "request_id": {
               "type": "string"
