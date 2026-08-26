@@ -20,7 +20,7 @@ dgc/
   acp.py           stable ACP v1 multi-session adapter
   cli.py           REPL, slash commands, banner, streaming render, approvals, `dgc setup` / `dgc doctor`
   memory.py        DGC.md load/add
-  skills.py        SKILL.md discovery/parsing
+  skills.py        exact bounded SKILL.md discovery/parsing + adaptive prompt matching
 tests/run_tests.py security, protocol, unit and mock-server end-to-end checks
 bench/             reproducible same-model harness comparison and edit-quality tooling
 editors/vscode/    VS Code/Cursor client, webview and tests

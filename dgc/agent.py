@@ -26,7 +26,7 @@ from .agents import discover_agents
 from .mcp import MCPInputError, MCPManager
 from .redaction import (StreamingRedactor, contains_secret, redact_messages,
                         redact_provider_value, redact_text, redact_value, secret_values)
-from .skills import discover_skills
+from .skills import discover_skills, matching_skill_names
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
@@ -971,6 +971,22 @@ class Agent:
         self._active_tool_intents = detected if replace else before | detected
         return self._active_tool_intents != before
 
+    def _activate_skill_intents(self, text: str, *, replace: bool = False) -> bool:
+        """Expose only skills that the user/goal explicitly names or narrowly matches."""
+        detected = matching_skill_names(self.skills, text)
+        if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
+            detected |= matching_skill_names(self.skills, self.goal)
+        before = set(self._active_skill_names)
+        self._active_skill_names = detected if replace else before | detected
+        return self._active_skill_names != before
+
+    def _skill_catalog(self):
+        profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
+        if profile == "full":
+            return list(self.skills.values())
+        active = set(getattr(self, "_active_skill_names", set()))
+        return [skill for name, skill in self.skills.items() if name in active]
+
     def _tool_schemas(self) -> list[dict]:
         """Built-in/MCP tools filtered by mode, state, and explicit adaptive-tool intent."""
         schemas = TOOL_SCHEMAS + self.mcp.tool_schemas()
@@ -993,6 +1009,9 @@ class Agent:
                            or _OPTIONAL_TOOL_INTENT[tool["function"]["name"]] in active
                            or (tool["function"]["name"] == "artifact" and self.mode == "plan"
                                and self.config.get("artifact_in_plan", False)))]
+            if not self._skill_catalog():
+                schemas = [tool for tool in schemas
+                           if tool.get("function", {}).get("name") != "skill"]
         if not (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"):
             schemas = [tool for tool in schemas
                        if tool.get("function", {}).get("name") != "update_goal"]
@@ -1074,6 +1093,7 @@ class Agent:
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
         self._active_tool_intents: set[str] = set()
+        self._active_skill_names: set[str] = set()
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.todos.clear()
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
@@ -1256,10 +1276,11 @@ class Agent:
             if user_mem:
                 parts += ["## User memory (~/.dgc/DGC.md)", user_mem]
 
-        if self.skills:
+        skill_catalog = self._skill_catalog()
+        if skill_catalog:
             parts += ["", "# Skills",
                       "Reusable instruction packages. Invoke with the skill tool when one matches the task:"]
-            parts += [f"- {s.name}: {s.description}" for s in self.skills.values()]
+            parts += [f"- {s.name}: {s.description}" for s in skill_catalog]
 
         if not self.client.tools_supported:
             parts += ["", self._text_protocol_section()]
@@ -1305,7 +1326,9 @@ class Agent:
         joined = "\n".join(m for m in msgs if m and m.strip())
         if not joined:
             return False
-        if self._activate_tool_intents(joined):
+        tools_changed = self._activate_tool_intents(joined)
+        skills_changed = self._activate_skill_intents(joined)
+        if tools_changed or skills_changed:
             self._refresh_system()
         self.messages.append({"role": "user", "content":
             "<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
@@ -1397,12 +1420,14 @@ class Agent:
             self.steer_queue.clear()            # drop stale interjections from a prior turn
             safe_user_text = self._safe_text(user_text)
             self._activate_tool_intents(safe_user_text, replace=True)
+            self._activate_skill_intents(safe_user_text, replace=True)
             self._refresh_system()
             completed = None
             try:
                 completed = self._run_turn(safe_user_text)
             finally:
                 self._active_tool_intents.clear()
+                self._active_skill_names.clear()
                 repaired, changed = _repair_tool_transcript(self.messages)
                 if changed:
                     self.messages = repaired
@@ -1737,8 +1762,9 @@ class Agent:
         verify_nudged = False
         summary_only = False        # budgeted green run → next response must close, not tool
         continues = 0               # length-truncation auto-continues used this turn
-        mutating_total = 0          # edits/bash this turn — drives the TodoGate nudge
+        mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
+        edited_targets: set[str] = set()  # distinct files make a late planning nudge truthful
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
         did_tools = False           # did the model actually call any tools this turn?
@@ -2095,6 +2121,13 @@ class Agent:
                     # meaningless code churn must still trip the hard no-progress guard.
                     fail_streak, fail_nudged = 0, False
                     _forget_mutation_sensitive_signatures(sig_count)
+                if landed_file_edit:
+                    target = str(call.arguments.get("path") or call.arguments.get("file_path") or "")
+                    if target:
+                        candidate = Path(target)
+                        if not candidate.is_absolute():
+                            candidate = self.config.project_root / candidate
+                        edited_targets.add(str(candidate.absolute()))
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -2174,9 +2207,11 @@ class Agent:
                     reminders.append("Verification passed after the code changes. Do not call any more "
                                      "tools, inspect more files, or refactor. Respond now with only a brief "
                                      "final summary of what changed and the verification result.")
-            if mutating_total >= 3 and not self.ctx.todos and not todo_nudged:
+            if (edited_total >= 3 and len(edited_targets) >= 2
+                    and not self.ctx.todos and not todo_nudged):
                 todo_nudged = True
-                reminders.append("You've made several edits without a plan. For a multi-step task, "
+                reminders.append("You've landed several edits across multiple files without a plan. "
+                                 "For this multi-step task, "
                                  "use the `todo` tool to list the steps and mark each done as you go.")
             pending = [t for t in self.ctx.todos if t.get("status") != "done"]
             if pending and not any(c.name == "todo" for c in result.tool_calls):
@@ -2446,6 +2481,11 @@ class Agent:
                                             input_handler=self._handle_mcp_input)
                     else:
                         out = execute(name, exec_args, self.ctx)
+                    if name == "add_skill" and not str(out).lstrip().lower().startswith("error"):
+                        # Installation refreshes ctx.skills in place. Make the new package visible on
+                        # the very next model iteration without bloating unrelated turns.
+                        self._active_skill_names.update(self.skills)
+                        self._refresh_system()
             finally:
                 if lease is not None:
                     lease.release()

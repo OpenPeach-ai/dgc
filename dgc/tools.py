@@ -2310,7 +2310,8 @@ def skill_tool(args: dict, ctx) -> str:
 
 def add_skill(args: dict, ctx) -> str:
     from .config import USER_SKILLS
-    from .skills import discover_skills
+    from .skills import (MAX_SKILL_BODY_CHARS, MAX_SKILL_FILE_BYTES, discover_skills,
+                         normalize_skill_name, parse_skill_text)
     url = str(args.get("url", "")).strip()
     if not url:
         return "error: a url is required"
@@ -2318,24 +2319,40 @@ def add_skill(args: dict, ctx) -> str:
     if "github.com" in raw and "/blob/" in raw:
         raw = raw.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
     try:
-        raw, content = _fetch_public_text(raw, max_bytes=512_000)
+        raw, content = _fetch_public_text(raw, max_bytes=MAX_SKILL_FILE_BYTES)
     except (requests.RequestException, ValueError) as e:
         return f"error fetching the skill: {e}"
     if re.match(r"\s*(<!doctype|<html)", content, re.I):
         return (f"error: {raw} returned an HTML page, not a SKILL.md. Point me at the RAW file "
                 "(e.g. a raw.githubusercontent.com URL or a link ending in /SKILL.md).")
-    name = str(args.get("name", "")).strip()
-    if not name:                                 # frontmatter `name:` wins, else the URL's folder/file
-        m = re.search(r"(?m)^name:\s*(.+)$", content)
-        name = m.group(1).strip() if m else raw.rstrip("/").rsplit("/", 1)[-1].removesuffix(".md")
-        if name.lower() in ("skill", "skill.md"):
-            name = raw.rstrip("/").split("/")[-2] if "/" in raw else name
-    name = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower() or "skill"
+    fallback = raw.rstrip("/").rsplit("/", 1)[-1].removesuffix(".md")
+    if fallback.lower() in ("skill", "skill.md"):
+        fallback = raw.rstrip("/").split("/")[-2] if "/" in raw else fallback
+    fallback = normalize_skill_name(fallback) or "skill"
+    provisional = parse_skill_text(content, USER_SKILLS / fallback / "SKILL.md")
+    if provisional is None:
+        return ("error: the downloaded skill must be bounded UTF-8 with valid frontmatter and a "
+                f"non-empty instruction body no larger than {MAX_SKILL_BODY_CHARS} characters "
+                f"({MAX_SKILL_FILE_BYTES} file bytes maximum)")
+    requested = normalize_skill_name(str(args.get("name", "")))
+    name = requested or provisional.name
+    if content.startswith("---"):
+        end = content.find("\n---", 3)
+        if end != -1:
+            front, tail = content[3:end], content[end:]
+            if re.search(r"(?m)^\s*name\s*:", front):
+                front = re.sub(r"(?m)^\s*name\s*:.*$", f"name: {name}", front,
+                               count=1).strip("\n")
+            else:
+                front = f"name: {name}\n" + front.strip("\n")
+            content = "---\n" + front + tail
     dest = USER_SKILLS / name
+    candidate = parse_skill_text(content, dest / "SKILL.md")
+    if candidate is None or candidate.name != name:
+        return "error: the downloaded skill has invalid metadata or exceeds the instruction limit"
     try:
-        dest.mkdir(parents=True, exist_ok=True)
-        (dest / "SKILL.md").write_text(content)
-    except OSError as e:
+        _atomic_write_bytes(dest / "SKILL.md", content.encode("utf-8"), mode=0o600)
+    except (OSError, ValueError, WorkspaceBoundaryError) as e:
         return f"error saving the skill: {e}"
     try:
         ctx.skills.clear(); ctx.skills.update(discover_skills(ctx.project_root))  # live, usable now

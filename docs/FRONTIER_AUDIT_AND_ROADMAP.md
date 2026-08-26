@@ -116,11 +116,11 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 797 / 797 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 819 / 819 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
-| Extension tests | 2 / 2 | 18 / 18 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
+| Extension tests | 2 / 2 | 19 / 19 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
 | Edit microbenchmark | 17,443 / 19,591 | 17,443 / 19,591 | 89.0% accepted and zero wrong-applies; unchanged corpus baseline. |
 | Release preflight | None | Previous clean candidate passed; current rerun deferred | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates must pass together after the explicit release freeze is lifted. |
@@ -562,7 +562,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 805/805 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 819/819 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -611,6 +611,16 @@ to valid modes/lifecycles, configured MCP tools are never filtered, and `tool_pr
 the complete execution catalog. A plain coding turn's serialized built-in schemas fall from 9,910 to
 6,798 bytes (31.4%) before provider framing, while explicit web/artifact/skill/memory/delegation
 requests preserve those capabilities.
+
+The same adaptive boundary now applies to reusable skill metadata and the `skill` schema. Ordinary
+coding turns on the audit host fell from 7,261 to 3,366 system-prompt characters (53.6%) while an
+explicit name or narrow code-review/debug/design/etc. intent exposes only the matching package;
+`tool_profile: full`, `/skills`, and `/skill NAME` remain escape hatches. Skill roots are enumerated
+through a deterministic bounded no-follow catalog, instruction files use the exact regular-file
+reader, names/descriptions/body/arguments are bounded, and URL installs use an atomic no-follow
+write. A focused inspect/test/edit/retest loop also no longer receives the late todo reminder merely
+because shell calls inflated its mutation count; the reminder remains for repeated edits spanning
+multiple files.
 
 ### Milestone 3 — one coherent product across terminal and editor (P1)
 
@@ -815,7 +825,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 805/805 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 819/819 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
