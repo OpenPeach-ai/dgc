@@ -1038,7 +1038,7 @@ cannot silently omit live commands or shadow itself with a duplicate title. Cust
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 1008/1008 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 1011/1011 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1058,17 +1058,23 @@ The stratified diagnostic added trace-backed runtime controls after this interac
 3. Budgeted DGC turns transition directly from a recognized green build/test after edits to one
    no-tools closing-summary request. Normal interactive and standing-`/goal` turns retain the soft
    completion nudge so a passing subsystem test cannot prematurely terminate larger work.
-4. Foreground, background, and sandboxed Bash use `pipefail`; `test | tail` can no longer report a
+4. In an untimed interactive turn, a no-tools closing response now reuses an exact configured
+   verifier pass while it remains current. A later file edit, integrated task, shell action, or
+   mutation-unknown MCP call invalidates that evidence and re-arms the fail-closed final gate;
+   configured PostToolUse hooks conservatively retain the controller-owned final check. Without those
+   invalidators, DGC no longer pays for an identical second verifier run merely to publish the model's
+   summary.
+5. Foreground, background, and sandboxed Bash use `pipefail`; `test | tail` can no longer report a
    compiler/test failure as exit zero.
-5. Loop signatures for tests and repository reads reset after a successful edit, while repeated
+6. Loop signatures for tests and repository reads reset after a successful edit, while repeated
    failed edits retain their grind evidence. Background-output polling is exempt from identical-call
    blocking.
-6. Budgeted model requests now inherit the remaining monotonic deadline, including a cancellation
+7. Budgeted model requests now inherit the remaining monotonic deadline, including a cancellation
    view that closes an in-flight stream without mutating the user's Stop event. Provider retry waits
    use the same terminal cancellation boundary, so a deadline expiring during exponential or
    `Retry-After` backoff cannot start another billable generation. This control is unit-covered but
    postdates the frozen post-trace benchmark snapshot.
-7. Tool calls and successful/failed file edits are persisted as monotonic session-schema-v6
+8. Tool calls and successful/failed file edits are persisted as monotonic session-schema-v6
    counters (with schema-v5 compatibility). An atomic `.metrics` journal checkpoints usage and
    activity after every completed request/tool call, so benchmark deltas survive both compaction and
    an external SIGKILL before the transcript finalizer. Schema-v4-and-earlier sessions retain an
@@ -1076,7 +1082,7 @@ The stratified diagnostic added trace-backed runtime controls after this interac
    Metrics schema v3 also assigns every completed provider request a bounded controller-owned reason
    without storing request content. Legacy requests reconcile into `unattributed`; resumed counters,
    child-agent rollup, per-round deltas, aggregate reports, and comparison JSON are regression-tested.
-8. Controlled benchmark sessions configure the official test command as DGC's bounded
+9. Controlled benchmark sessions configure the official test command as DGC's bounded
    verify-before-done gate. Build-only probes no longer trigger a false green closeout, prompts state
    that canonical expectations are reference-validated, and the varied-failure cap tightens only in
    the final 10% of the turn budget rather than discarding useful correction time at 80%.

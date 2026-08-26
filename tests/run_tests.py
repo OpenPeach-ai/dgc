@@ -3246,6 +3246,80 @@ def unit_tests(tmp: Path):
     check("a corrective tool action re-arms verify_before_done after repeated failed finals",
           _rearm.client.n == 5 and (_rearm_root / ".verify-runs").read_text() == "xxx"
           and (_rearm_root / "answer.txt").read_text() == "good\n")
+    _already_green_root = Path(tempfile.mkdtemp())
+    _already_green = _Ag(_Cfg(_already_green_root), _AgUI())
+    _already_green.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; test \"$(cat answer.txt)\" = good",
+    })
+    class _AlreadyGreenClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[
+                    _ToolCall("already-green-edit", "write_file", {
+                        "path": "answer.txt", "content": "good\n"}),
+                    _ToolCall("already-green-verify", "bash", {
+                        "command": "printf x >> .verify-runs; "
+                                   "test \"$(cat answer.txt)\" = good"}),
+                ])
+            kwargs["on_text"]("Implemented and verified.")
+            return _ChatResult(content="Implemented and verified.")
+    _already_green.client = _AlreadyGreenClient()
+    _already_green.run_turn("finish after one authoritative verification")
+    check("a no-tools final reuses still-current green verifier evidence",
+          _already_green.client.n == 2
+          and (_already_green_root / ".verify-runs").read_text() == "x"
+          and (_already_green_root / "answer.txt").read_text() == "good\n")
+    _hook_green_root = Path(tempfile.mkdtemp())
+    _hook_green = _Ag(_Cfg(_hook_green_root), _AgUI())
+    _hook_green.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; "
+                          "test \"$(cat answer.txt)\" = good",
+        "hooks": {"PostToolUse": [{"command": "true"}]},
+    })
+    _hook_green.client = _AlreadyGreenClient()
+    _hook_green.run_turn("verify again after model-issued tool hooks")
+    check("PostToolUse hooks keep the controller-owned final verifier",
+          _hook_green.client.n == 2
+          and (_hook_green_root / ".verify-runs").read_text() == "xx")
+    _mcp_green_root = Path(tempfile.mkdtemp())
+    _mcp_green = _Ag(_Cfg(_mcp_green_root), _AgUI())
+    _mcp_green.config.data.update({
+        "mode": "auto", "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; test -f answer.txt",
+    })
+    class _MutationUnknownMCP:
+        def tool_schemas(self):
+            return []
+        def call(self, *_args, **_kwargs):
+            return "MCP operation completed"
+    class _MCPAfterGreenClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[
+                    _ToolCall("mcp-green-edit", "write_file", {
+                        "path": "answer.txt", "content": "good\n"}),
+                    _ToolCall("mcp-green-verify", "bash", {
+                        "command": "printf x >> .verify-runs; test -f answer.txt"}),
+                ])
+            if self.n == 2:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "mcp-after-green", "mcp__fixture__mutate", {})])
+            kwargs["on_text"]("Completed after the MCP operation.")
+            return _ChatResult(content="Completed after the MCP operation.")
+    _mcp_green.client = _MCPAfterGreenClient()
+    _mcp_green.mcp = _MutationUnknownMCP()
+    _mcp_green.run_turn("keep verification current across MCP operations")
+    check("mutation-unknown MCP calls invalidate prior verifier evidence",
+          _mcp_green.client.n == 3
+          and (_mcp_green_root / ".verify-runs").read_text() == "xx")
     class _VerifyCapUI(_AgUI):
         def __init__(self): self.errors = []
         def error(self, message): self.errors.append(message)

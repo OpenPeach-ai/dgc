@@ -2256,6 +2256,12 @@ class Agent:
         held_final_messages: list[dict] = []
         held_final_parts: list[str] = []
         held_final_chars = 0
+        hook_config = self.config.get("hooks") or {}
+        # ``run_configured_verifier`` deliberately bypasses tool hooks. A model-issued verifier does
+        # not: a matching PostToolUse hook runs after its exit status and may change the checkout.
+        # Conservatively retain the final controller verification whenever any such hook is configured.
+        post_tool_hooks_configured = bool(
+            isinstance(hook_config, dict) and hook_config.get("PostToolUse"))
 
         def hold_final(message: dict) -> bool:
             nonlocal held_final_chars
@@ -2639,7 +2645,15 @@ class Agent:
                             "completion withheld — checking the active standing goal")
                     next_request_reason = "goal_gate"
                     continue
-                needs_verifier = (mutating_total > 0 and self.config.get("verify_before_done")
+                # A successful exact verifier remains authoritative until a later mutation-capable
+                # action invalidates ``verified``.  The assistant's no-tools closing response cannot
+                # change the checkout, so rerunning the same command here adds latency and can turn a
+                # green result into noise when the verifier is expensive or mildly flaky.  Every file
+                # edit, integrated task, and subsequent shell action already clears ``verified`` in the
+                # tool loop below; those paths still reach this fail-closed final gate.
+                needs_verifier = (mutating_total > 0
+                                  and (not verified or post_tool_hooks_configured)
+                                  and self.config.get("verify_before_done")
                                   and self.config.get("verify_command"))
                 if needs_verifier and verify_runs >= 2:
                     if defer_completion:
@@ -2792,6 +2806,12 @@ class Agent:
                     # read-only subset, so only a completed recognized verifier can establish green.
                     batch_verified = verified = False
                     verify_nudged = False
+                if call.name == "mcp_call" or call.name.startswith("mcp__"):
+                    # MCP annotations are untrusted hints and DGC serializes every third-party call as
+                    # mutation-unknown. Never carry local verifier evidence across one: even an MCP
+                    # error may follow a partial remote side effect.
+                    batch_verified = verified = False
+                    verify_nudged = False
                 if call.name in ("edit_file", "multi_edit", "apply_patch"):  # varied edit grind
                     if not landed_file_edit:  # denied/blocked/missed edits are all non-progress
                         edit_fail_streak += 1
@@ -2912,9 +2932,15 @@ class Agent:
 
             # keep flaky local models on track: nudge a todo list on multi-step work, and
             # re-surface still-pending todos so they don't get dropped mid-task.
-            mutating_total += batch_landed_edits + sum(1 for c in result.tool_calls if c.name == "bash")
+            mcp_mutations = sum(
+                1 for c in result.tool_calls
+                if c.name == "mcp_call" or c.name.startswith("mcp__"))
+            mutating_total += (batch_landed_edits
+                               + sum(1 for c in result.tool_calls if c.name == "bash")
+                               + mcp_mutations)
             edited_total += batch_landed_edits
-            if any(c.name in (*_FILE_EDIT_CALLS, "bash", "task") for c in result.tool_calls):
+            if any(c.name in (*_FILE_EDIT_CALLS, "bash", "task", "mcp_call")
+                   or c.name.startswith("mcp__") for c in result.tool_calls):
                 # A tool action may have changed the candidate. Allow the next final-answer attempt to
                 # run the configured verifier again; only repeated unsupported "done" replies are capped.
                 verify_runs = 0
