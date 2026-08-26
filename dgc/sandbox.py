@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from .guards import ENV_HIJACK_BLOCKLIST
@@ -21,6 +22,21 @@ _SAFE_ENV = {
     "PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "TZ",
     "USER", "LOGNAME", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
 }
+
+
+@dataclass(frozen=True)
+class SandboxCapabilities:
+    """Truthful, user-visible properties of the selected host backend."""
+
+    backend: str | None
+    available: bool
+    filesystem: str
+    home: str
+    temporary: str
+    network: str
+    process: str
+    private_temporary: bool
+    network_isolated: bool
 
 
 def _backend() -> tuple[str, Path] | None:
@@ -41,6 +57,60 @@ def _backend() -> tuple[str, Path] | None:
 def available() -> str | None:
     backend = _backend()
     return backend[0] if backend else None
+
+
+def capabilities(config=None) -> SandboxCapabilities:
+    """Describe guarantees without treating unlike host backends as equivalent."""
+    kind = available()
+    network_allowed = bool(config and config.get("sandbox_network", False))
+    network = "shared by explicit opt-in" if network_allowed else "isolated"
+    if kind == "bwrap":
+        return SandboxCapabilities(
+            backend=kind,
+            available=True,
+            filesystem="project writable; host filesystem read-only outside masked user state",
+            home="private sandbox home; ambient home hidden outside the project",
+            temporary="private temporary and runtime directories",
+            network=network,
+            process="isolated user, PID, IPC, and UTS namespaces",
+            private_temporary=True,
+            network_isolated=not network_allowed,
+        )
+    if kind == "sandbox-exec":
+        return SandboxCapabilities(
+            backend=kind,
+            available=True,
+            filesystem="project and shared system temporary paths writable",
+            home="ambient home reads denied outside the project",
+            temporary="shared system temporary paths (not a private namespace)",
+            network=network,
+            process="host process namespace with sandbox-exec policy enforcement",
+            private_temporary=False,
+            network_isolated=not network_allowed,
+        )
+    return SandboxCapabilities(
+        backend=None,
+        available=False,
+        filesystem="no supported OS confinement backend",
+        home="not isolated",
+        temporary="not isolated",
+        network="not isolated",
+        process="not isolated",
+        private_temporary=False,
+        network_isolated=False,
+    )
+
+
+def describe(config=None) -> str:
+    """Return a compact status line suitable for the TUI and diagnostics."""
+    report = capabilities(config)
+    if not report.available:
+        return f"unavailable on {sys.platform}; requested commands fail closed"
+    if report.backend == "bwrap":
+        return (f"bwrap; project writable; private home/tmp/runtime; network {report.network}; "
+                "approvals unchanged")
+    return (f"sandbox-exec; project + shared system temp writable; ambient home denied "
+            f"outside project; network {report.network}; approvals unchanged")
 
 
 def requested(config) -> bool:

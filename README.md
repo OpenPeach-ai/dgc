@@ -267,7 +267,7 @@ DGC is a coding agent that runs shell commands and edits files on your machine. 
 - **Your model, your machine.** Code and prompts stay local unless you point DGC at a cloud model (then they go to that provider, with your key).
 - **Deny-rules** apply in every mode, including auto — add your own hard blocks: `/permissions deny Bash(rm -rf *)`, `/permissions deny Read(**/.env)`.
 - **Prompt injection.** Web content is marked as untrusted data and private/link-local fetch targets are blocked. A hostile page or repository can still influence a model, so use `default` mode for untrusted work.
-- **Optional OS confinement.** `/sandbox on` gives shell commands a private home/tmp/environment and blocks network by default on supported systems; normal approval prompts still apply. Use `/sandbox network on` only for a command that needs it.
+- **Optional OS confinement.** `/sandbox on` gives Linux/bubblewrap commands private home/tmp/runtime and process namespaces; macOS/sandbox-exec instead uses policy enforcement with shared system temp paths. Both protect ambient home state and block network by default, normal approval prompts still apply, and unsupported platforms fail closed. `/sandbox` and `dgc doctor` report the exact active capability.
 - **The installer** is non-root (touches only `~/.local/bin` and `~/dgc`) and requires a matching published SHA-256. Tagged GitHub builds also carry build-provenance attestations.
 
 ## License

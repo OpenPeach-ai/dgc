@@ -1214,14 +1214,27 @@ class CLI:
 
 def run_doctor(config: Config) -> None:
     """`dgc doctor` — verify the endpoint is reachable and the model is available."""
+    from . import sandbox
     from .llm import LLMClient
     c = Console()
+    sandbox_report = sandbox.capabilities(config)
+    sandbox_requested = sandbox.requested(config)
     c.print("[bold]DGC doctor[/bold] — checking your setup\n")
     c.print(f"  endpoint      {config.base_url}")
     c.print(f"  model         {config.model}")
     c.print(f"  mode          {config.data.get('mode', 'default')}")
     c.print(f"  context_size  {config.get('context_size')}")
-    c.print(f"  config file   {USER_CONFIG}\n")
+    c.print(f"  config file   {USER_CONFIG}")
+    c.print(f"  sandbox       {'on' if sandbox_requested else 'off'} — {sandbox.describe(config)}\n")
+    if sandbox_requested and sandbox_report.available:
+        c.print(f"  sandbox fs    {sandbox_report.filesystem}")
+        c.print(f"  sandbox home  {sandbox_report.home}")
+        c.print(f"  sandbox temp  {sandbox_report.temporary}")
+        c.print(f"  sandbox proc  {sandbox_report.process}")
+        c.print(f"  sandbox net   {sandbox_report.network}\n")
+    if sandbox_requested and not sandbox_report.available:
+        c.print("  [bold red]✗[/bold red] sandbox is enabled but this platform has no supported backend")
+        c.print("    → install bubblewrap on Linux, use sandbox-exec on macOS, or run [bold]/sandbox off[/bold]")
     client = LLMClient(config.base_url, config.api_key, config.model,
                        api_mode=str(config.get("api_mode", "auto")))
     try:
@@ -1240,7 +1253,10 @@ def run_doctor(config: Config) -> None:
             shown = ", ".join(models[:12]) + ("…" if len(models) > 12 else "")
             c.print(f"    available: {shown}")
         c.print("    → set one: [bold]dgc --model <name>[/bold]  or  [bold]dgc setup[/bold]")
-    c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
+    if sandbox_requested and not sandbox_report.available:
+        c.print("\n  [bold red]not ready[/bold red] — sandboxed shell commands will fail closed.\n")
+    else:
+        c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
 
 
 def run_setup(config: Config) -> None:

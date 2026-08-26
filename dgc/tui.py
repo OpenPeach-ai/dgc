@@ -2904,7 +2904,7 @@ class TUI:
                 self._flash("sandbox remains OFF — no supported confinement backend found")
             elif val in ("on", "true", "1"):
                 cfg.set("sandbox", True)
-                self._flash("sandbox ON — project writable, private home/tmp, network blocked; approvals unchanged")
+                self._flash(f"sandbox ON — {sandbox.describe(cfg)}")
             elif val in ("network on", "net on"):
                 cfg.set("sandbox_network", True)
                 self._flash("sandbox network ON — commands still require normal approval")
@@ -2913,10 +2913,9 @@ class TUI:
                 self._flash("sandbox network OFF")
             else:
                 net = "on" if cfg.get("sandbox_network", False) else "off"
-                backend = sandbox.available() or "unavailable"
                 state = "on" if cfg.get("sandbox") else "off"
                 self._flash(
-                    f"sandbox: {state}, network: {net}, backend: {backend} — "
+                    f"sandbox: {state}, network: {net} — {sandbox.describe(cfg)} — "
                     "/sandbox on|off|network on|network off")
         elif cmd == "mode":
             if rest in ("default", "acceptEdits", "plan", "auto"):
@@ -4139,7 +4138,7 @@ def _tui_help() -> str:
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),
-                      ("/sandbox on|off", "project-only shell sandbox; private home/tmp, network off by default"),
+                      ("/sandbox on|off", "strongest supported OS shell boundary; network off by default"),
                       ("/context", "context usage"), ("/compact", "summarise old turns now")]),
         ("inspect", [("/status", "model · host · mode · context · session"),
                      ("/agents", "sub-agent defaults"), ("/skills", "installed skills"),

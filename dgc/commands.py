@@ -72,7 +72,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 usage="worktree [NAME]"),
     CommandSpec("tasks", "list, show, apply, or drop retained sub-agent work", _TCE,
                 "retainedTasks", usage="tasks [ACTION…]"),
-    CommandSpec("sandbox", "confine bash to the project (private home/tmp, no network)", _T),
+    CommandSpec("sandbox", "confine bash with the supported host OS boundary", _T),
     CommandSpec("bg", "terminal background: auto · dark · inherit", _T,
                 aliases=("background",)),
     CommandSpec("theme", "colour theme: auto · dark · light", _TC, usage="theme [NAME]"),

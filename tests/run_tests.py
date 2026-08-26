@@ -1448,6 +1448,10 @@ def unit_tests(tmp: Path):
     from dgc import sandbox as _sandbox
     _real_sandbox_available = _sandbox.available
     try:
+        _sandbox.available = lambda: "sandbox-exec"
+        _sandbox_values["sandbox"] = False
+        _sandbox_ui._handle_slash("/sandbox on")
+        _mac_sandbox_flash = _sandbox_flashes[-1]
         _sandbox.available = lambda: None
         _sandbox_ui._handle_slash("/sandbox off")
         _sandbox_disabled_without_backend = _sandbox_values["sandbox"] is False
@@ -1455,6 +1459,9 @@ def unit_tests(tmp: Path):
         _sandbox_ui._handle_slash("/sandbox on")
     finally:
         _sandbox.available = _real_sandbox_available
+    check("TUI sandbox activation reports the selected backend without a private-temp overclaim",
+          "sandbox-exec" in _mac_sandbox_flash and "shared system temp" in _mac_sandbox_flash
+          and "private home/tmp" not in _mac_sandbox_flash)
     check("TUI can disable a persisted sandbox when its backend is unavailable",
           _sandbox_disabled_without_backend)
     check("TUI cannot retain an enabled sandbox when its backend is unavailable",
@@ -4540,6 +4547,74 @@ def test_mcp_protocol():
 
     unavailable_root = Path(tempfile.mkdtemp())
     real_backend = sandbox._backend
+    try:
+        sandbox._backend = lambda: ("bwrap", Path("/opt/dgc-test/bwrap"))
+        linux_caps = sandbox.capabilities(_SCfg())
+        linux_network_caps = sandbox.capabilities(_SCfg(network=True))
+        linux_description = sandbox.describe(_SCfg())
+        sandbox._backend = lambda: ("sandbox-exec", Path("/usr/bin/sandbox-exec"))
+        mac_caps = sandbox.capabilities(_SCfg())
+        mac_description = sandbox.describe(_SCfg())
+        sandbox._backend = lambda: None
+        missing_caps = sandbox.capabilities(_SCfg())
+        missing_description = sandbox.describe(_SCfg())
+    finally:
+        sandbox._backend = real_backend
+    check("sandbox capabilities distinguish Linux private temp and process isolation",
+          linux_caps.backend == "bwrap" and linux_caps.private_temporary
+          and linux_caps.network_isolated and "private home/tmp/runtime" in linux_description
+          and "PID" in linux_caps.process)
+    check("sandbox capabilities report an explicit Linux network opt-in",
+          not linux_network_caps.network_isolated
+          and linux_network_caps.network == "shared by explicit opt-in")
+    check("sandbox capabilities do not overclaim macOS private temporary namespaces",
+          mac_caps.backend == "sandbox-exec" and not mac_caps.private_temporary
+          and mac_caps.network_isolated and "shared system temp" in mac_description
+          and "host process namespace" in mac_caps.process)
+    check("sandbox capabilities expose unsupported platforms as fail closed",
+          not missing_caps.available and missing_caps.backend is None
+          and "requested commands fail closed" in missing_description)
+
+    from dgc import cli as _doctor_cli
+    from dgc import llm as _doctor_llm
+
+    class _DoctorConfig(_SCfg):
+        base_url = "http://fixture.invalid/v1"
+        api_key = "fixture"
+        model = "fixture-model"
+        data = {"mode": "default"}
+
+        def get(self, key, default=None):
+            return {"sandbox": True, "sandbox_network": False,
+                    "context_size": 8192, "api_mode": "auto"}.get(key, default)
+
+    class _DoctorConsole:
+        def __init__(self): self.lines = []
+        def print(self, *values, **_kwargs):
+            self.lines.append(" ".join(str(value) for value in values))
+
+    class _DoctorClient:
+        def __init__(self, *_args, **_kwargs): pass
+        def list_models(self): return ["fixture-model"]
+
+    doctor_console = _DoctorConsole()
+    real_console = _doctor_cli.Console
+    real_client = _doctor_llm.LLMClient
+    try:
+        sandbox._backend = lambda: None
+        _doctor_cli.Console = lambda: doctor_console
+        _doctor_llm.LLMClient = _DoctorClient
+        _doctor_cli.run_doctor(_DoctorConfig())
+    finally:
+        sandbox._backend = real_backend
+        _doctor_cli.Console = real_console
+        _doctor_llm.LLMClient = real_client
+    doctor_output = "\n".join(doctor_console.lines)
+    check("doctor reports a requested unavailable sandbox as fail closed and not ready",
+          "requested commands fail closed" in doctor_output
+          and "sandbox is enabled but this platform has no supported backend" in doctor_output
+          and "not ready" in doctor_output and "[bold green]ready" not in doctor_output)
+
     try:
         sandbox._backend = lambda: None
         unavailable_foreground = bash({"command": ":"}, _SCtx(unavailable_root))

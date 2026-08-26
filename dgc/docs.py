@@ -88,10 +88,14 @@ or set one with `/mode`.
 - **auto** — full access, nothing asks. Use only in a sandbox or a throwaway repo.
 
 You can also carve out standing rules with `/permissions` (allow / ask / deny).
-`/sandbox on` makes only the project writable, hides the ambient user home and
-secrets, uses private temporary/runtime directories, and blocks network access by
-default. It does **not** skip normal permission prompts. Enable sandbox networking
-only when needed with `/sandbox network on`.
+`/sandbox on` uses the strongest supported host boundary and does **not** skip
+normal permission prompts. Linux/bubblewrap makes the project the only persistent
+writable host path, masks ambient user state, and provides private home, temporary,
+runtime, process, and network namespaces. macOS/sandbox-exec denies ambient-home
+reads outside the project and host writes except the project and shared system
+temporary paths; its temporary and process namespaces are not private. Network is
+blocked by default on both. Unsupported platforms fail closed instead of running a
+requested sandbox without confinement. Use `/sandbox network on` only when needed.
 """.strip()),
 
     ("Plan mode", "read-only planning, then one-tap approve", """
