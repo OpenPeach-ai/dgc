@@ -1941,7 +1941,7 @@ class Agent:
         edit_grind_nudged = False   # so the "just write the whole file" nudge fires at most once
         verified = False            # a test/build passed AND no edit since — finish-when-verified nudge
         verify_nudged = False
-        summary_only = False        # budgeted green run → next response must close, not tool
+        summary_only = False        # budgeted green run → deterministic closeout, no provider request
         continues = 0               # length-truncation auto-continues used this turn
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
@@ -1981,9 +1981,31 @@ class Agent:
                     self.ui.info("⏱ out of time — stopping")
                 return True
             self._drain_steer()             # inject anything the user typed mid-turn
+            if summary_only:
+                labels = []
+                root = Path(self.config.project_root).absolute()
+                for target in sorted(edited_targets)[:4]:
+                    path = Path(target)
+                    try:
+                        path = path.relative_to(root)
+                    except ValueError:
+                        path = Path(path.name)
+                    label = self._safe_text(str(path)).replace("`", "'")[:160]
+                    labels.append(f"`{label}`")
+                final = "Implemented and verified the requested changes."
+                if labels:
+                    omitted = max(0, len(edited_targets) - len(labels))
+                    final += "\n\nUpdated: " + ", ".join(labels)
+                    if omitted:
+                        final += f", plus {omitted} more file{'s' if omitted != 1 else ''}"
+                    final += "."
+                final += "\n\nVerification: the test command passed."
+                self.messages.append({"role": "assistant", "content": final})
+                self.ui.on_text(final)
+                self.ui.end_stream()
+                return True
             compact_deadline = (deadline - 0.06 * budget) if deadline is not None else None
-            tools = (None if summary_only else
-                     (self._tool_schemas() if self.client.tools_supported else None))
+            tools = self._tool_schemas() if self.client.tools_supported else None
             # Use one state-aware schema snapshot for both budgeting and the request. Besides being
             # exact, this avoids refreshing a large MCP catalog twice at the start of every turn.
             self.maybe_compact(deadline=compact_deadline, tools=tools)
@@ -2055,22 +2077,16 @@ class Agent:
                     self.messages.append({"role": "assistant", "content": partial})
                 self.ui.info("turn cancelled")
                 return True
-            # A verified turn gets exactly one no-tools closing request. A few local endpoints still emit
-            # a tool-shaped response even without schemas; do not execute it and do not leave the user
-            # with a silent turn.
-            if summary_only and not (result.content or "").strip():
-                result.content = "Verification passed. The requested changes are complete."
-                self.ui.on_text(result.content)
             # Some local models emit valid tool calls but no user-facing text. Preserve genuine model
             # commentary; otherwise add a deterministic, non-speculative preamble BEFORE tool cards.
-            if (not summary_only and result.tool_calls and result.finish_reason != "length"
+            if (result.tool_calls and result.finish_reason != "length"
                     and not (result.content or "").strip()):
                 result.content = _tool_batch_preamble(
                     result.tool_calls, did_tools=did_tools, edited_before=edited_total > 0)
                 self.ui.on_text(result.content)
             self.ui.end_stream()
 
-            native = (not summary_only and bool(result.tool_calls)
+            native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
             assistant: dict = {"role": "assistant", "content": result.content}
             if result.provider_items:
@@ -2084,12 +2100,6 @@ class Agent:
                                   "arguments": json.dumps(self._safe_value(c.arguments))}}
                     for c in result.tool_calls]
             self.messages.append(assistant)
-
-            if summary_only:
-                # Tests already passed and this request deliberately exposed no tools. Never execute a
-                # hallucinated/text-protocol call or re-enter todo/goal gates: that recreates the exact
-                # post-green loop this state exists to prevent.
-                return True
 
             if not result.tool_calls:
                 if result.finish_reason == "length":
@@ -2337,9 +2347,7 @@ class Agent:
 
             if (deadline is not None and batch_verified
                     and edited_total + batch_landed_edits > 0):
-                # A verifier just passed: capture the exact current state of every project path the
-                # turn checkpoint knows was mutated (including task integrations). The checkout lease
-                # prevents another DGC process from mutating that state while it is being captured.
+                # Preserve the exact green state until the next loop emits its provider-free closeout.
                 cutoff = deadline - 0.06 * budget
                 captured = self._capture_good_snapshot(cutoff)
                 if captured is not None and captured.files:
@@ -2415,15 +2423,11 @@ class Agent:
                 reminders.append("A test/build command passed and you haven't changed the code since. If "
                                  "the task is complete, give a brief final summary and stop — don't re-run "
                                  "or refactor code that already works.")
-            if batch_verified:
-                # Only an explicitly budgeted turn gets a hard closeout. Normal interactive and /goal
-                # work keeps the soft nudge above: a passing subsystem test must not terminate a larger
-                # task. Benchmark prompts supply the authoritative build/test command and outer limit.
-                if edited_total > 0 and deadline is not None:
-                    summary_only = True
-                    reminders.append("Verification passed after the code changes. Do not call any more "
-                                     "tools, inspect more files, or refactor. Respond now with only a brief "
-                                     "final summary of what changed and the verification result.")
+            if batch_verified and edited_total > 0 and deadline is not None:
+                # The authoritative verifier is already green. A separate no-tools model request adds
+                # no evidence, costs a full generation, and can overrun the deadline. The next loop emits
+                # a bounded outcome-first closeout; unbudgeted interactive turns remain model-authored.
+                summary_only = True
             if (edited_total >= 3 and len(edited_targets) >= 2
                     and not self.ctx.todos and not todo_nudged):
                 todo_nudged = True

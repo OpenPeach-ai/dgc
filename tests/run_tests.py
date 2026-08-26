@@ -2708,12 +2708,14 @@ def unit_tests(tmp: Path):
                 {"path": "post-green.txt", "content": "must not execute\n"})])
     _green_agent.client = _GreenClient()
     _green_agent.run_turn("write and verify the answer")
-    check("shell-equivalent green verifier hard-stops post-pass text tools",
-          _green_agent.client.n == 2
+    check("budgeted green verifier closes without another generation or post-pass tools",
+          _green_agent.client.n == 1
           and (_green_root / "answer.txt").read_text() == "good\n"
           and not (_green_root / "post-green.txt").exists()
-          and "edited at least 3 times without running a test" not in
-          _green_agent.client.closing_context)
+          and _green_agent.messages[-1]["role"] == "assistant"
+          and "Implemented and verified" in _green_agent.messages[-1]["content"]
+          and "`answer.txt`" in _green_agent.messages[-1]["content"]
+          and "test command passed" in _green_agent.messages[-1]["content"])
     _ordered_root = Path(tempfile.mkdtemp())
     _ordered_agent = _Ag(_Cfg(_ordered_root), _AgUI())
     _ordered_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
@@ -8547,8 +8549,8 @@ class MockHandler(BaseHTTPRequestHandler):
             n = sum(1 for m in messages if m.get("role") == "tool")
             payload = tool_delta("bash", [json.dumps({"command": f"echo 'still failing'  # {n}\nexit 1"})])
         elif self.scenario == "verify":
-            # edit → a real passing test invocation → DGC must make the next request without tools, so the
-            # model cannot keep inspecting/refactoring code that is already green.
+            # edit → a real passing test invocation → DGC must close locally without a third request, so
+            # the model cannot keep inspecting/refactoring code that is already green.
             MockHandler.vcount = getattr(MockHandler, "vcount", 0) + 1
             if MockHandler.vcount == 1:
                 payload = tool_delta("write_file", [json.dumps({
@@ -9951,7 +9953,7 @@ def test_multi_edit():
 
 
 def e2e_verify(port: int, tmp: Path) -> bool:
-    """finish-when-verified: a passing test forces the next response into summary-only mode."""
+    """finish-when-verified: a passing test closes without a summary-only provider request."""
     import glob
     MockHandler.native_tools = True
     MockHandler.scenario = "verify"
@@ -9975,11 +9977,9 @@ def e2e_verify(port: int, tmp: Path) -> bool:
     msgs = json.loads(Path(sess[-1]).read_text())
     if isinstance(msgs, dict):
         msgs = msgs.get("messages", [])
-    has_reminder = any("Verification passed after the code changes" in str(m.get("content", ""))
-                       for m in msgs)
-    return (has_reminder and MockHandler.verify_summary_without_tools
-            and MockHandler.vcount == 3
-            and any("implementation complete" in str(m.get("content", "")) for m in msgs))
+    return (MockHandler.vcount == 2 and not MockHandler.verify_summary_without_tools
+            and any("Implemented and verified" in str(m.get("content", "")) for m in msgs)
+            and any("test command passed" in str(m.get("content", "")) for m in msgs))
 
 
 def main():
@@ -10033,7 +10033,7 @@ def main():
             check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
-            check("e2e tests pass → immediate summary-only response", e2e_verify(port, tmp))
+            check("e2e tests pass → provider-free verified closeout", e2e_verify(port, tmp))
         finally:
             server.shutdown()
 

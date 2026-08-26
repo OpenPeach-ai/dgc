@@ -602,7 +602,10 @@ slowest/highest-request tasks per engine and baseline quality/latency/request re
 every peer. Efficiency regressions require an equal successful quality tier, so an earlier peer
 failure is never mislabeled as a speed win. Missing or unsynchronized task usage remains
 JSON `null`, so the next league can be triaged without ad hoc scripts or accidental partial
-attribution. Built-in
+attribution. A budgeted turn now closes immediately with a bounded outcome-first summary after a
+recognized verifier passes (the controlled league supplies the exact authoritative command), avoiding
+one evidence-free provider generation and its deadline risk; normal interactive turns remain
+model-authored. Built-in
 timings contain no
 arguments, commands, paths, prompts, or results; labels and counters are bounded, survive
 compaction/resume/crash journals, and use the existing activity persistence boundary rather than an
