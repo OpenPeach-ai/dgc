@@ -15,6 +15,12 @@ EXPECTED_PROVIDER_TRANSPORTS = {
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
 }
 _PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
+_REQUEST_REASON_LABELS = frozenset({
+    "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
+    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+})
 
 
 def wilson(successes: int, total: int, z: float = 1.959963984540054) -> tuple[float, float]:
@@ -125,12 +131,18 @@ def load(path: Path) -> dict:
                                for item in stats)
     by_tool_us: dict[str, int] = {}
     by_tool_samples: dict[str, int] = {}
+    by_request_reason: dict[str, int] = {}
     for item in stats:
         for source_key, target in (("by_tool_us", by_tool_us),
-                                   ("by_tool_samples", by_tool_samples)):
+                                   ("by_tool_samples", by_tool_samples),
+                                   ("by_request_reason", by_request_reason)):
+            if source_key == "by_request_reason" and engine != "dgc":
+                continue
             values = item.get(source_key) if isinstance(item.get(source_key), dict) else {}
             valid_names = [str(name) for name in sorted(values)
-                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))][:64]
+                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))
+                           and (source_key != "by_request_reason"
+                                or str(name) in _REQUEST_REASON_LABELS)][:64]
             for name in valid_names:
                 amount = values.get(name, 0)
                 target[name] = target.get(name, 0) + max(0, int(amount or 0))
@@ -147,7 +159,8 @@ def load(path: Path) -> dict:
             "provider_requests": provider_requests, "provider_transports": provider_transports,
             "builtin_timing_rounds": builtin_timing_rounds,
             "builtin_tool_s": builtin_tool_s, "builtin_tool_samples": builtin_tool_samples,
-            "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples}
+            "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples,
+            "by_request_reason": by_request_reason}
 
 
 def efficiency_metrics(run: dict) -> dict[str, float | None]:
@@ -237,6 +250,21 @@ def task_metrics(engine: str, record: dict) -> dict:
         return (sum(max(0, int(item.get(key, 0) or 0)) for item in stats if item is not None)
                 if rounds and all(item is not None and key in item for item in stats) else None)
 
+    def stat_map_total(key: str) -> dict[str, int] | None:
+        if not rounds or not all(
+                item is not None and isinstance(item.get(key), dict) for item in stats):
+            return None
+        total: dict[str, int] = {}
+        names = sorted({str(name) for item in stats if item is not None
+                        for name in item[key]
+                        if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))
+                        and (key != "by_request_reason"
+                             or str(name) in _REQUEST_REASON_LABELS)})[:64]
+        for name in names:
+            total[name] = sum(max(0, int(item[key].get(name, 0) or 0))
+                              for item in stats if item is not None)
+        return total
+
     builtin_us = stat_total("builtin_tool_us")
     output_tokens = token_total("output_tokens")
     solved_round = record.get("solved_round")
@@ -264,6 +292,8 @@ def task_metrics(engine: str, record: dict) -> dict:
         "edit_fails": stat_total("edit_fails"),
         "builtin_tool_s": builtin_us / 1_000_000 if builtin_us is not None else None,
         "builtin_tool_samples": stat_total("builtin_tool_samples"),
+        "by_request_reason": (stat_map_total("by_request_reason")
+                              if engine == "dgc" else None),
     }
 
 
@@ -561,10 +591,17 @@ def main() -> None:
                               "provider_max_duration_s", "builtin_timing_rounds",
                               "builtin_tool_s", "builtin_tool_samples",
                               "provider_requests", "provider_transports",
-                              "by_tool_us", "by_tool_samples")}
+                              "by_tool_us", "by_tool_samples", "by_request_reason")}
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
                              "efficiency": efficiency,
                              "source": str(run["path"])})
+    for run in sorted(runs, key=lambda item: item["engine"]):
+        reasons = run.get("by_request_reason")
+        if not isinstance(reasons, dict) or not reasons:
+            continue
+        ranked = sorted(reasons.items(), key=lambda item: (-int(item[1]), item[0]))
+        details = ", ".join(f"{name}={int(count)}" for name, count in ranked[:10])
+        print(f"{run['engine']} completed-request reasons (argument-free): {details}")
     outliers = task_outliers(runs, args.top_tasks)
     if outliers:
         print("\ntask outliers (bounded union of slowest and highest-request tasks per engine)")

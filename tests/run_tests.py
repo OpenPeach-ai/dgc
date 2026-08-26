@@ -2464,10 +2464,27 @@ def unit_tests(tmp: Path):
           and _aa.timing_totals["by_tool_samples"] == {
               "edit_file": 1, "write_file": 1}
           and set(_aa.timing_totals["by_tool_us"]) == {"edit_file", "write_file"})
+    check("agent attributes every foreground generation to a fixed controller reason",
+          _aa.usage_totals["requests"] == 3
+          and _aa.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "tool_result": 2}
+          and sum(_aa.timing_totals["by_request_reason"].values())
+          == _aa.usage_totals["requests"])
     _aa_resumed = _Ag(_Cfg(_activity_root), _AgUI()); _aa_resumed.load_session(_aa.session_file)
     check("agent resume restores monotonic activity counters",
           _aa_resumed.activity_totals == _aa.activity_totals
           and _aa_resumed.timing_totals == _aa.timing_totals)
+    _legacy_reason_root = Path(tempfile.mkdtemp())
+    _legacy_reason_path = _activity_sessions.new_path(_legacy_reason_root)
+    _activity_sessions.save(
+        _legacy_reason_path, [{"role": "user", "content": "legacy"}], _legacy_reason_root,
+        usage={"requests": 2}, timing={"builtin_tool_us": 0, "builtin_tool_samples": 0})
+    _legacy_reason_agent = _Ag(_Cfg(_legacy_reason_root), _AgUI())
+    _legacy_reason_agent.load_session(_legacy_reason_path)
+    check("agent resume reconciles pre-v3 request counts into one legacy bucket",
+          _legacy_reason_agent.timing_totals["by_request_reason"] == {"unattributed": 2}
+          and sum(_legacy_reason_agent.timing_totals["by_request_reason"].values())
+          == _legacy_reason_agent.usage_totals["requests"])
     _bounded_timing = _Ag(_Cfg(Path(tempfile.mkdtemp())), _AgUI())
     for _timing_index in range(70):
         _bounded_timing._record_tool_timing(f"fixture_{_timing_index}", _timing_index)
@@ -2476,6 +2493,11 @@ def unit_tests(tmp: Path):
           and _bounded_timing.timing_totals["builtin_tool_us"] == sum(range(70))
           and len(_bounded_timing.timing_totals["by_tool_us"]) == 64
           and len(_bounded_timing.timing_totals["by_tool_samples"]) == 64)
+    _reason_guard = _Ag(_Cfg(Path(tempfile.mkdtemp())), _AgUI())
+    _reason_guard._record_usage({}, "prompt-and-/secret/path-must-not-be-a-label")
+    _reason_guard._record_usage({}, {"unhashable": "repository input"})
+    check("request-reason labels are fixed and cannot retain arbitrary or unhashable text",
+          _reason_guard.timing_totals["by_request_reason"] == {"other": 2})
 
     class _TerminalProviderFailure:
         tools_supported = True
@@ -2485,6 +2507,41 @@ def unit_tests(tmp: Path):
     _failed_outcome = _failed_turn.run_turn("surface the provider failure")
     check("handled provider failures produce a truthful unsuccessful turn result",
           _failed_outcome is False and "fixture provider failed" in _failed_turn._last_turn_error)
+
+    from dgc.llm import (ContextOverflowError as _ContextOverflowError,
+                         ToolsUnsupportedError as _ToolsUnsupportedError)
+    class _TransportRetryClient:
+        tools_supported = True
+        calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                self.tools_supported = False
+                raise _ToolsUnsupportedError("native tools rejected")
+            return _ChatResult(content="Recovered with the text protocol.")
+    _transport_retry = _Ag(_Cfg(tmp), _AgUI())
+    _transport_retry.client = _TransportRetryClient()
+    check("a completed tool-transport retry is attributed without charging the rejected response",
+          _transport_retry.run_turn("recover the tool transport") is True
+          and _transport_retry.client.calls == 2
+          and _transport_retry.timing_totals["by_request_reason"] == {
+              "transport_retry": 1})
+
+    class _ContextRetryClient:
+        tools_supported = True
+        calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise _ContextOverflowError("context length exceeded")
+            return _ChatResult(content="Recovered after compaction.")
+    _context_retry = _Ag(_Cfg(tmp), _AgUI())
+    _context_retry.client = _ContextRetryClient()
+    _context_retry.maybe_compact = lambda **kwargs: None
+    check("a completed overflow retry is distinguished from the initial user generation",
+          _context_retry.run_turn("recover the context") is True
+          and _context_retry.client.calls == 2
+          and _context_retry.timing_totals["by_request_reason"] == {"context_retry": 1})
 
     class _SilentFinalClient:
         tools_supported = True
@@ -2496,7 +2553,9 @@ def unit_tests(tmp: Path):
     _silent_outcome = _silent_turn.run_turn("do not end silently")
     check("two empty model finals fail visibly instead of reporting a completed turn",
           _silent_outcome is False and _silent_turn.client.calls == 2
-          and "without a user-facing response" in _silent_turn._last_turn_error)
+          and "without a user-facing response" in _silent_turn._last_turn_error
+          and _silent_turn.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "empty_final": 1})
 
     class _LengthOnlyClient:
         tools_supported = True
@@ -2509,7 +2568,9 @@ def unit_tests(tmp: Path):
     check("repeatedly truncated text cannot masquerade as a completed final answer",
           _length_outcome is False
           and _length_turn.client.calls == _AGENT_MAX_CONTINUE + 1
-          and "output-token limit" in _length_turn._last_turn_error)
+          and "output-token limit" in _length_turn._last_turn_error
+          and _length_turn.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
 
     _cancel_root = Path(tempfile.mkdtemp())
     _cancel_group = _Ag(_Cfg(_cancel_root), _AgUI())
@@ -2622,7 +2683,8 @@ def unit_tests(tmp: Path):
     _crash_root = Path(tempfile.mkdtemp())
     _crash_agent = _Ag(_Cfg(_crash_root), _AgUI())
     _crash_agent.session_file = _activity_sessions.new_path(_crash_root)
-    _crash_agent._record_usage({"prompt_tokens": 17, "completion_tokens": 5})
+    _crash_agent._record_usage(
+        {"prompt_tokens": 17, "completion_tokens": 5}, "user_turn")
     _crash_agent._record_tool_timing("bash", 123456)
     with _crash_agent._usage_lock:
         _crash_agent.activity_totals.update({"tool_calls": 2, "edits": 1, "edit_fails": 0})
@@ -2638,7 +2700,8 @@ def unit_tests(tmp: Path):
           {"tool_calls": 2, "edits": 1, "edit_fails": 0}
           and _crash_metrics.get("timing") == {
               "builtin_tool_us": 123456, "builtin_tool_samples": 1,
-              "by_tool_us": {"bash": 123456}, "by_tool_samples": {"bash": 1}})
+              "by_tool_us": {"bash": 123456}, "by_tool_samples": {"bash": 1},
+              "by_request_reason": {"user_turn": 1}})
     class _VerifyVisibilityUI(_AgUI):
         def __init__(self): self.events = []
         def on_text(self, chunk): self.events.append(("text", str(chunk)))
@@ -2682,6 +2745,11 @@ def unit_tests(tmp: Path):
     check("authoritative verifier rejects a premature final and feeds failure back",
           _va.client.saw_failure and _va.client.n == 4
           and (_verify_root / "answer.txt").read_text() == "good\n")
+    check("verifier recovery generations are distinguishable from ordinary tool continuation",
+          _va.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "tool_result": 2, "verifier_evidence": 1}
+          and sum(_va.timing_totals["by_request_reason"].values())
+          == _va.usage_totals["requests"] == 4)
     check("failed completion text is withheld from every shared Agent UI",
           "Done — the requested change is verified." not in _verify_text
           and _verify_text.count("Implemented and verified.") == 1
@@ -2966,7 +3034,9 @@ def unit_tests(tmp: Path):
           _edit_repair_agent.client.n == 2
           and _edit_repair_agent.client.saw_red_evidence
           and (_edit_repair_root / ".verify-runs").read_text() == "xx"
-          and (_edit_repair_root / "answer.txt").read_text() == "good\n")
+          and (_edit_repair_root / "answer.txt").read_text() == "good\n"
+          and _edit_repair_agent.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "verifier_evidence": 1})
     _denied_edit_root = Path(tempfile.mkdtemp())
     _denied_edit_agent = _Ag(_Cfg(_denied_edit_root), _AgUI())
     _denied_edit_agent.config.data.update({
@@ -3034,7 +3104,9 @@ def unit_tests(tmp: Path):
           and (_steered_green_root / "answer.txt").read_text() == "green\n"
           and (_steered_green_root / "follow-up.txt").read_text() == "handled\n"
           and "Implemented and verified" in _steered_green_agent.messages[-1]["content"]
-          and "`follow-up.txt`" in _steered_green_agent.messages[-1]["content"])
+          and "`follow-up.txt`" in _steered_green_agent.messages[-1]["content"]
+          and _steered_green_agent.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "steering": 1})
     _ordered_root = Path(tempfile.mkdtemp())
     _ordered_agent = _Ag(_Cfg(_ordered_root), _AgUI())
     _ordered_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
@@ -3082,7 +3154,9 @@ def unit_tests(tmp: Path):
     check("repeated red verification cycles across edits trigger one coherent-solution nudge",
           _cycles_agent.client.n == 4
           and "3 test/verification cycles have failed" in _cycles_agent.client.final_context
-          and "Stop patching the latest assertion in isolation" in _cycles_agent.client.final_context)
+          and "Stop patching the latest assertion in isolation" in _cycles_agent.client.final_context
+          and _cycles_agent.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "tool_result": 2, "convergence_nudge": 1})
     _unchecked_root = Path(tempfile.mkdtemp())
     _unchecked_agent = _Ag(_Cfg(_unchecked_root), _AgUI())
     _unchecked_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
@@ -3326,7 +3400,8 @@ def unit_tests(tmp: Path):
     check("handoff prompt requests the handoff sections",
           all(s in _hcap["sys"] for s in ("Objective", "Done", "Next steps", "How to continue")))
     check("handoff includes the session content", "do the thing" in _hcap["body"] and "write_file" in _hcap["body"])
-    check("handoff returns a document", _hd.startswith("# Handoff"))
+    check("handoff returns a document", _hd.startswith("# Handoff")
+          and _h.timing_totals["by_request_reason"] == {"handoff": 1})
     check("handoff on an empty session is graceful",
           "Nothing has happened" in _Ag(_Cfg(), _AgUI()).generate_handoff())
 
@@ -3913,7 +3988,8 @@ def test_context_prune():
           and len(compact_prompt[0]["content"]) < 6000
           and compact_kwargs.get("tools") is None
           and compact_kwargs.get("reasoning_effort") == "off"
-          and hasattr(compact_kwargs.get("cancel"), "deadline"),
+          and hasattr(compact_kwargs.get("cancel"), "deadline")
+          and bounded_agent.timing_totals["by_request_reason"] == {"compaction": 1},
           detail=repr((aux_options, len(compact_prompt[0]["content"]), compact_kwargs)))
 
     bounded_agent.messages.extend([
@@ -4806,7 +4882,8 @@ def test_mcp_protocol():
         sampling_agent.ui = _SamplingUI(["accept", "accept"])
         sampling_agent._aux_client = lambda **kwargs: sampling_agent.client
         sampled_usage = []
-        sampling_agent._record_usage = sampled_usage.append
+        sampling_agent._record_usage = lambda usage, reason="other": sampled_usage.append(
+            (usage, reason))
         sampling_params = sanitize_input_request("sampling/createMessage", {
             "systemPrompt": "Answer briefly", "messages": [{"role": "user", "content": {
                 "type": "text", "text": "hello"}}], "maxTokens": 32,
@@ -4823,14 +4900,15 @@ def test_mcp_protocol():
               sampling_agent.client.calls[0][1].get("tools") is None
               and "Never infer, retrieve, or reveal DGC project files" in sample_messages[0]["content"]
               and all("project secret" not in str(message) for message in sample_messages)
-              and sampled_usage == [{"prompt_tokens": 3, "completion_tokens": 2}])
+              and sampled_usage == [(
+                  {"prompt_tokens": 3, "completion_tokens": 2}, "mcp_sampling")])
         denied_agent = object.__new__(_MCPAgent)
         denied_agent.cancelled = threading.Event()
         denied_agent.client = _SamplingClient()
         denied_agent.config = sampling_agent.config
         denied_agent.ui = _SamplingUI(["decline"])
         denied_agent._aux_client = lambda **kwargs: denied_agent.client
-        denied_agent._record_usage = lambda usage: None
+        denied_agent._record_usage = lambda usage, reason="other": None
         try:
             _MCPAgent._handle_mcp_input(
                 denied_agent, "fixture", "sampling/createMessage", sampling_params)
@@ -5691,7 +5769,8 @@ def test_sessions_and_worktree():
         activity={"tool_calls": 9, "edits": 4, "edit_fails": 2},
         timing={"builtin_tool_us": 4000, "builtin_tool_samples": 2,
                 "by_tool_us": {"bash": 2500, "read_file": 1500},
-                "by_tool_samples": {"bash": 1, "read_file": 1}},
+                "by_tool_samples": {"bash": 1, "read_file": 1},
+                "by_request_reason": {"user_turn": 2, "tool_result": 3, "title": 1}},
         checkpoints=checkpoint_payload)
     check("session save reports durable transcript success",
           session_saved and json.loads(sp.read_text()).get("schema_version") == 6)
@@ -5773,7 +5852,8 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
           sessions.timing_of(sp, d) == {
               "builtin_tool_us": 4000, "builtin_tool_samples": 2,
               "by_tool_us": {"bash": 2500, "read_file": 1500},
-              "by_tool_samples": {"bash": 1, "read_file": 1}})
+              "by_tool_samples": {"bash": 1, "read_file": 1},
+              "by_request_reason": {"title": 1, "tool_result": 3, "user_turn": 2}})
     metrics = sessions.metrics_path(sp, d)
     check("session metrics journal is private and colocated",
           metrics.exists() and metrics.parent == sp.parent
@@ -5785,13 +5865,17 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
         activity={"tool_calls": 11, "edits": 5, "edit_fails": 3},
         timing={"builtin_tool_us": 9000, "builtin_tool_samples": 4,
                 "by_tool_us": {"bash": 6500, "read_file": 2500, "bad label": 99},
-                "by_tool_samples": {"bash": 2, "read_file": 2, "bad label": 1}})
+                "by_tool_samples": {"bash": 2, "read_file": 2, "bad label": 1},
+                "by_request_reason": {
+                    "user_turn": 2, "tool_result": 3, "title": 1,
+                    "verifier_evidence": 1, "APIKEYSHOULDNOTSURVIVE": 99}})
     sessions.save_metrics(  # a racing stale writer must never move monotonic counters backwards
         sp, d,
         usage={"input_tokens": 1, "output_tokens": 1, "requests": 1},
         activity={"tool_calls": 1, "edits": 1, "edit_fails": 1},
         timing={"builtin_tool_us": 1, "builtin_tool_samples": 1,
-                "by_tool_us": {"bash": 1}, "by_tool_samples": {"bash": 1}})
+                "by_tool_us": {"bash": 1}, "by_tool_samples": {"bash": 1},
+                "by_request_reason": {"user_turn": 1}})
     check("metrics journal merges monotonically with the transcript",
           sessions.usage_of(sp, d) == {"input_tokens": 150, "output_tokens": 50,
                                        "cached_input_tokens": 22, "reasoning_tokens": 8,
@@ -5801,7 +5885,18 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
           and sessions.timing_of(sp, d) == {
               "builtin_tool_us": 9000, "builtin_tool_samples": 4,
               "by_tool_us": {"bash": 6500, "read_file": 2500},
-              "by_tool_samples": {"bash": 2, "read_file": 2}})
+              "by_tool_samples": {"bash": 2, "read_file": 2},
+              "by_request_reason": {
+                  "title": 1, "tool_result": 3, "user_turn": 2,
+                  "verifier_evidence": 1}})
+    inconsistent_reason_path = sessions.new_path(d)
+    sessions.save(
+        inconsistent_reason_path, [{"role": "user", "content": "inconsistent metrics"}], d,
+        usage={"requests": 1}, timing={"by_request_reason": {"user_turn": 2}})
+    check("inconsistent request-reason snapshots fail closed to the truthful request total",
+          sessions.timing_of(inconsistent_reason_path, d)["by_request_reason"]
+          == {"unattributed": 1})
+    sessions.delete(inconsistent_reason_path, d)
     # A compacted transcript can be far smaller than the earlier one; monotonic activity must not
     # be reconstructed from it or decrease. This is the benchmark round-delta regression case.
     bench_home = _P(_tf.mkdtemp()); bench_work = _P(_tf.mkdtemp()) / "activity-case"
@@ -5814,6 +5909,7 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
         "schema_version": 5,
         "messages": [{"role": "user", "content": "[Earlier conversation compacted]"}],
         "activity": {"tool_calls": 14, "edits": 6, "edit_fails": 3},
+        "usage": {"requests": 4},
         "timing": {"builtin_tool_us": 23000, "builtin_tool_samples": 14,
                    "by_tool_us": {"read_file": 8000, "bash": 15000},
                    "by_tool_samples": {"read_file": 8, "bash": 6}},
@@ -5829,6 +5925,8 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
               "builtin_tool_us": 23000, "builtin_tool_samples": 14,
               "by_tool_us": {"bash": 15000, "read_file": 8000},
               "by_tool_samples": {"bash": 6, "read_file": 8}})
+    check("legacy benchmark sessions explicitly account for unexplained requests",
+          _bench_stats["by_request_reason"] == {"unattributed": 4})
     # Timeout regression: a metrics journal can be newer than—or exist without—the transcript.
     (bench_sessions / "timed-out.metrics").write_text(json.dumps({
         "schema_version": 1,
@@ -5838,7 +5936,8 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
     _timeout_stats = _session_stats(bench_home, bench_work)
     check("benchmark reads crash-safe metrics without a final transcript",
           _timeout_stats == {"tool_calls": 7, "edits": 2, "edit_fails": 1,
-                             "input_tokens": 91, "output_tokens": 17, "requests": 4})
+                             "input_tokens": 91, "output_tokens": 17, "requests": 4,
+                             "by_request_reason": {"unattributed": 4}})
     sessions.set_name(sp, "renamed", d)
     check("session name is updatable", sessions.name_of(sp, d) == "renamed")
     check("rename keeps the messages", sessions.load(sp, d) == [{"role": "user", "content": "hi"}])
@@ -6958,7 +7057,8 @@ def test_isolated_subagents():
           and parent.usage_totals["requests"] == 1 and parent.usage_totals["input_tokens"] == 11
           and parent.activity_totals == {"tool_calls": 1, "edits": 1, "edit_fails": 0}
           and parent.timing_totals["builtin_tool_us"] == 4321
-          and parent.timing_totals["by_tool_samples"] == {"write_file": 1},
+          and parent.timing_totals["by_tool_samples"] == {"write_file": 1}
+          and parent.timing_totals["by_request_reason"] == {"subagent": 1},
           detail=outcome)
     check("integrated child edits participate in the parent checkpoint",
           parent.checkpoints.rewind(0) == (9, 1) and not (repo / "delegated.txt").exists())
@@ -7402,8 +7502,14 @@ def test_benchmark_integrity():
               "bench-secret" not in trace["stdout"] and "[REDACTED]" in trace["stdout"]
               and len(trace["stdout_sha256"]) == 64 and trace["stdout_chars"] > 0)
         import compare as _BC
+        import dgc.agent as _metric_agent
+        from dgc import sessions as _metric_sessions
         lo, hi = _BC.wilson(7, 10)
         check("benchmark comparison reports a real confidence interval", 0 < lo < .7 < hi < 1)
+        check("agent, session, runner, and comparison share one request-reason vocabulary",
+              _metric_agent._REQUEST_REASON_LABELS
+              == _RB._REQUEST_REASON_LABELS == _BC._REQUEST_REASON_LABELS
+              == _metric_sessions.REQUEST_REASON_LABELS)
         publish_manifest = {
             "settings": {"model_digest": "sha256:model", "thinking": "transport-reasoning-off",
                          "usage_source": "provider-proxy", "langs": sorted(_BC.REQUIRED_LANGS),
@@ -7461,7 +7567,8 @@ def test_benchmark_integrity():
                                       "builtin_tool_us": 250000,
                                       "builtin_tool_samples": 2,
                                       "by_tool_us": {"read_file": 50000, "bash": 200000},
-                                      "by_tool_samples": {"read_file": 1, "bash": 1}}}]}),
+                                      "by_tool_samples": {"read_file": 1, "bash": 1},
+                                      "by_request_reason": {"user_turn": 1}}}]}),
             json.dumps({"engine": "dgc", "lang": "python", "ex": "legacy", "solved": False,
                         "rounds": [{"dgc": {"time": 3, "timeout": True, "usage": {
                             "requests": 2, "synchronized": True,
@@ -7469,7 +7576,8 @@ def test_benchmark_integrity():
                             "provider_transports": {"ollama_chat": 2}}}, "stats": {
                             "tool_calls": 4, "edits": 2, "edit_fails": 1,
                             "builtin_tool_us": 0, "builtin_tool_samples": 0,
-                            "by_tool_us": {}, "by_tool_samples": {}}}]}),
+                            "by_tool_us": {}, "by_tool_samples": {},
+                            "by_request_reason": {"user_turn": 1, "tool_result": 1}}}]}),
         )))
         agg = _RB.aggregate(results)["python"]
         check("benchmark aggregate reads versioned and legacy rounds",
@@ -7479,7 +7587,8 @@ def test_benchmark_integrity():
               and agg["builtin_timing_rounds"] == 2 and agg["builtin_tool_s"] == 0.25
               and agg["builtin_tool_samples"] == 2
               and agg["by_tool_us"] == {"read_file": 50000, "bash": 200000}
-              and agg["by_tool_samples"] == {"read_file": 1, "bash": 1})
+              and agg["by_tool_samples"] == {"read_file": 1, "bash": 1}
+              and agg["by_request_reason"] == {"user_turn": 2, "tool_result": 1})
         from contextlib import redirect_stdout as _redirect_stdout
         from io import StringIO as _StringIO
         report_out = _StringIO()
@@ -7489,7 +7598,8 @@ def test_benchmark_integrity():
               "prov_s" in report_out.getvalue() and "other_s" in report_out.getvalue()
               and "req/t" in report_out.getvalue() and "out/req" in report_out.getvalue()
               and "tool_s" in report_out.getvalue()
-              and "built-in tool-seconds (sum; parallel calls may overlap)" in report_out.getvalue())
+              and "built-in tool-seconds (sum; parallel calls may overlap)" in report_out.getvalue()
+              and "DGC completed-request reasons (argument-free)" in report_out.getvalue())
         compare_results = root / "results-timing.jsonl"
         compare_results.write_bytes(results.read_bytes())
         (root / "manifest-timing.json").write_text(json.dumps({
@@ -7506,7 +7616,9 @@ def test_benchmark_integrity():
               and loaded_timing["provider_requests"] == 3
               and loaded_timing["provider_transports"] == {"ollama_chat": 3}
               and loaded_timing["builtin_tool_s"] == 0.25
-              and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000})
+              and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000}
+              and loaded_timing["by_request_reason"] == {
+                  "user_turn": 2, "tool_result": 1})
         duplicate_results = root / "results-duplicate.jsonl"
         duplicate_results.write_text(
             "\n".join([results.read_text().splitlines()[0]] * 2) + "\n")
@@ -7569,8 +7681,12 @@ def test_benchmark_integrity():
               and timed_task["provider_wall_s"] == 1.5
               and timed_task["outside_provider_s"] == 0.5
               and timed_task["tool_calls"] == 3 and timed_task["edits"] == 1
-              and timed_task["builtin_tool_s"] == 0.25 and "trace" not in timed_task
+              and timed_task["builtin_tool_s"] == 0.25
+              and timed_task["by_request_reason"] == {"user_turn": 1}
+              and "trace" not in timed_task
               and legacy_task["provider_requests"] == 2
+              and legacy_task["by_request_reason"] == {
+                  "user_turn": 1, "tool_result": 1}
               and legacy_task["provider_timing_rounds"] == 0
               and legacy_task["provider_wall_s"] is None
               and ignored_task["usage_rounds"] == 0
@@ -7678,20 +7794,28 @@ def test_benchmark_integrity():
                       ("dgc", "legacy"), ("dgc", "timed")]
               and len(comparison_payload["paired_summaries"]) == 1
               and len(comparison_payload["paired_task_deltas"]) == 2
+              and comparison_payload["runs"][0]["by_request_reason"] == {}
+              and comparison_payload["runs"][1]["by_request_reason"] == {
+                  "user_turn": 2, "tool_result": 1}
               and "task outliers" in comparison_stdout.getvalue()
+              and "dgc completed-request reasons (argument-free)" in comparison_stdout.getvalue()
+              and "codex completed-request reasons" not in comparison_stdout.getvalue()
               and "paired dgc regressions" in comparison_stdout.getvalue()
               and "python/legacy" in comparison_stdout.getvalue())
         round_delta = _RB._monotonic_stats_delta(
             {"tool_calls": 9, "builtin_tool_us": 9000, "builtin_tool_samples": 5,
              "by_tool_us": {"read_file": 3000, "bash": 6000},
-             "by_tool_samples": {"read_file": 2, "bash": 3}},
+             "by_tool_samples": {"read_file": 2, "bash": 3},
+             "by_request_reason": {"user_turn": 2, "tool_result": 4}},
             {"tool_calls": 4, "builtin_tool_us": 3500, "builtin_tool_samples": 2,
              "by_tool_us": {"read_file": 3000, "bash": 500},
-             "by_tool_samples": {"read_file": 2, "bash": 0}})
+             "by_tool_samples": {"read_file": 2, "bash": 0},
+             "by_request_reason": {"user_turn": 1, "tool_result": 1}})
         check("benchmark round deltas remain exact for resumed additive timing counters",
               round_delta == {
                   "tool_calls": 5, "builtin_tool_us": 5500, "builtin_tool_samples": 3,
-                  "by_tool_us": {"bash": 5500}, "by_tool_samples": {"bash": 3}})
+                  "by_tool_us": {"bash": 5500}, "by_tool_samples": {"bash": 3},
+                  "by_request_reason": {"user_turn": 1, "tool_result": 3}})
 
         # An operator interrupt must reap the isolated harness process group just like a timeout.
         class _InterruptedProcess:

@@ -22,13 +22,21 @@ from .scheduler import named_process_lock
 
 SESSIONS_DIR = USER_HOME / "sessions"
 SCHEMA_VERSION = 6
-METRICS_SCHEMA_VERSION = 2
+METRICS_SCHEMA_VERSION = 3
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests")
 ACTIVITY_KEYS = ("tool_calls", "edits", "edit_fails")
 TIMING_KEYS = ("builtin_tool_us", "builtin_tool_samples")
-TIMING_MAP_KEYS = ("by_tool_us", "by_tool_samples")
+TIMING_MAP_KEYS = ("by_tool_us", "by_tool_samples", "by_request_reason")
+# These are controller states, not user/model-provided tags. Keep this vocabulary in the durable
+# metrics layer so both writers and readers can reject arbitrary text in a tampered sidecar.
+REQUEST_REASON_LABELS = frozenset({
+    "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
+    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+})
 _MAX_TIMING_NAMES = 64
 _MAX_TIMING_VALUE = (1 << 63) - 1
 _LOCKS_GUARD = threading.Lock()
@@ -235,6 +243,8 @@ def _timing_values(value) -> dict:
         for name, amount in sorted(raw.items(), key=lambda item: str(item[0])):
             label = str(name)
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label):
+                continue
+            if map_key == "by_request_reason" and label not in REQUEST_REASON_LABELS:
                 continue
             if label not in cleaned and len(cleaned) >= _MAX_TIMING_NAMES:
                 continue
@@ -670,7 +680,12 @@ def activity_of(path, project_root, record: dict | None = None) -> dict:
 
 
 def timing_of(path, project_root, record: dict | None = None) -> dict:
-    """Return monotonic, argument-free built-in tool timings from transcript and crash journal."""
+    """Return monotonic argument-free tool timings and provider-request reasons.
+
+    Sessions written before metrics schema v3 have request totals but no reason map. Attribute only
+    that historical gap to the fixed ``unattributed`` bucket so a resumed session's reason counters
+    remain additive and exactly reconcilable with its completed-request total.
+    """
     try:
         timing = (record if isinstance(record, dict)
                   else _load_data(path, project_root)).get("timing") or {}
@@ -678,7 +693,19 @@ def timing_of(path, project_root, record: dict | None = None) -> dict:
         timing = {}
     journal = _load_metrics(path, project_root).get("timing") or {}
     try:
-        return _merge_timing(timing, journal)
+        merged = _merge_timing(timing, journal)
+        requests = usage_of(path, project_root, record).get("requests", 0)
+        explained = sum(merged["by_request_reason"].values())
+        if explained > requests:
+            # Divergent stale writers or manual sidecar corruption can produce individually
+            # monotonic buckets whose union is impossible. Preserve the truthful request total and
+            # discard the unprovable breakdown instead of publishing a fabricated overcount.
+            merged["by_request_reason"] = ({"unattributed": requests} if requests else {})
+        elif requests > explained:
+            merged["by_request_reason"]["unattributed"] = min(
+                _MAX_TIMING_VALUE,
+                merged["by_request_reason"].get("unattributed", 0) + requests - explained)
+        return merged
     except (ValueError, TypeError):
         return _timing_values({})
 

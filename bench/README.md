@@ -76,12 +76,15 @@ Results append to `results/results-<engine>-<model>-<tag>.jsonl` as each exercis
 finishes, so a run is **resumable** — re-run the same command and it skips
 exercises already recorded (`--redo` forces a re-run).
 
-DGC tool calls and successful/failed file-edit counts come from monotonic counters persisted in
-the session plus an atomic lightweight `.metrics` journal updated after every completed model
-request and tool call. They remain valid across context compaction, `--continue`, and an external
-wall-time SIGKILL that bypasses the full-transcript finalizer. Schema-v4 and older DGC sessions use
-a transcript-derived compatibility fallback and must not be mixed into a newly published controlled
-run.
+DGC tool calls, successful/failed file-edit counts, and completed-request reasons come from monotonic
+counters persisted in the session plus an atomic lightweight `.metrics` journal updated after every
+completed model request and tool call. They remain valid across context compaction, `--continue`, and
+an external wall-time SIGKILL that bypasses the full-transcript finalizer. Request reasons use a
+fixed controller-owned vocabulary such as `user_turn`, `tool_result`, `verifier_evidence`,
+`steering`, and `compaction`; they never contain prompts, tool arguments, paths, model output, or
+errors. Pre-metrics-schema-v3 requests appear explicitly as `unattributed`. Schema-v4 and older DGC
+sessions use a transcript-derived activity compatibility fallback and must not be mixed into a newly
+published controlled run.
 
 Performance attribution uses two independent clocks. The loopback provider proxy records monotonic
 duration for every normalized request; each round stores both request-seconds (the sum of all request
@@ -90,6 +93,8 @@ request. DGC records microsecond elapsed time and sample counts for built-in exe
 and by bounded tool name. Tool arguments, commands, paths, prompts, and results are never included in
 timing records. The timer updates only in-memory counters; the already-required activity/request
 journal save persists them, so instrumentation does not add a disk write to each tool call.
+Request-reason counters use that same save boundary and likewise add no persistence write per
+generation. The per-round `by_request_reason` map is an additive request count, not a duration.
 
 The report shows `other_s = max(agent_s - prov_s, 0)` only as outside-provider wall time—not as a
 claim that all of it is DGC overhead. Built-in tool-seconds can overlap when DGC runs independent
@@ -99,6 +104,8 @@ reads in parallel, and provider work may continue after a timed-out client disco
 named tool total points at execution, sandbox, or filesystem cost; `other_s` includes orchestration,
 permission/lease waits, external tools, process startup, and unmeasured frontend work. Legacy or
 incompletely synchronized records render affected metrics as `?`, never a misleading zero.
+The bounded `completed-request reasons` line explains DGC's journaled generations; it does not
+manufacture equivalent controller semantics for peer harnesses.
 
 ## Endpoint-free runtime overhead probe
 

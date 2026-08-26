@@ -67,6 +67,15 @@ _MAX_TIMING_VALUE = (1 << 63) - 1
 _MAX_MCP_SEARCH_OUTPUT_CHARS = 16_000
 _MAX_VERIFIED_FINAL_CHARS = 512_000  # bounded across output-limit continuations
 
+# Mirror sessions.REQUEST_REASON_LABELS without eagerly importing the persistence layer at Agent
+# module startup. The regression suite locks this set to the session and benchmark readers.
+_REQUEST_REASON_LABELS = frozenset({
+    "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
+    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+})
+
 _MCP_BROKER_SCHEMAS = [
     {"type": "function", "function": {
         "name": "mcp_search",
@@ -912,7 +921,7 @@ class Agent:
         except LLMError as exc:
             raise MCPInputError(
                 f"sampling model failed: {self._safe_text(str(exc))[:300]}") from exc
-        self._record_usage(getattr(result, "usage", {}))
+        self._record_usage(getattr(result, "usage", {}), "mcp_sampling")
         if sample_cancel.is_set():
             reason = "cancelled by user" if cancel.is_set() else "timed out"
             raise MCPInputError(f"sampling request {reason}")
@@ -943,16 +952,23 @@ class Agent:
             raise MCPInputError("sampled response cancelled before disclosure")
         return response
 
-    def _record_usage(self, raw_usage: dict | None) -> None:
+    def _record_usage(self, raw_usage: dict | None, request_reason: object = "other") -> None:
         usage = normalize_usage(raw_usage)
+        reason = (request_reason if isinstance(request_reason, str)
+                  and request_reason in _REQUEST_REASON_LABELS else "other")
         with self._usage_lock:
             for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"):
                 self.usage_totals[key] += usage[key]
             self.usage_totals["requests"] += 1
+            reasons = self.timing_totals.setdefault("by_request_reason", {})
+            reasons[reason] = min(_MAX_TIMING_VALUE, reasons.get(reason, 0) + 1)
         self._persist_metrics()
         parent = getattr(self, "_metrics_parent", None)
         if parent is not None and parent is not self:
-            parent._record_usage(usage)
+            # The child retains its detailed trajectory in its private counters. The root owns the
+            # aggregate session and deliberately records only that this generation belonged to an
+            # isolated sub-agent, rather than pretending it was part of the parent's foreground loop.
+            parent._record_usage(usage, "subagent")
 
     def _record_activity(self, name: str, edit_failed: bool = False) -> None:
         with self._usage_lock:
@@ -1196,7 +1212,7 @@ class Agent:
         return redact_value(value, self._secret_values())
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
-              defer_text: bool = False):
+              defer_text: bool = False, request_reason: str = "other"):
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
             self.messages = repaired
@@ -1239,7 +1255,7 @@ class Agent:
             result.provider_items = redact_provider_value(result.provider_items, secrets)
         if result.provider_message:
             result.provider_message = redact_provider_value(result.provider_message, secrets)
-        self._record_usage(result.usage)
+        self._record_usage(result.usage, request_reason)
         return result
 
     @property
@@ -1286,7 +1302,7 @@ class Agent:
             self.activity_totals = {"tool_calls": 0, "edits": 0, "edit_fails": 0}
             self.timing_totals = {
                 "builtin_tool_us": 0, "builtin_tool_samples": 0,
-                "by_tool_us": {}, "by_tool_samples": {},
+                "by_tool_us": {}, "by_tool_samples": {}, "by_request_reason": {},
             }
 
     def _refresh_system(self) -> None:
@@ -1768,7 +1784,7 @@ class Agent:
             res = self._aux_client(max_tokens=64, read_timeout=60).chat(
                 msgs, tools=None, reasoning_effort="off",
                 cancel=cancel if cancel is not None else self.cancelled)
-            self._record_usage(getattr(res, "usage", None))
+            self._record_usage(getattr(res, "usage", None), "title")
         except Exception:
             return None
         title = self._safe_text((getattr(res, "content", "") or "").strip())
@@ -1790,7 +1806,7 @@ class Agent:
                 [{"role": "system", "content": sysmsg}, {"role": "user", "content": ctx}],
                 tools=None, reasoning_effort="off",
                 cancel=cancel if cancel is not None else self.cancelled)
-            self._record_usage(getattr(res, "usage", None))
+            self._record_usage(getattr(res, "usage", None), "suggestion")
         except Exception:
             return None
         s = self._safe_text((getattr(res, "content", "") or "").strip()).splitlines()
@@ -1833,7 +1849,7 @@ class Agent:
             res = self._aux_client().chat([{"role": "system", "content": sysmsg},
                                            {"role": "user", "content": "\n\n".join(lines)[:40000]}],
                                           tools=None, reasoning_effort="off", cancel=self.cancelled)
-            self._record_usage(getattr(res, "usage", None))
+            self._record_usage(getattr(res, "usage", None), "handoff")
             return (self._safe_text((getattr(res, "content", "") or "").strip())
                     or "# Handoff\n\n(generation returned nothing)")
         except LLMError as e:
@@ -2000,6 +2016,10 @@ class Agent:
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
         overflow_retried = False    # context-overflow → compact-and-retry fires at most once
+        # Why the next completed foreground provider request exists. This private controller state
+        # never derives a label from transcript text, so a repository/user/model cannot forge
+        # benchmark attribution by echoing reminder tags or tool arguments.
+        next_request_reason = "user_turn"
         # Time-triage (all OFF when turn_budget_s == 0, i.e. for real slow-model users — no pressure):
         try:
             budget = float(self.config.get("turn_budget_s", 0) or 0)
@@ -2108,6 +2128,8 @@ class Agent:
                 return True
             steered = self._drain_steer(
                 close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
+            if steered:
+                next_request_reason = "steering"
             if steered and held_final_messages:
                 withhold_final(
                     "[Completion withheld by DGC: a newer user instruction continued the turn.]",
@@ -2162,13 +2184,15 @@ class Agent:
                 and self.config.get("verify_command"))
             try:
                 result = self._chat(tools, effort, cancel=chat_cancel, read_timeout=chat_timeout,
-                                    defer_text=defer_completion)
+                                    defer_text=defer_completion,
+                                    request_reason=next_request_reason)
             except ToolsUnsupportedError:
                 # The rejected request emitted no stream. Rebuild the system prompt with the
                 # fenced text-tool protocol before retrying; otherwise the first fallback answer
                 # has no instructions for calling tools and commonly stops without acting.
                 self._refresh_system()
                 self.ui.info("↻ endpoint has no native tools — retrying with the text tool protocol")
+                next_request_reason = "transport_retry"
                 continue
             except ContextOverflowError as e:
                 # the real window is smaller than configured → compact hard and retry ONCE, instead of
@@ -2184,6 +2208,7 @@ class Agent:
                     self.ui.info("↻ context overflowed — compacting and retrying")
                     # Aggressive compaction guarantees the retry is smaller.
                     self.maybe_compact(force=True, deadline=compact_deadline, tools=tools)
+                    next_request_reason = "context_retry"
                     continue
                 if held_final_messages:
                     withhold_final(
@@ -2202,10 +2227,12 @@ class Agent:
                     try:
                         result = self._chat(tools, effort, cancel=chat_cancel,
                                             read_timeout=chat_timeout,
-                                            defer_text=defer_completion)
+                                            defer_text=defer_completion,
+                                            request_reason="fallback")
                     except ToolsUnsupportedError:
                         self._refresh_system()
                         self.ui.info("↻ fallback endpoint has no native tools — retrying with text tools")
+                        next_request_reason = "transport_retry"
                         continue
                     except LLMError as e2:
                         if held_final_messages:
@@ -2303,6 +2330,7 @@ class Agent:
                         self.messages.append({"role": "user", "content":
                             "Your previous response was cut off at the length limit. Continue exactly "
                             "where you left off — do not repeat what you already wrote."})
+                        next_request_reason = "output_continue"
                         continue
                     if defer_completion:
                         withhold_final(
@@ -2324,6 +2352,7 @@ class Agent:
                         withhold_final(
                             "[Completion withheld by DGC: open todos required the turn to continue.]",
                             "completion withheld — open todos still require action")
+                    next_request_reason = "todo_gate"
                     continue
                 if not (result.content or "").strip():
                     if not summary_nudged:
@@ -2339,6 +2368,7 @@ class Agent:
                             "with a tool. Do not answer only in the thinking channel.\n</system-reminder>"})
                         if defer_completion:
                             withhold_final()
+                        next_request_reason = "empty_final"
                         continue
                     if defer_completion:
                         withhold_final()
@@ -2349,6 +2379,7 @@ class Agent:
                         withhold_final(
                             "[Completion withheld by DGC: a newer user instruction continued the turn.]",
                             "completion withheld — applying the newer user instruction")
+                    next_request_reason = "steering"
                     continue
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
                         and not goal_nudged and did_tools):  # standing /goal gate:
@@ -2362,6 +2393,7 @@ class Agent:
                         withhold_final(
                             "[Completion withheld by DGC: the active standing goal required another step.]",
                             "completion withheld — checking the active standing goal")
+                    next_request_reason = "goal_gate"
                     continue
                 needs_verifier = (mutating_total > 0 and self.config.get("verify_before_done")
                                   and self.config.get("verify_command"))
@@ -2385,6 +2417,7 @@ class Agent:
                             withhold_final(
                                 "[Completion withheld by DGC: the configured verifier did not pass.]",
                                 "completion withheld — configured verifier failed; continuing")
+                        next_request_reason = "verifier_evidence"
                         continue
                 if self._drain_steer(close_if_empty=True):
                     # Catch steering that arrived while the final configured verifier was running.
@@ -2392,6 +2425,7 @@ class Agent:
                         withhold_final(
                             "[Completion withheld by DGC: a newer user instruction continued the turn.]",
                             "completion withheld — applying the newer user instruction")
+                    next_request_reason = "steering"
                     continue
                 if defer_completion:
                     publish_final()
@@ -2418,6 +2452,7 @@ class Agent:
                 else:
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\n" + reissue + "\n</system-reminder>"})
+                next_request_reason = "tool_reissue"
                 continue
 
             did_tools = True                # the model called tools → expect a closing summary
@@ -2546,6 +2581,7 @@ class Agent:
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
             flush_text_results()
+            next_request_reason = "tool_result"
 
             # In a timed autonomous run, the configured verifier is an authoritative controller
             # primitive, not a decision that needs another model generation. If the model lands an
@@ -2577,6 +2613,7 @@ class Agent:
                     last_fail_fp = fp
                     batch_verified = verified = False
                     verify_nudged = False
+                    next_request_reason = "verifier_evidence"
                 verdict = "passed" if passed else "did not pass"
                 note = (
                     "<system-reminder>\n"
@@ -2703,6 +2740,8 @@ class Agent:
                     self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
                 else:                                                        # native: separate turn
                     self.messages.append({"role": "user", "content": note})
+                if next_request_reason == "tool_result":
+                    next_request_reason = "convergence_nudge"
         if held_final_messages:
             withhold_final(
                 "[Completion withheld by DGC: the turn limit was reached before verification.]",
@@ -3562,7 +3601,7 @@ class Agent:
                     max_tokens=_COMPACT_MAX_TOKENS, read_timeout=read_timeout).chat(
                         [{"role": "user", "content": prompt}], tools=None,
                         reasoning_effort="off", cancel=compact_cancel)
-                self._record_usage(getattr(result, "usage", None))
+                self._record_usage(getattr(result, "usage", None), "compaction")
                 candidate = self._safe_text(
                     str(getattr(result, "content", "") or "").strip())
                 required = ("## Goal", "## Progress", "## Next")

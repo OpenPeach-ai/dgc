@@ -34,6 +34,12 @@ EXPECTED_PROVIDER_TRANSPORTS = {
     "aider": "chat_completions", "opencode": "chat_completions", "pi": "chat_completions",
 }
 _PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
+_REQUEST_REASON_LABELS = frozenset({
+    "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
+    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "compaction", "mcp_sampling", "subagent", "unattributed", "other",
+})
 
 
 class UsageSynchronizationError(RuntimeError):
@@ -725,7 +731,9 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
                      if isinstance(journal_timing.get(key), dict) else {})
             names = {str(name) for name in left} | {str(name) for name in right}
             valid_names = [name for name in sorted(names)
-                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)][:64]
+                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)
+                           and (key != "by_request_reason"
+                                or name in _REQUEST_REASON_LABELS)][:64]
             return {
                 name: max(timing_counter(left.get(name)), timing_counter(right.get(name)))
                 for name in valid_names
@@ -738,6 +746,17 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
                                       int(journal_usage.get("output_tokens", 0) or 0)),
                  "requests": max(0, int(usage.get("requests", 0) or 0),
                                  int(journal_usage.get("requests", 0) or 0))}
+        request_reasons = timing_map("by_request_reason")
+        explained_requests = sum(request_reasons.values())
+        if explained_requests > stats["requests"]:
+            request_reasons = ({"unattributed": stats["requests"]}
+                               if stats["requests"] else {})
+        elif stats["requests"] > explained_requests:
+            request_reasons["unattributed"] = (
+                request_reasons.get("unattributed", 0)
+                + stats["requests"] - explained_requests)
+        if stats["requests"] or request_reasons:
+            stats["by_request_reason"] = request_reasons
         if transcript_has_timing or journal_has_timing:
             stats.update({
                 "builtin_tool_us": timing_scalar("builtin_tool_us"),
@@ -899,7 +918,8 @@ def aggregate(jsonl_path: Path) -> dict:
                                        "builtin_tool_s": 0.0,
                                        "builtin_tool_samples": 0,
                                        "builtin_timing_rounds": 0,
-                                       "by_tool_us": {}, "by_tool_samples": {}})
+                                       "by_tool_us": {}, "by_tool_samples": {},
+                                       "by_request_reason": {}})
         p["n"] += 1
         if r.get("solved") and r.get("solved_round") == 1:
             p["p1"] += 1
@@ -913,6 +933,17 @@ def aggregate(jsonl_path: Path) -> dict:
                 p["timeouts"] += 1
             stats = rd.get("stats") or {}
             p["edit_fails"] += stats.get("edit_fails", 0) or 0
+            reason_values = (
+                stats.get("by_request_reason")
+                if str(r.get("engine") or "") == "dgc"
+                and isinstance(stats.get("by_request_reason"), dict) else {})
+            valid_reasons = [str(name) for name in sorted(reason_values)
+                             if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))
+                             and str(name) in _REQUEST_REASON_LABELS][:64]
+            for name in valid_reasons:
+                p["by_request_reason"][name] = (
+                    p["by_request_reason"].get(name, 0)
+                    + max(0, int(reason_values.get(name, 0) or 0)))
             if "builtin_tool_us" in stats:
                 p["builtin_timing_rounds"] += 1
                 p["builtin_tool_s"] += max(0, int(stats.get("builtin_tool_us", 0) or 0)) / 1_000_000
@@ -963,7 +994,8 @@ def print_report(jsonl_path: Path, langs: list[str] | None = None) -> None:
            "provider_duration_s": 0.0, "provider_wall_s": 0.0,
            "provider_max_duration_s": 0.0, "provider_timing_rounds": 0,
            "builtin_tool_s": 0.0, "builtin_tool_samples": 0,
-           "builtin_timing_rounds": 0, "by_tool_us": {}, "by_tool_samples": {}}
+           "builtin_timing_rounds": 0, "by_tool_us": {}, "by_tool_samples": {},
+           "by_request_reason": {}}
     print(f"\n==== {Path(jsonl_path).name} ====")
     print(f"{'lang':11s} {'n':>4} {'pass@1':>14} {'pass@2':>14} {'avg_s':>7} "
           f"{'prov_s':>7} {'other_s':>7} {'tool_s':>7} {'req/t':>6} {'avg_out':>9} "
@@ -1027,6 +1059,11 @@ def print_report(jsonl_path: Path, langs: list[str] | None = None) -> None:
                 f"{name}={elapsed / 1_000_000:.1f}s/{tot['by_tool_samples'].get(name, 0)}"
                 for name, elapsed in ranked[:8])
             print("built-in tool-seconds (sum; parallel calls may overlap): " + details)
+        if tot["by_request_reason"]:
+            ranked = sorted(
+                tot["by_request_reason"].items(), key=lambda item: (-item[1], item[0]))
+            details = ", ".join(f"{name}={count}" for name, count in ranked[:10])
+            print("DGC completed-request reasons (argument-free): " + details)
 
 
 def summary_line(rec: dict) -> str:
