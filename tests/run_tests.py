@@ -7857,6 +7857,73 @@ def test_steering():
         a._active_mcp_tools.clear()
         a._mcp_query_text = ""
 
+    # A frontier-sized catalog is indexed once per catalog generation. The contract tests both
+    # bounded hot-path work and lexical recall for ordinary inflections without relying on timing.
+    class _IndexedCatalogServer:
+        def __init__(self, tools): self.tools = tools
+        def refresh_tools_if_stale(self): return False
+    _retrieval_targets = [
+        ("create_github_issue", "Create a GitHub issue", "issue title and body"),
+        ("backup_database", "Back up a database", "database backup destination"),
+        ("send_slack_message", "Send a Slack message", "message channel and text"),
+        ("search_repository", "Search repository files", "repository search query"),
+        ("update_customer_record", "Update a customer record", "record fields"),
+        ("remove_cloud_resource", "Remove a cloud resource", "resource identifier"),
+    ]
+    _indexed_tools = [{"name": name, "description": description,
+                       "inputSchema": {"type": "object", "properties": {
+                           "value": {"type": "string", "description": parameter}}}}
+                      for name, description, parameter in _retrieval_targets]
+    _indexed_tools.extend({
+        "name": f"unrelated_fixture_{index}",
+        "description": f"Synthetic unrelated operation {index}",
+        "inputSchema": {"type": "object", "properties": {
+            "value": {"type": "string", "description": "fixture payload " + ("x" * 400)}}},
+    } for index in range(250))
+    _indexed_mcp = object.__new__(_CatalogManager)
+    _indexed_mcp.servers = {"retrieval": _IndexedCatalogServer(_indexed_tools)}
+    _indexed_mcp._routes = {}
+    _indexed_mcp._tool_schema_cache = ()
+    _indexed_mcp._tool_search_cache = ()
+    _indexed_mcp._rebuild_routes()
+    _initial_index = _indexed_mcp._tool_search_cache
+    _initial_schemas = _indexed_mcp.tool_schemas()
+    _retrieval_cases = {
+        "creating GitHub issues": "mcp__retrieval__create_github_issue",
+        "database backups": "mcp__retrieval__backup_database",
+        "sending Slack messages": "mcp__retrieval__send_slack_message",
+        "searching repository files": "mcp__retrieval__search_repository",
+        "updated customer records": "mcp__retrieval__update_customer_record",
+        "removed cloud resources": "mcp__retrieval__remove_cloud_resource",
+    }
+    _retrieval_results = {
+        query: [schema["function"]["name"]
+                for schema in _indexed_mcp.search_tool_schemas(query, 1)]
+        for query in _retrieval_cases
+    }
+    check("large MCP retrieval recalls inflected intents without arbitrary filler",
+          len(_initial_schemas) == 256
+          and all(names == [_retrieval_cases[query]]
+                  for query, names in _retrieval_results.items()),
+          detail=repr(_retrieval_results))
+    _selected_indexed, _indexed_lazy = _indexed_mcp.select_tool_schemas(
+        "creating GitHub issues", 4096)
+    check("large MCP catalog ranking reuses one bounded generation index",
+          _indexed_mcp._tool_search_cache is _initial_index
+          and _indexed_mcp.tool_schemas()[0] is _initial_schemas[0]
+          and max(len(entry[6]) for entry in _initial_index) <= 8192
+          and max(len(entry[7]) for entry in _initial_index) <= 1024
+          and _indexed_lazy
+          and any(schema["function"]["name"] == "mcp__retrieval__create_github_issue"
+                  for schema in _selected_indexed))
+    _indexed_tools[0]["description"] = "Open a tracked GitHub ticket"
+    _indexed_mcp._rebuild_routes()
+    check("MCP catalog rebuild atomically invalidates schema and search caches",
+          _indexed_mcp._tool_search_cache is not _initial_index
+          and _indexed_mcp.tool_schemas()[0] is not _initial_schemas[0]
+          and _indexed_mcp.search_tool_schemas("tracked ticket", 1)[0]["function"]["name"]
+              == "mcp__retrieval__create_github_issue")
+
     import dgc.tools as _stateful_tools
     import time as _state_time
     _state_output_id = "out-stateful-schema"

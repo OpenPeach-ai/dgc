@@ -45,8 +45,13 @@ _INPUT_ORIGIN_METHODS = {"tools/call", "prompts/get", "resources/read"}
 _CATALOG_SEARCH_STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "call", "do", "for", "from",
     "in", "is", "it", "mcp", "of", "on", "or", "please", "the", "this", "to", "tool",
-    "tools", "use", "with",
+    "tools", "use", "with", "array", "boolean", "default", "description", "enum", "integer",
+    "number", "object", "properties", "property", "required", "schema", "string", "type",
 }
+_MAX_CATALOG_SEARCH_SCHEMA_CHARS = 8_192
+_MAX_CATALOG_SEARCH_SCHEMA_NODES = 4_096
+_MAX_CATALOG_SEARCH_RAW_TERMS = 256
+_MAX_CATALOG_SEARCH_TERMS = 1_024
 _SENSITIVE_FIELD_RE = re.compile(
     r"\b(?:password|passphrase|secret|client[ _-]?secret|api[ _-]?key|access[ _-]?token|"
     r"refresh[ _-]?token|bearer|private[ _-]?key|ssh[ _-]?key|seed[ _-]?phrase|mnemonic|"
@@ -1386,6 +1391,9 @@ class MCPManager:
         self.servers: dict[str, MCPServer] = {}
         self.failures: dict[str, str] = {}
         self._routes: dict[str, tuple[str, str]] = {}
+        self._tool_schema_cache: tuple[dict, ...] = ()
+        self._tool_search_cache: tuple[tuple, ...] = ()
+        self._catalog_state_lock = threading.RLock()
         self._client_capabilities = (dict(client_capabilities)
                                      if isinstance(client_capabilities, dict) else {})
         atexit.register(self.stop_all)
@@ -1414,7 +1422,8 @@ class MCPManager:
 
     def _rebuild_routes(self) -> None:
         routes: dict[str, tuple[str, str]] = {}
-        for server_name, server in self.servers.items():
+        schemas: list[dict] = []
+        for server_name, server in list(self.servers.items()):
             for tool in server.tools:
                 original = str(tool.get("name", ""))
                 base = f"mcp__{_safe_name(server_name)}__{_safe_name(original)}"
@@ -1423,7 +1432,23 @@ class MCPManager:
                 while exposed in routes:
                     exposed, n = f"{base}_{n}", n + 1
                 routes[exposed] = (server_name, original)
-        self._routes = routes
+                parameters = tool.get("inputSchema")
+                if not isinstance(parameters, dict):
+                    parameters = {"type": "object", "properties": {}}
+                schemas.append({"type": "function", "function": {
+                    "name": exposed,
+                    "description": (f"[MCP:{server_name}] {tool.get('description', '')}")[:1000],
+                    "parameters": parameters,
+                }})
+        schema_cache = tuple(schemas)
+        search_cache = tuple(self._schema_search_entry(schema) for schema in schemas)
+        lock = getattr(self, "_catalog_state_lock", None)
+        if lock is None:  # compatibility for deliberately minimal injected manager shims
+            lock = self._catalog_state_lock = threading.RLock()
+        with lock:
+            self._routes = routes
+            self._tool_schema_cache = schema_cache
+            self._tool_search_cache = search_cache
 
     def tool_schemas(self) -> list[dict]:
         changed = False
@@ -1432,62 +1457,138 @@ class MCPManager:
                 changed = True
         if changed:
             self._rebuild_routes()
-        schemas = []
-        by_route = {route: pair for route, pair in self._routes.items()}
-        for exposed, (server_name, original) in by_route.items():
-            server = self.servers[server_name]
-            tool = next((t for t in server.tools if str(t.get("name", "")) == original), {})
-            schema = tool.get("inputSchema")
-            if not isinstance(schema, dict):
-                schema = {"type": "object", "properties": {}}
-            schemas.append({"type": "function", "function": {
-                "name": exposed,
-                "description": (f"[MCP:{server_name}] {tool.get('description', '')}")[:1000],
-                "parameters": schema,
-            }})
-        return schemas
+        with self._catalog_state_lock:
+            return list(self._tool_schema_cache)
 
     @staticmethod
-    def _catalog_terms(query: str) -> set[str]:
-        return {
-            term for term in re.findall(r"[a-z0-9]{2,}", str(query or "").lower())
-            if term not in _CATALOG_SEARCH_STOP_WORDS
-        }
+    def _term_forms(term: str) -> set[str]:
+        """Small deterministic inflection normalizer, deliberately not a language-model retriever."""
+        term = str(term or "").lower()
+        forms = {term}
+        if len(term) > 4 and term.endswith("ies"):
+            forms.add(term[:-3] + "y")
+        if len(term) > 4 and term.endswith("s"):
+            forms.add(term[:-1])
+        if len(term) > 5 and term.endswith("ing"):
+            root = term[:-3]
+            forms.update((root, root + "e"))
+            if len(root) > 2 and root[-1] == root[-2]:
+                forms.add(root[:-1])
+        if len(term) > 4 and term.endswith("ed"):
+            root = term[:-2]
+            forms.update((root, root + "e"))
+            if len(root) > 2 and root[-1] == root[-2]:
+                forms.add(root[:-1])
+        return {form for form in forms if len(form) >= 2}
 
     @classmethod
-    def _schema_relevance(cls, schema: dict, query: str) -> int:
-        terms = cls._catalog_terms(query)
-        if not terms:
-            return 0
+    def _catalog_terms(cls, query: str) -> set[str]:
+        raw_terms = re.findall(r"[a-z0-9]{2,}", str(query or "").lower())
+        if len(raw_terms) > _MAX_CATALOG_SEARCH_RAW_TERMS:
+            half = _MAX_CATALOG_SEARCH_RAW_TERMS // 2
+            raw_terms = raw_terms[:half] + raw_terms[-half:]
+        terms: set[str] = set()
+        for term in raw_terms:
+            if term not in _CATALOG_SEARCH_STOP_WORDS:
+                terms.update(form for form in cls._term_forms(term)
+                             if form not in _CATALOG_SEARCH_STOP_WORDS)
+                if len(terms) >= _MAX_CATALOG_SEARCH_TERMS:
+                    break
+        return terms
+
+    @staticmethod
+    def _parameter_search_text(parameters) -> str:
+        """Extract bounded schema vocabulary without serializing a whole 128 KiB schema per query."""
+        output: list[str] = []
+        used = nodes = 0
+        stack = [parameters]
+        seen: set[int] = set()
+        while stack and used < _MAX_CATALOG_SEARCH_SCHEMA_CHARS \
+                and nodes < _MAX_CATALOG_SEARCH_SCHEMA_NODES:
+            value = stack.pop()
+            nodes += 1
+            if isinstance(value, (dict, list, tuple)):
+                identity = id(value)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+            if isinstance(value, dict):
+                items = list(value.items())
+                for key, _ in items:
+                    text = str(key).lower()
+                    remaining = _MAX_CATALOG_SEARCH_SCHEMA_CHARS - used
+                    if remaining <= 0:
+                        break
+                    output.append(text[:remaining]); used += min(len(text), remaining) + 1
+                stack.extend(item for _, item in reversed(items))
+            elif isinstance(value, (list, tuple)):
+                stack.extend(reversed(value))
+            elif isinstance(value, str):
+                remaining = _MAX_CATALOG_SEARCH_SCHEMA_CHARS - used
+                if remaining > 0:
+                    text = value.lower()[:remaining]
+                    output.append(text); used += len(text) + 1
+        return " ".join(output)
+
+    @classmethod
+    def _schema_search_entry(cls, schema: dict) -> tuple:
         fn = schema.get("function") or {}
         name = str(fn.get("name") or "").lower()
-        name_parts = set(re.findall(r"[a-z0-9]{2,}", name))
         description = str(fn.get("description") or "").lower()
+        parameters = cls._parameter_search_text(fn.get("parameters") or {})
         try:
-            parameters = json.dumps(fn.get("parameters") or {}, ensure_ascii=False,
-                                    separators=(",", ":"), default=str).lower()
+            size = len(json.dumps(schema, default=str))
         except (RecursionError, TypeError, ValueError):
-            parameters = ""
+            size = 1 << 60
+        return (schema, size, name, cls._catalog_terms(name), description,
+                cls._catalog_terms(description), parameters, cls._catalog_terms(parameters))
+
+    def _catalog_search_entries(self, schemas: list[dict]) -> tuple[tuple, ...]:
+        lock = getattr(self, "_catalog_state_lock", None)
+        if lock is None:
+            lock = self._catalog_state_lock = threading.RLock()
+        with lock:
+            cached_schemas = getattr(self, "_tool_schema_cache", ())
+            cached_entries = getattr(self, "_tool_search_cache", ())
+        if (len(schemas) == len(cached_schemas) == len(cached_entries)
+                and all(schema is cached for schema, cached in zip(schemas, cached_schemas))):
+            return cached_entries
+        return tuple(self._schema_search_entry(schema) for schema in schemas)
+
+    @classmethod
+    def _entry_relevance(cls, entry: tuple, query: str,
+                         terms: set[str] | None = None) -> int:
+        _, _, name, name_terms, description, description_terms, parameters, parameter_terms = entry
+        if terms is None:
+            terms = cls._catalog_terms(query)
+        if not terms:
+            return 0
         score = 100 if str(query or "").strip().lower() == name else 0
         for term in terms:
-            if term in name_parts:
+            if term in name_terms:
                 score += 24
             elif term in name:
                 score += 12
-            if term in description:
+            if term in description_terms or term in description:
                 score += 4
-            if term in parameters:
+            if term in parameter_terms or term in parameters:
                 score += 1
         return score
+
+    @classmethod
+    def _schema_relevance(cls, schema: dict, query: str) -> int:
+        return cls._entry_relevance(cls._schema_search_entry(schema), query)
 
     def search_tool_schemas(self, query: str, limit: int = 8) -> list[dict]:
         """Return deterministic relevant schemas from the current catalog, never arbitrary filler."""
         limit = max(1, min(20, int(limit)))
+        schemas = self.tool_schemas()
+        terms = self._catalog_terms(query)
         ranked = []
-        for index, schema in enumerate(self.tool_schemas()):
-            score = self._schema_relevance(schema, query)
+        for index, entry in enumerate(self._catalog_search_entries(schemas)):
+            score = self._entry_relevance(entry, query, terms)
             if score > 0:
-                ranked.append((-score, index, schema))
+                ranked.append((-score, index, entry[0]))
         ranked.sort(key=lambda row: (row[0], row[1]))
         return [schema for _, _, schema in ranked[:limit]]
 
@@ -1499,15 +1600,18 @@ class MCPManager:
         budget = max(0, int(budget_chars))
         # Match LLMClient.estimate_input_tokens: escaped non-ASCII schema text must consume budget
         # exactly as it does in the provider request estimate.
-        sizes = [len(json.dumps(schema, default=str)) for schema in schemas]
+        entries = self._catalog_search_entries(schemas)
+        sizes = [entry[1] for entry in entries]
         if sum(sizes) <= budget:
             return schemas, False
         budget = max(0, budget - max(0, int(reserve_chars)))
         active = set(active or ())
+        terms = self._catalog_terms(query)
         ranked = []
-        for index, schema in enumerate(schemas):
+        for index, entry in enumerate(entries):
+            schema = entry[0]
             name = str((schema.get("function") or {}).get("name") or "")
-            score = self._schema_relevance(schema, query)
+            score = self._entry_relevance(entry, query, terms)
             if name in active or score > 0:
                 ranked.append((0 if name in active else 1, -score, index, schema, sizes[index]))
         ranked.sort(key=lambda row: (row[0], row[1], row[2]))
@@ -1521,11 +1625,12 @@ class MCPManager:
     def call(self, full_name: str, arguments: dict,
              cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
              input_handler=None) -> str:
-        route = self._routes.get(full_name)
+        with self._catalog_state_lock:
+            route = self._routes.get(full_name)
+            server = self.servers.get(route[0]) if route else None
         if not route:
             return f"ERROR: unknown MCP tool route: {full_name}"
         server_name, tool = route
-        server = self.servers.get(server_name)
         if not server:
             return f"ERROR: MCP server '{server_name}' is not connected"
         return server.call_tool(tool, arguments, cancel=cancel,
@@ -1554,6 +1659,9 @@ class MCPManager:
     def stop_all(self) -> None:
         for server in list(self.servers.values()):
             server.stop()
-        self.servers.clear()
-        self._routes.clear()
+        with self._catalog_state_lock:
+            self.servers.clear()
+            self._routes.clear()
+            self._tool_schema_cache = ()
+            self._tool_search_cache = ()
         self.failures.clear()
