@@ -370,6 +370,7 @@ class TUI:
         "Behaviour": [
             ("mode", "Permission mode", "enum", ["default", "acceptEdits", "plan", "auto"]),
             ("max_turns", "Max tool iterations", "int"), ("bash_timeout", "Bash timeout (s)", "int"),
+            ("search_timeout", "Search timeout (s)", "int"),
             ("verify_before_done", "Verify before finishing", "bool"),
             ("verify_command", "Verify command", "str"), ("suggest", "Ghost-text suggestions", "bool"),
             ("aux_idle_delay_ms", "Title/suggestion idle delay (ms)", "int"),
@@ -2822,7 +2823,7 @@ class TUI:
         elif cmd == "set":
             from .config import DEFAULTS
             tunable = ("temperature", "top_p", "top_k", "min_p", "max_tokens", "context_size",
-                       "bash_timeout", "request_timeout", "artifact_hostname")
+                       "bash_timeout", "search_timeout", "request_timeout", "artifact_hostname")
             sp = rest.split(maxsplit=1)
             if not sp:
                 cur = " · ".join(f"{k}={self.config.get(k, '') or '(default)'}" for k in tunable)

@@ -5,14 +5,19 @@ import difflib
 import atexit
 import glob as globmod
 import hashlib
+import heapq
 import html
 import ipaddress
 import itertools as _itertools
+import json
 import os
 import re
+import shutil
 import signal
 import socket
+import stat
 import subprocess
+import sys
 import tempfile
 import threading as _threading
 import time
@@ -36,6 +41,13 @@ MAX_BASH_QUERY_CHARS = 256
 MAX_BASH_COMMAND_LABEL = 1000
 MAX_GREP_MATCHES = 200
 MAX_GLOB_RESULTS = 100
+MAX_SEARCH_FILES = 100_000
+MAX_SEARCH_ENTRIES = 200_000
+MAX_SEARCH_PATTERN_CHARS = 1000
+MAX_SEARCH_RECORD_BYTES = 16_384
+MAX_SEARCH_ERROR_BYTES = 8192
+MAX_SEARCH_OUTPUT_BYTES = 16_000_000
+SEARCH_TIMEOUT_S = 15.0
 MAX_FETCH_CHARS = 8000
 MAX_FETCH_BYTES = 1_000_000
 MAX_FETCH_REDIRECTS = 5
@@ -1290,27 +1302,29 @@ def bash_kill(args: dict, ctx) -> str:
     return f"killed {bid} (process group reaped)"
 
 
-def _terminate_background(proc: subprocess.Popen) -> None:
+def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = False) -> None:
     """Terminate and reap an entire background process group, including grandchildren."""
-    if proc.poll() is not None:
+    if proc.poll() is not None and not (sweep_exited_group and os.name == "posix"):
         try:
             proc.wait(timeout=0)
         except Exception:
             pass
         return
+    pgid = proc.pid if os.name == "posix" else None
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        else:
+        if pgid is not None and proc.poll() is None:
+            os.killpg(pgid, signal.SIGTERM)
+        elif pgid is None and proc.poll() is None:
             proc.terminate()
         proc.wait(timeout=2)
-        return
     except (ProcessLookupError, PermissionError, OSError, subprocess.TimeoutExpired):
         pass
+    # The leader can exit on SIGTERM while a grandchild ignores it. Sweep the original process
+    # group before returning; start_new_session makes the leader PID the stable group ID.
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        else:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGKILL)
+        elif proc.poll() is None:
             proc.kill()
     except (ProcessLookupError, PermissionError, OSError):
         pass
@@ -1340,60 +1354,688 @@ def _shutdown_background() -> None:
 atexit.register(_shutdown_background)
 
 
+def _ripgrep_path() -> str | None:
+    """Resolve the optional fast search engine without consulting a shell."""
+    candidate = shutil.which("rg")
+    if not candidate:
+        return None
+    try:
+        return str(Path(candidate).resolve(strict=True))
+    except (OSError, RuntimeError):
+        return None
+
+
+def _search_timeout(ctx) -> float:
+    try:
+        value = float(getattr(ctx, "config", None).get("search_timeout", SEARCH_TIMEOUT_S))
+    except (AttributeError, TypeError, ValueError):
+        value = SEARCH_TIMEOUT_S
+    if value != value or value in (float("inf"), float("-inf")):
+        value = SEARCH_TIMEOUT_S
+    return max(1.0, min(60.0, value))
+
+
+def _run_search_process(argv: list[str], on_stdout, ctx, *,
+                        stdin_data: bytes | None = None,
+                        cwd: Path | None = None) -> tuple[int | None, str, str]:
+    """Run an internal search helper with bounded stderr, cancellation, timeout, and tree cleanup.
+
+    ``on_stdout`` receives byte chunks and returns false once enough results have been collected.
+    The helper is argv-only, inherits a credential-minimal environment, and owns a process group.
+    """
+    from .guards import mcp_process_env
+    env, _ = mcp_process_env(None)
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd or ctx.project_root),
+            stdin=(subprocess.PIPE if stdin_data is not None else None),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=(os.name == "posix"), env=env)
+    except OSError as exc:
+        return None, "launch", str(exc)
+    if stdin_data is not None:
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(stdin_data)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError, ValueError) as exc:
+            _terminate_background(proc, sweep_exited_group=True)
+            return proc.returncode, "input", str(exc)
+
+    capped = _threading.Event()
+    reader_failed = _threading.Event()
+    errors = bytearray()
+    stdout_bytes = 0
+
+    def read_stdout() -> None:
+        nonlocal stdout_bytes
+        try:
+            if proc.stdout is None:
+                return
+            while True:
+                chunk = proc.stdout.read(16_384)
+                if not chunk:
+                    return
+                room = MAX_SEARCH_OUTPUT_BYTES - stdout_bytes
+                if room <= 0:
+                    capped.set()
+                    return
+                accepted = chunk[:room]
+                stdout_bytes += len(accepted)
+                if on_stdout(accepted) is False or len(accepted) < len(chunk):
+                    capped.set()
+                    return
+        except Exception:
+            reader_failed.set()
+
+    def read_stderr() -> None:
+        try:
+            if proc.stderr is None:
+                return
+            while True:
+                chunk = proc.stderr.read(4096)
+                if not chunk:
+                    return
+                room = MAX_SEARCH_ERROR_BYTES - len(errors)
+                if room > 0:
+                    errors.extend(chunk[:room])
+        except (OSError, ValueError):
+            pass
+
+    stdout_reader = _threading.Thread(target=read_stdout, daemon=True)
+    stderr_reader = _threading.Thread(target=read_stderr, daemon=True)
+    stdout_reader.start(); stderr_reader.start()
+    deadline = time.monotonic() + _search_timeout(ctx)
+    reason = ""
+    while True:
+        process_done = proc.poll() is not None
+        readers_done = not stdout_reader.is_alive() and not stderr_reader.is_alive()
+        if process_done and readers_done:
+            break
+        cancel = getattr(ctx, "cancelled", None)
+        if cancel is not None and cancel.is_set():
+            reason = "cancelled"
+        elif capped.is_set():
+            reason = "limit"
+        elif reader_failed.is_set():
+            reason = "output"
+        elif time.monotonic() >= deadline:
+            reason = "timeout"
+        if reason:
+            _terminate_background(proc, sweep_exited_group=True)
+            break
+        time.sleep(0.01)
+    try:
+        proc.wait(timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        _terminate_background(proc, sweep_exited_group=True)
+    stdout_reader.join(timeout=1); stderr_reader.join(timeout=1)
+    for stream, reader in ((proc.stdout, stdout_reader), (proc.stderr, stderr_reader)):
+        if reader.is_alive() and stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+            reader.join(timeout=1)
+    if not reason:
+        if capped.is_set():
+            reason = "limit"
+        elif reader_failed.is_set():
+            reason = "output"
+    message = bytes(errors).decode("utf-8", errors="replace").strip()
+    return proc.returncode, reason, message
+
+
+def _validate_glob_pattern(value, *, name: str = "glob pattern") -> str:
+    pattern = str(value or "")
+    if (not pattern or len(pattern) > MAX_SEARCH_PATTERN_CHARS or "\x00" in pattern
+            or Path(pattern).is_absolute() or re.match(r"^[A-Za-z]:[\\/]", pattern)):
+        raise ValueError(
+            f"{name} must be a relative pattern of at most {MAX_SEARCH_PATTERN_CHARS} characters")
+    normalized = pattern.replace("\\", "/") if os.name == "nt" else pattern
+    if ".." in normalized.split("/"):
+        raise ValueError(f"{name} may not contain '..'")
+    normalized = normalized.removeprefix("./")
+    if not normalized or normalized == ".":
+        raise ValueError(f"{name} must select at least one filename")
+    return normalized
+
+
+def _confined_regular(path: Path, boundary: Path) -> os.stat_result | None:
+    """Accept only a non-symlink regular file whose resolved parent stays under the scan root."""
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        resolved = path.resolve(strict=True)
+        if os.path.commonpath((str(boundary), str(resolved))) != str(boundary):
+            return None
+        return info
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _scan_boundary(target: Path) -> Path:
+    try:
+        candidate = target if stat.S_ISDIR(target.lstat().st_mode) else target.parent
+        return candidate.resolve(strict=True)
+    except OSError:
+        return target.parent.resolve(strict=False)
+
+
+def _search_target_kind(target: Path) -> str:
+    try:
+        mode = target.lstat().st_mode
+    except OSError:
+        return ""
+    if stat.S_ISDIR(mode):
+        return "directory"
+    if stat.S_ISREG(mode):
+        return "file"
+    return ""
+
+
+def _prepare_search_target(target: Path) -> tuple[str, Path] | None:
+    """Freeze one canonical scan boundary and reject a target changed during preparation."""
+    try:
+        before = target.lstat()
+        kind = ("directory" if stat.S_ISDIR(before.st_mode) else
+                "file" if stat.S_ISREG(before.st_mode) else "")
+        if not kind:
+            return None
+        resolved_target = target.resolve(strict=True)
+        boundary = resolved_target if kind == "directory" else resolved_target.parent
+        after = target.lstat()
+        identity_before = (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))
+        identity_after = (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode))
+        same_path = (os.path.normcase(os.path.normpath(str(resolved_target)))
+                     == os.path.normcase(os.path.normpath(str(target))))
+        if identity_before != identity_after or not same_path:
+            return None
+        return kind, boundary
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _display_search_path(path: Path, ctx) -> str:
+    relative = _safe_output(os.path.relpath(path, ctx.project_root), ctx)
+    escaped = []
+    for character in relative:
+        code = ord(character)
+        if character == "\n":
+            escaped.append(r"\n")
+        elif character == "\r":
+            escaped.append(r"\r")
+        elif character == "\t":
+            escaped.append(r"\t")
+        elif code < 32 or code == 127:
+            escaped.append(f"\\x{code:02x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
+
+
+def _rg_exclusions() -> list[str]:
+    out: list[str] = []
+    for name in sorted(SKIP_DIRS):
+        out.extend(("--glob", f"!**/{name}/**"))
+    return out
+
+
+def _glob_heap_add(heap: list[tuple[int, str]], path: Path, info: os.stat_result, ctx) -> None:
+    item = (int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+            _display_search_path(path, ctx))
+    if len(heap) < MAX_GLOB_RESULTS:
+        heapq.heappush(heap, item)
+    elif item > heap[0]:
+        heapq.heapreplace(heap, item)
+
+
+def _glob_with_rg(executable: str, pattern: str, base: Path, boundary: Path,
+                  ctx) -> tuple[list[str], int, str, str]:
+    # A one-segment pattern is a basename pattern at every depth, matching the old recursive API.
+    positive = pattern if "/" in pattern else f"**/{pattern}"
+    if positive.startswith("!"):
+        positive = "\\" + positive
+    argv = [executable, "--no-config", "--files", "--null", "--hidden", "--no-ignore",
+            "--glob", positive, *_rg_exclusions(), "--", str(base)]
+    pending = bytearray()
+    heap: list[tuple[int, str]] = []
+    count = 0
+    parse_error = ""
+
+    def consume(chunk: bytes) -> bool:
+        nonlocal count, parse_error
+        pending.extend(chunk)
+        while True:
+            end = pending.find(b"\x00")
+            if end < 0:
+                if len(pending) > MAX_SEARCH_RECORD_BYTES:
+                    parse_error = "ripgrep emitted an oversized file record"
+                    return False
+                return True
+            raw = bytes(pending[:end]); del pending[:end + 1]
+            path = Path(os.fsdecode(raw))
+            if not path.is_absolute():
+                path = base / path
+            info = _confined_regular(path, boundary)
+            if info is None:
+                continue
+            count += 1
+            _glob_heap_add(heap, path, info, ctx)
+            if count >= MAX_SEARCH_FILES:
+                return False
+
+    code, reason, error = _run_search_process(argv, consume, ctx)
+    if pending and not parse_error and reason not in ("limit", "timeout", "cancelled"):
+        parse_error = "ripgrep emitted an incomplete file record"
+    if code not in (0, 1) and not reason and not parse_error:
+        reason = "process"
+    rows = [item[1] for item in sorted(heap, reverse=True)]
+    return rows, count, ("output" if parse_error else reason), parse_error or error
+
+
+def _walk_regular_files(root: Path, ctx, state: dict, *, boundary: Path | None = None):
+    """Yield bounded non-symlink regular files without following discovered directory links."""
+    boundary = boundary or _scan_boundary(root)
+    kind = _search_target_kind(root)
+    if kind == "file":
+        info = _confined_regular(root, boundary)
+        if info is not None:
+            state["files"] += 1
+            yield root, info
+        return
+    if kind != "directory":
+        return
+    stack = [root]
+    while stack:
+        cancel = getattr(ctx, "cancelled", None)
+        if cancel is not None and cancel.is_set():
+            state["cancelled"] = True
+            return
+        if time.monotonic() >= state.get("deadline", float("inf")):
+            state["timed_out"] = True
+            return
+        directory = stack.pop()
+        try:
+            dinfo = directory.lstat()
+            if not stat.S_ISDIR(dinfo.st_mode) or directory.is_symlink():
+                continue
+            resolved = directory.resolve(strict=True)
+            if os.path.commonpath((str(boundary), str(resolved))) != str(boundary):
+                continue
+            entries = os.scandir(directory)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        with entries:
+            for entry in entries:
+                if time.monotonic() >= state.get("deadline", float("inf")):
+                    state["timed_out"] = True
+                    return
+                state["entries"] += 1
+                if state["entries"] > MAX_SEARCH_ENTRIES:
+                    state["truncated"] = True
+                    return
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if entry.name not in SKIP_DIRS:
+                            stack.append(Path(entry.path))
+                        continue
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                if state["files"] >= MAX_SEARCH_FILES:
+                    state["truncated"] = True
+                    return
+                path = Path(entry.path)
+                info = _confined_regular(path, boundary)
+                if info is None:
+                    continue
+                state["files"] += 1
+                yield path, info
+
+
+def _segment_glob_match(relative: str, pattern: str) -> bool:
+    """Path-aware glob matcher with ``**`` support for the dependency-free fallback."""
+    path_parts = tuple(part for part in relative.replace(os.sep, "/").split("/") if part)
+    pattern_parts = tuple(part for part in pattern.split("/") if part not in ("", "."))
+    if len(pattern_parts) == 1:
+        return bool(path_parts and globmod.fnmatch.fnmatchcase(path_parts[-1], pattern_parts[0]))
+    memo: dict[tuple[int, int], bool] = {}
+
+    def matches(pi: int, gi: int) -> bool:
+        key = (pi, gi)
+        if key in memo:
+            return memo[key]
+        if gi == len(pattern_parts):
+            answer = pi == len(path_parts)
+        elif pattern_parts[gi] == "**":
+            answer = matches(pi, gi + 1) or (pi < len(path_parts) and matches(pi + 1, gi))
+        else:
+            answer = (pi < len(path_parts)
+                      and globmod.fnmatch.fnmatchcase(path_parts[pi], pattern_parts[gi])
+                      and matches(pi + 1, gi + 1))
+        memo[key] = answer
+        return answer
+
+    return matches(0, 0)
+
+
+def _glob_fallback(pattern: str, base: Path, boundary: Path,
+                   ctx) -> tuple[list[str], int, str, str]:
+    state = {"entries": 0, "files": 0, "truncated": False, "cancelled": False,
+             "timed_out": False, "deadline": time.monotonic() + _search_timeout(ctx)}
+    heap: list[tuple[int, str]] = []
+    count = 0
+    base_is_directory = _search_target_kind(base) == "directory"
+    for path, info in _walk_regular_files(base, ctx, state, boundary=boundary):
+        try:
+            relative = path.relative_to(base).as_posix() if base_is_directory else path.name
+        except ValueError:
+            continue
+        if _segment_glob_match(relative, pattern):
+            count += 1
+            _glob_heap_add(heap, path, info, ctx)
+    reason = ("cancelled" if state["cancelled"] else "timeout" if state["timed_out"]
+              else "limit" if state["truncated"] else "")
+    return [item[1] for item in sorted(heap, reverse=True)], count, reason, ""
+
+
 def glob_tool(args: dict, ctx) -> str:
-    pattern = str(args.get("pattern", ""))
-    if not pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts or "\x00" in pattern:
-        return "error: glob pattern must be relative to its search path and may not contain '..'"
+    try:
+        pattern = _validate_glob_pattern(args.get("pattern"))
+    except ValueError as exc:
+        return f"error: {exc}"
     base = (_resolve(str(args.get("path", "")), ctx.project_root,
                      allow_external=_allow_external(args)) if args.get("path") else ctx.project_root)
-    matches = [p for p in globmod.glob(str(base / "**" / pattern), recursive=True)
-               if os.path.isfile(p)]
-    matches = [m for m in matches if not any(part in SKIP_DIRS for part in Path(m).parts)]
-    matches.sort(key=lambda m: -os.path.getmtime(m))
-    rel = [os.path.relpath(m, ctx.project_root) for m in matches[:MAX_GLOB_RESULTS]]
-    if len(matches) > MAX_GLOB_RESULTS:
-        rel.append(f"… ({len(matches) - MAX_GLOB_RESULTS} more)")
-    return "\n".join(rel) or "no matches"
+    prepared = _prepare_search_target(base)
+    if prepared is None:
+        return f"error: glob search path is unavailable or not a regular file/directory: {base}"
+    _kind, boundary = prepared
+    executable = _ripgrep_path()
+    if executable:
+        rows, count, reason, error = _glob_with_rg(executable, pattern, base, boundary, ctx)
+        if reason in ("launch", "process"):
+            rows, count, reason, error = _glob_fallback(pattern, base, boundary, ctx)
+    else:
+        rows, count, reason, error = _glob_fallback(pattern, base, boundary, ctx)
+    if reason == "cancelled":
+        return "error: glob search cancelled"
+    if reason in ("launch", "output", "process") or (not rows and error):
+        return f"error: glob search failed: {_safe_output(error or reason, ctx)}"
+    if not rows:
+        if reason == "timeout":
+            detail = _safe_output(error, ctx)
+            return (f"error: glob search timed out after {_search_timeout(ctx):g}s"
+                    + (f": {detail}" if detail else ""))
+        return "no matches" + (" (scan limit reached)" if reason == "limit" else "")
+    more = max(0, count - len(rows))
+    if reason == "timeout":
+        rows.append(f"… (search timed out after {_search_timeout(ctx):g}s; results are partial)")
+    elif reason == "limit":
+        known = f"at least {more} more; " if more else ""
+        rows.append(f"… ({known}search scan/output limit reached; additional matches may exist)")
+    elif more:
+        rows.append(f"… ({more} more)")
+    return "\n".join(rows)
+
+
+def _read_regular_bytes(path: Path, boundary: Path, maximum: int) -> bytes | None:
+    if _confined_regular(path, boundary) is None:
+        return None
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+            return None
+        chunks: list[bytes] = []
+        total = 0
+        while total <= maximum:
+            chunk = os.read(fd, min(65_536, maximum + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk); total += len(chunk)
+        return None if total > maximum else b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _grep_fallback_scan(pattern: str, target: Path, boundary: Path,
+                        file_glob: str, ctx):
+    try:
+        rx = re.compile(pattern)
+    except re.error as exc:
+        return [], set(), "regex", f"bad regex: {exc}"
+    state = {"entries": 0, "files": 0, "truncated": False, "cancelled": False,
+             "timed_out": False, "deadline": time.monotonic() + _search_timeout(ctx)}
+    matches: list[str] = []
+    files_hit: set[str] = set()
+    for path, _info in _walk_regular_files(target, ctx, state, boundary=boundary):
+        if file_glob and not globmod.fnmatch.fnmatchcase(path.name, file_glob):
+            continue
+        raw = _read_regular_bytes(path, boundary, 2_000_000)
+        if raw is None or b"\x00" in raw[:8192]:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), 1):
+            if time.monotonic() >= state["deadline"]:
+                return matches, files_hit, "timeout", ""
+            if rx.search(line):
+                relative = _display_search_path(path, ctx)
+                safe_line = _trunc_line(_safe_output(line.strip(), ctx))
+                matches.append(f"{relative}:{number}: {safe_line}")
+                files_hit.add(relative)
+                if len(matches) >= MAX_GREP_MATCHES:
+                    return matches, files_hit, "limit", ""
+    reason = ("cancelled" if state["cancelled"] else "timeout" if state["timed_out"]
+              else "scan" if state["truncated"] else "")
+    return matches, files_hit, reason, ""
+
+
+def _grep_fallback_worker_main() -> int:
+    """Private stdin/stdout worker entrypoint for killable Python-regex compatibility."""
+    try:
+        raw = sys.stdin.buffer.read(65_537)
+        if len(raw) > 65_536:
+            raise ValueError("fallback worker input exceeds 64 KiB")
+        request = json.loads(raw.decode("utf-8"))
+        if not isinstance(request, dict):
+            raise ValueError("fallback worker input must be an object")
+        pattern = request.get("pattern")
+        target = request.get("target")
+        file_glob = request.get("file_glob")
+        project_root = request.get("project_root")
+        boundary = request.get("boundary")
+        timeout = request.get("timeout")
+        if not all(isinstance(value, str) for value in (
+                pattern, target, file_glob, project_root, boundary)):
+            raise ValueError("fallback worker string fields are invalid")
+        timeout = max(1.0, min(60.0, float(timeout)))
+        worker_ctx = type("SearchWorkerContext", (), {})()
+        worker_ctx.project_root = Path(project_root)
+        worker_ctx.cancelled = None
+        worker_ctx.config = type("SearchWorkerConfig", (), {
+            "get": lambda self, key, default=None: timeout
+            if key == "search_timeout" else default,
+        })()
+        matches, files_hit, status, error = _grep_fallback_scan(
+            pattern, Path(target), Path(boundary), file_glob, worker_ctx)
+        payload = {"matches": matches, "files_hit": sorted(files_hit),
+                   "status": status, "error": error}
+    except BaseException as exc:
+        payload = {"matches": [], "files_hit": [], "status": "process",
+                   "error": f"{type(exc).__name__}: {exc}"}
+    sys.stdout.write(json.dumps(payload, separators=(",", ":")))
+    return 0
+
+
+def _grep_fallback(pattern: str, target: Path, boundary: Path, file_glob: str, ctx):
+    """Run Python-regex compatibility in a process that timeout/cancel can actually stop."""
+    timeout = _search_timeout(ctx)
+    request = json.dumps({
+        "pattern": pattern, "target": str(target), "file_glob": file_glob,
+        "project_root": str(ctx.project_root), "boundary": str(boundary), "timeout": timeout,
+    }, separators=(",", ":")).encode("utf-8")
+    output = bytearray()
+
+    def consume(chunk: bytes) -> bool:
+        output.extend(chunk)
+        return len(output) <= 1_000_000
+
+    code, reason, error = _run_search_process(
+        [sys.executable, "-m", "dgc.tools", "--grep-fallback-worker"],
+        consume, ctx, stdin_data=request, cwd=Path(__file__).resolve().parent.parent)
+    if reason:
+        return [], set(), ("output" if reason == "limit" else reason), error
+    if code != 0:
+        return [], set(), "process", error or f"fallback worker exited {code}"
+    try:
+        payload = json.loads(bytes(output).decode("utf-8"))
+        matches = payload.get("matches")
+        files_hit = payload.get("files_hit")
+        status = payload.get("status")
+        worker_error = payload.get("error")
+        if (not isinstance(matches, list) or len(matches) > MAX_GREP_MATCHES
+                or not all(isinstance(row, str) for row in matches)
+                or not isinstance(files_hit, list) or len(files_hit) > MAX_GREP_MATCHES
+                or not all(isinstance(path, str) for path in files_hit)
+                or status not in ("", "limit", "scan", "timeout", "regex", "process")
+                or not isinstance(worker_error, str)):
+            raise ValueError("fallback worker result shape is invalid")
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError, ValueError) as exc:
+        return [], set(), "output", str(exc)
+    # Apply the live caller's exact-secret set after crossing the process boundary.
+    return ([_safe_output(row, ctx) for row in matches],
+            {_safe_output(path, ctx) for path in files_hit}, status,
+            _safe_output(worker_error, ctx))
+
+
+def _grep_with_rg(executable: str, pattern: str, target: Path, boundary: Path,
+                  target_is_directory: bool, file_glob: str, ctx):
+    argv = [executable, "--no-config", "--no-heading", "--with-filename", "--null",
+            "--line-number", "--column", "--color", "never", "--hidden", "--no-ignore",
+            "--max-filesize", "2M", "--max-columns", str(MAX_LINE_LEN),
+            "--max-columns-preview"]
+    if file_glob:
+        argv.extend(("--glob", f"**/{file_glob}"))
+    argv.extend((*_rg_exclusions(), "--", pattern, str(target)))
+    pending = bytearray()
+    matches: list[str] = []
+    files_hit: set[str] = set()
+    parse_error = ""
+
+    def consume(chunk: bytes) -> bool:
+        nonlocal parse_error
+        pending.extend(chunk)
+        while True:
+            separator = pending.find(b"\x00")
+            end = pending.find(b"\n", separator + 1) if separator >= 0 else -1
+            if separator < 0 or end < 0:
+                if len(pending) > MAX_SEARCH_RECORD_BYTES:
+                    parse_error = "ripgrep emitted an oversized match record"
+                    return False
+                return True
+            raw_path = bytes(pending[:separator])
+            rest = bytes(pending[separator + 1:end]); del pending[:end + 1]
+            fields = rest.split(b":", 2)
+            if len(fields) != 3:
+                parse_error = "ripgrep emitted a malformed match record"
+                return False
+            try:
+                number = max(1, int(fields[0]))
+            except ValueError:
+                parse_error = "ripgrep emitted an invalid line number"
+                return False
+            path = Path(os.fsdecode(raw_path))
+            if not path.is_absolute():
+                path = target / path if target_is_directory else target.parent / path
+            if _confined_regular(path, boundary) is None:
+                continue
+            relative = _display_search_path(path, ctx)
+            line = fields[2].decode("utf-8", errors="replace").rstrip("\r")
+            matches.append(f"{relative}:{number}: {_trunc_line(_safe_output(line.strip(), ctx))}")
+            files_hit.add(relative)
+            if len(matches) >= MAX_GREP_MATCHES:
+                return False
+
+    code, reason, error = _run_search_process(argv, consume, ctx)
+    if pending and not parse_error and reason not in ("limit", "timeout", "cancelled"):
+        parse_error = "ripgrep emitted an incomplete match record"
+    if parse_error:
+        reason, error = "output", parse_error
+    elif code not in (0, 1) and not reason:
+        reason = "regex" if code == 2 else "process"
+    return matches, files_hit, reason, error
 
 
 def grep_tool(args: dict, ctx) -> str:
     pattern = str(args.get("pattern", ""))
+    if not pattern or len(pattern) > MAX_SEARCH_PATTERN_CHARS or "\x00" in pattern:
+        return (f"error: grep pattern must contain 1 to {MAX_SEARCH_PATTERN_CHARS} "
+                "characters and no NUL byte")
     target = (_resolve(str(args.get("path", "")), ctx.project_root,
                        allow_external=_allow_external(args)) if args.get("path") else ctx.project_root)
-    file_glob = args.get("glob")
-    try:
-        rx = re.compile(pattern)
-    except re.error as e:
-        return f"error: bad regex: {e}"
-    if target.is_file():
-        files = [target]
-    else:
-        files = []
-        for dirpath, dirnames, filenames in os.walk(target):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            for fn in filenames:
-                if file_glob and not globmod.fnmatch.fnmatch(fn, str(file_glob)):
-                    continue
-                files.append(Path(dirpath) / fn)
-    matches, files_hit = [], set()
-    for f in files:
-        if len(matches) >= MAX_GREP_MATCHES:
-            break
+    prepared = _prepare_search_target(target)
+    if prepared is None:
+        return f"error: grep search path is unavailable or not a regular file/directory: {target}"
+    target_kind, boundary = prepared
+    file_glob = ""
+    if args.get("glob"):
         try:
-            if f.stat().st_size > 2_000_000:
-                continue
-            text = f.read_text(errors="replace")
-        except OSError:
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if rx.search(line):
-                rel = os.path.relpath(f, ctx.project_root)
-                matches.append(f"{rel}:{i}: {_trunc_line(_safe_output(line.strip(), ctx))}")
-                files_hit.add(rel)
-                if len(matches) >= MAX_GREP_MATCHES:
-                    break
-    header = f"{len(matches)} match(es) in {len(files_hit)} file(s)\n" if matches else ""
-    return header + "\n".join(matches) if matches else "no matches"
+            file_glob = _validate_glob_pattern(args.get("glob"), name="grep file glob")
+        except ValueError as exc:
+            return f"error: {exc}"
+        if "/" in file_glob:
+            return "error: grep file glob must match a filename, not a path"
+
+    executable = _ripgrep_path()
+    if executable:
+        matches, files_hit, reason, error = _grep_with_rg(
+            executable, pattern, target, boundary, target_kind == "directory", file_glob, ctx)
+        # Ripgrep deliberately excludes look-around/backreferences. Preserve the prior Python regex
+        # surface when such an expression is valid, but keep that fallback bounded and link-safe.
+        if reason in ("regex", "process", "launch"):
+            try:
+                re.compile(pattern)
+            except re.error:
+                pass
+            else:
+                matches, files_hit, reason, error = _grep_fallback(
+                    pattern, target, boundary, file_glob, ctx)
+    else:
+        matches, files_hit, reason, error = _grep_fallback(
+            pattern, target, boundary, file_glob, ctx)
+
+    if reason == "cancelled":
+        return "error: grep search cancelled"
+    if reason in ("regex", "process", "output", "launch", "input"):
+        return f"error: grep search failed: {_safe_output(error or reason, ctx)}"
+    if not matches:
+        if reason == "timeout":
+            detail = _safe_output(error, ctx)
+            return (f"error: grep search timed out after {_search_timeout(ctx):g}s"
+                    + (f": {detail}" if detail else ""))
+        suffix = " (scan limit reached)" if reason in ("limit", "scan") else ""
+        return "no matches" + suffix
+    observed = "at least " if reason in ("limit", "scan", "timeout") else ""
+    rows = [f"{observed}{len(matches)} match(es) in {len(files_hit)} file(s)", *matches]
+    if reason == "limit":
+        rows.append("… (result cap reached; additional matches may exist — refine the pattern or path)")
+    elif reason == "scan":
+        rows.append("… (search scan limit reached; results are partial)")
+    elif reason == "timeout":
+        rows.append(f"… (search timed out after {_search_timeout(ctx):g}s; results are partial)")
+    return "\n".join(rows)
 
 
 _SOURCE_EXTS = {
@@ -1665,3 +2307,9 @@ def execute(name: str, args: dict, ctx) -> str:
         return f"error: {e}"
     except Exception as e:  # never let a tool crash the loop
         return f"error: {type(e).__name__}: {e}"
+
+
+if __name__ == "__main__":  # private process-isolated compatibility worker; not a public CLI
+    if sys.argv[1:] == ["--grep-fallback-worker"]:
+        raise SystemExit(_grep_fallback_worker_main())
+    raise SystemExit(2)

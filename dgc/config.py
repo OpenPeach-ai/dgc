@@ -81,6 +81,7 @@ DEFAULTS: dict = {
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
     "verify_command": "",                       #   feed failures back once. e.g. "npm test" / "pytest -q"
     "bash_timeout": 120,
+    "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
     "approval_timeout_s": 300,                  # abandoned IDE permission prompts fail closed
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size

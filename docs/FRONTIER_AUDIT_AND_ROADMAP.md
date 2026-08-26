@@ -38,7 +38,7 @@ the editor registries: those are external release actions that require a reviewe
 
 | Area | Implemented and verified in this working tree | Still required for a defensible frontier claim |
 |---|---|---|
-| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection, explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
+| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including descendant search discovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted foreground/background output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees with exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
@@ -106,7 +106,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current working tree | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 705 / 705 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 716 / 716 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -525,7 +525,14 @@ bounded idle TTL, with a four-session pool, a 128-document LRU, content-aware cl
 failure retirement, external-file one-shot isolation, explicit/exit cleanup, and
 `code_intel_lsp_idle_s: 0` one-shot compatibility.
 Unsolicited or late diagnostics outside the bounded active-document set are discarded.
-The complete offline evidence is 705/705 Python checks, 18/18 editor transport/webview checks, and
+`grep` and `glob` now use a no-shell ripgrep fast path when available and a bounded dependency-free
+walker otherwise. Both refuse repository descendant file/directory symlinks instead of inheriting
+outside-read authority from an approved project root; direct external roots still require the normal
+explicit approval. Search subprocesses receive a credential-minimal environment and have cancellation,
+timeout, POSIX process-group cleanup, global file/result/record/stdout/stderr ceilings, safe NUL-delimited
+filename framing, control-character/path redaction, and truthful partial-result notices. The fallback
+also skips non-regular/binary/oversized files and caps entries without retaining an unbounded file list.
+The complete offline evidence is 716/716 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Implementation note for command-output continuity: foreground pipes are drained continuously rather
@@ -760,7 +767,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-705/705 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+716/716 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

@@ -312,6 +312,8 @@ Useful keys:
   interval before DGC retries a capability that an endpoint/model rejected.
 - `context_size` — auto-sized to the model; long sessions compact at
   `compact_threshold` of it.
+- `search_timeout` — bounded 1–60 second lifetime for internal `grep`/`glob` discovery. DGC uses
+  ripgrep without a shell when available and a link-safe bounded fallback otherwise.
 - `session_redaction` — on by default. Durable transcripts, checkpoint conversation blobs, goals,
   titles, and plans receive an additional credential-redaction pass. Live provider/tool/editor/ACP
   masking is always enforced. Exact file rewind snapshots remain byte-for-byte unchanged inside the

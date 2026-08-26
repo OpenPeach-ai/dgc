@@ -296,6 +296,169 @@ def unit_tests(tmp: Path):
     import time as _time_tools
     import dgc.tools as _tools_bg
 
+    # Search starts at one authorized root, but repository-controlled descendants are still
+    # untrusted. Neither the ripgrep fast path nor the dependency-free fallback may follow them.
+    _search_outside = Path(tempfile.mkdtemp())
+    _search_secret = _search_outside / "outside-search.txt"
+    _search_secret.write_text("OUTSIDE_SEARCH_SENTINEL\n")
+    _search_safe = tmp / "inside-search.txt"
+    _search_safe.write_text("INSIDE_SEARCH_SENTINEL\n")
+    _search_file_link = tmp / "search-file-link.txt"
+    _search_dir_link = tmp / "search-dir-link"
+    _search_file_link.symlink_to(_search_secret)
+    _search_dir_link.symlink_to(_search_outside, target_is_directory=True)
+    _confined_grep = execute("grep", {"pattern": "SEARCH_SENTINEL"}, ctx)
+    _confined_glob = execute("glob", {"pattern": "**/*search*.txt"}, ctx)
+    check("grep and glob never follow repository descendant symlinks",
+          "INSIDE_SEARCH_SENTINEL" in _confined_grep
+          and "OUTSIDE_SEARCH_SENTINEL" not in _confined_grep
+          and "inside-search.txt" in _confined_glob
+          and "search-file-link.txt" not in _confined_glob
+          and "search-dir-link" not in _confined_glob,
+          _confined_grep + "\n" + _confined_glob)
+    _approved_external_grep = execute(
+        "grep", {"pattern": "OUTSIDE_SEARCH_SENTINEL", "path": str(_search_outside),
+                  "_dgc_external_approved": True}, ctx)
+    check("an explicitly approved external search root remains usable",
+          "outside-search.txt:1: OUTSIDE_SEARCH_SENTINEL" in _approved_external_grep,
+          _approved_external_grep)
+
+    _race_parent = tmp / "search-race-parent"
+    _race_parent.mkdir()
+    _race_target = _race_parent / "answer.txt"
+    _race_target.write_text("SAFE_SEARCH_STATE\n")
+    _race_prepared = _tools_bg._prepare_search_target(_race_target)
+    _race_target.unlink(); _race_parent.rmdir()
+    _race_outside = Path(tempfile.mkdtemp())
+    (_race_outside / "answer.txt").write_text("OUTSIDE_RACE_SENTINEL\n")
+    _race_parent.symlink_to(_race_outside, target_is_directory=True)
+    _race_boundary = _race_prepared[1] if _race_prepared else tmp / "invalid-boundary"
+    _race_fallback = _tools_bg._grep_fallback(
+        "OUTSIDE_RACE_SENTINEL", _race_target, _race_boundary, "", ctx)
+    _race_fast = ([], set(), "", "")
+    _race_rg_executable = _tools_bg._ripgrep_path()
+    if _race_rg_executable:
+        _race_fast = _tools_bg._grep_with_rg(
+            _race_rg_executable, "OUTSIDE_RACE_SENTINEL", _race_target,
+            _race_boundary, False, "", ctx)
+    check("search authority remains bound after a parent is swapped for an outside symlink",
+          _race_prepared is not None and not _race_fallback[0] and not _race_fast[0],
+          repr((_race_fallback, _race_fast)))
+
+    _real_ripgrep_path = _tools_bg._ripgrep_path
+    _tools_bg._ripgrep_path = lambda: None
+    try:
+        _fallback_grep = execute("grep", {"pattern": r"INSIDE(?=_SEARCH_SENTINEL)"}, ctx)
+        _fallback_glob = execute("glob", {"pattern": "**/*search*.txt"}, ctx)
+    finally:
+        _tools_bg._ripgrep_path = _real_ripgrep_path
+    check("bounded dependency-free search fallback is also link-safe",
+          "inside-search.txt:1: INSIDE_SEARCH_SENTINEL" in _fallback_grep
+          and "OUTSIDE_SEARCH_SENTINEL" not in _fallback_grep
+          and "inside-search.txt" in _fallback_glob
+          and "search-file-link.txt" not in _fallback_glob
+          and "search-dir-link" not in _fallback_glob,
+          _fallback_grep + "\n" + _fallback_glob)
+
+    _incompatible_rg = tmp / "incompatible-rg"
+    _incompatible_rg.write_text(f"#!{sys.executable}\nimport sys\nsys.exit(2)\n")
+    _incompatible_rg.chmod(0o755)
+    _tools_bg._ripgrep_path = lambda: str(_incompatible_rg)
+    try:
+        _compat_grep = execute("grep", {"pattern": "INSIDE_SEARCH_SENTINEL"}, ctx)
+        _compat_glob = execute("glob", {"pattern": "inside-search.txt"}, ctx)
+    finally:
+        _tools_bg._ripgrep_path = _real_ripgrep_path
+    check("an incompatible ripgrep binary degrades to the bounded fallback",
+          "inside-search.txt:1: INSIDE_SEARCH_SENTINEL" in _compat_grep
+          and "inside-search.txt" in _compat_glob,
+          _compat_grep + "\n" + _compat_glob)
+
+    _redos_file = tmp / "search-redos.txt"
+    _redos_file.write_text("a" * 100_000 + "!\n")
+    _redos_ctx = Ctx(tmp)
+    _redos_ctx.config = type("ReDoSSearchCfg", (), {
+        "get": lambda self, key, default=None: 1 if key == "search_timeout" else default,
+    })()
+    _tools_bg._ripgrep_path = lambda: None
+    _redos_started = _time_tools.monotonic()
+    try:
+        _redos_result = execute(
+            "grep", {"pattern": "(a+)+$", "path": "search-redos.txt"}, _redos_ctx)
+    finally:
+        _tools_bg._ripgrep_path = _real_ripgrep_path
+    _redos_elapsed = _time_tools.monotonic() - _redos_started
+    check("fallback regex timeout kills pathological evaluation instead of stranding the agent",
+          _redos_elapsed < 4 and "grep search timed out" in _redos_result,
+          f"elapsed={_redos_elapsed:.2f} result={_redos_result[-500:]}")
+
+    _many_matches = tmp / "search-result-cap.txt"
+    _many_matches.write_text("".join(
+        f"GLOBAL_SEARCH_CAP {number}\n" for number in range(_tools_bg.MAX_GREP_MATCHES + 5)))
+    _capped_grep = execute("grep", {"pattern": "GLOBAL_SEARCH_CAP",
+                                     "path": "search-result-cap.txt"}, ctx)
+    check("grep enforces and reports one global result cap",
+          _capped_grep.startswith(f"at least {_tools_bg.MAX_GREP_MATCHES} match(es)")
+          and _capped_grep.count("GLOBAL_SEARCH_CAP") == _tools_bg.MAX_GREP_MATCHES
+          and "result cap reached" in _capped_grep, _capped_grep[-500:])
+
+    for _glob_number in range(_tools_bg.MAX_GLOB_RESULTS + 5):
+        (tmp / f"search-glob-cap-{_glob_number:03d}.bounded").write_text("x")
+    _capped_glob = execute("glob", {"pattern": "search-glob-cap-*.bounded"}, ctx)
+    check("glob retains only its newest bounded result set and reports omitted matches",
+          len(_capped_glob.splitlines()) == _tools_bg.MAX_GLOB_RESULTS + 1
+          and _capped_glob.splitlines()[-1] == "… (5 more)", _capped_glob[-500:])
+    check("search rejects malformed or oversized patterns before traversal",
+          execute("grep", {"pattern": "["}, ctx).startswith("error: grep search failed:")
+          and execute("glob", {"pattern": "x" * (_tools_bg.MAX_SEARCH_PATTERN_CHARS + 1)}, ctx)
+          .startswith("error: glob pattern must be"))
+    if os.name == "posix":
+        _control_name = tmp / "search-control\nname.txt"
+        _control_name.write_text("CONTROL_NAME_MATCH\n")
+        _control_grep = execute("grep", {"pattern": "CONTROL_NAME_MATCH"}, ctx)
+        _control_glob = execute("glob", {"pattern": "search-control*"}, ctx)
+        check("search paths escape control characters before model-visible output",
+              "search-control\\nname.txt" in _control_grep
+              and "search-control\\nname.txt" in _control_glob
+              and "search-control\nname.txt" not in _control_grep + _control_glob,
+              _control_grep + "\n" + _control_glob)
+
+        _slow_search = tmp / "slow-search-helper"
+        _slow_search.write_text(
+            f"#!{sys.executable}\n"
+            "import subprocess,sys,time\n"
+            "child=subprocess.Popen([sys.executable,'-c',"
+            "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'])\n"
+            "print(f'CHILD_PID={child.pid}', file=sys.stderr, flush=True)\n"
+            "time.sleep(30)\n")
+        _slow_search.chmod(0o755)
+        _slow_ctx = Ctx(tmp)
+        _slow_ctx.config = type("SlowSearchCfg", (), {
+            "get": lambda self, key, default=None: 1 if key == "search_timeout" else default,
+        })()
+        _tools_bg._ripgrep_path = lambda: str(_slow_search)
+        _slow_started = _time_tools.monotonic()
+        try:
+            _slow_result = execute("grep", {"pattern": "never"}, _slow_ctx)
+        finally:
+            _tools_bg._ripgrep_path = _real_ripgrep_path
+        _slow_elapsed = _time_tools.monotonic() - _slow_started
+        _slow_pid_match = _re_bg.search(r"CHILD_PID=(\d+)", _slow_result)
+        _slow_child_alive = False
+        if _slow_pid_match:
+            try:
+                _slow_pid = int(_slow_pid_match.group(1))
+                os.kill(_slow_pid, 0)
+                _slow_stat = Path(f"/proc/{_slow_pid}/stat")
+                _slow_child_alive = not (
+                    _slow_stat.exists() and _slow_stat.read_text().split()[2] == "Z")
+            except (OSError, ProcessLookupError, ValueError):
+                pass
+        check("search timeout reaps the complete helper process group and reports failure",
+              _slow_elapsed < 4 and "search timed out" in _slow_result
+              and bool(_slow_pid_match) and not _slow_child_alive,
+              f"elapsed={_slow_elapsed:.2f} alive={_slow_child_alive} result={_slow_result[-500:]}")
+
     _timeout_program = (
         "import subprocess,sys\n"
         "p=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
