@@ -4,7 +4,8 @@ Linux uses bubblewrap with a private home/runtime/tmp view, a writable project m
 a minimal environment, isolated process namespaces, and no network by default. macOS
 uses sandbox-exec with the closest available filesystem/network policy. Permission
 approval remains independent: confinement never turns an arbitrary shell string into
-a trusted read-only operation.
+a trusted read-only operation. The host-side backend is resolved outside the writable
+workspace, and startup-injection environment variables are never forwarded.
 """
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from .guards import ENV_HIJACK_BLOCKLIST
+
 
 _SAFE_ENV = {
     "PATH", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "TZ",
@@ -20,12 +23,24 @@ _SAFE_ENV = {
 }
 
 
+def _backend() -> tuple[str, Path] | None:
+    name = ("bwrap" if sys.platform.startswith("linux") else
+            "sandbox-exec" if sys.platform == "darwin" else "")
+    candidate = shutil.which(name) if name else None
+    if not candidate:
+        return None
+    try:
+        executable = Path(candidate).resolve(strict=True)
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            return None
+    except OSError:
+        return None
+    return name, executable
+
+
 def available() -> str | None:
-    if sys.platform.startswith("linux") and shutil.which("bwrap"):
-        return "bwrap"
-    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        return "sandbox-exec"
-    return None
+    backend = _backend()
+    return backend[0] if backend else None
 
 
 def requested(config) -> bool:
@@ -50,7 +65,8 @@ def process_env(config=None) -> dict[str, str]:
         configured = [part.strip() for part in configured.split(",") if part.strip()]
     for name in configured if isinstance(configured, (list, tuple)) else []:
         key = str(name)
-        if key in os.environ and key and "\x00" not in key and "=" not in key:
+        if (key in os.environ and key and "\x00" not in key and "=" not in key
+                and key.upper() not in ENV_HIJACK_BLOCKLIST):
             env[key] = os.environ[key]
     env.update({"HOME": "/tmp/dgc-home", "TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"})
     return env
@@ -88,15 +104,19 @@ def _mask_with_workspace_link(argv: list[str], masked: Path, root: Path) -> None
 
 def wrap(command: str, project_root, config=None) -> list[str] | None:
     """Build a confined argv, or return ``None`` when no supported sandbox exists."""
-    kind = available()
+    backend = _backend()
+    if backend is None:
+        return None
+    kind, executable = backend
     root = Path(project_root).resolve(strict=False)
+    if root == Path("/") or _inside(executable, root):
+        # `/` has no outside boundary. A helper inside the model-writable workspace could be
+        # replaced between turns and would execute on the host before confinement takes effect.
+        return None
     network = bool(config and config.get("sandbox_network", False))
     if kind == "bwrap":
-        if root == Path("/"):
-            # There is no meaningful "outside the workspace" when the workspace is /.
-            return None
         argv = [
-            "bwrap", "--unshare-all", "--unshare-user",
+            str(executable), "--unshare-all", "--unshare-user",
             *(["--share-net"] if network else []),
             "--die-with-parent", "--new-session", "--disable-userns",
             "--ro-bind", "/", "/",
@@ -134,5 +154,6 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
                         f'(allow file-read* (subpath "{q(root)}"))']
         if not network:
             profile.append("(deny network*)")
-        return ["sandbox-exec", "-p", "".join(profile), "/bin/bash", "-o", "pipefail", "-c", command]
+        return [str(executable), "-p", "".join(profile),
+                "/bin/bash", "-o", "pipefail", "-c", command]
     return None

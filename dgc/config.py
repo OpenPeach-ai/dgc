@@ -121,7 +121,7 @@ DEFAULTS: dict = {
     "background": "inherit",                    # inherit (never repaint — respect the terminal) | auto | dark
     "sandbox": False,                           # OS-confine bash; approval policy remains independent
     "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
-    "sandbox_env_allow": [],                    # extra parent env-var names deliberately passed through
+    "sandbox_env_allow": [],                    # extra parent env names; runtime injection vars stay blocked
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
 }
 

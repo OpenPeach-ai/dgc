@@ -3646,20 +3646,55 @@ def test_mcp_protocol():
         def __init__(self, root, cfg=None): self.project_root = root; self.config = cfg or _SCfg()
 
     unavailable_root = Path(tempfile.mkdtemp())
-    real_available = sandbox.available
+    real_backend = sandbox._backend
     try:
-        sandbox.available = lambda: None
+        sandbox._backend = lambda: None
         unavailable_foreground = bash({"command": ":"}, _SCtx(unavailable_root))
         unavailable_background = bash({"command": ":", "background": True},
                                       _SCtx(unavailable_root))
     finally:
-        sandbox.available = real_available
+        sandbox._backend = real_backend
     check("requested sandbox fails closed when no backend can confine foreground bash",
           unavailable_foreground ==
           "error: sandbox policy cannot safely confine this workspace; command was not run")
     check("requested sandbox fails closed when no backend can confine background bash",
           unavailable_background ==
           "error: sandbox policy cannot safely confine this workspace; background command was not run")
+
+    injected_name = "DGC_SANDBOX_BENIGN_FIXTURE"
+    old_injected = os.environ.get(injected_name)
+    old_node_options = os.environ.get("NODE_OPTIONS")
+    os.environ[injected_name] = "visible"
+    os.environ["NODE_OPTIONS"] = "--require /outside/host-injection.js"
+    try:
+        screened_env = sandbox.process_env(
+            _SCfg(env_allow=[injected_name, "NODE_OPTIONS"]))
+    finally:
+        if old_injected is None:
+            os.environ.pop(injected_name, None)
+        else:
+            os.environ[injected_name] = old_injected
+        if old_node_options is None:
+            os.environ.pop("NODE_OPTIONS", None)
+        else:
+            os.environ["NODE_OPTIONS"] = old_node_options
+    check("sandbox environment allowlist cannot re-enable runtime startup injection",
+          screened_env.get(injected_name) == "visible" and "NODE_OPTIONS" not in screened_env)
+
+    workspace_backend = unavailable_root / "bwrap"
+    workspace_backend.write_text("#!/bin/sh\nexit 1\n")
+    workspace_backend.chmod(0o700)
+    try:
+        sandbox._backend = lambda: ("bwrap", workspace_backend)
+        workspace_backend_rejected = sandbox.wrap(":", unavailable_root, _SCfg()) is None
+        pinned_backend = Path("/opt/dgc-test/bwrap")
+        sandbox._backend = lambda: ("bwrap", pinned_backend)
+        pinned_argv = sandbox.wrap(":", unavailable_root, _SCfg())
+    finally:
+        sandbox._backend = real_backend
+    check("sandbox backend must resolve outside the writable workspace",
+          workspace_backend_rejected and pinned_argv is not None
+          and pinned_argv[0] == str(pinned_backend))
 
     if sandbox.available():                    # skip live isolation where no bwrap/sandbox-exec
         import shlex as _shlex
