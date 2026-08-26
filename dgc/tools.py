@@ -29,7 +29,13 @@ import requests
 
 from .codeintel import run_code_intel, symbol_records
 from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
-from .workspace import WorkspaceBoundaryError, resolve_path
+from .workspace import (
+    WorkspaceBoundaryError,
+    atomic_write_bytes as _atomic_write_bytes,
+    list_directory,
+    read_regular_bytes,
+    resolve_path,
+)
 
 MAX_READ_LINES = 2000
 MAX_LINE_LEN = 2000
@@ -248,18 +254,19 @@ def _safe_command_label(command: str, ctx) -> str:
 def read_file(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
-    if not p.exists():
-        return f"error: no such file: {p}"
     if p.is_dir():
         try:
-            entries = sorted(os.listdir(p))[:200]
-        except OSError as e:
+            entries = list_directory(p, limit=200)
+        except (OSError, WorkspaceBoundaryError) as e:
             return f"error: {e}"
         return f"directory listing of {p}:\n" + "\n".join(entries)
     try:
-        raw = p.read_bytes()
-    except OSError as e:
+        captured = read_regular_bytes(p, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
+    if captured is None:
+        return f"error: no such file: {p}"
+    raw, _version = captured
     if b"\x00" in raw[:8192]:
         return f"error: {p} looks like a binary file"
     lines = raw.decode("utf-8", errors="replace").splitlines()
@@ -279,12 +286,20 @@ def write_file(args: dict, ctx) -> str:
                  allow_external=_allow_external(args))
     content = str(args.get("content", ""))
     old = ""
-    if p.exists():
+    try:
+        captured = read_regular_bytes(p, missing_ok=True)
+    except (OSError, WorkspaceBoundaryError) as e:
+        return f"error: {e}"
+    expected = captured[1] if captured is not None else None
+    if captured is not None:
         try:
-            old = p.read_text()
-        except (OSError, UnicodeDecodeError):
+            old = captured[0].decode("utf-8")
+        except UnicodeDecodeError:
             old = ""
-    _atomic_write_bytes(p, content.encode("utf-8"))
+    try:
+        _atomic_write_bytes(p, content.encode("utf-8"), expected=expected)
+    except (OSError, WorkspaceBoundaryError) as e:
+        return f"error: {e}"
     diff = _diff(old, content, str(p), ctx)
     return f"wrote {len(content)} bytes to {p}\n{diff}"
 
@@ -382,29 +397,6 @@ def _apply_unified_patch(content: str, patch: str) -> str:
     return updated
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    mode = (path.stat().st_mode & 0o777) if path.exists() else 0o644
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    try:
-        os.fchmod(fd, mode)
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(temp_name, path)
-    except Exception:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
-
-
 def apply_patch_tool(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
@@ -412,9 +404,11 @@ def apply_patch_tool(args: dict, ctx) -> str:
     if len(patch.encode("utf-8")) > 2_000_000:
         return "error: patch exceeds the 2 MB safety limit"
     try:
-        raw = p.read_bytes() if p.exists() else b""
+        captured = read_regular_bytes(p, missing_ok=True)
+        raw = captured[0] if captured is not None else b""
+        expected_version = captured[1] if captured is not None else None
         text = raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
     expected = str(args.get("expected_sha256", "")).strip().lower()
     actual_hash = hashlib.sha256(raw).hexdigest()
@@ -429,7 +423,10 @@ def apply_patch_tool(args: dict, ctx) -> str:
     if updated == content:
         return "error: patch made no changes"
     out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= max(1, content.count("\n")) else updated
-    _atomic_write_bytes(p, out.encode("utf-8"))
+    try:
+        _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
+    except (OSError, WorkspaceBoundaryError) as e:
+        return f"error: {e}"
     return (f"patched {p} atomically · sha256 {hashlib.sha256(out.encode('utf-8')).hexdigest()}\n"
             + _diff(content, updated, str(p), ctx))
 
@@ -745,14 +742,15 @@ def _edit_error(content: str, old: str, new: str = "") -> str:
 def edit_file(args: dict, ctx) -> str:
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
-    if not p.exists():
-        return f"error: no such file: {p} (use write_file to create it)"
     old_string, new_string = str(args.get("old_string", "")), str(args.get("new_string", ""))
     replace_all = bool(args.get("replace_all"))
     try:
-        raw = p.read_bytes()
+        captured = read_regular_bytes(p, missing_ok=True)
+        if captured is None:
+            return f"error: no such file: {p} (use write_file to create it)"
+        raw, expected_version = captured
         text = raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
     crlf = raw.count(b"\r\n")                       # remember the file's dominant line ending
     content = text.replace("\r\n", "\n")            # match on LF; restore on write
@@ -767,7 +765,10 @@ def edit_file(args: dict, ctx) -> str:
                            new_string.replace("\r\n", "\n"))
     updated, count, how = result
     out = updated.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else updated
-    _atomic_write_bytes(p, out.encode("utf-8"))
+    try:
+        _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
+    except (OSError, WorkspaceBoundaryError) as e:
+        return f"error: {e}"
     note = "" if how == "exact" else f"  [matched via {how}]"
     return f"edited {p} ({count} replacement(s)){note}\n{_diff(content, updated, str(p), ctx)}"
 
@@ -813,15 +814,16 @@ def multi_edit(args: dict, ctx) -> str:
     edits that apply are kept even if a later one fails, with per-edit failure accounting."""
     p = _resolve(str(args.get("path", "")), ctx.project_root,
                  allow_external=_allow_external(args))
-    if not p.exists():
-        return f"error: no such file: {p} (use write_file to create it)"
     edits = _coerce_edits(args)                     # accept the many shapes a weak model sends edits in
     if not isinstance(edits, list) or not edits:
         return "error: 'edits' must be a non-empty list of {old_string, new_string, replace_all?}"
     try:
-        raw = p.read_bytes()
+        captured = read_regular_bytes(p, missing_ok=True)
+        if captured is None:
+            return f"error: no such file: {p} (use write_file to create it)"
+        raw, expected_version = captured
         text = raw.decode("utf-8")
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError, WorkspaceBoundaryError) as e:
         return f"error: {e}"
     crlf = raw.count(b"\r\n")
     content = text.replace("\r\n", "\n")
@@ -846,7 +848,10 @@ def multi_edit(args: dict, ctx) -> str:
     if applied == 0:
         return "error: no edits applied.\n" + "\n".join(failures)
     out = buf.replace("\n", "\r\n") if crlf and crlf * 2 >= content.count("\n") else buf
-    _atomic_write_bytes(p, out.encode("utf-8"))
+    try:
+        _atomic_write_bytes(p, out.encode("utf-8"), expected=expected_version)
+    except (OSError, WorkspaceBoundaryError) as e:
+        return f"error: {e}"
     msg = f"applied {applied}/{len(edits)} edits to {p}"
     if failures:
         msg += "\nFAILED (do NOT re-send the applied edits, only fix these):\n" + "\n".join(failures)

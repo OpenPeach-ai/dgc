@@ -7,11 +7,335 @@ External access is possible only when the permission layer has explicitly approv
 from __future__ import annotations
 
 import os
+import secrets
+import stat
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
 class WorkspaceBoundaryError(ValueError):
     """A requested path is outside the active project boundary."""
+
+
+@dataclass(frozen=True)
+class FileVersion:
+    """Identity used to reject a stale structured edit at its final commit point."""
+
+    device: int
+    inode: int
+    file_type: int
+    size: int
+    modified_ns: int
+    changed_ns: int
+
+
+_ANY_VERSION = object()
+
+
+def _version(info: os.stat_result) -> FileVersion:
+    return FileVersion(
+        int(info.st_dev), int(info.st_ino), stat.S_IFMT(info.st_mode), int(info.st_size),
+        int(getattr(info, "st_mtime_ns", info.st_mtime * 1_000_000_000)),
+        int(getattr(info, "st_ctime_ns", info.st_ctime * 1_000_000_000)),
+    )
+
+
+def _absolute_frozen(path: Path | str) -> Path:
+    """Normalize spelling without following a component that may have changed since approval."""
+    value = Path(path)
+    if not value.is_absolute() or "\x00" in str(value) or ".." in value.parts:
+        raise WorkspaceBoundaryError("a canonical absolute path is required")
+    return Path(os.path.normpath(str(value)))
+
+
+def _dirfd_supported() -> bool:
+    return (os.name == "posix" and bool(getattr(os, "O_DIRECTORY", 0))
+            and bool(getattr(os, "O_NOFOLLOW", 0))
+            and os.open in getattr(os, "supports_dir_fd", set()))
+
+
+def _open_parent_fd(path: Path, *, create: bool) -> int:
+    """Walk an absolute parent one held directory at a time without following symlinks.
+
+    Holding each directory descriptor while opening the next prevents a repository process from
+    redirecting the final read/write through a parent symlink after permission resolution.
+    """
+    if not _dirfd_supported():
+        raise NotImplementedError
+    anchor = path.anchor
+    if not anchor or path.name in ("", ".", ".."):
+        raise WorkspaceBoundaryError("a file or directory below an absolute root is required")
+    flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+             | getattr(os, "O_CLOEXEC", 0))
+    current = os.open(anchor, flags)
+    try:
+        parts = path.parts[1:-1]
+        for part in parts:
+            if part in ("", ".", "..") or os.sep in part:
+                raise WorkspaceBoundaryError("unsafe path component")
+            try:
+                child = os.open(part, flags, dir_fd=current)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(part, mode=0o755, dir_fd=current)
+                child = os.open(part, flags, dir_fd=current)
+            info = os.fstat(child)
+            if not stat.S_ISDIR(info.st_mode):
+                os.close(child)
+                raise WorkspaceBoundaryError(f"path parent is not a directory: {part}")
+            os.close(current)
+            current = child
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _fallback_parent(path: Path, *, create: bool) -> Path:
+    """Best-effort non-dirfd validation for platforms without POSIX openat semantics."""
+    parent = path.parent
+    current = Path(parent.anchor)
+    for part in parent.parts[1:]:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if not create:
+                raise
+            current.mkdir(mode=0o755)
+            info = current.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise WorkspaceBoundaryError(f"path parent is not a real directory: {current}")
+    resolved = parent.resolve(strict=True)
+    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
+            os.path.normpath(str(parent))):
+        raise WorkspaceBoundaryError(f"path parent changed or contains a symlink: {parent}")
+    return parent
+
+
+def read_regular_bytes(path: Path | str, *, maximum: int | None = None,
+                       missing_ok: bool = False) -> tuple[bytes, FileVersion] | None:
+    """Read one frozen canonical regular file without following a late parent/final symlink."""
+    target = _absolute_frozen(path)
+    if maximum is not None and maximum < 0:
+        raise ValueError("maximum must be non-negative")
+    if _dirfd_supported():
+        try:
+            parent_fd = _open_parent_fd(target, create=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return None
+            raise
+        try:
+            flags = (os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+            try:
+                fd = os.open(target.name, flags, dir_fd=parent_fd)
+            except FileNotFoundError:
+                if missing_ok:
+                    return None
+                raise
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise WorkspaceBoundaryError(f"path is not a regular file: {target}")
+                if maximum is not None and info.st_size > maximum:
+                    raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
+                chunks: list[bytes] = []
+                total = 0
+                while maximum is None or total <= maximum:
+                    size = 65_536 if maximum is None else min(65_536, maximum + 1 - total)
+                    if size <= 0:
+                        break
+                    chunk = os.read(fd, size)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                if maximum is not None and total > maximum:
+                    raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
+                after = os.fstat(fd)
+                if _version(after) != _version(info):
+                    raise WorkspaceBoundaryError(f"file changed while it was being read: {target}")
+                return b"".join(chunks), _version(after)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+
+    try:
+        before = target.lstat()
+    except FileNotFoundError:
+        if missing_ok:
+            return None
+        raise
+    if not stat.S_ISREG(before.st_mode) or target.is_symlink():
+        raise WorkspaceBoundaryError(f"path is not a regular file: {target}")
+    resolved = target.resolve(strict=True)
+    if os.path.normcase(os.path.normpath(str(resolved))) != os.path.normcase(
+            os.path.normpath(str(target))):
+        raise WorkspaceBoundaryError(f"path changed or contains a symlink: {target}")
+    if maximum is not None and before.st_size > maximum:
+        raise OSError(f"file exceeds the {maximum}-byte safety limit: {target}")
+    with target.open("rb") as handle:
+        data = handle.read() if maximum is None else handle.read(maximum + 1)
+        opened = os.fstat(handle.fileno())
+    after = target.lstat()
+    if _version(before) != _version(opened) or _version(after) != _version(opened):
+        raise WorkspaceBoundaryError(f"file changed while it was being read: {target}")
+    if maximum is not None and len(data) > maximum:
+        raise OSError(f"file grew beyond the {maximum}-byte safety limit: {target}")
+    return data, _version(opened)
+
+
+def list_directory(path: Path | str, *, limit: int = 200) -> list[str]:
+    """List one canonical directory through a descriptor that cannot be redirected by a symlink."""
+    target = _absolute_frozen(path)
+    limit = max(0, int(limit))
+    if _dirfd_supported():
+        parent_fd = _open_parent_fd(target, create=False)
+        try:
+            flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                     | getattr(os, "O_CLOEXEC", 0))
+            fd = os.open(target.name, flags, dir_fd=parent_fd)
+            try:
+                return sorted(os.listdir(fd))[:limit]
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+    _fallback_parent(target, create=False)
+    if target.is_symlink() or not target.is_dir():
+        raise WorkspaceBoundaryError(f"path is not a directory: {target}")
+    return sorted(os.listdir(target))[:limit]
+
+
+def atomic_write_bytes(path: Path | str, data: bytes, *,
+                       expected: FileVersion | None | object = _ANY_VERSION,
+                       mode: int | None = None) -> FileVersion:
+    """Atomically replace one canonical file without following late symlinks.
+
+    When ``expected`` is a ``FileVersion`` or ``None`` (expected missing), the final commit also
+    rejects a file that changed after the caller read it.
+    """
+    target = _absolute_frozen(path)
+    payload = bytes(data)
+    if expected is not _ANY_VERSION and expected is not None and not isinstance(expected, FileVersion):
+        raise TypeError("expected must be a FileVersion, None, or omitted")
+    if mode is not None and (not isinstance(mode, int) or mode < 0 or mode > 0o777):
+        raise ValueError("mode must be an integer between 0 and 0o777")
+    if _dirfd_supported():
+        parent_fd = _open_parent_fd(target, create=True)
+        temp_name = ""
+        try:
+            try:
+                current_info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                current_info = None
+            if current_info is not None and not stat.S_ISREG(current_info.st_mode):
+                raise WorkspaceBoundaryError(f"write target is not a regular file: {target}")
+            current = _version(current_info) if current_info is not None else None
+            if expected is not _ANY_VERSION and current != expected:
+                raise WorkspaceBoundaryError(f"file changed before the edit could be committed: {target}")
+            file_mode = int(mode if mode is not None else
+                            (stat.S_IMODE(current_info.st_mode) & 0o777)
+                            if current_info is not None else 0o644)
+            flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+                     | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_BINARY", 0))
+            for _ in range(128):
+                candidate = f".{target.name}.{secrets.token_hex(8)}.tmp"
+                try:
+                    fd = os.open(candidate, flags, file_mode, dir_fd=parent_fd)
+                    temp_name = candidate
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise OSError(f"could not allocate a private temporary file beside {target}")
+            try:
+                try:
+                    os.fchmod(fd, file_mode)
+                except (AttributeError, OSError):
+                    pass
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except BaseException:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise
+            try:
+                before_replace = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                before_replace = None
+            before_version = _version(before_replace) if before_replace is not None else None
+            if before_replace is not None and not stat.S_ISREG(before_replace.st_mode):
+                raise WorkspaceBoundaryError(f"write target changed type before commit: {target}")
+            if before_version != current:
+                raise WorkspaceBoundaryError(f"file changed while the edit was being prepared: {target}")
+            os.replace(temp_name, target.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            temp_name = ""
+            try:
+                os.fsync(parent_fd)
+            except OSError:
+                pass
+            return _version(os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False))
+        finally:
+            if temp_name:
+                try:
+                    os.unlink(temp_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+            os.close(parent_fd)
+
+    parent = _fallback_parent(target, create=True)
+    try:
+        current_info = target.lstat()
+    except FileNotFoundError:
+        current_info = None
+    if current_info is not None and (not stat.S_ISREG(current_info.st_mode) or target.is_symlink()):
+        raise WorkspaceBoundaryError(f"write target is not a regular file: {target}")
+    current = _version(current_info) if current_info is not None else None
+    if expected is not _ANY_VERSION and current != expected:
+        raise WorkspaceBoundaryError(f"file changed before the edit could be committed: {target}")
+    file_mode = int(mode if mode is not None else
+                    (stat.S_IMODE(current_info.st_mode) & 0o777)
+                    if current_info is not None else 0o644)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(parent))
+    try:
+        try:
+            os.fchmod(fd, file_mode)
+        except (AttributeError, OSError):
+            pass
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fallback_parent(target, create=False)
+        try:
+            before_replace = target.lstat()
+        except FileNotFoundError:
+            before_replace = None
+        before_version = _version(before_replace) if before_replace is not None else None
+        if (before_replace is not None and
+                (not stat.S_ISREG(before_replace.st_mode) or target.is_symlink())):
+            raise WorkspaceBoundaryError(f"write target changed type before commit: {target}")
+        if before_version != current:
+            raise WorkspaceBoundaryError(f"file changed while the edit was being prepared: {target}")
+        os.replace(temp_name, target)
+        temp_name = ""
+        return _version(target.stat())
+    finally:
+        if temp_name:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
 
 
 def canonical_root(root: Path | str) -> Path:

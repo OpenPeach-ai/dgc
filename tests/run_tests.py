@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -203,6 +204,12 @@ def unit_tests(tmp: Path):
         check("executor rejects unapproved external path", out.startswith("error: path is outside"), out)
         out = execute("read_file", {"path": str(secret), "_dgc_external_approved": True}, Ctx(tmp))
         check("executor accepts permission-approved external path", "secret" in out, out)
+        external_write = outside / "approved-write.txt"
+        external_write.write_text("old external state\n")
+        out = execute("write_file", {"path": str(external_write), "content": "new external state\n",
+                                     "_dgc_external_approved": True}, Ctx(tmp))
+        check("executor keeps permission-approved external structured writes usable",
+              out.startswith("wrote ") and external_write.read_text() == "new external state\n", out)
         link = tmp / "outside-link"
         link.symlink_to(secret)
         out = execute("write_file", {"path": "outside-link", "content": "changed"}, Ctx(tmp))
@@ -295,6 +302,105 @@ def unit_tests(tmp: Path):
     import shlex as _shlex_tools
     import time as _time_tools
     import dgc.tools as _tools_bg
+    import dgc.workspace as _workspace_safe
+
+    def _late_parent_swap_case(number, tool_name, tool_args):
+        _late_parent = tmp / f"late-tool-parent-{number}"
+        _late_parent.mkdir()
+        _late_held = tmp / f"late-tool-parent-{number}-held"
+        (_late_parent / "target.txt").write_text("INSIDE_TOOL_STATE\n")
+        _late_outside = Path(tempfile.mkdtemp())
+        _late_outside_target = _late_outside / "target.txt"
+        _late_outside_target.write_text("OUTSIDE_TOOL_SENTINEL\n")
+        _late_real_resolve = _tools_bg._resolve
+        _late_swapped = False
+
+        def _late_resolve(value, root, *, allow_external=False):
+            nonlocal _late_swapped
+            resolved = _late_real_resolve(value, root, allow_external=allow_external)
+            if not _late_swapped:
+                _late_parent.rename(_late_held)
+                _late_parent.symlink_to(_late_outside, target_is_directory=True)
+                _late_swapped = True
+            return resolved
+
+        _tools_bg._resolve = _late_resolve
+        try:
+            result = execute(tool_name, tool_args, ctx)
+            outside_after = _late_outside_target.read_text()
+        finally:
+            _tools_bg._resolve = _late_real_resolve
+            if _late_parent.is_symlink():
+                _late_parent.unlink()
+            if _late_held.exists():
+                _late_held.rename(_late_parent)
+        return result, outside_after
+
+    _late_tool_cases = [
+        ("read_file", {"path": "late-tool-parent-0/target.txt"}),
+        ("write_file", {"path": "late-tool-parent-1/target.txt", "content": "COMPROMISED\n"}),
+        ("edit_file", {"path": "late-tool-parent-2/target.txt",
+                       "old_string": "OUTSIDE_TOOL_SENTINEL", "new_string": "COMPROMISED"}),
+        ("multi_edit", {"path": "late-tool-parent-3/target.txt", "edits": [{
+            "old_string": "OUTSIDE_TOOL_SENTINEL", "new_string": "COMPROMISED"}]}),
+        ("apply_patch", {"path": "late-tool-parent-4/target.txt", "patch":
+                         "@@ -1 +1 @@\n-OUTSIDE_TOOL_SENTINEL\n+COMPROMISED\n"}),
+    ]
+    _late_tool_results = [
+        _late_parent_swap_case(index, name, args)
+        for index, (name, args) in enumerate(_late_tool_cases)
+    ]
+    check("structured file tools refuse a parent symlink introduced after path resolution",
+          all(result.startswith("error:") and outside == "OUTSIDE_TOOL_SENTINEL\n"
+              and "OUTSIDE_TOOL_SENTINEL" not in result
+              for result, outside in _late_tool_results), repr(_late_tool_results))
+
+    _stale_edit_file = tmp / "stale-final-commit.txt"
+    _stale_edit_file.write_text("original edit state\n")
+    _real_atomic_write = _tools_bg._atomic_write_bytes
+
+    def _concurrent_atomic_write(path, data, **kwargs):
+        Path(path).write_text("newer concurrent state\n")
+        return _real_atomic_write(path, data, **kwargs)
+
+    _tools_bg._atomic_write_bytes = _concurrent_atomic_write
+    try:
+        _stale_edit_result = execute("edit_file", {
+            "path": "stale-final-commit.txt", "old_string": "original", "new_string": "agent"}, ctx)
+    finally:
+        _tools_bg._atomic_write_bytes = _real_atomic_write
+    check("structured edits reject a stale file at the final atomic commit",
+          _stale_edit_result.startswith("error: file changed")
+          and _stale_edit_file.read_text() == "newer concurrent state\n",
+          _stale_edit_result + "\n" + _stale_edit_file.read_text())
+
+    _mode_edit_file = tmp / "mode-preserving-edit.txt"
+    _mode_edit_file.write_text("before mode edit\n")
+    if os.name == "posix":
+        _mode_edit_file.chmod(0o751)
+    _mode_edit_result = execute("edit_file", {
+        "path": "mode-preserving-edit.txt", "old_string": "before", "new_string": "after"}, ctx)
+    check("race-safe structured edits preserve the target file mode",
+          "after mode edit" in _mode_edit_file.read_text()
+          and (os.name != "posix" or stat.S_IMODE(_mode_edit_file.stat().st_mode) == 0o751),
+          _mode_edit_result)
+
+    _fallback_platform_file = tmp / "fallback-platform-edit.txt"
+    _fallback_platform_file.write_text("fallback before\n")
+    _real_dirfd_supported = _workspace_safe._dirfd_supported
+    _workspace_safe._dirfd_supported = lambda: False
+    try:
+        _fallback_platform_edit = execute("edit_file", {
+            "path": "fallback-platform-edit.txt", "old_string": "before", "new_string": "after"}, ctx)
+        _fallback_platform_race = _late_parent_swap_case(
+            5, "write_file", {"path": "late-tool-parent-5/target.txt", "content": "COMPROMISED\n"})
+    finally:
+        _workspace_safe._dirfd_supported = _real_dirfd_supported
+    check("non-dirfd structured-file fallback preserves edits and rejects late symlinks",
+          "fallback after" in _fallback_platform_file.read_text()
+          and _fallback_platform_race[0].startswith("error:")
+          and _fallback_platform_race[1] == "OUTSIDE_TOOL_SENTINEL\n",
+          _fallback_platform_edit + "\n" + repr(_fallback_platform_race))
 
     # Search starts at one authorized root, but repository-controlled descendants are still
     # untrusted. Neither the ripgrep fast path nor the dependency-free fallback may follow them.
