@@ -46,10 +46,10 @@ def _write_private_json(path: Path, payload: dict) -> None:
             pass
 
 DEFAULTS: dict = {
-    "base_url": "http://localhost:11434/v1",   # any OpenAI-compatible endpoint
+    "base_url": "http://localhost:11434/v1",   # supported native or OpenAI-compatible endpoint
     "api_key": "ollama",                        # dummy key works for ollama/lm-studio
     "model": "qwen3:8b",
-    "api_mode": "auto",                         # auto | ollama | chat_completions | responses
+    "api_mode": "auto",                         # auto | ollama | anthropic | chat_completions | responses
     "provider_state": "stateless",              # stateless | server; server permits provider-side storage
     "prompt_cache": True,                        # send a privacy-safe stable cache-routing key when supported
     "prompt_cache_key": "",                     # optional explicit key (never derived from prompt text verbatim)
@@ -135,13 +135,14 @@ SEARCH_PROVIDERS: dict[str, dict] = {
 }
 
 # One-command connection presets — used by `dgc setup`, `/connect <name>`, and the docs.
-# Every preset is an OpenAI-compatible endpoint. Local ones need no real key; cloud ones prompt.
+# Local presets need no real key; cloud presets prompt and use their provider-native auth contract.
 PROVIDERS: dict[str, dict] = {
     "ollama":     {"base_url": "http://localhost:11434/v1",      "api_key": "ollama",    "needs_key": False, "label": "Ollama (local)"},
     "llamacpp":   {"base_url": "http://localhost:8080/v1",       "api_key": "sk-local",  "needs_key": False, "label": "llama.cpp / llama-server (local)"},
     "lmstudio":   {"base_url": "http://localhost:1234/v1",       "api_key": "lm-studio", "needs_key": False, "label": "LM Studio (local)"},
     "vllm":       {"base_url": "http://localhost:8000/v1",       "api_key": "sk-local",  "needs_key": False, "label": "vLLM (local)"},
     "openai":     {"base_url": "https://api.openai.com/v1",      "api_key": "",          "needs_key": True,  "label": "OpenAI (cloud)"},
+    "anthropic":  {"base_url": "https://api.anthropic.com/v1",   "api_key": "",          "needs_key": True,  "label": "Anthropic (cloud)"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1",   "api_key": "",          "needs_key": True,  "label": "OpenRouter (cloud — 100s of models)"},
     "groq":       {"base_url": "https://api.groq.com/openai/v1", "api_key": "",          "needs_key": True,  "label": "Groq (cloud)"},
     "deepseek":   {"base_url": "https://api.deepseek.com/v1",    "api_key": "",          "needs_key": True,  "label": "DeepSeek (cloud)"},

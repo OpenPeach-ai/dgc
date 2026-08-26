@@ -19,6 +19,7 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   lmstudio: { url: "http://localhost:1234/v1", needsKey: false, label: "LM Studio (local)", apiKey: "lm-studio" },
   vllm: { url: "http://localhost:8000/v1", needsKey: false, label: "vLLM (local)", apiKey: "sk-local" },
   openai: { url: "https://api.openai.com/v1", needsKey: true, label: "OpenAI" },
+  anthropic: { url: "https://api.anthropic.com/v1", needsKey: true, label: "Anthropic" },
   openrouter: { url: "https://openrouter.ai/api/v1", needsKey: true, label: "OpenRouter" },
   groq: { url: "https://api.groq.com/openai/v1", needsKey: true, label: "Groq" },
   deepseek: { url: "https://api.deepseek.com/v1", needsKey: true, label: "DeepSeek" },
@@ -1146,7 +1147,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
     <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
     <label>API transport
-      <select id="s-api_mode"><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+      <select id="s-api_mode"><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Responses state
       <select id="s-provider_state"><option value="stateless">stateless (private default)</option><option value="server">server stored</option></select></label>
     <label>Prompt cache routing
@@ -1160,7 +1161,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label>Sub-agent host URL
       <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
     <label>Sub-agent API transport
-      <select id="s-subagent_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+      <select id="s-subagent_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Sub-agent API key
       <input id="s-subagent_api_key" type="password" spellcheck="false" placeholder="inherit only on the same endpoint"></label>
 
@@ -1170,7 +1171,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label>Fallback host URL
       <input id="s-fallback_base_url" type="text" spellcheck="false" placeholder="same as main"></label>
     <label>Fallback API transport
-      <select id="s-fallback_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
+      <select id="s-fallback_api_mode"><option value="">inherit on main host / auto on another</option><option value="auto">auto</option><option value="ollama">Ollama native</option><option value="anthropic">Anthropic Messages</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select></label>
     <label>Fallback API key
       <input id="s-fallback_api_key" type="password" spellcheck="false" placeholder="same endpoint only / DGC_FALLBACK_API_KEY"></label>
 

@@ -8,7 +8,7 @@ A sub-agent is a Markdown file with frontmatter:
     description: Careful code reviewer
     model: qwen3:14b                 # optional — else subagent_model, else the main model
     base_url: http://gpu-box:11434/v1  # optional — run this agent on a DIFFERENT host
-    api_mode: ollama                 # optional — auto | ollama | chat_completions | responses
+    api_mode: ollama                 # optional — auto | ollama | anthropic | chat_completions | responses
     api_key_env: REVIEWER_API_KEY    # optional — key from an environment variable
     effort: high                     # optional — off | low | medium | high
     ---

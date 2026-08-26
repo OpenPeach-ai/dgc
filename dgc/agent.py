@@ -25,7 +25,8 @@ from .permissions import ALLOW, ASK, DENY, MODE_DESCRIPTIONS, PermissionEngine
 from .agents import discover_agents
 from .mcp import MCPInputError, MCPManager
 from .redaction import (StreamingRedactor, contains_secret, redact_messages,
-                        redact_provider_value, redact_text, redact_value, secret_values)
+                        provider_continuation_has_secret, redact_provider_value,
+                        redact_text, redact_value, secret_values)
 from .skills import discover_skills, matching_skill_names
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 
@@ -44,6 +45,7 @@ _VERIFY_INFO_FLAGS = {
     "--listenvs", "--list-tests", "--listtests",
 }
 _MAX_CONTINUE = 3       # length-truncation auto-continues per turn
+_MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
@@ -72,7 +74,8 @@ _MAX_VERIFIED_FINAL_CHARS = 512_000  # bounded across output-limit continuations
 _REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
     "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
-    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
+    "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
 })
 
@@ -1220,9 +1223,19 @@ class Agent:
         old_timeout = getattr(self.client, "read_timeout", None)
         if read_timeout is not None and old_timeout is not None:
             self.client.read_timeout = max(1, min(old_timeout, int(read_timeout)))
+        secrets = self._secret_values()
+        for message in self.messages:
+            if not isinstance(message, dict):
+                continue
+            for key in ("_responses_output", "_provider_message"):
+                if (key in message
+                        and provider_continuation_has_secret(message[key], secrets)):
+                    raise LLMError(
+                        "provider continuation contains a configured credential inside signed or "
+                        "encrypted state; start a new session or remove that credential-bearing turn")
         text_stream = StreamingRedactor(self._secret_values)
         thinking_stream = StreamingRedactor(self._secret_values)
-        safe_messages = redact_messages(self.messages, self._secret_values())
+        safe_messages = redact_messages(self.messages, secrets)
 
         def emit_text(chunk) -> None:
             safe = text_stream.feed(chunk)
@@ -1249,8 +1262,20 @@ class Agent:
         finally:
             if old_timeout is not None:
                 self.client.read_timeout = old_timeout
+        unsafe_provider_state = (
+            (result.provider_items
+             and provider_continuation_has_secret(result.provider_items, secrets))
+            or (result.provider_message
+                and provider_continuation_has_secret(result.provider_message, secrets)))
+        if unsafe_provider_state:
+            # The generation completed even though its continuation state is unusable. Attribute
+            # that provider work before discarding the response or attempting a configured fallback.
+            self._record_usage(result.usage, request_reason)
+            raise LLMError(
+                "provider returned a configured credential inside signed or encrypted continuation "
+                "state; the response was discarded before any tool execution")
         result.content = self._safe_text(result.content)
-        secrets = self._secret_values()
+        result.thinking = self._safe_text(result.thinking)
         if result.provider_items:
             result.provider_items = redact_provider_value(result.provider_items, secrets)
         if result.provider_message:
@@ -2005,6 +2030,8 @@ class Agent:
         verify_nudged = False
         summary_only = False        # budgeted green run → deterministic closeout, no provider request
         continues = 0               # length-truncation auto-continues used this turn
+        provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
+        paused_assistant_index: int | None = None
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
         edited_targets: set[str] = set()  # distinct files make a late planning nudge truthful
@@ -2315,7 +2342,32 @@ class Agent:
                      "function": {"name": c.name,
                                   "arguments": json.dumps(self._safe_value(c.arguments))}}
                     for c in result.tool_calls]
-            self.messages.append(assistant)
+            if (paused_assistant_index is not None
+                    and 0 <= paused_assistant_index < len(self.messages)
+                    and self.messages[paused_assistant_index].get("role") == "assistant"):
+                # Anthropic's pause_turn contract replaces the paused assistant state on each
+                # continuation, keeping role alternation and opaque server-tool state exact.
+                self.messages[paused_assistant_index] = assistant
+            else:
+                self.messages.append(assistant)
+                paused_assistant_index = len(self.messages) - 1
+
+            if result.finish_reason == "pause_turn":
+                if result.tool_calls:
+                    return self._fail_turn(
+                        "stopped — the provider paused with an unsafe unfinished client tool call")
+                if not result.provider_message:
+                    return self._fail_turn(
+                        "stopped — the provider paused without exact continuation state")
+                if provider_pauses >= _MAX_PROVIDER_PAUSE_CONTINUE:
+                    return self._fail_turn(
+                        "stopped — the provider repeatedly paused its server-side turn before finishing")
+                provider_pauses += 1
+                self.ui.info("↻ provider paused a server-side turn — continuing exact state")
+                next_request_reason = "provider_pause"
+                continue
+
+            paused_assistant_index = None
 
             if not result.tool_calls:
                 if defer_completion and not hold_final(assistant):

@@ -8,9 +8,10 @@ DOCS: list[tuple[str, str, str]] = [
     ("Getting started", "install, first launch, connect a model", """
 # Getting started
 
-DGC is a local-first coding agent for your terminal. It talks to **any
-OpenAI-compatible endpoint** — Ollama, LM Studio, llama.cpp, vLLM, or a cloud
-provider — so your code and your prompts stay on hardware you choose.
+DGC is a local-first coding agent for your terminal. It talks to **supported
+native and compatible endpoints** — Ollama, Anthropic Messages, OpenAI Responses,
+LM Studio, llama.cpp, vLLM, and cloud providers — so your code and prompts go only
+where you choose.
 
 ## First launch
 
@@ -313,8 +314,11 @@ Useful keys:
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
   auto-continues, 0=don't send).
 - `api_mode`, `provider_state`, `prompt_cache` — transport and continuity. `auto` selects native
-  Ollama chat for detected Ollama endpoints, OpenAI Responses for OpenAI, and Chat Completions for
-  compatible servers. Use `api_mode: ollama` for an Ollama proxy whose URL cannot be detected.
+  Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for
+  OpenAI, and Chat Completions for compatible servers. Use `api_mode: ollama` or `api_mode:
+  anthropic` only when a proxy hides its provider identity. Anthropic Messages preserves signed
+  thinking and grouped tool-result continuation blocks locally; it never sends the key as Bearer
+  authentication.
   Responses defaults to stateless (`store: false`) with local encrypted-reasoning replay and
   privacy-safe cache routing. Choose `provider_state: server` only when provider-side response
   storage is acceptable.

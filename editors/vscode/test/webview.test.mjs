@@ -420,6 +420,8 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
 
 test("provider runtime settings and actual usage round-trip through the webview", () => {
   const { dom, errors, posted, send, doc } = makeDom();
+  assert.ok([...doc.getElementById("s-api_mode").options].some((option) =>
+    option.value === "anthropic" && option.textContent === "Anthropic Messages"));
   send({ type: "settings_open", providers: [
     { id: "ollama", label: "Ollama", url: "http://localhost:11434/v1", needsKey: false },
   ], models: [] });

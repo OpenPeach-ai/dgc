@@ -34,7 +34,8 @@ TIMING_MAP_KEYS = ("by_tool_us", "by_tool_samples", "by_request_reason")
 REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
     "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
-    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
+    "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
 })
 _MAX_TIMING_NAMES = 64

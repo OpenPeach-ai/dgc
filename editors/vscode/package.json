@@ -1,7 +1,7 @@
 {
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
-  "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
+  "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
   "version": "0.8.1",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -191,7 +191,7 @@
         "dgc.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Main model host \u2014 any OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
+          "description": "Main model host \u2014 a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
         "dgc.model": {
           "type": "string",
@@ -211,7 +211,7 @@
         "dgc.subagentApiMode": {
           "type": "string",
           "default": "",
-          "enum": ["", "auto", "ollama", "chat_completions", "responses"],
+          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
           "description": "Transport for task sub-agents. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.fallbackModel": {
@@ -227,7 +227,7 @@
         "dgc.fallbackApiMode": {
           "type": "string",
           "default": "",
-          "enum": ["", "auto", "ollama", "chat_completions", "responses"],
+          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
           "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.contextSize": {

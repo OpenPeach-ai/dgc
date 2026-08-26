@@ -359,7 +359,8 @@ class TUI:
     _SETTINGS = {
         "Model & sampling": [
             ("model", "Model", "str"), ("base_url", "Endpoint URL", "str"),
-            ("api_mode", "API transport", "enum", ["auto", "ollama", "chat_completions", "responses"]),
+            ("api_mode", "API transport", "enum",
+             ["auto", "ollama", "anthropic", "chat_completions", "responses"]),
             ("provider_state", "Responses state", "enum", ["stateless", "server"]),
             ("prompt_cache", "Prompt cache routing", "bool"),
             ("prompt_cache_key", "Prompt cache key", "str"),
@@ -384,13 +385,13 @@ class TUI:
             ("subagent_model", "Sub-agent model", "str"),
             ("subagent_base_url", "Sub-agent endpoint", "str"),
             ("subagent_api_mode", "Sub-agent transport", "enum",
-             ["inherit", "auto", "ollama", "chat_completions", "responses"]),
+             ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
             ("max_parallel_tasks", "Parallel task workers (1–8)", "int"),
             ("fleet_worktree_root", "Fleet worktree storage", "str"),
             ("fallback_model", "Fallback model", "str"),
             ("fallback_base_url", "Fallback endpoint", "str"),
             ("fallback_api_mode", "Fallback transport", "enum",
-             ["inherit", "auto", "ollama", "chat_completions", "responses"]),
+             ["inherit", "auto", "ollama", "anthropic", "chat_completions", "responses"]),
         ],
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
@@ -3411,8 +3412,9 @@ class TUI:
             self._set_host(args[1], subagent=True); return
         if args and args[0] == "transport" and len(args) == 2:
             mode = args[1].lower()
-            if mode not in ("auto", "ollama", "chat_completions", "responses"):
-                self._flash("transport must be auto, ollama, chat_completions, or responses"); return
+            if mode not in ("auto", "ollama", "anthropic", "chat_completions", "responses"):
+                self._flash(
+                    "transport must be auto, ollama, anthropic, chat_completions, or responses"); return
             cfg.set("subagent_api_mode", mode)
             self._flash(f"sub-agent transport → {mode}"); return
         if args and args[0] == "clear":
@@ -3431,7 +3433,7 @@ class TUI:
             elif i == 1:
                 self._model_flow(subagent=True)
             elif i == 2:
-                modes = ["auto", "ollama", "chat_completions", "responses"]
+                modes = ["auto", "ollama", "anthropic", "chat_completions", "responses"]
                 self._show_picker("Sub-agent transport", modes,
                                   lambda j: self._subagent_flow(f"transport {modes[j]}"))
             else:

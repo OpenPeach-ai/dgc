@@ -11,7 +11,7 @@ Built by Mohit Kalra.
 
 ---
 
-DGC is an interactive coding agent that lives in your terminal, pointed at **your own model, on your own machine**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible cloud endpoint (OpenAI, OpenRouter, Groq, DeepSeek, Together, Mistral…).
+DGC is an interactive coding agent that lives in your terminal and points at **the model endpoint you choose**: local Ollama, llama.cpp, LM Studio, or vLLM; native Anthropic or OpenAI; and compatible clouds such as OpenRouter, Groq, DeepSeek, Together, and Mistral.
 
 ![Vibe DGC — the CLI welcome screen](docs/welcome.png)
 
@@ -241,12 +241,25 @@ cumulative ID/name/argument snapshots, string or omitted indices, and direct arg
 local gateways. Invalid non-object arguments are returned to the model for repair instead of
 crashing the agent or executing a corrupted call.
 
+A detected Anthropic endpoint uses the native `/v1/messages` contract and `x-api-key`
+authentication rather than pretending Claude exposes Chat Completions. DGC maps canonical tool
+schemas to `input_schema`, groups correlated `tool_result` blocks before following user content,
+streams text/thinking/citations/tool JSON through the native event protocol, and replays valid
+provider-signed thinking and server-owned continuation state exactly. Adaptive-capable Claude
+generations receive adaptive thinking plus the selected effort control; older extended-thinking
+models receive a bounded legacy budget below `max_tokens`. Unsupported
+thinking is negotiated away once without abandoning the Messages transport. Anthropic model
+discovery, cache-token accounting, cancellation, retry/backoff, base64 vision estimation, and error
+responses use the same bounded lifecycle guarantees as the other native transports. Set
+`api_mode` to `"anthropic"` only when a proxy hides the provider identity from its URL.
+
 For OpenAI Responses, DGC defaults to `store: false`, locally preserves encrypted reasoning items
 needed for tool-loop continuity, and uses a hashed cache-routing key when supported. Set
 `provider_state` to `"server"` only if you intentionally want provider-side response storage and
 `previous_response_id` continuation. `provider_capabilities` can explicitly override feature flags
 for a compatible endpoint; rejected features are retried after `capability_cache_ttl_s` rather than
-being disabled forever. Across Responses, Chat Completions, and native Ollama, transient retries
+being disabled forever. Across Responses, Chat Completions, native Anthropic Messages, and native
+Ollama, transient retries
 honor bounded `Retry-After` values but stop immediately on cancellation or a turn deadline; abandoned
 streamed responses are always released before retry or transport fallback.
 

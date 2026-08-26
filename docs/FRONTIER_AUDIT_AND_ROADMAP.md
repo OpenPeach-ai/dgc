@@ -42,7 +42,7 @@ the editor registries: those are external release actions that require a reviewe
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy blocks ambient-home reads, writes outside the project/shared system temp, and network but does not claim private temp/process namespaces; `/sandbox` and `dgc doctor` expose the selected backend's exact guarantees; an explicitly requested sandbox fails closed if its backend is unavailable, inside the writable workspace, or resolves to a non-executable; runtime-injection environment names cannot be opted back in | Native Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes with bounded post-crash temp reclamation, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, atomic lease/CAS memory appends without lost concurrent facts, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted lifecycle-hook output, bounded internal-Git diagnostics, and bounded/redacted/cancellable foreground, background, and direct-terminal command output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader cross-platform crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free count-and-byte-bounded editor follow-up FIFO across completion/cancel boundaries, atomic TUI steer-or-defer ownership with a bounded per-session next-turn FIFO across model closeout/cancel/failure and direct-shell execution, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, lifecycle hooks serialized under the same checkout lease with one cancellable batch deadline, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees whose internal Git is pinned outside the repository, non-interactive, hook-suppressed, output-bounded, and process-group reaped, exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
-| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; provider-wire context budgeting that includes the exact state-aware native tool-schema snapshot, Responses conversion, and bounded dimension-based vision estimates instead of base64 transport bytes; day-stable system prefixes and compact text-tool catalogs for prefix/prefill efficiency; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards, and bounded verified-final publication that withholds rejected completion claims without losing commentary-before-tool cadence | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
+| Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; native Anthropic Messages with provider authentication, fail-closed signed/encrypted state, exact bounded `pause_turn` replay, grouped client/server tool state, citations, adaptive/legacy thinking, strict stream completion, cache usage, model discovery, vision and bounded output negotiation; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; provider-wire context budgeting that includes exact state-aware native tool schemas and transcripts, Responses conversion, and bounded dimension-based vision estimates instead of base64 transport bytes; day-stable system prefixes and compact text-tool catalogs for prefix/prefill efficiency; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards, and bounded verified-final publication that withholds rejected completion claims without losing commentary-before-tool cadence | Additional native transports, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; small catalogs remain direct while oversized catalogs use a bounded generation-scoped lexical index, deterministic inflection-aware selection, bounded untrusted `mcp_search`, next-request direct-schema activation, and approval-gated `mcp_call` fallback within a context-proportional budget; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, roots and stdio MCP with bounded UTF-8 frames, prompt blocks/text/images, signature-validated data-only images, and boundary-safe untrusted resource framing | Real-world large-catalog retrieval accuracy/latency, wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, installed-host migration/backend-restart/endpoint-invalidation evidence, typed selection/tab/diagnostic resources and canonical multi-root file mentions with display/path separation, acknowledged live multi-root grant reconciliation (including active-turn deferral and removal), accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, exact-wire validation with optional-field normalization, bounded startup/backpressure queues with priority decision/cancel frames, count/byte-bounded image paste plus backend signature validation, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake and live multi-root lifecycle evidence, and automated keyboard/ARIA/reduced-motion coverage | Cross-platform OS-keychain relaunch and installed-host decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
 | Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage and overlap-aware latency; crash-safe argument-free DGC built-in timing by bounded tool name plus fixed controller-owned completed-request reasons; endpoint-free reproducible lease/filesystem/journal/shell/sandbox overhead probe; per-task request burden, output per generation, outside-provider wall-time attribution, trace-free comparison schema-v5 task rows, exact-task paired baseline deltas with explicit coverage, and bounded per-engine/paired regression reporting; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from attributed traces |
@@ -125,13 +125,14 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 926 / 926 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 963 / 963 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
 | Extension tests | 2 / 2 | 19 / 19 + host 1 / 1 | jsdom protocol/render/safety/accessibility, real spawned-child transport/backpressure/decision-race flows, and activation/command registration/webview handshake inside installed VS Code are green. |
 | Extension dependency audit | 1 moderate | 0 | Updated build chain; `npm audit --audit-level=moderate` is clean. |
 | Edit microbenchmark | 17,443 / 19,591 | 19,560 / 19,591 + 14,197 duplicate transforms | Acceptance improved from 89.04% to 99.84%; wrong-applies and duplicate-target applications both remain zero. |
+| Native Anthropic conformance | None | Offline contract/adversarial gates pass | Native request, JSON/SSE, signed state, tools, citations, stop reasons, effort, retry/cancel and credential boundaries are deterministic-test green. No live Anthropic request was made; real-account/model conformance remains an external gate. |
 | Release preflight | None | Previous clean candidate passed; current rerun deferred | Python suite, edit corpus, editor type/test/package/audit, dependency check, SBOM and script gates must pass together after the explicit release freeze is lifted. |
 | Polyglot run | 40 / 52 pass@2 | Not rerun | 76.9% on 26 C++ + 26 Go tasks only; not a complete or comparative benchmark. |
 | Polyglot agent timeouts | 28 / 67 rounds | Not rerun | Original main operational failure; the new convergence/runtime work must be measured. |
@@ -996,7 +997,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 926/926 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 963/963 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
@@ -1058,56 +1059,77 @@ The provider-runtime slice is also implemented and contract-tested:
 5. Native Ollama uses `/api/chat` and `/api/tags` directly, preserving streamed thinking, correlated
    tool calls, exact continuation fields, options, keep-alive, cancellation, and provider usage. Auto
    mode falls back safely when a proxy does not expose the native route.
-6. Primary, fallback, sub-agent, and auxiliary clients resolve transport per endpoint. Credentials
+6. Native Anthropic uses `/v1/messages` and `/v1/models` with `x-api-key` authentication and the
+   versioned provider contract, never Chat Completions/Bearer emulation. Canonical history becomes
+   top-level system plus alternating content blocks; parallel tool results are grouped first in one
+   user turn. Token-shaped but non-secret signed/redacted thinking remains exact; if a configured
+   credential appears in signed/encrypted state, inbound responses are charged then discarded before
+   tool execution and saved state is rejected before any request. Native SSE text, citations,
+   thinking, signatures, fragmented client/server tool JSON, opaque server results, finish state,
+   disjoint cache usage, cancellation and errors normalize into the shared agent contract. Bounded
+   `pause_turn` handling replays and replaces exact provider state; context-window exhaustion enters
+   the normal truncation path. Duplicate/out-of-order blocks, mismatched or unknown content deltas,
+   unknown stop reasons, malformed JSON, oversized bodies/tool/signature state, and streams without a
+   complete stop lifecycle fail closed; cancellation and the thinking watchdog discard partial calls
+   so they cannot execute.
+   Current adaptive controls include `output_config.effort`; Claude 5 and frontier-family IDs avoid
+   obsolete manual budgets, while older models receive a bounded legacy budget that reserves visible
+   coding output. Rejected effort/thinking/tool-choice/output controls negotiate independently.
+   Base64 vision and tool schemas enter
+   the exact context estimate, and CLI/TUI plus VS Code/Cursor expose the preset and explicit route.
+7. Primary, fallback, sub-agent, and auxiliary clients resolve transport per endpoint. Credentials
    inherit only on the same endpoint; endpoint changes invalidate matching live, persisted, and
    editor-cached keys. Editor model discovery is correlated through the same provider adapter instead
    of duplicating a hard-coded `/models` request in TypeScript.
-7. TUI auto-title and ghost-suggestion generations share one fleet-wide low-priority slot, wait for
+8. TUI auto-title and ghost-suggestion generations share one fleet-wide low-priority slot, wait for
    an idle grace period, run sequentially, and are canceled at a foreground barrier before any real
    prompt starts. Queued prompts bypass auxiliary work; clear/close/rename/worktree lifecycle changes
    retire stale jobs. Tiny outputs and prefill stalls are independently capped.
-8. Local compaction is now deadline-aware and bounded to a 1,024-token, 120-second, reasoning-off
+9. Local compaction is now deadline-aware and bounded to a 1,024-token, 120-second, reasoning-off
    auxiliary request with context-sized head/tail input. Repeated compactions merge the prior brief
    once instead of recursively summarizing DGC's wrapper messages. Tool arguments and both ends of
    stale results remain visible. Empty, malformed, tool-calling, canceled, timed-out, or failed
    summaries fall back to a deterministic 12,000-character evidence brief rather than dropping all
    earlier context. Native server-side compaction remains future provider work.
-9. Chat Completions, Responses, and native Ollama now share bounded retry-delay parsing (numeric or
-   HTTP-date), cancellation-aware waits for both event and deadline-only cancellation views, and
-   deterministic response ownership. Error, capability-negotiation, retry, transport-fallback,
+10. Chat Completions, Responses, native Anthropic Messages, and native Ollama now share bounded
+   retry-delay parsing (numeric or HTTP-date), cancellation-aware waits for both event and
+   deadline-only cancellation views, and
+   deterministic response ownership. Error bodies and native Anthropic SSE are bounded before line
+   or whole-body materialization. Error, capability-negotiation, retry, transport-fallback,
    successful-consumption, and parser-failure paths release streamed responses before control moves
    on. Adversarial tests prove a five-second `Retry-After` is interrupted without a second request on
-   all three transports.
-10. Compatible Chat tool streams now normalize spec fragments, repeated complete IDs/names,
+   all four transports.
+11. Compatible Chat tool streams now normalize spec fragments, repeated complete IDs/names,
     cumulative argument snapshots, numeric-string or missing indices, and direct argument objects
     into one stable call. Responses applies the same cumulative-argument rule, preserves index zero,
     and keeps out-of-order calls distinct in canonical index order when proxy item IDs are missing.
     Non-object arguments remain a bounded `_unparsed` repair result and are never executed as a
     malformed type. Seven adversarial wire cases cover these variants without contacting a provider.
-11. The VS Code/Cursor host now reconciles live multi-root add/remove/reorder events with the
+12. The VS Code/Cursor host now reconciles live multi-root add/remove/reorder events with the
     backend's external-directory grants. Updates are revisioned, acknowledged, coalesced, deferred
     while a turn is active, and retried after a command/turn-start race; the same 32-external-root
     protocol bound is enforced on both sides. The installed-VS-Code smoke opens a real two-folder
     workspace and proves initial propagation, removal, and restoration without a network download.
-12. Editor commands are serialized before validation so optional JavaScript `undefined` properties
+13. Editor commands are serialized before validation so optional JavaScript `undefined` properties
     are judged as the exact omitted fields received on the JSON wire. This fixes silent rejection of
     partially specified model/settings commands. Legacy plaintext cleanup no longer deadlocks the
     backend handshake when VS Code rewrites settings but its configuration promise never settles;
     cleanup stays live behind a bound, remaining scopes produce a credential-free warning, and a
     completed migration avoids a redundant activation-path keyring read. The installed host proves
     migration, SecretStorage-only backend restart, endpoint invalidation, and no-key restart.
-13. The editor's `@file` catalog now separates the user-facing multi-root label from a typed URI,
+14. The editor's `@file` catalog now separates the user-facing multi-root label from a typed URI,
     canonical filesystem path, root-relative path, and workspace identity. Selecting a file from a
     secondary root no longer hands the model a folder-prefixed label that resolves under the primary
     root. The webview bounds and validates catalog entries, hides absolute host paths from the
     suggestion UI, and regression-tests the exact typed prompt context submitted after selection.
-14. Context budgeting now measures the provider-visible transcript plus the exact state-aware native
-    tool snapshot sent on that turn. Ollama and Chat Completions count their direct schemas; Responses
-    counts its converted function definitions without double-counting provider-private replay state.
+15. Context budgeting now measures the provider-visible transcript plus the exact state-aware native
+    tool snapshot sent on that turn. Ollama and Chat Completions count their direct schemas; Anthropic
+    counts its system/content blocks and converted `input_schema` definitions without counting base64
+    as prose; Responses counts converted functions without double-counting private replay state.
     Compaction and the following request reuse one catalog snapshot, summary-only closing requests
     correctly budget for no tools, and deterministic coverage proves a large MCP schema crosses the
     real compaction threshold instead of remaining hidden until a provider overflow.
-15. Adaptive mode now keeps the complete direct behavior for small MCP catalogs while constraining an
+16. Adaptive mode now keeps the complete direct behavior for small MCP catalogs while constraining an
     oversized catalog—including broker definitions—to one context-proportional allowance. Lexical
     user/goal relevance and exact search activation prioritize direct schemas deterministically;
     bounded search results label server metadata as untrusted. `mcp_call` keeps a hidden or individually

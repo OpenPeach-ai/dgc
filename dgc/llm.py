@@ -1,10 +1,10 @@
-"""OpenAI-compatible LLM client with streaming, <think> tag handling,
-native tool calling, and a text-protocol fallback for models without
-tool support (common with small local models)."""
+"""Provider-aware LLM client with native streaming, thinking/tool continuity,
+and a text-protocol fallback for models without tool support."""
 from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import json
 import hashlib
 import math
@@ -29,6 +29,14 @@ _MAX_MODEL_METADATA_CACHE_ENTRIES = 256
 _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
 _MODEL_CAPABILITY_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
+_ANTHROPIC_VERSION = "2023-06-01"
+_MAX_ANTHROPIC_JSON_BYTES = 8 * 1024 * 1024
+_MAX_ANTHROPIC_STREAM_BYTES = 8 * 1024 * 1024
+_ANTHROPIC_BLOCK_TYPE_RE = re.compile(r"\A[a-z][a-z0-9_]{0,63}\Z")
+_ANTHROPIC_IMAGE_RE = re.compile(
+    r"\Adata:(image/(?:jpeg|png|gif|webp));base64,([A-Za-z0-9+/]*={0,2})\Z",
+    re.IGNORECASE,
+)
 
 
 def _decoded_base64_size(payload: str) -> int:
@@ -130,6 +138,15 @@ def _scrub_multimodal_images(value) -> tuple[object, int]:
     if not isinstance(value, dict):
         return value, 0
     kind = value.get("type")
+    if kind == "image" and isinstance(value.get("source"), dict):
+        source = value["source"]
+        if source.get("type") == "base64":
+            payload = str(source.get("data") or "")
+            tokens = _estimate_base64_image_tokens(payload)
+            if tokens:
+                clean = dict(value)
+                clean["source"] = {**source, "data": "[image]"}
+                return clean, tokens
     if kind in ("image_url", "input_image"):
         key = "image_url" if "image_url" in value else "image"
         slot = value.get(key)
@@ -196,7 +213,22 @@ def _close_response(response) -> None:
 def _error_body(response, limit: int = 600) -> str:
     """Read a bounded error body and always release its streamed response."""
     try:
-        return str(response.text or "")[:limit]
+        maximum = max(0, int(limit))
+        iterator = getattr(response, "iter_content", None)
+        if callable(iterator):
+            body = bytearray()
+            for chunk in iterator(chunk_size=min(65_536, max(1, maximum + 1))):
+                if not chunk:
+                    continue
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8", "replace")
+                remaining = maximum - len(body)
+                if remaining > 0:
+                    body.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    break
+            return bytes(body).decode("utf-8", "replace")
+        return str(response.text or "")[:maximum]
     finally:
         _close_response(response)
 
@@ -231,7 +263,7 @@ def _bounded_json_response(response, maximum: int, label: str,
             check_deadline()
             try:
                 return json.loads(bytes(body).decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise LLMError(f"{label} returned malformed JSON") from exc
         # Lightweight injected/test responses may expose only json(). Bound their normalized shape.
         value = response.json()
@@ -245,6 +277,42 @@ def _bounded_json_response(response, maximum: int, label: str,
         return value
     finally:
         _close_response(response)
+
+
+def _bounded_stream_lines(response, maximum: int, label: str):
+    """Yield decoded lines while bounding real streamed bodies before line buffering."""
+    iterator = getattr(response, "iter_content", None)
+    if not callable(iterator):
+        total = 0
+        for line in response.iter_lines(decode_unicode=True):
+            raw = (line if isinstance(line, bytes)
+                   else str(line or "").encode("utf-8", "replace"))
+            total += len(raw)
+            if total > maximum:
+                raise LLMError(f"{label} exceeded its safety bound")
+            yield raw.decode("utf-8", "replace")
+        return
+
+    total = 0
+    pending = bytearray()
+    for chunk in iterator(chunk_size=65_536):
+        if not chunk:
+            continue
+        if isinstance(chunk, str):
+            chunk = chunk.encode("utf-8", "replace")
+        total += len(chunk)
+        if total > maximum:
+            raise LLMError(f"{label} exceeded its safety bound")
+        pending.extend(chunk)
+        while True:
+            newline = pending.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(pending[:newline])
+            del pending[:newline + 1]
+            yield line.rstrip(b"\r").decode("utf-8", "replace")
+    if pending:
+        yield bytes(pending).rstrip(b"\r").decode("utf-8", "replace")
 
 
 def _retry_delay(headers, default: float, cap: float = 10.0) -> float:
@@ -390,6 +458,7 @@ class ProviderCapabilities:
     responses: bool = False
     stateful_responses: bool = False
     native_chat: bool = False
+    anthropic_messages: bool = False
     prompt_cache_key: bool = False
     encrypted_reasoning: bool = False
     usage: bool = True
@@ -421,7 +490,8 @@ _PROVIDER_ADAPTERS = {
     "ollama": ProviderAdapter("ollama", ProviderCapabilities(native_chat=True)),
     "vllm": ProviderAdapter("vllm", ProviderCapabilities()),
     "deepseek": ProviderAdapter("deepseek", ProviderCapabilities(reasoning=False)),
-    "anthropic": ProviderAdapter("anthropic", ProviderCapabilities()),
+    "anthropic": ProviderAdapter("anthropic", ProviderCapabilities(
+        anthropic_messages=True, sampling=False)),
     "openrouter": ProviderAdapter("openrouter", ProviderCapabilities()),
     "groq": ProviderAdapter("groq", ProviderCapabilities()),
     "together": ProviderAdapter("together", ProviderCapabilities(reasoning=False)),
@@ -806,11 +876,13 @@ class LLMClient:
                 self.api_mode = "responses"
             elif self.family == "ollama":
                 self.api_mode = "ollama"
+            elif self.family == "anthropic":
+                self.api_mode = "anthropic"
             else:
                 self.api_mode = "chat_completions"
         else:
             self.api_mode = requested_mode
-        if self.api_mode not in ("chat_completions", "responses", "ollama"):
+        if self.api_mode not in ("chat_completions", "responses", "ollama", "anthropic"):
             self.api_mode = "chat_completions"
         self.provider_state = ("server" if str(provider_state).lower() == "server" else "stateless")
         self.prompt_cache = bool(prompt_cache)
@@ -824,6 +896,9 @@ class LLMClient:
                 self.api_mode = "chat_completions"
         if (requested_mode == "auto" and self.api_mode == "ollama"
                 and not self._feature_supported("native_chat")):
+            self.api_mode = "chat_completions"
+        if (requested_mode == "auto" and self.api_mode == "anthropic"
+                and not self._feature_supported("anthropic_messages")):
             self.api_mode = "chat_completions"
 
     def _capability_key(self, feature: str) -> tuple[str, str, str]:
@@ -1006,6 +1081,10 @@ class LLMClient:
         # An explicit native transport can intentionally sit behind a generic loopback proxy whose
         # URL cannot identify Ollama. Report the transport actually in use, not only URL inference.
         snapshot["native_chat"] = self.api_mode == "ollama" or snapshot["native_chat"]
+        snapshot["anthropic_messages"] = (
+            self.api_mode == "anthropic" or snapshot["anthropic_messages"])
+        if self.api_mode == "anthropic":
+            snapshot["sampling"] = False
         _, metadata = self._cached_model_metadata()
         result: dict[str, bool | str | int | list] = {"provider": self.family, **snapshot}
         if metadata.get("source") == "ollama_show":
@@ -1037,6 +1116,11 @@ class LLMClient:
             wire = {"instructions": instructions, "input": items}
             wire, image_tokens = _scrub_multimodal_images(wire)
             wire_tools = self._responses_tools(tools)
+        elif self.api_mode == "anthropic":
+            system, anthropic_messages = self._anthropic_messages(messages)
+            wire = {"system": system, "messages": anthropic_messages}
+            wire, image_tokens = _scrub_multimodal_images(wire)
+            wire_tools = self._anthropic_tools(tools)
         else:
             wire = [{k: v for k, v in message.items() if not str(k).startswith("_")}
                     for message in messages]
@@ -1071,6 +1155,13 @@ class LLMClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
+    def _anthropic_headers(self) -> dict:
+        return {
+            "x-api-key": self.api_key,
+            "anthropic-version": _ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        }
+
     def list_models(self) -> list[str]:
         if self.api_mode == "ollama":
             r = requests.get(f"{self._ollama_root}/api/tags", headers=self._headers(), timeout=10)
@@ -1080,6 +1171,24 @@ class LLMClient:
             if self.requested_api_mode != "auto" or r.status_code not in (404, 405, 501):
                 r.raise_for_status()
             self._mark_rejected("native_chat")
+            self.api_mode = "chat_completions"
+        if self.api_mode == "anthropic":
+            r = requests.get(f"{self.base_url}/models?limit=1000",
+                             headers=self._anthropic_headers(), stream=True, timeout=(2, 2))
+            if r.status_code == 200:
+                value = _bounded_json_response(
+                    r, _MAX_MODEL_METADATA_BYTES, "Anthropic model catalog",
+                    deadline=time.monotonic() + _MODEL_METADATA_TOTAL_S)
+                if not isinstance(value, dict) or not isinstance(value.get("data"), list):
+                    raise LLMError("Anthropic model catalog returned an invalid shape")
+                return sorted(str(model.get("id") or "?") for model in value["data"]
+                              if isinstance(model, dict))
+            if self.requested_api_mode != "auto" or r.status_code not in (404, 405, 501):
+                status = r.status_code
+                body = _error_body(r, 400)
+                raise LLMError(f"HTTP {status} from Anthropic model catalog: {body}")
+            _close_response(r)
+            self._mark_rejected("anthropic_messages")
             self.api_mode = "chat_completions"
         r = requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=10)
         r.raise_for_status()
@@ -1100,8 +1209,652 @@ class LLMClient:
         if self.api_mode == "ollama":
             return self._chat_ollama(messages, tools, reasoning_effort,
                                      on_text, on_thinking, cancel)
+        if self.api_mode == "anthropic":
+            return self._chat_anthropic(messages, tools, reasoning_effort,
+                                        on_text, on_thinking, cancel)
         return self._chat_completions(messages, tools, reasoning_effort,
                                       on_text, on_thinking, cancel)
+
+    @staticmethod
+    def _anthropic_content(content) -> list[dict]:
+        """Translate DGC text/image content into Claude Messages content blocks."""
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}] if content else []
+        if not isinstance(content, list):
+            text = str(content or "")
+            return [{"type": "text", "text": text}] if text else []
+        blocks: list[dict] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            kind = part.get("type")
+            if kind in ("text", "input_text"):
+                blocks.append({"type": "text", "text": str(part.get("text") or "")})
+                continue
+            if kind not in ("image_url", "input_image"):
+                continue
+            value = part.get("image_url") or part.get("image") or ""
+            if isinstance(value, dict):
+                value = value.get("url") or ""
+            match = _ANTHROPIC_IMAGE_RE.fullmatch(str(value))
+            if not match:
+                raise LLMError(
+                    "Anthropic Messages image input must be a validated base64 JPEG, PNG, GIF, or WebP")
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": match.group(1).lower(),
+                           "data": match.group(2)},
+            })
+        return blocks
+
+    @classmethod
+    def _anthropic_messages(cls, messages: list[dict]) -> tuple[str, list[dict]]:
+        """Map canonical history to the stateless Claude Messages transcript.
+
+        Claude requires system instructions at the top level, assistant tool-use blocks followed
+        immediately by user tool-result blocks, and exact signed thinking blocks on continuation.
+        The agent's transcript repair already supplies every missing native tool result; this
+        conversion additionally groups adjacent results into Claude's required user turn.
+        """
+        system: list[str] = []
+        out: list[dict] = []
+
+        def append(role: str, blocks: list[dict]) -> None:
+            if not blocks:
+                blocks = [{"type": "text", "text": ""}]
+            if out and out[-1]["role"] == role:
+                out[-1]["content"].extend(blocks)
+            else:
+                out.append({"role": role, "content": blocks})
+
+        def append_tool_result(block: dict) -> None:
+            if out and out[-1]["role"] == "user":
+                content = out[-1]["content"]
+                # Claude requires every tool_result before ordinary user text/image blocks. Insert
+                # after prior results to preserve parallel-call order even for repaired transcripts.
+                index = 0
+                while index < len(content) and content[index].get("type") == "tool_result":
+                    index += 1
+                content.insert(index, block)
+            else:
+                out.append({"role": "user", "content": [block]})
+
+        for source in messages:
+            if not isinstance(source, dict):
+                continue
+            role = str(source.get("role") or "")
+            if role == "system":
+                parts = cls._anthropic_content(source.get("content", ""))
+                system.extend(str(part.get("text") or "") for part in parts
+                              if part.get("type") == "text")
+                continue
+            if role == "tool":
+                content = str(source.get("content") or "")
+                block: dict = {
+                    "type": "tool_result",
+                    "tool_use_id": str(source.get("tool_call_id") or ""),
+                    "content": content,
+                }
+                lowered = content.lstrip().lower()
+                exit_code = re.match(r"exit code:\s*(-?\d+)", lowered)
+                if (lowered.startswith("error:")
+                        or (exit_code and int(exit_code.group(1)) != 0)):
+                    block["is_error"] = True
+                append_tool_result(block)
+                continue
+            if role not in ("user", "assistant"):
+                continue
+            if role == "user":
+                append("user", cls._anthropic_content(source.get("content", "")))
+                continue
+
+            provider_message = source.get("_provider_message") or {}
+            exact = (provider_message.get("content")
+                     if provider_message.get("provider") == "anthropic" else None)
+            blocks = ([copy.deepcopy(block) for block in exact if isinstance(block, dict)]
+                      if isinstance(exact, list) and exact else [])
+            if not blocks:
+                blocks = cls._anthropic_content(source.get("content", ""))
+                for call in source.get("tool_calls") or []:
+                    if not isinstance(call, dict):
+                        continue
+                    function = call.get("function") or {}
+                    name = str(function.get("name") or "") if isinstance(function, dict) else ""
+                    if not name:
+                        continue
+                    raw = function.get("arguments")
+                    arguments = raw if isinstance(raw, dict) else _tool_arguments(raw)
+                    blocks.append({"type": "tool_use", "id": str(call.get("id") or ""),
+                                   "name": name, "input": arguments})
+            append("assistant", blocks)
+        return "\n\n".join(part for part in system if part), out
+
+    @staticmethod
+    def _anthropic_tools(tools: list[dict] | None) -> list[dict]:
+        converted: list[dict] = []
+        for tool in tools or []:
+            if not isinstance(tool, dict):
+                continue
+            function = tool.get("function") or {}
+            if not isinstance(function, dict) or not function.get("name"):
+                continue
+            schema = function.get("parameters")
+            converted.append({
+                "name": str(function["name"]),
+                "description": str(function.get("description") or ""),
+                "input_schema": (copy.deepcopy(schema) if isinstance(schema, dict)
+                                 else {"type": "object", "properties": {}}),
+            })
+        return converted
+
+    @staticmethod
+    def _anthropic_adaptive_model(model: str) -> bool:
+        value = model.lower()
+        if "claude-mythos-preview" in value:
+            return True
+        match = re.search(
+            r"claude-(?:opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?", value)
+        if not match:
+            return False
+        major = int(match.group(1))
+        minor = int(match.group(2) or 0)
+        return major >= 5 or (major, minor) >= (4, 6)
+
+    def _anthropic_thinking(self, level, max_tokens: int) -> dict:
+        if level in _REASONING_OFF:
+            return {"type": "disabled"}
+        if self._anthropic_adaptive_model(self.model):
+            return {"type": "adaptive", "display": "summarized"}
+        target = {"low": 2048, "medium": 8192, "high": 16384}.get(
+            str(level).lower(), 8192)
+        # Legacy extended thinking requires budget_tokens < max_tokens. A tiny explicit output cap
+        # cannot carry the minimum useful thinking budget, so honor the cap and disable thinking.
+        if max_tokens <= 1024:
+            return {"type": "disabled"}
+        # max_tokens includes legacy thinking. Preserve a useful visible coding/tool budget instead
+        # of allowing "high" to consume every token except one.
+        visible_reserve = min(4096, max(1, max_tokens // 2))
+        budget = min(target, max_tokens - visible_reserve)
+        if budget < 1024:
+            return {"type": "disabled"}
+        return {"type": "enabled", "budget_tokens": budget}
+
+    @staticmethod
+    def _anthropic_finish_reason(reason) -> str:
+        value = str(reason or "")
+        mapped = {
+            "end_turn": "stop",
+            "stop_sequence": "stop",
+            "tool_use": "tool_calls",
+            "max_tokens": "length",
+            "model_context_window_exceeded": "length",
+            "pause_turn": "pause_turn",
+            "refusal": "stop",
+        }.get(value)
+        if mapped is None:
+            raise LLMError(
+                f"Anthropic Messages emitted an unsupported stop reason: {value or '<missing>'}")
+        return mapped
+
+    @staticmethod
+    def _anthropic_usage(usage: dict | None) -> dict:
+        raw = dict(usage) if isinstance(usage, dict) else {}
+        def count(key: str) -> int:
+            try:
+                return max(0, int(raw.get(key, 0) or 0))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+        cache_read = count("cache_read_input_tokens")
+        # Claude reports uncached, cache-write, and cache-read input as disjoint counters. DGC's
+        # normalized input total represents the whole occupied context while retaining cache reads.
+        return {
+            "input_tokens": (count("input_tokens")
+                             + count("cache_creation_input_tokens") + cache_read),
+            "output_tokens": count("output_tokens"),
+            "cached_input_tokens": cache_read,
+            "reasoning_tokens": count("thinking_tokens"),
+        }
+
+    @staticmethod
+    def _anthropic_result_from_blocks(blocks: dict[int, dict], result: ChatResult,
+                                      on_text=None, on_thinking=None,
+                                      *, emit_complete: bool = False) -> ChatResult:
+        provider_content: list[dict] = []
+        for index in sorted(blocks):
+            source = blocks[index]
+            kind = str(source.get("type") or "")
+            if kind == "text":
+                text = str(source.get("text") or "")
+                block = {k: copy.deepcopy(v) for k, v in source.items()
+                         if not str(k).startswith("_")}
+                block["type"], block["text"] = "text", text
+                provider_content.append(block)
+                if emit_complete and text:
+                    result.content += text
+                    if on_text:
+                        on_text(text)
+            elif kind == "thinking":
+                thinking = str(source.get("thinking") or "")
+                if not source.get("signature"):
+                    raise LLMError("Anthropic thinking block omitted its continuation signature")
+                if len(str(source["signature"])) > 128_000:
+                    raise LLMError("Anthropic thinking signature exceeded its safety bound")
+                block = {"type": "thinking", "thinking": thinking}
+                block["signature"] = str(source["signature"])
+                provider_content.append(block)
+                if emit_complete and thinking:
+                    result.thinking += thinking
+                    if on_thinking:
+                        on_thinking(thinking)
+            elif kind == "redacted_thinking":
+                provider_content.append({k: copy.deepcopy(v) for k, v in source.items()
+                                         if not str(k).startswith("_")})
+            elif kind in ("tool_use", "server_tool_use"):
+                raw = source.get("_input_json", "")
+                if (not raw and source.get("input") is not None
+                        and not isinstance(source.get("input"), dict)):
+                    raise LLMError(f"Anthropic {kind} block emitted a non-object input")
+                if raw and kind == "server_tool_use":
+                    parsed = _loads_lenient(raw)
+                    if not isinstance(parsed, dict):
+                        raise LLMError(
+                            "Anthropic server_tool_use block emitted malformed input JSON")
+                    arguments = dict(parsed)
+                else:
+                    arguments = (_tool_arguments(raw) if raw
+                                 else (copy.deepcopy(source.get("input"))
+                                       if isinstance(source.get("input"), dict) else {}))
+                call_id = str(source.get("id") or f"toolu_{index}")
+                name = str(source.get("name") or "")
+                if (not source.get("id") or not name
+                        or len(call_id) > 512 or len(name) > 256):
+                    raise LLMError(f"Anthropic {kind} block emitted an invalid id or name")
+                try:
+                    input_size = len(json.dumps(
+                        arguments, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                except (RecursionError, TypeError, ValueError) as exc:
+                    raise LLMError(f"Anthropic {kind} block emitted invalid input") from exc
+                if input_size > 512_000:
+                    raise LLMError("Anthropic tool input exceeded its safety bound")
+                provider_content.append({"type": kind, "id": call_id,
+                                         "name": name, "input": arguments})
+                if kind == "tool_use":
+                    result.tool_calls.append(
+                        ToolCall(id=call_id, name=name, arguments=arguments))
+            else:
+                # Server-tool results, fallbacks, and newly added complete block types are
+                # provider-owned continuation state. Preserve them byte-for-byte at the JSON-value
+                # level, but never promote them into executable DGC tool calls.
+                provider_content.append({
+                    k: copy.deepcopy(v) for k, v in source.items()
+                    if not str(k).startswith("_")
+                })
+        result.provider_message = {"provider": "anthropic", "content": provider_content}
+        result.usage = LLMClient._anthropic_usage(result.usage)
+        if result.tool_calls and result.finish_reason == "stop":
+            result.finish_reason = "tool_calls"
+        if result.tool_calls and result.finish_reason == "pause_turn":
+            raise LLMError("Anthropic pause_turn unexpectedly included an unfinished client tool call")
+        if result.finish_reason == "tool_calls" and not result.tool_calls:
+            raise LLMError("Anthropic tool_use stop omitted an executable client tool call")
+        if not result.tool_calls:
+            clean, text_calls = parse_text_tool_calls(result.content)
+            if text_calls:
+                result.content, result.tool_calls = clean, text_calls
+        return result
+
+    def _consume_anthropic_json(self, obj: dict, on_text, on_thinking) -> ChatResult:
+        if not isinstance(obj, dict):
+            raise LLMError("Anthropic Messages emitted a non-object response")
+        if obj.get("type") == "error" or obj.get("error"):
+            error = obj.get("error") or {}
+            raise LLMError(str(error.get("message") or error or "Anthropic Messages failed"))
+        content = obj.get("content") or []
+        if (not isinstance(content, list) or len(content) > 256
+                or not all(isinstance(block, dict)
+                           and _ANTHROPIC_BLOCK_TYPE_RE.fullmatch(
+                               str(block.get("type") or "")) for block in content)):
+            raise LLMError("Anthropic Messages emitted invalid content blocks")
+        try:
+            blocks = {index: copy.deepcopy(block) for index, block in enumerate(content)
+                      if isinstance(block, dict)}
+        except RecursionError as exc:
+            raise LLMError("Anthropic Messages emitted excessively nested content") from exc
+        result = ChatResult(
+            response_id=str(obj.get("id") or "")[:512],
+            finish_reason=self._anthropic_finish_reason(obj.get("stop_reason")),
+            usage=obj.get("usage") or {},
+        )
+        return self._anthropic_result_from_blocks(
+            blocks, result, on_text, on_thinking, emit_complete=True)
+
+    def _consume_anthropic(self, response: requests.Response, on_text, on_thinking,
+                           cancel=None, think_budget: int = 0) -> ChatResult:
+        if ("application/json" in response.headers.get("Content-Type", "").lower()
+                and "text/event-stream" not in response.headers.get("Content-Type", "").lower()):
+            value = _bounded_json_response(
+                response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response")
+            return self._consume_anthropic_json(value, on_text, on_thinking)
+        result = ChatResult()
+        blocks: dict[int, dict] = {}
+        produced = False
+        message_started = False
+        message_stopped = False
+        stop_reason_seen = False
+        active_blocks: set[int] = set()
+        stop_watch = threading.Event()
+        if cancel is not None:
+            def _watch(resp=response, ev=stop_watch, cx=cancel):
+                while not ev.wait(0.15):
+                    if getattr(resp, "_dgc_closed", False):
+                        return
+                    if cx.is_set():
+                        sock = _raw_socket(resp)
+                        if sock is not None:
+                            try:
+                                import socket as _socket
+                                sock.shutdown(_socket.SHUT_RDWR)
+                            except Exception:
+                                pass
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+            threading.Thread(target=_watch, daemon=True).start()
+        response.encoding = "utf-8"
+        try:
+            for line in _bounded_stream_lines(
+                    response, _MAX_ANTHROPIC_STREAM_BYTES, "Anthropic Messages stream"):
+                if cancel is not None and cancel.is_set():
+                    result.finish_reason = "cancelled"
+                    break
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data:
+                    continue
+                try:
+                    event = json.loads(data)
+                except (json.JSONDecodeError, RecursionError) as exc:
+                    raise LLMError("Anthropic Messages emitted malformed SSE JSON") from exc
+                if not isinstance(event, dict):
+                    raise LLMError("Anthropic Messages emitted a non-object stream event")
+                typ = str(event.get("type") or "")
+                if message_stopped and typ not in ("ping", ""):
+                    raise LLMError("Anthropic stream emitted data after message_stop")
+                if typ == "message_start":
+                    if message_started:
+                        raise LLMError("Anthropic stream emitted duplicate message_start")
+                    message = event.get("message") or {}
+                    if not isinstance(message, dict):
+                        raise LLMError("Anthropic message_start omitted its message object")
+                    result.response_id = str(message.get("id") or "")[:512]
+                    message_started = True
+                    if isinstance(message.get("usage"), dict):
+                        result.usage.update(message["usage"])
+                elif typ == "content_block_start":
+                    if not message_started:
+                        raise LLMError("Anthropic content block arrived before message_start")
+                    try:
+                        index = int(event.get("index"))
+                    except (TypeError, ValueError, OverflowError):
+                        raise LLMError("Anthropic content block has an invalid index") from None
+                    if index < 0 or index >= 256 or index in blocks:
+                        raise LLMError("Anthropic content block index is duplicate or out of range")
+                    block = event.get("content_block") or {}
+                    kind = str(block.get("type") or "") if isinstance(block, dict) else ""
+                    if (not isinstance(block, dict)
+                            or not _ANTHROPIC_BLOCK_TYPE_RE.fullmatch(kind)):
+                        raise LLMError("Anthropic content block start is invalid")
+                    blocks[index] = copy.deepcopy(block)
+                    active_blocks.add(index)
+                    if kind in ("tool_use", "server_tool_use"):
+                        blocks[index]["_input_json"] = ""
+                        produced = True
+                    elif kind == "text":
+                        initial = str(block.get("text") or "")
+                        result.content += initial
+                        produced = produced or bool(initial)
+                        if on_text and initial:
+                            on_text(initial)
+                    elif kind == "thinking":
+                        initial = str(block.get("thinking") or "")
+                        result.thinking += initial
+                        if on_thinking and initial:
+                            on_thinking(initial)
+                elif typ == "content_block_delta":
+                    try:
+                        index = int(event.get("index"))
+                    except (TypeError, ValueError, OverflowError):
+                        raise LLMError("Anthropic content delta has an invalid index") from None
+                    if index not in blocks:
+                        raise LLMError("Anthropic content delta arrived before its block")
+                    if index not in active_blocks:
+                        raise LLMError("Anthropic content delta arrived after its block stopped")
+                    delta = event.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        raise LLMError("Anthropic content delta is invalid")
+                    delta_type = str(delta.get("type") or "")
+                    block = blocks[index]
+                    if delta_type == "text_delta":
+                        if block.get("type") != "text":
+                            raise LLMError("Anthropic text delta targeted a non-text block")
+                        chunk = str(delta.get("text") or "")
+                        block["text"] = str(block.get("text") or "") + chunk
+                        result.content += chunk
+                        produced = produced or bool(chunk)
+                        if on_text and chunk:
+                            on_text(chunk)
+                    elif delta_type == "thinking_delta":
+                        if block.get("type") != "thinking":
+                            raise LLMError("Anthropic thinking delta targeted a non-thinking block")
+                        chunk = str(delta.get("thinking") or "")
+                        block["thinking"] = str(block.get("thinking") or "") + chunk
+                        result.thinking += chunk
+                        if on_thinking and chunk:
+                            on_thinking(chunk)
+                    elif delta_type == "signature_delta":
+                        if block.get("type") != "thinking":
+                            raise LLMError("Anthropic signature delta targeted a non-thinking block")
+                        signature = str(delta.get("signature") or "")
+                        block["signature"] = str(block.get("signature") or "") + signature
+                        if len(str(block["signature"])) > 128_000:
+                            raise LLMError("Anthropic thinking signature exceeded its safety bound")
+                    elif delta_type == "input_json_delta":
+                        if block.get("type") not in ("tool_use", "server_tool_use"):
+                            raise LLMError("Anthropic tool-input delta targeted a non-tool block")
+                        partial = delta.get("partial_json")
+                        block["_input_json"] = _merge_stream_arguments(
+                            block.get("_input_json", ""), partial)
+                        if len(str(block["_input_json"])) > 512_000:
+                            raise LLMError("Anthropic tool input exceeded its safety bound")
+                    elif delta_type == "citations_delta":
+                        if block.get("type") != "text" or not isinstance(delta.get("citation"), dict):
+                            raise LLMError("Anthropic citation delta targeted an invalid block")
+                        citations = block.setdefault("citations", [])
+                        if not isinstance(citations, list) or len(citations) >= 4096:
+                            raise LLMError("Anthropic citations exceeded their safety bound")
+                        citations.append(copy.deepcopy(delta["citation"]))
+                    else:
+                        # Unknown top-level events are forward compatible, but silently ignoring a
+                        # block delta would corrupt exact continuation state.
+                        raise LLMError(
+                            f"Anthropic Messages emitted an unsupported content delta: "
+                            f"{delta_type or '<missing>'}")
+                elif typ == "message_delta":
+                    if not message_started or active_blocks:
+                        raise LLMError("Anthropic message_delta arrived out of sequence")
+                    delta = event.get("delta") or {}
+                    if isinstance(delta, dict) and delta.get("stop_reason"):
+                        result.finish_reason = self._anthropic_finish_reason(delta["stop_reason"])
+                        stop_reason_seen = True
+                    if isinstance(event.get("usage"), dict):
+                        result.usage.update(event["usage"])
+                elif typ == "content_block_stop":
+                    try:
+                        index = int(event.get("index"))
+                    except (TypeError, ValueError, OverflowError):
+                        raise LLMError("Anthropic content stop has an invalid index") from None
+                    if index not in active_blocks:
+                        raise LLMError("Anthropic content stop has no active block")
+                    active_blocks.remove(index)
+                elif typ == "message_stop":
+                    if not message_started or active_blocks or message_stopped:
+                        raise LLMError("Anthropic message_stop arrived out of sequence")
+                    message_stopped = True
+                elif typ == "error":
+                    error = event.get("error") or {}
+                    raise LLMError(str(error.get("message") or error or
+                                       "Anthropic Messages stream failed"))
+                # Ping and future event types are ignorable; structural events above stay strict.
+                if think_budget and not produced and len(result.thinking) > think_budget:
+                    result.finish_reason = "overthink"
+                    response.close()
+                    break
+        except Exception:
+            if cancel is None or not cancel.is_set():
+                raise
+            result.finish_reason = "cancelled"
+        finally:
+            stop_watch.set()
+        if (result.finish_reason not in ("cancelled", "overthink")
+                and (not message_started or not message_stopped or active_blocks
+                     or not stop_reason_seen)):
+            raise LLMError("Anthropic Messages stream ended without a complete message lifecycle")
+        if result.finish_reason in ("cancelled", "overthink"):
+            # Never turn a partially received tool block into an executable call. A watchdog retry
+            # also must not retain an unsigned partial thinking block as continuation state.
+            result.usage = self._anthropic_usage(result.usage)
+            return result
+        return self._anthropic_result_from_blocks(blocks, result)
+
+    def _anthropic_payload(self, messages, tools, reasoning_effort,
+                           disabled: set[str], max_tokens_limit: int | None = None) -> dict:
+        system, wire_messages = self._anthropic_messages(messages)
+        maximum = max(1, int(self.max_tokens or 16_384))
+        if max_tokens_limit is not None:
+            maximum = min(maximum, max(1, int(max_tokens_limit)))
+        payload: dict = {"model": self.model, "messages": wire_messages,
+                         "max_tokens": maximum, "stream": True}
+        if system:
+            payload["system"] = system
+        converted_tools = self._anthropic_tools(
+            tools if "tools" not in disabled and self.tools_supported else None)
+        if converted_tools:
+            payload["tools"] = converted_tools
+            if "tool_choice" not in disabled:
+                payload["tool_choice"] = {"type": "auto"}
+        if "reasoning" not in disabled and self.reasoning_supported:
+            payload["thinking"] = self._anthropic_thinking(reasoning_effort, maximum)
+        effort = str(reasoning_effort or "").lower()
+        if "effort" not in disabled and effort in {"low", "medium", "high", "xhigh", "max"}:
+            payload["output_config"] = {"effort": effort}
+        return payload
+
+    def _chat_anthropic(self, messages, tools, reasoning_effort, on_text, on_thinking,
+                        cancel) -> ChatResult:
+        transient = 0
+        disabled: set[str] = set()
+        overthink = 0
+        level = reasoning_effort
+        lower = {"high": "medium", "medium": "low", "low": "off",
+                 "none": "off", "off": "off"}
+        last_err = ""
+        max_tokens_limit: int | None = None
+        for _ in range(10):
+            if cancel is not None and cancel.is_set():
+                return ChatResult(finish_reason="cancelled")
+            payload = self._anthropic_payload(
+                messages, tools, level, disabled, max_tokens_limit)
+            try:
+                response = requests.post(
+                    f"{self.base_url}/messages", headers=self._anthropic_headers(), json=payload,
+                    stream=True, timeout=(15, self.read_timeout))
+            except requests.ConnectionError as exc:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
+                transient += 1
+                last_err = f"connection: {exc}"
+                if transient < 4:
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
+                raise LLMError(f"cannot connect to Anthropic Messages: {exc}") from exc
+            except requests.Timeout as exc:
+                if cancel is not None and cancel.is_set():
+                    return ChatResult(finish_reason="cancelled")
+                transient += 1
+                last_err = f"timeout: {exc}"
+                if transient < 4:
+                    if not _wait_for_retry(0.5 * transient, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
+                raise LLMError(f"Anthropic Messages timed out repeatedly: {exc}") from exc
+            if (response.status_code in (404, 405, 501)
+                    and self.requested_api_mode == "auto"):
+                _close_response(response)
+                self._mark_rejected("anthropic_messages")
+                self.api_mode = "chat_completions"
+                return self._chat_completions(messages, tools, reasoning_effort,
+                                              on_text, on_thinking, cancel)
+            if response.status_code in (408, 429) or response.status_code >= 500:
+                status = response.status_code
+                headers = response.headers
+                body = _error_body(response, 400)
+                last_err = f"HTTP {status}: {body}"
+                transient += 1
+                if transient < 4:
+                    delay = _retry_delay(headers, 0.5 * transient)
+                    if not _wait_for_retry(delay, cancel):
+                        return ChatResult(finish_reason="cancelled")
+                    continue
+                raise LLMError(
+                    f"HTTP {status} from Anthropic Messages after {transient} tries: {body}")
+            if response.status_code in (400, 413):
+                status = response.status_code
+                body = _error_body(response)
+                low = body.lower()
+                last_err = body
+                if status == 413 or _OVERFLOW_RE.search(low):
+                    raise ContextOverflowError("context window exceeded: " + body[:200])
+                if "tool_choice" in payload and re.search(r"tool.choice|tool_choice", low):
+                    payload.pop("tool_choice", None)
+                    disabled.add("tool_choice")
+                    continue
+                if "output_config" in payload and re.search(r"output_config|effort", low):
+                    disabled.add("effort")
+                    continue
+                if "thinking" in payload and re.search(
+                        r"think|budget_tokens|adaptive|signature", low):
+                    self._mark_rejected("reasoning")
+                    disabled.add("reasoning")
+                    continue
+                if re.search(r"max_tokens|max.{0,12}(?:output|token)", low):
+                    maximum = int(payload["max_tokens"])
+                    if maximum > 1024:
+                        max_tokens_limit = max(1024, maximum // 2)
+                        continue
+                if "tools" in payload and re.search(r"tool|input_schema", low):
+                    self._mark_rejected("tools")
+                    raise ToolsUnsupportedError("Anthropic Messages rejected native tool calling")
+                raise LLMError(f"{status} from Anthropic Messages: {body}")
+            if response.status_code != 200:
+                status = response.status_code
+                body = _error_body(response, 400)
+                raise LLMError(f"HTTP {status} from Anthropic Messages: {body}")
+            budget = 0 if overthink > 2 else self.think_budget_chars
+            try:
+                result = self._consume_anthropic(
+                    response, on_text, on_thinking, cancel, think_budget=budget)
+            finally:
+                _close_response(response)
+            if result.finish_reason == "overthink":
+                overthink += 1
+                level = lower.get(str(level or "off"), "off")
+                continue
+            return result
+        raise LLMError(f"Anthropic Messages request failed repeatedly: {last_err}")
 
     @staticmethod
     def _ollama_content(content) -> tuple[str, list[str]]:

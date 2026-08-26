@@ -105,7 +105,9 @@ def unit_tests(tmp: Path):
     # --- credential redaction is centralized, shape-aware, and safe across stream chunk splits.
     from dgc.redaction import (REDACTED as _REDACTED, StreamingRedactor as _StreamRedactor,
                                contains_secret as _contains_secret,
+                               provider_continuation_has_secret as _provider_has_secret,
                                redact_messages as _redact_messages,
+                               redact_provider_value as _redact_provider_value,
                                redact_text as _redact_text, redact_value as _redact_value)
     _credential = "sk-proj-fixtureCredential123456"
     _secret_text = (
@@ -145,6 +147,34 @@ def unit_tests(tmp: Path):
     check("redaction preserves opaque provider continuation while masking visible content",
           _provider_safe["_responses_output"][0]["encrypted_content"] == _opaque_jwe
           and _credential not in _provider_safe["content"])
+    _token_shaped_thinking = "sk-proj-fixtureThinkingToken123456"
+    _signed_anthropic = {"provider": "anthropic", "content": [
+        {"type": "thinking", "thinking": _token_shaped_thinking,
+         "signature": "opaque-signature"},
+        {"type": "redacted_thinking", "data": _opaque_jwe},
+    ]}
+    _signed_safe = _redact_provider_value(_signed_anthropic)
+    _server_token = "sk-proj-fixtureServerState123456"
+    _server_state = {"provider": "anthropic", "content": [{
+        "type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search",
+        "input": {"query": _server_token},
+    }, {
+        "type": "web_search_tool_result", "tool_use_id": "srvtoolu_1",
+        "content": [{"type": "web_search_result", "title": _server_token,
+                     "encrypted_content": _opaque_jwe}],
+    }]}
+    _tool_input_safe = _redact_provider_value({"provider": "anthropic", "content": [{
+        "type": "tool_use", "id": "toolu_1", "name": "fixture",
+        "input": {"type": "thinking", "note": _token_shaped_thinking},
+    }]})
+    check("Anthropic signed thinking is opaque without exempting lookalike tool input",
+          _signed_safe == _signed_anthropic
+          and _redact_provider_value(_server_state) == _server_state
+          and _tool_input_safe["content"][0]["input"]["note"] == _REDACTED)
+    check("configured credentials inside signed provider state are detected fail-closed",
+          _provider_has_secret(_signed_anthropic, (_token_shaped_thinking,))
+          and _provider_has_secret(_server_state, (_server_token,))
+          and not _provider_has_secret(_signed_anthropic, ("different-secret-value",)))
 
     # --- modes
     eng = PermissionEngine("default", {"allow": [], "ask": [], "deny": []})
@@ -2275,6 +2305,7 @@ def unit_tests(tmp: Path):
     # --- a sub-agent shares the parent's cancel Event but must NOT clear it on run_turn entry (only a
     #     top-level turn clears), else a cancel arriving during sub construction is silently swallowed.
     from dgc.agent import (Agent as _Ag, _MAX_CONTINUE as _AGENT_MAX_CONTINUE,
+                           _MAX_PROVIDER_PAUSE_CONTINUE as _AGENT_MAX_PROVIDER_PAUSE,
                            _sampling as _samp, _tool_batch_preamble,
                            _tool_transcript_errors as _tool_errors)
     from dgc.config import Config as _Cfg
@@ -2571,6 +2602,58 @@ def unit_tests(tmp: Path):
           and "output-token limit" in _length_turn._last_turn_error
           and _length_turn.timing_totals["by_request_reason"] == {
               "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
+
+    _agent_copy = __import__("copy")
+    _paused_state = {"provider": "anthropic", "content": [
+        {"type": "server_tool_use", "id": "srvtoolu_pause", "name": "web_search",
+         "input": {"query": "fixture"}},
+        {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_pause",
+         "content": [{"type": "web_search_result", "title": "Fixture",
+                      "encrypted_content": "opaque-ciphertext"}]},
+    ]}
+    _finished_state = {"provider": "anthropic", "content": [
+        {"type": "text", "text": "Finished after the provider pause."},
+    ]}
+    class _ProviderPauseClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0; self.seen = []
+        def chat(self, messages, *args, **kwargs):
+            self.calls += 1
+            self.seen.append(_agent_copy.deepcopy(messages))
+            if self.calls == 1:
+                return _ChatResult(
+                    content="Working through a server-side tool.",
+                    finish_reason="pause_turn",
+                    provider_message=_agent_copy.deepcopy(_paused_state))
+            return _ChatResult(
+                content="Finished after the provider pause.",
+                provider_message=_agent_copy.deepcopy(_finished_state))
+    _provider_pause = _Ag(_Cfg(tmp), _AgUI())
+    _provider_pause.client = _ProviderPauseClient()
+    _provider_pause_outcome = _provider_pause.run_turn("complete the server-side turn")
+    _provider_pause_assistants = [
+        message for message in _provider_pause.messages if message.get("role") == "assistant"]
+    check("provider pause_turn replays exact state and replaces it with the completed response",
+          _provider_pause_outcome is True and _provider_pause.client.calls == 2
+          and _provider_pause.client.seen[1][-1].get("_provider_message") == _paused_state
+          and len(_provider_pause_assistants) == 1
+          and _provider_pause_assistants[0].get("_provider_message") == _finished_state
+          and _provider_pause.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "provider_pause": 1})
+
+    class _EndlessProviderPauseClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return _ChatResult(finish_reason="pause_turn",
+                               provider_message=_agent_copy.deepcopy(_paused_state))
+    _endless_pause = _Ag(_Cfg(tmp), _AgUI())
+    _endless_pause.client = _EndlessProviderPauseClient()
+    check("provider pause_turn continuation is bounded",
+          _endless_pause.run_turn("exercise the provider pause bound") is False
+          and _endless_pause.client.calls == _AGENT_MAX_PROVIDER_PAUSE + 1
+          and "repeatedly paused" in _endless_pause._last_turn_error)
 
     _cancel_root = Path(tempfile.mkdtemp())
     _cancel_group = _Ag(_Cfg(_cancel_root), _AgUI())
@@ -9534,12 +9617,18 @@ def test_reasoning_payload():
 def test_provider_capabilities():
     """Provider profiles are explicit, overrideable, and failed probes expire by endpoint+model."""
     import time as _time
+    from dgc.config import PROVIDERS
     from dgc.llm import LLMClient, normalize_usage, provider_adapter
 
     openai = provider_adapter("https://api.openai.com/v1")
     check("OpenAI profile advertises Responses state and cache routing",
           openai.family == "openai" and openai.capabilities.responses
           and openai.capabilities.stateful_responses and openai.capabilities.prompt_cache_key)
+    anthropic = provider_adapter("https://api.anthropic.com/v1")
+    check("Anthropic profile and connection preset select the native Messages contract",
+          anthropic.capabilities.anthropic_messages and not anthropic.capabilities.sampling
+          and PROVIDERS["anthropic"]["base_url"] == "https://api.anthropic.com/v1"
+          and PROVIDERS["anthropic"]["needs_key"] is True)
     overridden = LLMClient("http://localhost:1234/v1", "k", "cap-model",
                            provider_capabilities={"tools": False, "responses": True})
     check("explicit provider capability overrides win over family defaults",
@@ -9576,7 +9665,7 @@ def test_provider_retry_lifecycle():
     from email.utils import format_datetime
 
     import dgc.llm as _llm
-    from dgc.llm import ChatResult, LLMClient, _retry_delay, _wait_for_retry
+    from dgc.llm import ChatResult, LLMClient, _error_body, _retry_delay, _wait_for_retry
 
     future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=30), usegmt=True)
     check("Retry-After accepts HTTP dates and remains bounded",
@@ -9595,6 +9684,18 @@ def test_provider_retry_lifecycle():
     waited = _wait_for_retry(5, _DeadlineOnly(0.05))
     check("deadline-only cancellation interrupts retry backoff",
           not waited and _time.monotonic() - started < 1.0)
+
+    class _LargeErrorBody:
+        def __init__(self): self.closed = False; self.chunks = 0
+        def iter_content(self, chunk_size=1):
+            for chunk in (b"abc", b"defghijklmnopqrstuvwxyz", b"must-not-be-read"):
+                self.chunks += 1
+                yield chunk
+        def close(self): self.closed = True
+    bounded_error = _LargeErrorBody()
+    check("provider error bodies are capped before the streamed response is materialized",
+          _error_body(bounded_error, 5) == "abcde"
+          and bounded_error.chunks == 2 and bounded_error.closed)
 
     class _RetryResponse:
         status_code = 429
@@ -9626,6 +9727,8 @@ def test_provider_retry_lifecycle():
             "http://localhost:1234/v1", "k", "retry-chat", api_mode="chat_completions")),
         ("native Ollama", lambda: LLMClient(
             "http://localhost:11434/v1", "k", "retry-ollama", api_mode="ollama")),
+        ("Anthropic Messages", lambda: LLMClient(
+            "https://api.anthropic.com/v1", "k", "retry-anthropic", api_mode="anthropic")),
         ("Responses", lambda: LLMClient(
             "https://api.openai.com/v1", "k", "retry-responses", api_mode="responses")),
     ]
@@ -9673,6 +9776,8 @@ def test_provider_retry_lifecycle():
     fallbacks = [
         ("native Ollama", LLMClient(
             "http://localhost:11434/v1", "k", "close-ollama-fallback", api_mode="auto")),
+        ("Anthropic Messages", LLMClient(
+            "https://api.anthropic.com/v1", "k", "close-anthropic-fallback", api_mode="auto")),
         ("Responses", LLMClient(
             "https://api.openai.com/v1", "k", "close-responses-fallback", api_mode="auto")),
     ]
@@ -10342,6 +10447,546 @@ def test_ollama_adapter():
           and fallback_result.content == "compat fallback")
 
 
+def test_anthropic_adapter():
+    """Claude Messages preserves signed thinking, native tools, usage, and cancellation."""
+    import copy
+    import dgc.llm as _llm
+    from dgc.agent import Agent
+    from dgc.config import Config
+    from dgc.llm import ChatResult, LLMClient, LLMError, ToolCall
+
+    client = LLMClient(
+        "https://api.anthropic.com/v1", "anthropic-secret", "claude-sonnet-4-6")
+    client.invalidate_capabilities()
+    headers = client._anthropic_headers()
+    check("Anthropic endpoints auto-select Messages with non-Bearer authentication",
+          client.api_mode == "anthropic"
+          and client.capability_snapshot()["anthropic_messages"] is True
+          and headers.get("x-api-key") == "anthropic-secret"
+          and headers.get("anthropic-version") == "2023-06-01"
+          and "Authorization" not in headers)
+
+    class _SilentUI:
+        def __getattr__(self, _name): return lambda *args, **kwargs: None
+
+    def _agent_with_client(fake_client):
+        config = Config(Path(tempfile.mkdtemp()))
+        config._persist = False
+        config.data.update({
+            "api_key": "anthropic-secret", "base_url": "https://api.anthropic.com/v1",
+            "model": "claude-sonnet-4-6", "api_mode": "anthropic",
+            "mcp_servers": {}, "hooks": {},
+        })
+        agent = Agent(config, _SilentUI())
+        agent.client = fake_client
+        return agent
+
+    token_shaped = "sk-proj-fixtureThinkingToken123456"
+    exact_signed = {"provider": "anthropic", "content": [{
+        "type": "thinking", "thinking": token_shaped, "signature": "opaque-signature",
+    }]}
+
+    class _SafeSignedClient:
+        tools_supported = True
+        read_timeout = 30
+        calls = 0
+        def chat(self, *_args, **_kwargs):
+            self.calls += 1
+            return ChatResult(thinking=token_shaped, provider_message=copy.deepcopy(exact_signed))
+
+    safe_signed_client = _SafeSignedClient()
+    safe_signed_result = _agent_with_client(safe_signed_client)._chat(None, "high")
+    check("Agent preserves token-shaped signed thinking while sanitizing display-only reasoning",
+          safe_signed_client.calls == 1
+          and safe_signed_result.provider_message == exact_signed
+          and safe_signed_result.thinking == "[REDACTED]")
+
+    secret_signed = {"provider": "anthropic", "content": [{
+        "type": "thinking", "thinking": "anthropic-secret", "signature": "signature",
+    }]}
+
+    class _InboundSecretClient:
+        tools_supported = True
+        read_timeout = 30
+        calls = 0
+        def chat(self, *_args, **_kwargs):
+            self.calls += 1
+            return ChatResult(
+                provider_message=copy.deepcopy(secret_signed),
+                tool_calls=[ToolCall("toolu_secret", "write_file", {
+                    "path": "must-not-run", "content": "x"})])
+
+    inbound_client = _InboundSecretClient()
+    inbound_agent = _agent_with_client(inbound_client)
+    try:
+        inbound_agent._chat(None, "high")
+        inbound_failed_closed = False
+    except LLMError as exc:
+        inbound_failed_closed = "discarded before any tool execution" in str(exc)
+    check("credential-bearing signed responses fail before returning executable tools",
+          inbound_failed_closed and inbound_client.calls == 1
+          and inbound_agent.usage_totals["requests"] == 1)
+
+    class _OutboundProbeClient(_SafeSignedClient):
+        calls = 0
+
+    outbound_client = _OutboundProbeClient()
+    outbound_agent = _agent_with_client(outbound_client)
+    outbound_agent.messages.append({
+        "role": "assistant", "content": "", "_provider_message": secret_signed})
+    try:
+        outbound_agent._chat(None, "high")
+        outbound_failed_closed = False
+    except LLMError as exc:
+        outbound_failed_closed = "start a new session" in str(exc)
+    check("credential-bearing saved continuations fail before the next provider request",
+          outbound_failed_closed and outbound_client.calls == 0)
+
+    exact_blocks = [
+        {"type": "thinking", "thinking": "private chain", "signature": "opaque-signature"},
+        {"type": "text", "text": "I will inspect it."},
+        {"type": "tool_use", "id": "toolu_old", "name": "read_file",
+         "input": {"path": "old.py"}},
+    ]
+    system, converted = client._anthropic_messages([
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {
+                "url": "data:image/png;base64,QUJD"}},
+        ]},
+        {"role": "assistant", "content": "display-only",
+         "_provider_message": {"provider": "anthropic", "content": exact_blocks},
+         "tool_calls": [{"id": "toolu_old", "function": {
+             "name": "read_file", "arguments": '{"path":"old.py"}'}}]},
+        {"role": "tool", "tool_call_id": "toolu_old", "content": "error: not found"},
+        {"role": "user", "content": "try another file"},
+    ])
+    check("Anthropic history lifts system, maps images, and replays signed thinking exactly",
+          system == "Use tools." and converted[0]["role"] == "user"
+          and converted[0]["content"][1]["source"] == {
+              "type": "base64", "media_type": "image/png", "data": "QUJD"}
+          and converted[1]["content"] == exact_blocks
+          and converted[2]["content"][0] == {
+              "type": "tool_result", "tool_use_id": "toolu_old",
+              "content": "error: not found", "is_error": True}
+          and converted[2]["content"][1] == {
+              "type": "text", "text": "try another file"})
+    _, repaired_order = client._anthropic_messages([
+        {"role": "user", "content": "orphaned text"},
+        {"role": "tool", "tool_call_id": "toolu_repaired", "content": "result"},
+    ])
+    check("Anthropic conversion keeps repaired tool results before user content",
+          [block["type"] for block in repaired_order[0]["content"]]
+          == ["tool_result", "text"])
+    _, failed_tool_order = client._anthropic_messages([
+        {"role": "user", "content": "run it"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "toolu_fail",
+            "function": {"name": "bash", "arguments": '{"command":"false"}'}}]},
+        {"role": "tool", "tool_call_id": "toolu_fail", "content": "exit code: 1\nfailed"},
+    ])
+    check("Anthropic tool results mark non-zero shell exits as errors",
+          failed_tool_order[-1]["content"][0].get("is_error") is True)
+
+    tools = [{"type": "function", "function": {
+        "name": "read_file", "description": "Read a file",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}}, "required": ["path"]}}}]
+    payload = client._anthropic_payload(
+        [{"role": "user", "content": "inspect"}], tools, "high", set())
+    check("Anthropic payload uses native schemas, adaptive thinking, and required output cap",
+          payload["tools"][0]["input_schema"] == tools[0]["function"]["parameters"]
+          and payload["tool_choice"] == {"type": "auto"}
+          and payload["thinking"] == {"type": "adaptive", "display": "summarized"}
+          and payload["output_config"] == {"effort": "high"}
+          and payload["max_tokens"] == 16384
+          and not any(key in payload for key in ("temperature", "top_p", "top_k", "min_p")))
+    sonnet_five = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude-sonnet-5", api_mode="anthropic")
+    check("Claude major-version and frontier-family IDs select adaptive thinking",
+          sonnet_five._anthropic_thinking("medium", 16_384)["type"] == "adaptive"
+          and client._anthropic_adaptive_model("claude-opus-5")
+          and client._anthropic_adaptive_model("claude-fable-5")
+          and client._anthropic_adaptive_model("claude-mythos-preview"))
+    legacy = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude-3-5-sonnet-20241022",
+        max_tokens=4096, sampling={"temperature": 0.3})
+    check("legacy Anthropic thinking stays below max_tokens and sampling is omitted",
+          legacy._anthropic_payload(
+              [{"role": "user", "content": "x"}], None, "high", set())["thinking"]
+          == {"type": "enabled", "budget_tokens": 2048})
+
+    class _AnthropicStream:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "text/event-stream"}
+        encoding = ""
+        def __init__(self): self.closed = False
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "message_start", "message": {"id": "msg_1", "usage": {
+                    "input_tokens": 3, "cache_creation_input_tokens": 5,
+                    "cache_read_input_tokens": 7, "output_tokens": 1}}},
+                {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "thinking", "thinking": ""}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "thinking_delta", "thinking": "checking "}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "signature_delta", "signature": "signed-value"}},
+                {"type": "content_block_stop", "index": 0},
+                {"type": "content_block_start", "index": 1,
+                 "content_block": {"type": "text", "text": ""}},
+                {"type": "content_block_delta", "index": 1,
+                 "delta": {"type": "text_delta", "text": "Reading. "}},
+                {"type": "content_block_stop", "index": 1},
+                {"type": "content_block_start", "index": 2,
+                 "content_block": {"type": "tool_use", "id": "toolu_9",
+                                   "name": "read_file", "input": {}}},
+                {"type": "content_block_delta", "index": 2,
+                 "delta": {"type": "input_json_delta", "partial_json": '{"pa'}},
+                {"type": "content_block_delta", "index": 2,
+                 "delta": {"type": "input_json_delta", "partial_json": 'th":"main.py"}'}},
+                {"type": "content_block_stop", "index": 2},
+                {"type": "message_delta", "delta": {"stop_reason": "tool_use"},
+                 "usage": {"output_tokens": 4}},
+                {"type": "message_stop"},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+        def close(self): self.closed = True
+
+    text_chunks, thinking_chunks = [], []
+    response = _AnthropicStream()
+    result = client._consume_anthropic(
+        response, text_chunks.append, thinking_chunks.append)
+    check("Anthropic SSE preserves text, signed thinking, tools, finish state, and cache usage",
+          result.response_id == "msg_1" and result.content == "Reading. "
+          and result.thinking == "checking " and text_chunks == ["Reading. "]
+          and thinking_chunks == ["checking "] and result.finish_reason == "tool_calls"
+          and [(call.id, call.name, call.arguments) for call in result.tool_calls]
+          == [("toolu_9", "read_file", {"path": "main.py"})]
+          and result.usage == {"input_tokens": 15, "output_tokens": 4,
+                               "cached_input_tokens": 7, "reasoning_tokens": 0}
+          and result.provider_message["content"][0] == {
+              "type": "thinking", "thinking": "checking ", "signature": "signed-value"})
+
+    check("Anthropic stop reasons distinguish exact pause replay from truncation",
+          client._anthropic_finish_reason("pause_turn") == "pause_turn"
+          and client._anthropic_finish_reason("model_context_window_exceeded") == "length")
+    try:
+        client._anthropic_finish_reason("future_unhandled_reason")
+        unknown_stop_failed = False
+    except _llm.LLMError:
+        unknown_stop_failed = True
+    check("unknown Anthropic stop reasons fail closed", unknown_stop_failed)
+
+    citation = {"type": "web_search_result_location", "url": "https://example.test",
+                "title": "Fixture", "cited_text": "source", "encrypted_index": "opaque-index"}
+    class _ServerToolStream(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "message_start", "message": {"id": "msg_server", "usage": {}}},
+                {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "text", "text": "Initial "}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "text_delta", "text": "text"}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "citations_delta", "citation": citation}},
+                {"type": "content_block_stop", "index": 0},
+                {"type": "content_block_start", "index": 1,
+                 "content_block": {"type": "server_tool_use", "id": "srvtoolu_1",
+                                   "name": "web_search", "input": {}}},
+                {"type": "content_block_delta", "index": 1,
+                 "delta": {"type": "input_json_delta",
+                           "partial_json": '{"query":"fixture"}'}},
+                {"type": "content_block_stop", "index": 1},
+                {"type": "content_block_start", "index": 2,
+                 "content_block": {"type": "web_search_tool_result",
+                                   "tool_use_id": "srvtoolu_1", "content": [{
+                                       "type": "web_search_result", "title": "Fixture",
+                                       "encrypted_content": "opaque-result"}]}},
+                {"type": "content_block_stop", "index": 2},
+                {"type": "message_delta", "delta": {"stop_reason": "pause_turn"},
+                 "usage": {"output_tokens": 3}},
+                {"type": "message_stop"},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+    server_chunks = []
+    server_result = client._consume_anthropic(_ServerToolStream(), server_chunks.append, None)
+    server_content = server_result.provider_message["content"]
+    check("Anthropic streams preserve initial text, citations, and opaque server-tool state",
+          server_result.content == "Initial text" and server_chunks == ["Initial ", "text"]
+          and server_result.finish_reason == "pause_turn" and not server_result.tool_calls
+          and server_content[0]["citations"] == [citation]
+          and server_content[1] == {"type": "server_tool_use", "id": "srvtoolu_1",
+                                    "name": "web_search", "input": {"query": "fixture"}}
+          and server_content[2]["content"][0]["encrypted_content"] == "opaque-result")
+
+    class _MismatchedDelta(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "message_start", "message": {"id": "mismatch", "usage": {}}},
+                {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "text", "text": ""}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "input_json_delta", "partial_json": "{}"}},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+    try:
+        client._consume_anthropic(_MismatchedDelta(), None, None)
+        mismatched_delta_failed = False
+    except _llm.LLMError:
+        mismatched_delta_failed = True
+    check("Anthropic mismatched content deltas fail closed", mismatched_delta_failed)
+
+    original_stream_bound = _llm._MAX_ANTHROPIC_STREAM_BYTES
+    class _OversizedStream(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + ("x" * 128)
+    try:
+        _llm._MAX_ANTHROPIC_STREAM_BYTES = 64
+        try:
+            client._consume_anthropic(_OversizedStream(), None, None)
+            oversized_stream_failed = False
+        except _llm.LLMError as exc:
+            oversized_stream_failed = "safety bound" in str(exc)
+    finally:
+        _llm._MAX_ANTHROPIC_STREAM_BYTES = original_stream_bound
+    check("Anthropic SSE bodies have a total safety bound", oversized_stream_failed)
+
+    class _ChunkedAnthropicStream(_AnthropicStream):
+        def iter_content(self, chunk_size=65_536):
+            events = [
+                {"type": "message_start", "message": {"id": "chunked", "usage": {}}},
+                {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "text", "text": ""}},
+                {"type": "content_block_delta", "index": 0,
+                 "delta": {"type": "text_delta", "text": "chunked"}},
+                {"type": "content_block_stop", "index": 0},
+                {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                 "usage": {"output_tokens": 1}},
+                {"type": "message_stop"},
+            ]
+            wire = ("\n".join("data: " + json.dumps(event) for event in events)
+                    + "\n").encode()
+            for boundary in (3, 17, 61, len(wire)):
+                prior = getattr(self, "_prior", 0)
+                if boundary > prior:
+                    yield wire[prior:boundary]
+                self._prior = boundary
+        def iter_lines(self, decode_unicode=True):
+            raise AssertionError("real streamed responses must use bounded incremental chunks")
+    chunked_response = _ChunkedAnthropicStream()
+    chunked_result = client._consume_anthropic(chunked_response, None, None)
+    check("Anthropic real-HTTP chunks are framed incrementally before SSE parsing",
+          chunked_result.content == "chunked" and chunked_result.finish_reason == "stop")
+
+    _, continuation = client._anthropic_messages([
+        {"role": "user", "content": "inspect"},
+        {"role": "assistant", "content": result.content,
+         "_provider_message": result.provider_message,
+         "tool_calls": [{"id": "toolu_9", "function": {
+             "name": "read_file", "arguments": '{"path":"main.py"}'}}]},
+        {"role": "tool", "tool_call_id": "toolu_9", "content": "contents"},
+    ])
+    check("Anthropic tool continuation replays provider blocks without duplicate tool use",
+          continuation[1]["content"] == result.provider_message["content"]
+          and sum(block.get("type") == "tool_use"
+                  for block in continuation[1]["content"]) == 1
+          and continuation[2]["content"][0]["tool_use_id"] == "toolu_9")
+
+    original_post = _llm.requests.post
+    captured = []
+    try:
+        def _post(url, **kwargs):
+            captured.append((url, kwargs))
+            return _AnthropicStream()
+        _llm.requests.post = _post
+        posted = client.chat([{"role": "user", "content": "inspect"}], tools=tools,
+                             reasoning_effort="high")
+    finally:
+        _llm.requests.post = original_post
+    check("Anthropic chat posts only to /messages with its native credential header",
+          len(captured) == 1 and captured[0][0] == "https://api.anthropic.com/v1/messages"
+          and captured[0][1]["headers"]["x-api-key"] == "anthropic-secret"
+          and "Authorization" not in captured[0][1]["headers"]
+          and captured[0][1]["json"]["tools"][0]["name"] == "read_file"
+          and posted.tool_calls[0].id == "toolu_9")
+
+    class _ThinkingRejected:
+        status_code = 400
+        text = "thinking type adaptive is unsupported"
+        headers = {"Content-Type": "application/json"}
+        def close(self): pass
+    class _AnthropicJSON:
+        status_code = 200
+        text = ""
+        headers = {"Content-Type": "application/json"}
+        def json(self):
+            return {"id": "msg_json", "type": "message", "content": [
+                {"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                "usage": {"input_tokens": 2, "output_tokens": 1}}
+        def close(self): pass
+    negotiation = []
+    negotiated = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude-sonnet-4-6-negotiation")
+    negotiated.invalidate_capabilities()
+    try:
+        def _negotiate(_url, **kwargs):
+            negotiation.append(copy.deepcopy(kwargs["json"]))
+            return _ThinkingRejected() if len(negotiation) == 1 else _AnthropicJSON()
+        _llm.requests.post = _negotiate
+        negotiated_result = negotiated.chat(
+            [{"role": "user", "content": "hello"}], reasoning_effort="high")
+    finally:
+        _llm.requests.post = original_post
+    check("Anthropic reasoning rejection is bounded and keeps the native transport",
+          len(negotiation) == 2 and "thinking" in negotiation[0]
+          and "thinking" not in negotiation[1] and negotiated_result.content == "ok"
+          and negotiated.api_mode == "anthropic" and not negotiated.reasoning_supported)
+
+    class _EffortRejected(_ThinkingRejected):
+        text = "output_config.effort is unsupported for this model"
+    effort_payloads = []
+    effort_client = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude-sonnet-4-6-effort",
+        api_mode="anthropic")
+    try:
+        def _effort(_url, **kwargs):
+            effort_payloads.append(copy.deepcopy(kwargs["json"]))
+            return _EffortRejected() if len(effort_payloads) == 1 else _AnthropicJSON()
+        _llm.requests.post = _effort
+        effort_result = effort_client.chat(
+            [{"role": "user", "content": "hello"}], reasoning_effort="medium")
+    finally:
+        _llm.requests.post = original_post
+    check("Anthropic effort negotiation retains adaptive thinking and the native transport",
+          len(effort_payloads) == 2
+          and effort_payloads[0]["output_config"] == {"effort": "medium"}
+          and "output_config" not in effort_payloads[1]
+          and effort_payloads[1]["thinking"]["type"] == "adaptive"
+          and effort_result.content == "ok" and effort_client.api_mode == "anthropic")
+
+    class _MaxRejected(_ThinkingRejected):
+        text = "max_tokens exceeds the maximum output token limit"
+    max_payloads = []
+    limited = LLMClient(
+        "https://api.anthropic.com/v1", "k", "claude-legacy-output-limit",
+        api_mode="anthropic", max_tokens=4096)
+    try:
+        def _limit(_url, **kwargs):
+            max_payloads.append(copy.deepcopy(kwargs["json"]))
+            return _MaxRejected() if len(max_payloads) == 1 else _AnthropicJSON()
+        _llm.requests.post = _limit
+        limited_result = limited.chat(
+            [{"role": "user", "content": "hello"}], reasoning_effort="off")
+    finally:
+        _llm.requests.post = original_post
+    check("Anthropic output limits negotiate downward without mutating configured state",
+          [payload["max_tokens"] for payload in max_payloads] == [4096, 2048]
+          and limited.max_tokens == 4096 and limited_result.content == "ok")
+
+    class _Runaway(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + json.dumps({
+                "type": "message_start", "message": {"id": "runaway", "usage": {}}})
+            yield "data: " + json.dumps({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "thinking", "thinking": ""}})
+            yield "data: " + json.dumps({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "x" * 100}})
+    runaway = client._consume_anthropic(
+        _Runaway(), None, None, think_budget=10)
+    check("Anthropic thinking watchdog discards unsigned partial continuation state",
+          runaway.finish_reason == "overthink" and not runaway.provider_message
+          and not runaway.tool_calls)
+
+    class _Stalled(_AnthropicStream):
+        def __init__(self): self.released = threading.Event()
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + json.dumps({
+                "type": "message_start", "message": {"id": "cancelled", "usage": {}}})
+            yield "data: " + json.dumps({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "partial-tool",
+                                  "name": "write_file", "input": {}}})
+            self.released.wait(5)
+            raise OSError("closed")
+            yield
+        def close(self): self.released.set()
+    stalled = _Stalled(); cancelled = threading.Event()
+    threading.Timer(0.1, cancelled.set).start()
+    started = __import__("time").monotonic()
+    cancelled_result = client._consume_anthropic(stalled, None, None, cancel=cancelled)
+    check("Anthropic cancellation interrupts a stalled response stream",
+          cancelled_result.finish_reason == "cancelled"
+          and not cancelled_result.tool_calls and not cancelled_result.provider_message
+          and __import__("time").monotonic() - started < 1 and stalled.released.is_set())
+
+    class _Malformed(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True): yield "data: {not-json"
+    try:
+        client._consume_anthropic(_Malformed(), None, None)
+        malformed_failed = False
+    except _llm.LLMError:
+        malformed_failed = True
+    check("Anthropic malformed streams fail closed", malformed_failed)
+    class _Truncated(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + json.dumps({
+                "type": "message_start", "message": {"id": "partial", "usage": {}}})
+            yield "data: " + json.dumps({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "unsafe",
+                                  "name": "write_file", "input": {}}})
+            yield "data: " + json.dumps({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": "{}"}})
+    try:
+        client._consume_anthropic(_Truncated(), None, None)
+        truncated_failed = False
+    except _llm.LLMError:
+        truncated_failed = True
+    check("Anthropic truncated tool streams cannot become executable calls", truncated_failed)
+
+    class _Models:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        def __init__(self): self.closed = False
+        def json(self): return {"data": [{"id": "claude-z"}, {"id": "claude-a"}]}
+        def close(self): self.closed = True
+    original_get = _llm.requests.get
+    catalog_calls = []
+    catalog = _Models()
+    try:
+        def _get(url, **kwargs):
+            catalog_calls.append((url, kwargs)); return catalog
+        _llm.requests.get = _get
+        models = client.list_models()
+    finally:
+        _llm.requests.get = original_get
+    check("Anthropic model discovery is bounded and uses native headers",
+          models == ["claude-a", "claude-z"] and catalog.closed
+          and catalog_calls[0][0].endswith("/models?limit=1000")
+          and catalog_calls[0][1]["stream"] is True
+          and catalog_calls[0][1]["timeout"] == (2, 2)
+          and "Authorization" not in catalog_calls[0][1]["headers"])
+
+    image_tokens = client.estimate_input_tokens([{"role": "user", "content": [{
+        "type": "image_url", "image_url": {"url":
+            "data:image/png;base64," + ("A" * 4000)}}]}])
+    check("Anthropic context estimation counts base64 as bounded image tokens, not prose",
+          image_tokens < 1500, detail=str(image_tokens))
+    check("Anthropic usage exposes thinking tokens without double-counting output",
+          client._anthropic_usage({"input_tokens": 2, "output_tokens": 9,
+                                   "thinking_tokens": 6}) == {
+              "input_tokens": 2, "output_tokens": 9, "cached_input_tokens": 0,
+              "reasoning_tokens": 6})
+
+
 def test_responses_adapter():
     """OpenAI Responses history/tool streaming maps losslessly onto DGC's agent contract."""
     from dgc.llm import LLMClient
@@ -10690,6 +11335,7 @@ def main():
         test_provider_retry_lifecycle()
         test_compatible_tool_deltas()
         test_ollama_adapter()
+        test_anthropic_adapter()
         test_responses_adapter()
         test_overthink_watchdog()
         test_multi_edit()

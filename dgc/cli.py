@@ -847,8 +847,9 @@ class CLI:
                 self.ui.info(f"sub-agent host → {args[1]}")
             elif args[0] == "transport" and len(args) == 2:
                 mode = args[1].lower()
-                if mode not in ("auto", "ollama", "chat_completions", "responses"):
-                    self.ui.error("transport must be auto, ollama, chat_completions, or responses")
+                if mode not in ("auto", "ollama", "anthropic", "chat_completions", "responses"):
+                    self.ui.error(
+                        "transport must be auto, ollama, anthropic, chat_completions, or responses")
                     return True
                 cfg.set("subagent_api_mode", mode)
                 self.ui.info(f"sub-agent transport → {mode}")

@@ -1,6 +1,6 @@
 # DGC for VS Code & Cursor
 
-Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, or any OpenAI-compatible endpoint. Your code stays on your machine.
+Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
 > Requires the DGC CLI **v0.4.0+** on your PATH. Install it with
 > `curl -fsSL https://vibedgc.com/install.sh | bash`, then `dgc setup`.

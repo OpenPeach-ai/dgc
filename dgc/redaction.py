@@ -285,8 +285,24 @@ def redact_known_value(value, secrets: Iterable[str] = (), *, _depth: int = 0):
     return value
 
 
+_OPAQUE_PROVIDER_FIELDS = frozenset({
+    "encrypted_content", "encrypted_reasoning", "signature",
+    "thinking_signature", "reasoning_signature",
+})
+_OPAQUE_PROVIDER_BLOCK_TYPES = frozenset({
+    "thinking", "redacted_thinking", "server_tool_use", "fallback",
+})
+
+
+def _opaque_anthropic_block(value) -> bool:
+    """Whether a Messages content block must be replayed as one exact provider value."""
+    kind = str(value.get("type") or "").lower() if isinstance(value, dict) else ""
+    return kind in _OPAQUE_PROVIDER_BLOCK_TYPES or kind.endswith("_tool_result")
+
+
 def redact_provider_value(value, secrets: Iterable[str] = (), *, _depth: int = 0,
-                          _opaque: bool = False):
+                          _opaque: bool = False, _provider: str = "",
+                          _anthropic_content: bool = False):
     """Redact visible provider metadata while preserving signed/encrypted continuation blobs."""
     if _depth > 32:
         return REDACTED
@@ -300,23 +316,77 @@ def redact_provider_value(value, secrets: Iterable[str] = (), *, _depth: int = 0
             return value
         return redact_known_text(text, secrets) if _opaque else redact_text(text, secrets)
     if isinstance(value, dict):
+        # Anthropic signs the complete thinking block, not only its ``signature`` field. Applying
+        # shape-based token redaction to the thinking text would make an otherwise valid signature
+        # impossible to replay. Exact configured credentials are still replaced here; Agent detects
+        # that change and fails closed before either sending or retaining the broken continuation.
+        provider = _provider or str(value.get("provider") or "").lower()
+        block_opaque = (_opaque or (_anthropic_content and provider == "anthropic"
+                                    and _opaque_anthropic_block(value)))
         return {
-            (redact_known_text(key, secrets) if _opaque else redact_text(key, secrets))
+            (redact_known_text(key, secrets) if block_opaque else redact_text(key, secrets))
             if isinstance(key, str) else key: redact_provider_value(
                 item, secrets, _depth=_depth + 1,
-                _opaque=(_opaque or str(key).lower() in {
-                    "encrypted_content", "encrypted_reasoning", "signature",
-                    "thinking_signature", "reasoning_signature",
-                }))
+                _opaque=(block_opaque or str(key).lower() in _OPAQUE_PROVIDER_FIELDS),
+                _provider=provider,
+                _anthropic_content=(provider == "anthropic" and str(key).lower() == "content"
+                                    and isinstance(item, (list, tuple))))
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [redact_provider_value(item, secrets, _depth=_depth + 1, _opaque=_opaque)
+        return [redact_provider_value(item, secrets, _depth=_depth + 1, _opaque=_opaque,
+                                      _provider=_provider,
+                                      _anthropic_content=_anthropic_content)
                 for item in value]
     if isinstance(value, tuple):
-        return tuple(redact_provider_value(item, secrets, _depth=_depth + 1, _opaque=_opaque)
+        return tuple(redact_provider_value(item, secrets, _depth=_depth + 1, _opaque=_opaque,
+                                           _provider=_provider,
+                                           _anthropic_content=_anthropic_content)
                      for item in value)
     return value
+
+
+def provider_continuation_has_secret(value, secrets: Iterable[str] = (), *,
+                                     _depth: int = 0, _opaque: bool = False,
+                                     _provider: str = "",
+                                     _anthropic_content: bool = False) -> bool:
+    """Whether exact redaction would mutate signed/encrypted provider continuation state.
+
+    Such state cannot be safely redacted in place: its signature or ciphertext would no longer be
+    valid. Callers must stop before replaying or persisting it. Visible provider text is deliberately
+    ignored here because ordinary redaction can safely sanitize that material.
+    """
+    if _depth > 32:
+        return _opaque
+    if isinstance(value, str):
+        return _opaque and redact_known_text(value, secrets) != value
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        return _opaque and redact_known_text(text, secrets) != text
+    if isinstance(value, dict):
+        provider = _provider or str(value.get("provider") or "").lower()
+        block_opaque = (_opaque or (_anthropic_content and provider == "anthropic"
+                                    and _opaque_anthropic_block(value)))
+        for key, item in value.items():
+            if (block_opaque and isinstance(key, str)
+                    and redact_known_text(key, secrets) != key):
+                return True
+            if provider_continuation_has_secret(
+                    item, secrets, _depth=_depth + 1,
+                    _opaque=(block_opaque or str(key).lower() in _OPAQUE_PROVIDER_FIELDS),
+                    _provider=provider,
+                    _anthropic_content=(provider == "anthropic" and str(key).lower() == "content"
+                                        and isinstance(item, (list, tuple)))):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(provider_continuation_has_secret(
+            item, secrets, _depth=_depth + 1, _opaque=_opaque,
+            _provider=_provider, _anthropic_content=_anthropic_content) for item in value)
+    return False
 
 
 def redact_message(message, secrets: Iterable[str] = ()):

@@ -18,7 +18,8 @@ _PROVIDER_TRANSPORTS = frozenset(EXPECTED_PROVIDER_TRANSPORTS.values())
 _REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
     "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
-    "transport_retry", "context_retry", "fallback", "title", "suggestion", "handoff",
+    "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
+    "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
 })
 
