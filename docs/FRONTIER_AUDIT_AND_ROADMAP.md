@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 866 / 866 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 867 / 867 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -169,6 +169,11 @@ DGC also now retains a separate count of recognized red verification cycles acro
 after three, it issues one bounded reminder to stop patching the latest assertion in isolation and
 derive one coherent correction from all tests and failures already in context. It never aborts useful
 work on this signal, and any passing recognized test resets it.
+The failed Go alphametics trajectory exposed the complementary pre-test pattern: four complete
+same-file rewrites consumed round one without a single compile, then the deadline preserved a file
+with an unused variable. DGC now issues one non-aborting check-now reminder after three successful
+edits to the same target without a recognized test. Any completed red or green test resets the
+counter, and an ordered edit-plus-test batch never triggers it.
 DGC's old JavaScript alphametics files passed at the 600-second external kill after tests were already
 green, while Rust runs received contradictory shell status or had legitimate re-tests blocked.
 
@@ -583,7 +588,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 866/866 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 867/867 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -894,7 +899,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 866/866 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 867/867 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

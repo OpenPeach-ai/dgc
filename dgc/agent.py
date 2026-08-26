@@ -1946,6 +1946,8 @@ class Agent:
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
         edited_total = 0            # landed edit calls; lets fallback cadence identify verification phases
         edited_targets: set[str] = set()  # distinct files make a late planning nudge truthful
+        unverified_target_edits: dict[str, int] = {}  # repeated drafting of one file before any test
+        unverified_edit_nudged = False
         todo_nudged = False         # so the "make a todo list" nudge fires at most once
         todo_gate = 0               # times we've refused to end the turn with open todos
         did_tools = False           # did the model actually call any tools this turn?
@@ -2269,6 +2271,11 @@ class Agent:
                         cmdstr, configured_verifier)
                     is_test_command = (is_configured_verifier
                                        or _is_verification_command(cmdstr))
+                    if is_test_command:
+                        # A completed test, red or green, turns prior drafting into evidence. Permit
+                        # another bounded edit phase before warning about unchecked same-file churn.
+                        unverified_target_edits.clear()
+                        unverified_edit_nudged = False
                     if head[len("exit code: "):].strip() == "0":             # a pass = progress → reset
                         fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
                         if is_test_command:
@@ -2318,7 +2325,10 @@ class Agent:
                         candidate = Path(target)
                         if not candidate.is_absolute():
                             candidate = self.config.project_root / candidate
-                        edited_targets.add(str(candidate.absolute()))
+                        absolute_target = str(candidate.absolute())
+                        edited_targets.add(absolute_target)
+                        unverified_target_edits[absolute_target] = (
+                            unverified_target_edits.get(absolute_target, 0) + 1)
                 if native:
                     self.messages.append({"role": "tool", "tool_call_id": call.id, "content": out})
                 else:
@@ -2386,6 +2396,13 @@ class Agent:
                     "output already in context, reason across the remaining cases, make one coherent "
                     "correction (rewrite the function/file if its design is wrong), then run the "
                     "authoritative verifier once.")
+            if (not unverified_edit_nudged
+                    and max(unverified_target_edits.values(), default=0) >= 3):
+                unverified_edit_nudged = True
+                reminders.append(
+                    "The same file has now been edited at least 3 times without running a test. Stop "
+                    "redrafting it speculatively and run the fastest relevant compile/test now; use that "
+                    "result to make one final coherent correction instead of another unchecked rewrite.")
             if edit_fail_streak >= _EDIT_FAIL_SOFT and not edit_grind_nudged:   # F3: steer to write_file
                 edit_grind_nudged = True
                 reminders.append(f"Your last {edit_fail_streak} edit_file calls failed to match the file. "

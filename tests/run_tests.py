@@ -2688,13 +2688,21 @@ def unit_tests(tmp: Path):
     class _GreenClient:
         tools_supported = True
         n = 0
+        closing_context = ""
         def chat(self, *args, **kwargs):
             self.n += 1
             if self.n == 1:
                 return _ChatResult(tool_calls=[
-                    _ToolCall("green-edit", "write_file", {"path": "answer.txt", "content": "good\n"}),
+                    _ToolCall("green-edit-1", "write_file", {
+                        "path": "answer.txt", "content": "draft one\n"}),
+                    _ToolCall("green-edit-2", "write_file", {
+                        "path": "answer.txt", "content": "draft two\n"}),
+                    _ToolCall("green-edit-3", "write_file", {
+                        "path": "answer.txt", "content": "good\n"}),
                     _ToolCall("green-test", "bash", {"command": "test -f answer.txt"}),
                 ])
+            self.closing_context = "\n".join(
+                str(message.get("content") or "") for message in args[0])
             return _ChatResult(tool_calls=[_ToolCall(
                 "textcall_post_green", "write_file",
                 {"path": "post-green.txt", "content": "must not execute\n"})])
@@ -2703,7 +2711,9 @@ def unit_tests(tmp: Path):
     check("shell-equivalent green verifier hard-stops post-pass text tools",
           _green_agent.client.n == 2
           and (_green_root / "answer.txt").read_text() == "good\n"
-          and not (_green_root / "post-green.txt").exists())
+          and not (_green_root / "post-green.txt").exists()
+          and "edited at least 3 times without running a test" not in
+          _green_agent.client.closing_context)
     _ordered_root = Path(tempfile.mkdtemp())
     _ordered_agent = _Ag(_Cfg(_ordered_root), _AgUI())
     _ordered_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
@@ -2752,6 +2762,28 @@ def unit_tests(tmp: Path):
           _cycles_agent.client.n == 4
           and "3 test/verification cycles have failed" in _cycles_agent.client.final_context
           and "Stop patching the latest assertion in isolation" in _cycles_agent.client.final_context)
+    _unchecked_root = Path(tempfile.mkdtemp())
+    _unchecked_agent = _Ag(_Cfg(_unchecked_root), _AgUI())
+    _unchecked_agent.config.data.update({"mode": "auto", "turn_budget_s": 60})
+    class _UncheckedEditsClient:
+        tools_supported = True
+        n = 0
+        final_context = ""
+        def chat(self, messages, **_kwargs):
+            self.n += 1
+            if self.n <= 3:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    f"unchecked-edit-{self.n}", "write_file",
+                    {"path": "solver.go", "content": f"package solver // draft {self.n}\n"})])
+            self.final_context = "\n".join(str(message.get("content") or "")
+                                             for message in messages)
+            return _ChatResult(content="I will compile the current candidate before rewriting it again.")
+    _unchecked_agent.client = _UncheckedEditsClient()
+    _unchecked_agent.run_turn("implement the solver efficiently")
+    check("three same-file edits without a test trigger one check-now nudge",
+          _unchecked_agent.client.n == 4
+          and "edited at least 3 times without running a test" in _unchecked_agent.client.final_context
+          and "another unchecked rewrite" in _unchecked_agent.client.final_context)
     _parent_cancel = threading.Event()
     check("budget deadline cancellation does not mutate the user's Stop event",
           _DeadlineCancel(_parent_cancel, _now - 1).is_set() and not _parent_cancel.is_set())
