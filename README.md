@@ -158,6 +158,7 @@ dgc --resume         pick a past session to resume
 dgc update           update DGC to the latest version
 dgc serve            headless JSON backend (NDJSON over stdio) for editor extensions
 dgc acp              Agent Client Protocol backend (stdio) for Zed / Neovim / …
+dgc protocol describe --compact    inspect the installed protocol + slash surfaces as JSON
 dgc -p "fix the bug in auth.py" --mode auto    one-shot, non-interactive
 DGC_API_KEY=... dgc --model NAME --base-url URL  use an environment credential
 ```
@@ -167,7 +168,12 @@ For a configured MCP server, a `dgc serve` controller sends
 `{"type":"call_mcp_tool","request_id":"invoke-1","call_id":"call-1","name":"mcp__server__tool","arguments":{}}`.
 Answer any emitted `permission_request` with its existing ID and a typed `permission_response`;
 completion is the correlated `mcp_call_complete` event. The generated protocol-v3 JSON Schema is
-`schemas/editor-protocol-v3.schema.json`.
+`schemas/editor-protocol-v3.schema.json` and is also bundled in the installed Python package.
+`dgc protocol describe --compact` reports its SHA-256, byte limits, required/optional fields, every
+headless command/event, and the exact TUI/classic/editor slash catalogs without loading configuration
+or contacting a model. `dgc protocol schema` prints the installed schema; validate fixture or captured
+NDJSON with `dgc protocol validate command FILE` or `dgc protocol validate event FILE` (`-` reads
+stdin). Validation emits one correlated JSON row per input line and exits nonzero if any frame fails.
 
 The same controller can verify skill precedence with
 `{"type":"list_skills","request_id":"skills-1"}` and receive a correlated `skill_catalog` whose
@@ -288,7 +294,7 @@ streamed responses are always released before retry or transport fallback.
 
 ```bash
 .venv/bin/python tests/run_tests.py   # units + end-to-end against a mock LLM server
-./scripts/generate-editor-protocol.py # regenerate checked-in JSON + TypeScript protocol schemas
+./scripts/generate-editor-protocol.py # regenerate source/package JSON + TypeScript protocol contracts
 ./scripts/preflight.sh                # complete local release gate
 ```
 

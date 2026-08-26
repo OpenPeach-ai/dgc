@@ -7,6 +7,7 @@ when either checked-in artifact drifts from this source.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 PROTOCOL_VERSION = 3
@@ -14,6 +15,7 @@ MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
 MAX_PENDING_COMMANDS = 256
+MAX_SAFE_INTEGER = (1 << 53) - 1
 
 
 def _f(*kinds: str, required: bool = True, enum: tuple | None = None) -> dict:
@@ -247,9 +249,15 @@ def _type_ok(value, kind: str) -> bool:
     if kind == "boolean":
         return isinstance(value, bool)
     if kind == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
+        return (isinstance(value, int) and not isinstance(value, bool)
+                and -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER)
     if kind == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            return math.isfinite(value) and -MAX_SAFE_INTEGER <= value <= MAX_SAFE_INTEGER
+        except OverflowError:
+            return False
     if kind == "array":
         return isinstance(value, list)
     if kind == "object":
@@ -301,11 +309,16 @@ def command_error(value) -> str | None:
 
 def _json_type(field: dict) -> dict:
     kinds = field["types"]
+    def branch(kind: str) -> dict:
+        value = {"type": kind}
+        if kind in ("integer", "number"):
+            value.update(minimum=-MAX_SAFE_INTEGER, maximum=MAX_SAFE_INTEGER)
+        return value
     # JSON Schema permits ``type: [..]``, but strict AJV requires a consumer-specific
     # ``allowUnionTypes`` option for it.  Explicit branches keep the generated public contract
     # portable across default draft-2020 validators.
-    schema: dict = ({"type": kinds[0]} if len(kinds) == 1 else {
-        "anyOf": [{"type": kind} for kind in kinds]
+    schema: dict = (branch(kinds[0]) if len(kinds) == 1 else {
+        "anyOf": [branch(kind) for kind in kinds]
     })
     if "enum" in field:
         schema["enum"] = field["enum"]
@@ -316,7 +329,8 @@ def _message_schema(name: str, fields: dict[str, dict], *, sequence: bool) -> di
     properties = {"type": {"const": name}}
     required = ["type"]
     if sequence:
-        properties["seq"] = {"type": "integer", "minimum": 0}
+        properties["seq"] = {"type": "integer", "minimum": 0,
+                             "maximum": MAX_SAFE_INTEGER}
         required.append("seq")
     for key, field in fields.items():
         properties[key] = _json_type(field)
@@ -378,7 +392,8 @@ function typeOk(value: unknown, kind: string): boolean {{
   if (kind === "string") return typeof value === "string";
   if (kind === "boolean") return typeof value === "boolean";
   if (kind === "integer") return Number.isSafeInteger(value);
-  if (kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (kind === "number") return typeof value === "number" && Number.isFinite(value)
+    && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
   if (kind === "array") return Array.isArray(value);
   if (kind === "object") return isObject(value);
   return false;
@@ -433,11 +448,16 @@ export function dgcCommandError(value: unknown): string | undefined {{
 '''
 
 
-def write_generated(root: Path) -> tuple[Path, Path]:
+def write_generated(root: Path) -> tuple[Path, Path, Path]:
     schema_path = root / "schemas" / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json"
+    package_schema_path = (root / "dgc" / "schemas"
+                           / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json")
     ts_path = root / "editors" / "vscode" / "src" / "protocol.generated.ts"
     schema_path.parent.mkdir(parents=True, exist_ok=True)
+    package_schema_path.parent.mkdir(parents=True, exist_ok=True)
     ts_path.parent.mkdir(parents=True, exist_ok=True)
-    schema_path.write_text(schema_text())
+    generated_schema = schema_text()
+    schema_path.write_text(generated_schema)
+    package_schema_path.write_text(generated_schema)
     ts_path.write_text(typescript_source())
-    return schema_path, ts_path
+    return schema_path, package_schema_path, ts_path

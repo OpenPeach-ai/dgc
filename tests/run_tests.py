@@ -1767,6 +1767,7 @@ def unit_tests(tmp: Path):
     from dgc.editor_protocol import (COMMAND_FIELDS as _COMMAND_FIELDS,
                                      EVENT_FIELDS as _EVENT_FIELDS,
                                      MAX_COMMAND_BYTES as _MAX_COMMAND_BYTES,
+                                     MAX_SAFE_INTEGER as _MAX_SAFE_INTEGER,
                                      PROTOCOL_VERSION as _PROTOCOL_VERSION,
                                      command_error as _command_error,
                                      event_error as _event_error,
@@ -1774,10 +1775,18 @@ def unit_tests(tmp: Path):
                                      schema_text as _schema_text,
                                      typescript_source as _typescript_source)
     _schema_path = PROJECT / "schemas" / f"editor-protocol-v{_PROTOCOL_VERSION}.schema.json"
+    _package_schema_path = (PROJECT / "dgc" / "schemas"
+                            / f"editor-protocol-v{_PROTOCOL_VERSION}.schema.json")
     _ts_protocol_path = PROJECT / "editors" / "vscode" / "src" / "protocol.generated.ts"
     check("editor protocol generated artifacts match the authoritative Python contract",
           _schema_path.read_text() == _schema_text()
+          and _package_schema_path.read_text() == _schema_text()
           and _ts_protocol_path.read_text() == _typescript_source())
+    from importlib import resources as _resources
+    _installed_schema = (_resources.files("dgc") / "schemas"
+                         / f"editor-protocol-v{_PROTOCOL_VERSION}.schema.json")
+    check("the installed Python package exposes the exact versioned protocol schema",
+          _installed_schema.read_text(encoding="utf-8") == _schema_text())
     _protocol_schema = _schema_document()
     def _schema_nodes(value):
         yield value
@@ -1793,6 +1802,30 @@ def unit_tests(tmp: Path):
           and set(_protocol_schema.get("$defs", {})) == {"event", "command"}
           and not any(isinstance(node, dict) and isinstance(node.get("type"), list)
                       for node in _schema_nodes(_protocol_schema)))
+    from dgc.protocol import Emitter as _ProtocolEmitter, strict_json_loads as _strict_json_loads
+    _nonfinite_rejected = False
+    try:
+        _strict_json_loads('{"type":"set_config","values":{"context_size":NaN}}')
+    except ValueError:
+        _nonfinite_rejected = True
+    _nonfinite_event_rejected = False
+    try:
+        _ProtocolEmitter(_io2.StringIO(), validator=_event_error).emit(
+            "tool_call", call_id=None, name="fixture", args={"value": float("nan")}, summary="")
+    except ValueError:
+        _nonfinite_event_rejected = True
+    _numeric_nodes = [node for node in _schema_nodes(_protocol_schema)
+                      if isinstance(node, dict) and node.get("type") in ("integer", "number")]
+    check("protocol JSON, Python, TypeScript, and Schema share finite safe-number semantics",
+          _nonfinite_rejected and _nonfinite_event_rejected
+          and _event_error({"type": "tool_progress", "seq": 0, "call_id": None,
+                            "name": "x", "message": "x", "progress": float("nan")})
+          and _event_error({"type": "tool_progress", "seq": 0, "call_id": None,
+                            "name": "x", "message": "x", "progress": 10 ** 1000})
+          and _command_error({"type": "rewind", "index": _MAX_SAFE_INTEGER + 1})
+          and _numeric_nodes
+          and all(node.get("minimum") is not None
+                  and node.get("maximum") == _MAX_SAFE_INTEGER for node in _numeric_nodes))
     _headless_tree = _ast.parse((PROJECT / "dgc" / "headless.py").read_text())
     _emitted_types = {
         node.args[0].value for node in _ast.walk(_headless_tree)
@@ -1802,6 +1835,53 @@ def unit_tests(tmp: Path):
     }
     check(f"every literal headless event is declared in protocol v{_PROTOCOL_VERSION}",
           _emitted_types <= set(_EVENT_FIELDS))
+
+    # The installed-build discovery command is intentionally usable without Config, user state,
+    # a session, an update check, or a model endpoint.
+    _protocol_home = tmp / "protocol-home"
+    _protocol_home.mkdir()
+    _protocol_env = {**os.environ, "HOME": str(_protocol_home), "PYTHONPATH": str(PROJECT)}
+    _described = subprocess.run(
+        [sys.executable, "-m", "dgc", "protocol", "describe", "--compact"],
+        cwd=tmp, env=_protocol_env, capture_output=True, text=True, timeout=10)
+    _description = _json2.loads(_described.stdout or "{}")
+    check("protocol discovery is side-effect-free and reports the exact installed surfaces",
+          _described.returncode == 0 and not (_protocol_home / ".dgc").exists()
+          and _description.get("protocol_version") == _PROTOCOL_VERSION
+          and _description.get("headless", {}).get("command") == "dgc serve"
+          and {row["type"] for row in _description.get("headless", {}).get("commands", [])}
+              == set(_COMMAND_FIELDS)
+          and set(_description.get("slash_commands", {})) == {"tui", "classic", "editor"})
+    _schema_cli = subprocess.run(
+        [sys.executable, "-m", "dgc", "protocol", "schema"],
+        cwd=tmp, env=_protocol_env, capture_output=True, text=True, timeout=10)
+    check("protocol schema CLI returns the byte-exact bundled contract",
+          _schema_cli.returncode == 0 and _schema_cli.stdout == _schema_text())
+    _validated = subprocess.run(
+        [sys.executable, "-m", "dgc", "protocol", "validate", "command", "-"],
+        cwd=tmp, env=_protocol_env, input=(
+            '{"type":"get_config"}\n'
+            '{"type":"set_mode","mode":"unsafe"}\n'
+            '{"type":"set_config","values":{"context_size":NaN}}\n'),
+        capture_output=True, text=True, timeout=10)
+    _validation_rows = [_json2.loads(line) for line in _validated.stdout.splitlines()]
+    check("protocol validator accepts valid NDJSON and fails invalid frames with line correlation",
+          _validated.returncode == 1 and _validation_rows == [
+              {"kind": "command", "line": 1, "type": "get_config", "valid": True},
+              {"error": "set_mode.mode has an unsupported value", "kind": "command",
+               "line": 2, "valid": False},
+              {"error": "frame was not valid JSON", "kind": "command",
+               "line": 3, "valid": False},
+          ])
+    _secret_type = "secret-frame-type-DoNotReflect123"
+    _safe_invalid = subprocess.run(
+        [sys.executable, "-m", "dgc", "protocol", "validate", "event", "-"],
+        cwd=tmp, env=_protocol_env,
+        input=_json2.dumps({"type": _secret_type, "seq": 0}) + "\n",
+        capture_output=True, text=True, timeout=10)
+    check("protocol validator diagnostics never reflect untrusted frame values",
+          _safe_invalid.returncode == 1 and _secret_type not in _safe_invalid.stdout
+          and "unknown message type" in _safe_invalid.stdout)
     _valid_info = {"type": "info", "seq": 0, "message": "ready"}
     _valid_progress = {"type": "tool_progress", "seq": 1, "call_id": "c1",
                        "name": "mcp__fixture__scan", "message": "halfway",

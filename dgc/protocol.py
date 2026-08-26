@@ -12,6 +12,14 @@ import json
 import threading
 
 
+def strict_json_loads(value):
+    """Parse standards-compliant JSON, rejecting Python's non-standard NaN/Infinity extension."""
+    def reject_constant(_value):
+        raise ValueError("non-finite numbers are not valid JSON")
+
+    return json.loads(value, parse_constant=reject_constant)
+
+
 class Emitter:
     def __init__(self, fp, validator=None, sanitizer=None):
         self.fp = fp
@@ -39,7 +47,7 @@ class Emitter:
                     problem = self.validator(obj)
                     if problem:
                         raise ValueError(f"sanitized protocol event is invalid: {problem}")
-            line = json.dumps(obj, default=str, ensure_ascii=False)
+            line = json.dumps(obj, default=str, ensure_ascii=False, allow_nan=False)
             try:
                 self.fp.write(line + "\n")
                 self.fp.flush()

@@ -28,6 +28,7 @@ from .attachments import validate_image_data_uris
 from .commands import custom_command_names
 from .config import Config
 from .permissions import MODE_DESCRIPTIONS, MODES, rule_for
+from .protocol import strict_json_loads
 from .redaction import redact_text, redact_value, secret_values, sensitive_name
 from .ui import arg_summary, split_diff, tool_output_is_error
 
@@ -121,7 +122,7 @@ class ACPServer:
 
     def _write(self, obj: dict) -> None:
         obj = self._safe_value(obj)
-        line = json.dumps(obj, ensure_ascii=False)
+        line = json.dumps(obj, ensure_ascii=False, allow_nan=False)
         with self._lock:
             try:
                 sys.stdout.write(line + "\n")
@@ -236,8 +237,8 @@ class ACPServer:
             if not line:
                 continue
             try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
+                msg = strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError):
                 self.respond(None, error={"code": -32700, "message": "parse error"})
                 continue
             if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":

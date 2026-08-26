@@ -1374,13 +1374,15 @@ def run_help() -> None:
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
     c.print("  dgc update              update DGC to the latest version")
+    c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
 
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in ("setup", "doctor", "help", "update", "serve", "acp", "bug"):
+    if raw_argv and raw_argv[0] in (
+            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug"):
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "bug":
@@ -1398,6 +1400,11 @@ def main(argv: list[str] | None = None) -> int | None:
             # Agent Client Protocol (JSON-RPC over stdio) for Zed/JetBrains/Neovim/Emacs.
             from .acp import serve as acp_serve
             acp_serve(); return
+        if raw_argv[0] == "protocol":
+            # Contract discovery/validation is intentionally side-effect-free: no Config, update
+            # check, model endpoint, session, or user-state access.
+            from .protocol_cli import main as protocol_main
+            return protocol_main(raw_argv[1:])
         cfg = Config()
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return

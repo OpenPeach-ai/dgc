@@ -23,7 +23,7 @@ from .commands import (
 from .config import Config
 from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
 from .permissions import Rule, rule_for
-from .protocol import Emitter, PendingRequests
+from .protocol import Emitter, PendingRequests, strict_json_loads
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import skill_catalog
@@ -1085,8 +1085,8 @@ def serve(config: Config) -> None:
             if not line:
                 continue
             try:
-                cmd = json.loads(line)
-            except json.JSONDecodeError:
+                cmd = strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError):
                 backend.em.emit("error", message="invalid JSON command line")
                 continue
             if not isinstance(cmd, dict):

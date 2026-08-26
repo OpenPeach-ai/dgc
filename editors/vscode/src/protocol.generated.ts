@@ -1658,7 +1658,8 @@ function typeOk(value: unknown, kind: string): boolean {
   if (kind === "string") return typeof value === "string";
   if (kind === "boolean") return typeof value === "boolean";
   if (kind === "integer") return Number.isSafeInteger(value);
-  if (kind === "number") return typeof value === "number" && Number.isFinite(value);
+  if (kind === "number") return typeof value === "number" && Number.isFinite(value)
+    && Math.abs(value) <= Number.MAX_SAFE_INTEGER;
   if (kind === "array") return Array.isArray(value);
   if (kind === "object") return isObject(value);
   return false;
