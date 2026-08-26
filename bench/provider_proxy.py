@@ -129,7 +129,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.server.request_finished()  # type: ignore[attr-defined]
 
     def _forward(self) -> None:
-        started = time.time()
+        started_at = time.time()
+        started_monotonic = time.monotonic()
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length) if length else b""
         model = None
@@ -204,7 +205,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         finally:
             connection.close()
             usage = extract_usage(bytes(captured))
-            record = {"time": time.time(), "duration_s": round(time.time() - started, 3),
+            record = {"time": time.time(), "started_at": started_at,
+                      "duration_s": round(time.monotonic() - started_monotonic, 3),
                       "method": self.command, "path": urlsplit(self.path).path,
                       "model": model, "status": status, "normalization": normalization,
                       "client_disconnected": disconnected, "usage": usage}

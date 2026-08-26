@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 REQUIRED_ENGINES = {"dgc", "aider", "codex", "goose", "opencode", "pi"}
@@ -54,13 +55,56 @@ def load(path: Path) -> dict:
     input_tokens = sum(int((usage or {}).get("input_tokens", 0) or 0) for usage in usages)
     output_tokens = sum(int((usage or {}).get("output_tokens", 0) or 0) for usage in usages)
     reasoning_tokens = sum(int((usage or {}).get("reasoning_tokens", 0) or 0) for usage in usages)
+    def timing_value(usage: dict, key: str) -> float | None:
+        try:
+            value = float(usage.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) and value >= 0 else None
+
+    provider_timings = []
+    for usage in usages:
+        if (not isinstance(usage, dict) or int(usage.get("requests", 0) or 0) <= 0
+                or usage.get("synchronized", True) is False):
+            continue
+        values = tuple(timing_value(usage, key) for key in
+                       ("provider_duration_s", "provider_wall_s", "provider_max_duration_s"))
+        if all(value is not None for value in values):
+            provider_timings.append(values)
+    provider_timing_rounds = len(provider_timings)
+    provider_duration_s = sum(values[0] for values in provider_timings)
+    provider_wall_s = sum(values[1] for values in provider_timings)
+    provider_max_duration_s = max((values[2] for values in provider_timings), default=0.0)
+    stats = [(rd.get("stats") or {}) for rd in rounds]
+    builtin_timing_rounds = sum("builtin_tool_us" in item for item in stats)
+    builtin_tool_s = sum(max(0, int(item.get("builtin_tool_us", 0) or 0))
+                         for item in stats) / 1_000_000
+    builtin_tool_samples = sum(max(0, int(item.get("builtin_tool_samples", 0) or 0))
+                               for item in stats)
+    by_tool_us: dict[str, int] = {}
+    by_tool_samples: dict[str, int] = {}
+    for item in stats:
+        for source_key, target in (("by_tool_us", by_tool_us),
+                                   ("by_tool_samples", by_tool_samples)):
+            values = item.get(source_key) if isinstance(item.get(source_key), dict) else {}
+            valid_names = [str(name) for name in sorted(values)
+                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))][:64]
+            for name in valid_names:
+                amount = values.get(name, 0)
+                target[name] = target.get(name, 0) + max(0, int(amount or 0))
     errors = sum(bool(r.get("error")) for r in records)
     return {"path": path, "manifest": manifest, "engine": engine, "records": records,
             "tasks": tasks, "n": len(records),
             "p1": p1, "p2": p2, "timeouts": timeouts, "agent_s": agent_s,
             "edit_fails": edit_fails, "errors": errors, "usage_rounds": usage_rounds,
             "rounds": len(rounds), "input_tokens": input_tokens,
-            "output_tokens": output_tokens, "reasoning_tokens": reasoning_tokens}
+            "output_tokens": output_tokens, "reasoning_tokens": reasoning_tokens,
+            "provider_timing_rounds": provider_timing_rounds,
+            "provider_duration_s": provider_duration_s, "provider_wall_s": provider_wall_s,
+            "provider_max_duration_s": provider_max_duration_s,
+            "builtin_timing_rounds": builtin_timing_rounds,
+            "builtin_tool_s": builtin_tool_s, "builtin_tool_samples": builtin_tool_samples,
+            "by_tool_us": by_tool_us, "by_tool_samples": by_tool_samples}
 
 
 def publication_errors(runs: list[dict]) -> list[str]:
@@ -143,7 +187,8 @@ def main() -> None:
         parser.error("run provenance/settings differ for: " + ", ".join(incompatible))
 
     print(f"{'engine':12s} {'n':>4} {'pass@1 (95% CI)':>24} {'pass@2 (95% CI)':>24} "
-          f"{'avg_s':>8} {'avg_in':>9} {'avg_out':>9} {'t/o':>5} {'errors':>7} {'editfail':>9}")
+          f"{'avg_s':>8} {'prov_s':>8} {'tool_s':>8} {'avg_in':>9} {'avg_out':>9} "
+          f"{'t/o':>5} {'errors':>7} {'editfail':>9}")
     comparison = []
     for run in sorted(runs, key=lambda r: (-r["p2"], r["agent_s"], r["engine"])):
         lo1, hi1 = wilson(run["p1"], run["n"])
@@ -153,14 +198,23 @@ def main() -> None:
                   if run["usage_rounds"] == run["rounds"] else "?")
         avg_out = (str(round(run["output_tokens"] / run["n"]))
                    if run["usage_rounds"] == run["rounds"] else "?")
+        avg_provider = (f"{run['provider_wall_s'] / run['n']:.1f}"
+                        if run["provider_timing_rounds"] == run["rounds"] else "?")
+        avg_tool = (f"{run['builtin_tool_s'] / run['n']:.1f}"
+                    if run["builtin_timing_rounds"] == run["rounds"] else "?")
         print(f"{run['engine']:12s} {run['n']:4d} "
               f"{100*run['p1']/run['n']:5.1f}% [{100*lo1:4.1f},{100*hi1:4.1f}] "
               f"{100*run['p2']/run['n']:5.1f}% [{100*lo2:4.1f},{100*hi2:4.1f}] "
-              f"{avg:8.1f} {avg_in:>9} {avg_out:>9} "
+              f"{avg:8.1f} {avg_provider:>8} {avg_tool:>8} {avg_in:>9} {avg_out:>9} "
               f"{run['timeouts']:5d} {run['errors']:7d} {run['edit_fails']:9d}")
         comparison.append({k: run[k] for k in
                            ("engine", "n", "p1", "p2", "timeouts", "agent_s", "errors", "edit_fails",
                             "input_tokens", "output_tokens", "reasoning_tokens", "usage_rounds", "rounds")}
+                          | {k: run[k] for k in
+                             ("provider_timing_rounds", "provider_duration_s", "provider_wall_s",
+                              "provider_max_duration_s", "builtin_timing_rounds",
+                              "builtin_tool_s", "builtin_tool_samples",
+                              "by_tool_us", "by_tool_samples")}
                           | {"pass1_ci95": [lo1, hi1], "pass2_ci95": [lo2, hi2],
                              "source": str(run["path"])})
     if args.json:

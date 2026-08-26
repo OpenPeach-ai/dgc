@@ -55,6 +55,8 @@ _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "c
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options"}
 _GOAL_MAX_CHARS = 4000
+_MAX_TIMING_NAMES = 64
+_MAX_TIMING_VALUE = (1 << 63) - 1
 
 # Keep the core coding catalog available on every execution turn. Product-specific and network
 # tools activate from explicit user/goal intent, avoiding repeated irrelevant prefill for small
@@ -460,6 +462,7 @@ class AgentContext:
     todos: list = field(default_factory=list)
     on_todo: object = None
     cancelled: threading.Event | None = None
+    on_tool_timing: object = None
     # Process-local tool handles (background jobs and retained command output) must not be readable
     # by another headless/editor session merely because it guessed a short handle such as ``out1``.
     tool_owner: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -709,7 +712,8 @@ class Agent:
             safe_todo_callback = None
         self.ctx = AgentContext(project_root=config.project_root, config=config,
                                 skills=self.skills, todos=self.todos,
-                                on_todo=safe_todo_callback, cancelled=self.cancelled)
+                                on_todo=safe_todo_callback, cancelled=self.cancelled,
+                                on_tool_timing=self._record_tool_timing)
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         # Tool execution is rooted at config.project_root. A managed fleet worktree deliberately
@@ -908,6 +912,34 @@ class Agent:
         if parent is not None and parent is not self:
             parent._record_activity(name, edit_failed)
 
+    def _record_tool_timing(self, name: str, elapsed_us: int) -> None:
+        """Accumulate argument-free built-in timing; the next activity/request save journals it."""
+        label = str(name)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label):
+            label = "unknown"
+        parent_label = label
+        try:
+            elapsed = max(0, int(elapsed_us))
+        except (OverflowError, TypeError, ValueError):
+            elapsed = 0
+        with self._usage_lock:
+            self.timing_totals["builtin_tool_us"] = min(
+                _MAX_TIMING_VALUE, self.timing_totals["builtin_tool_us"] + elapsed)
+            self.timing_totals["builtin_tool_samples"] = min(
+                _MAX_TIMING_VALUE, self.timing_totals["builtin_tool_samples"] + 1)
+            known = set(self.timing_totals["by_tool_us"]) | set(
+                self.timing_totals["by_tool_samples"])
+            if label not in known and len(known) >= _MAX_TIMING_NAMES:
+                label = "unknown" if "unknown" in known else ""
+            if label:
+                for key, amount in (("by_tool_us", elapsed), ("by_tool_samples", 1)):
+                    values = self.timing_totals[key]
+                    values[label] = min(
+                        _MAX_TIMING_VALUE, values.get(label, 0) + amount)
+        parent = getattr(self, "_metrics_parent", None)
+        if parent is not None and parent is not self:
+            parent._record_tool_timing(parent_label, elapsed)
+
     def _persist_metrics(self) -> None:
         """Crash-safe lightweight checkpoint for counters updated inside a running turn.
 
@@ -922,9 +954,11 @@ class Agent:
             with self._usage_lock:
                 usage = dict(self.usage_totals)
                 activity = dict(self.activity_totals)
+                timing = {key: (dict(value) if isinstance(value, dict) else value)
+                          for key, value in self.timing_totals.items()}
             from . import sessions
             sessions.save_metrics(
-                self.session_file, self.session_root, usage=usage, activity=activity,
+                self.session_file, self.session_root, usage=usage, activity=activity, timing=timing,
                 expected_revision=self._session_revision,
                 expected_exists=self._session_exists)
 
@@ -1057,6 +1091,10 @@ class Agent:
             self.usage_totals = {"input_tokens": 0, "output_tokens": 0,
                                  "cached_input_tokens": 0, "reasoning_tokens": 0, "requests": 0}
             self.activity_totals = {"tool_calls": 0, "edits": 0, "edit_fails": 0}
+            self.timing_totals = {
+                "builtin_tool_us": 0, "builtin_tool_samples": 0,
+                "by_tool_us": {}, "by_tool_samples": {},
+            }
 
     def _refresh_system(self) -> None:
         if self.messages and self.messages[0]["role"] == "system":
@@ -1405,12 +1443,15 @@ class Agent:
                     return False
                 with self._usage_lock:
                     usage, activity = dict(self.usage_totals), dict(self.activity_totals)
+                    timing = {key: (dict(value) if isinstance(value, dict) else value)
+                              for key, value in self.timing_totals.items()}
                 redact_secrets = (self._secret_values()
                                   if self.config.get("session_redaction", True) else None)
                 saved = sessions.save(
                     self.session_file, self.messages, self.session_root,
                     name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                    usage=usage, activity=activity, checkpoints=checkpoint_state,
+                    usage=usage, activity=activity, timing=timing,
+                    checkpoints=checkpoint_state,
                     expected_revision=self._session_revision,
                     expected_exists=self._session_exists,
                     redact_secrets=redact_secrets)
@@ -1583,6 +1624,7 @@ class Agent:
             with self._usage_lock:
                 self.usage_totals = sessions.usage_of(path, self.session_root, record)
                 self.activity_totals = sessions.activity_of(path, self.session_root, record)
+                self.timing_totals = sessions.timing_of(path, self.session_root, record)
             self.goal = self._safe_text(str(record.get("goal") or ""))[:_GOAL_MAX_CHARS]
             raw_status = str(record.get("goal_status") or "active")
             self.goal_status = (raw_status if self.goal

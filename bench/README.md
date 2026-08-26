@@ -19,9 +19,9 @@ file(s), and we score by running the official tests:
   (`dgc -c`), fed the exact failing output; we re-test.
 - **pass@1** = solved after round 1 · **pass@2** = solved by end of round 2.
 
-We also record wall-time, tool-call/turn counts, `edit_file` failure counts, and provider-reported
-input/output/reasoning tokens. Each exercise gets its own private HOME; round two reuses only that
-exercise's real harness session.
+We also record wall-time, tool-call/turn counts, `edit_file` failure counts, provider-reported
+input/output/reasoning tokens, provider request/wall latency, and DGC built-in tool time. Each
+exercise gets its own private HOME; round two reuses only that exercise's real harness session.
 
 ## Setup
 
@@ -82,6 +82,22 @@ wall-time SIGKILL that bypasses the full-transcript finalizer. Schema-v4 and old
 a transcript-derived compatibility fallback and must not be mixed into a newly published controlled
 run.
 
+Performance attribution uses two independent clocks. The loopback provider proxy records monotonic
+duration for every normalized request; each round stores both request-seconds (the sum of all request
+durations) and provider wall time (the union of overlapping request intervals), plus the longest
+request. DGC records microsecond elapsed time and sample counts for built-in execution, both in total
+and by bounded tool name. Tool arguments, commands, paths, prompts, and results are never included in
+timing records. The timer updates only in-memory counters; the already-required activity/request
+journal save persists them, so instrumentation does not add a disk write to each tool call.
+
+These quantities are intentionally not collapsed into a synthetic “overhead” number. Built-in
+tool-seconds can overlap when DGC runs independent reads in parallel, and provider work may continue
+after a timed-out client disconnects. Compare `avg_s`, `prov_s`, the DGC-only `tool_s`, request count,
+and the raw `by_tool_us`/`by_tool_samples` maps together. A high `prov_s` points at model/endpoint
+latency; a high named tool total points at execution, sandbox, or filesystem cost; a large remainder
+points at orchestration, permission/lease waits, external tools, process startup, or unmeasured
+frontend work. Legacy records render timing as `?`, not a misleading zero.
+
 Round-two compiler/test diagnostics are path-normalized before they are returned to a harness. The
 official grader runs in a disposable clean fixture, so absolute paths from that deleted fixture are
 mapped to `./...` in the still-live exercise worktree; diagnostic text and line numbers are otherwise
@@ -130,11 +146,15 @@ python3 report.py results/results-<model>-<tag>.jsonl
 ```
 
 ```
-lang           n         pass@1         pass@2   avg_s editfail  t/o
-python        34   19 ( 55.9%)   24 ( 70.6%)      92        3    0
+lang           n         pass@1         pass@2   avg_s  prov_s  tool_s   avg_out editfail  t/o
+python        34   19 ( 55.9%)   24 ( 70.6%)      92      71     8.4      1234        3    0
 ...
 TOTAL        225  ...
 ```
+
+`tool_s` is available only for instrumented DGC rounds. The report also prints the eight largest
+built-in tool totals with sample counts; the JSONL remains authoritative for every per-round and
+per-tool value.
 
 Key flags: `--langs` (subset), `-n/--limit` (cap per language), `--rounds`,
 `--dgc-timeout`, `--test-timeout`, `--tag`, `--keep-work`, `--dry-run`.

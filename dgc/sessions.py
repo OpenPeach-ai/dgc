@@ -23,11 +23,15 @@ from .scheduler import named_process_lock
 
 SESSIONS_DIR = USER_HOME / "sessions"
 SCHEMA_VERSION = 6
-METRICS_SCHEMA_VERSION = 1
+METRICS_SCHEMA_VERSION = 2
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
 USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests")
 ACTIVITY_KEYS = ("tool_calls", "edits", "edit_fails")
+TIMING_KEYS = ("builtin_tool_us", "builtin_tool_samples")
+TIMING_MAP_KEYS = ("by_tool_us", "by_tool_samples")
+_MAX_TIMING_NAMES = 64
+_MAX_TIMING_VALUE = (1 << 63) - 1
 _LOCKS_GUARD = threading.Lock()
 _LOCKS: dict[str, "_SessionLock"] = {}
 _SESSION_LOCK_TIMEOUT_S = 30.0
@@ -188,8 +192,46 @@ def metrics_path(session_file, project_root) -> Path:
     return p.with_suffix(".metrics")
 
 
+def _timing_counter(value) -> int:
+    try:
+        return min(_MAX_TIMING_VALUE, max(0, int(value or 0)))
+    except (OverflowError, TypeError, ValueError):
+        return 0
+
+
+def _timing_values(value) -> dict:
+    """Normalize bounded monotonic timing counters without retaining arguments or paths."""
+    source = value if isinstance(value, dict) else {}
+    out = {key: _timing_counter(source.get(key, 0)) for key in TIMING_KEYS}
+    for map_key in TIMING_MAP_KEYS:
+        raw = source.get(map_key) if isinstance(source.get(map_key), dict) else {}
+        cleaned: dict[str, int] = {}
+        for name, amount in sorted(raw.items(), key=lambda item: str(item[0])):
+            label = str(name)
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label):
+                continue
+            if label not in cleaned and len(cleaned) >= _MAX_TIMING_NAMES:
+                continue
+            cleaned[label] = max(cleaned.get(label, 0), _timing_counter(amount))
+        out[map_key] = cleaned
+    return out
+
+
+def _merge_timing(*values) -> dict:
+    normalized = [_timing_values(value) for value in values]
+    merged = {key: max((item[key] for item in normalized), default=0) for key in TIMING_KEYS}
+    for map_key in TIMING_MAP_KEYS:
+        names = {name for item in normalized for name in item[map_key]}
+        merged[map_key] = {
+            name: max(item[map_key].get(name, 0) for item in normalized)
+            for name in sorted(names)[:_MAX_TIMING_NAMES]
+        }
+    return merged
+
+
 def save_metrics(path: Path, project_root, *, usage: dict | None = None,
-                 activity: dict | None = None, expected_revision: int | None = None,
+                 activity: dict | None = None, timing: dict | None = None,
+                 expected_revision: int | None = None,
                  expected_exists: bool | None = None) -> bool:
     """Atomically checkpoint monotonic counters without rewriting the full transcript.
 
@@ -199,7 +241,7 @@ def save_metrics(path: Path, project_root, *, usage: dict | None = None,
     concurrent best-effort writers (for example title generation and the main loop) from moving a
     counter backwards.
     """
-    if usage is None and activity is None:
+    if usage is None and activity is None and timing is None:
         return True
     try:
         session = resolve_path(project_root, path)
@@ -218,6 +260,7 @@ def save_metrics(path: Path, project_root, *, usage: dict | None = None,
                 pass
             old_usage = old.get("usage") if isinstance(old.get("usage"), dict) else {}
             old_activity = old.get("activity") if isinstance(old.get("activity"), dict) else {}
+            old_timing = old.get("timing") if isinstance(old.get("timing"), dict) else {}
             current_usage = usage if isinstance(usage, dict) else {}
             current_activity = activity if isinstance(activity, dict) else {}
             data = {
@@ -235,6 +278,7 @@ def save_metrics(path: Path, project_root, *, usage: dict | None = None,
                              int(current_activity.get(key, 0) or 0))
                     for key in ACTIVITY_KEYS
                 },
+                "timing": _merge_timing(old_timing, timing),
             }
             _atomic_write(journal, json.dumps(data, default=str))
         return True
@@ -265,6 +309,7 @@ def metrics_of(path, project_root) -> dict:
 def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
+         timing: dict | None = None,
          checkpoints: dict | None = None, *, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -295,6 +340,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["activity"] = {
                 key: max(0, int(activity.get(key, 0) or 0)) for key in ACTIVITY_KEYS
             }
+        if timing is not None:
+            data["timing"] = _timing_values(timing)
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
         with _lock_for(path):
@@ -312,7 +359,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
                              and not isinstance(expected_revision, bool)
                              and isinstance(expected_revision, int) and expected_revision >= 0)
             if saved or stale_current:
-                save_metrics(path, project_root, usage=usage, activity=activity)
+                save_metrics(path, project_root, usage=usage, activity=activity, timing=timing)
     except (OSError, TypeError, ValueError):
         pass  # never let a failed save crash the turn
     return saved
@@ -592,6 +639,20 @@ def activity_of(path, project_root, record: dict | None = None) -> dict:
                 for key in ACTIVITY_KEYS}
     except (ValueError, TypeError):
         return {key: 0 for key in ACTIVITY_KEYS}
+
+
+def timing_of(path, project_root, record: dict | None = None) -> dict:
+    """Return monotonic, argument-free built-in tool timings from transcript and crash journal."""
+    try:
+        timing = (record if isinstance(record, dict)
+                  else _load_data(path, project_root)).get("timing") or {}
+    except (OSError, ValueError, TypeError):
+        timing = {}
+    journal = _load_metrics(path, project_root).get("timing") or {}
+    try:
+        return _merge_timing(timing, journal)
+    except (ValueError, TypeError):
+        return _timing_values({})
 
 
 def set_name(path, name: str, project_root, *, expected_revision: int | None = None,

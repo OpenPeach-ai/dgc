@@ -218,6 +218,8 @@ def unit_tests(tmp: Path):
 
     # --- tools: write / read / edit / grep / glob / todo
     ctx = Ctx(tmp)
+    tool_timings = []
+    ctx.on_tool_timing = lambda name, elapsed_us: tool_timings.append((name, elapsed_us))
     out = execute("write_file", {"path": "a/b.txt", "content": "one\ntwo\nthree\n"}, ctx)
     check("write_file", (tmp / "a" / "b.txt").exists(), out[:100])
     out = execute("read_file", {"path": "a/b.txt"}, ctx)
@@ -233,6 +235,15 @@ def unit_tests(tmp: Path):
     check("grep finds", "b.txt:2" in out, out[:80])
     out = execute("glob", {"pattern": "**/*.txt"}, ctx)
     check("glob finds", "b.txt" in out)
+    unknown = execute("invented_tool_name", {}, ctx)
+    check("tool execution records bounded argument-free microsecond timings",
+          unknown.startswith("error: unknown tool") and len(tool_timings) == 8
+          and tool_timings[-1][0] == "unknown"
+          and all(isinstance(elapsed, int) and elapsed >= 0 for _, elapsed in tool_timings),
+          repr(tool_timings))
+    ctx.on_tool_timing = lambda *_args: (_ for _ in ()).throw(RuntimeError("fixture callback"))
+    callback_safe = execute("read_file", {"path": "a/b.txt"}, ctx)
+    check("timing callbacks can never alter a tool result", "2\tTWO" in callback_safe)
 
     patch_file = tmp / "patch.txt"
     patch_file.write_text("alpha\nbeta\ngamma\ndelta\n")
@@ -1879,9 +1890,24 @@ def unit_tests(tmp: Path):
     check("failed and successful edits increment distinct monotonic counters",
           _aa.activity_totals == {"tool_calls": 2, "edits": 1, "edit_fails": 1}
           and (_activity_root / "target.txt").read_text() == "fixed\n")
+    check("agent journals every completed built-in execution by tool",
+          _aa.timing_totals["builtin_tool_samples"] == 2
+          and _aa.timing_totals["builtin_tool_us"] >= 0
+          and _aa.timing_totals["by_tool_samples"] == {
+              "edit_file": 1, "write_file": 1}
+          and set(_aa.timing_totals["by_tool_us"]) == {"edit_file", "write_file"})
     _aa_resumed = _Ag(_Cfg(_activity_root), _AgUI()); _aa_resumed.load_session(_aa.session_file)
     check("agent resume restores monotonic activity counters",
-          _aa_resumed.activity_totals == _aa.activity_totals)
+          _aa_resumed.activity_totals == _aa.activity_totals
+          and _aa_resumed.timing_totals == _aa.timing_totals)
+    _bounded_timing = _Ag(_Cfg(Path(tempfile.mkdtemp())), _AgUI())
+    for _timing_index in range(70):
+        _bounded_timing._record_tool_timing(f"fixture_{_timing_index}", _timing_index)
+    check("agent timing label cardinality is bounded without losing aggregate time",
+          _bounded_timing.timing_totals["builtin_tool_samples"] == 70
+          and _bounded_timing.timing_totals["builtin_tool_us"] == sum(range(70))
+          and len(_bounded_timing.timing_totals["by_tool_us"]) == 64
+          and len(_bounded_timing.timing_totals["by_tool_samples"]) == 64)
 
     class _TerminalProviderFailure:
         tools_supported = True
@@ -2029,6 +2055,7 @@ def unit_tests(tmp: Path):
     _crash_agent = _Ag(_Cfg(_crash_root), _AgUI())
     _crash_agent.session_file = _activity_sessions.new_path(_crash_root)
     _crash_agent._record_usage({"prompt_tokens": 17, "completion_tokens": 5})
+    _crash_agent._record_tool_timing("bash", 123456)
     with _crash_agent._usage_lock:
         _crash_agent.activity_totals.update({"tool_calls": 2, "edits": 1, "edit_fails": 0})
     _crash_agent._persist_metrics()
@@ -2040,7 +2067,10 @@ def unit_tests(tmp: Path):
           and _crash_metrics.get("usage", {}).get("input_tokens") == 17
           and _crash_metrics.get("usage", {}).get("output_tokens") == 5
           and _crash_metrics.get("activity") ==
-          {"tool_calls": 2, "edits": 1, "edit_fails": 0})
+          {"tool_calls": 2, "edits": 1, "edit_fails": 0}
+          and _crash_metrics.get("timing") == {
+              "builtin_tool_us": 123456, "builtin_tool_samples": 1,
+              "by_tool_us": {"bash": 123456}, "by_tool_samples": {"bash": 1}})
     _verify_root = Path(tempfile.mkdtemp()); (_verify_root / "answer.txt").write_text("start\n")
     _va = _Ag(_Cfg(_verify_root), _AgUI()); _va.config.data.update({
         "mode": "auto", "verify_before_done": True,
@@ -4295,6 +4325,9 @@ def test_sessions_and_worktree():
         usage={"input_tokens": 123, "output_tokens": 45, "cached_input_tokens": 20,
                "reasoning_tokens": 7, "requests": 6},
         activity={"tool_calls": 9, "edits": 4, "edit_fails": 2},
+        timing={"builtin_tool_us": 4000, "builtin_tool_samples": 2,
+                "by_tool_us": {"bash": 2500, "read_file": 1500},
+                "by_tool_samples": {"bash": 1, "read_file": 1}},
         checkpoints=checkpoint_payload)
     check("session save reports durable transcript success",
           session_saved and json.loads(sp.read_text()).get("schema_version") == 6)
@@ -4311,6 +4344,11 @@ def test_sessions_and_worktree():
                                        "requests": 6})
     check("session activity counters survive resume",
           sessions.activity_of(sp, d) == {"tool_calls": 9, "edits": 4, "edit_fails": 2})
+    check("session built-in timings survive resume without arguments or paths",
+          sessions.timing_of(sp, d) == {
+              "builtin_tool_us": 4000, "builtin_tool_samples": 2,
+              "by_tool_us": {"bash": 2500, "read_file": 1500},
+              "by_tool_samples": {"bash": 1, "read_file": 1}})
     metrics = sessions.metrics_path(sp, d)
     check("session metrics journal is private and colocated",
           metrics.exists() and metrics.parent == sp.parent
@@ -4319,17 +4357,26 @@ def test_sessions_and_worktree():
         sp, d,
         usage={"input_tokens": 150, "output_tokens": 50, "cached_input_tokens": 22,
                "reasoning_tokens": 8, "requests": 7},
-        activity={"tool_calls": 11, "edits": 5, "edit_fails": 3})
+        activity={"tool_calls": 11, "edits": 5, "edit_fails": 3},
+        timing={"builtin_tool_us": 9000, "builtin_tool_samples": 4,
+                "by_tool_us": {"bash": 6500, "read_file": 2500, "bad label": 99},
+                "by_tool_samples": {"bash": 2, "read_file": 2, "bad label": 1}})
     sessions.save_metrics(  # a racing stale writer must never move monotonic counters backwards
         sp, d,
         usage={"input_tokens": 1, "output_tokens": 1, "requests": 1},
-        activity={"tool_calls": 1, "edits": 1, "edit_fails": 1})
+        activity={"tool_calls": 1, "edits": 1, "edit_fails": 1},
+        timing={"builtin_tool_us": 1, "builtin_tool_samples": 1,
+                "by_tool_us": {"bash": 1}, "by_tool_samples": {"bash": 1}})
     check("metrics journal merges monotonically with the transcript",
           sessions.usage_of(sp, d) == {"input_tokens": 150, "output_tokens": 50,
                                        "cached_input_tokens": 22, "reasoning_tokens": 8,
                                        "requests": 7}
           and sessions.activity_of(sp, d) ==
-          {"tool_calls": 11, "edits": 5, "edit_fails": 3})
+          {"tool_calls": 11, "edits": 5, "edit_fails": 3}
+          and sessions.timing_of(sp, d) == {
+              "builtin_tool_us": 9000, "builtin_tool_samples": 4,
+              "by_tool_us": {"bash": 6500, "read_file": 2500},
+              "by_tool_samples": {"bash": 2, "read_file": 2}})
     # A compacted transcript can be far smaller than the earlier one; monotonic activity must not
     # be reconstructed from it or decrease. This is the benchmark round-delta regression case.
     bench_home = _P(_tf.mkdtemp()); bench_work = _P(_tf.mkdtemp()) / "activity-case"
@@ -4342,12 +4389,21 @@ def test_sessions_and_worktree():
         "schema_version": 5,
         "messages": [{"role": "user", "content": "[Earlier conversation compacted]"}],
         "activity": {"tool_calls": 14, "edits": 6, "edit_fails": 3},
+        "timing": {"builtin_tool_us": 23000, "builtin_tool_samples": 14,
+                   "by_tool_us": {"read_file": 8000, "bash": 15000},
+                   "by_tool_samples": {"read_file": 8, "bash": 6}},
     }))
     from bench.run_bench import session_stats as _session_stats
     _bench_stats = _session_stats(bench_home, bench_work)
     check("benchmark activity survives transcript compaction",
           {k: _bench_stats[k] for k in ("tool_calls", "edits", "edit_fails")} ==
           {"tool_calls": 14, "edits": 6, "edit_fails": 3})
+    check("benchmark timing survives transcript compaction with per-tool attribution",
+          {k: _bench_stats[k] for k in ("builtin_tool_us", "builtin_tool_samples",
+                                         "by_tool_us", "by_tool_samples")} == {
+              "builtin_tool_us": 23000, "builtin_tool_samples": 14,
+              "by_tool_us": {"bash": 15000, "read_file": 8000},
+              "by_tool_samples": {"bash": 6, "read_file": 8}})
     # Timeout regression: a metrics journal can be newer than—or exist without—the transcript.
     (bench_sessions / "timed-out.metrics").write_text(json.dumps({
         "schema_version": 1,
@@ -5450,6 +5506,7 @@ def test_isolated_subagents():
                         cancel=self.ctx.cancelled, mcp=self.mcp)
         (self.config.project_root / "delegated.txt").write_text("landed\n")
         self._record_usage({"prompt_tokens": 11, "completion_tokens": 3})
+        self._record_tool_timing("write_file", 4321)
         self._record_activity("write_file")
         self.ui.on_text("implemented and checked")
         self.ui.end_stream()
@@ -5469,7 +5526,9 @@ def test_isolated_subagents():
           "completed and integrated 1 path" in outcome
           and (repo / "delegated.txt").read_text() == "landed\n" and not task_branches
           and parent.usage_totals["requests"] == 1 and parent.usage_totals["input_tokens"] == 11
-          and parent.activity_totals == {"tool_calls": 1, "edits": 1, "edit_fails": 0},
+          and parent.activity_totals == {"tool_calls": 1, "edits": 1, "edit_fails": 0}
+          and parent.timing_totals["builtin_tool_us"] == 4321
+          and parent.timing_totals["by_tool_samples"] == {"write_file": 1},
           detail=outcome)
     check("integrated child edits participate in the parent checkpoint",
           parent.checkpoints.rewind(0) == (9, 1) and not (repo / "delegated.txt").exists())
@@ -5911,13 +5970,57 @@ def test_benchmark_integrity():
         results = root / "mixed.jsonl"
         results.write_text("\n".join((
             json.dumps({"lang": "python", "solved": True, "solved_round": 1,
-                        "rounds": [{"agent": {"time": 2, "timeout": False}, "stats": {}}]}),
+                        "rounds": [{"agent": {"time": 2, "timeout": False, "usage": {
+                            "requests": 1, "synchronized": True,
+                            "input_tokens": 10, "output_tokens": 4,
+                            "provider_duration_s": 1.5, "provider_wall_s": 1.5,
+                            "provider_max_duration_s": 1.5}},
+                            "stats": {"builtin_tool_us": 250000,
+                                      "builtin_tool_samples": 2,
+                                      "by_tool_us": {"read_file": 50000, "bash": 200000},
+                                      "by_tool_samples": {"read_file": 1, "bash": 1}}}]}),
             json.dumps({"lang": "python", "solved": False,
-                        "rounds": [{"dgc": {"time": 3, "timeout": True}, "stats": {}}]}),
+                        "rounds": [{"dgc": {"time": 3, "timeout": True}, "stats": {
+                            "builtin_tool_us": 0, "builtin_tool_samples": 0,
+                            "by_tool_us": {}, "by_tool_samples": {}}}]}),
         )))
         agg = _RB.aggregate(results)["python"]
         check("benchmark aggregate reads versioned and legacy rounds",
-              agg["n"] == 2 and agg["p1"] == 1 and agg["agent_s"] == 5 and agg["timeouts"] == 1)
+              agg["n"] == 2 and agg["p1"] == 1 and agg["agent_s"] == 5 and agg["timeouts"] == 1
+              and agg["provider_timing_rounds"] == 1 and agg["provider_wall_s"] == 1.5
+              and agg["builtin_timing_rounds"] == 2 and agg["builtin_tool_s"] == 0.25
+              and agg["builtin_tool_samples"] == 2
+              and agg["by_tool_us"] == {"read_file": 50000, "bash": 200000}
+              and agg["by_tool_samples"] == {"read_file": 1, "bash": 1})
+        from contextlib import redirect_stdout as _redirect_stdout
+        from io import StringIO as _StringIO
+        report_out = _StringIO()
+        with _redirect_stdout(report_out):
+            _RB.print_report(results)
+        check("benchmark report labels provider and overlapping tool timing explicitly",
+              "prov_s" in report_out.getvalue() and "tool_s" in report_out.getvalue()
+              and "built-in tool-seconds (sum; parallel calls may overlap)" in report_out.getvalue())
+        compare_results = root / "results-timing.jsonl"
+        compare_results.write_bytes(results.read_bytes())
+        (root / "manifest-timing.json").write_text(json.dumps({"schema_version": 3}))
+        loaded_timing = _BC.load(compare_results)
+        check("benchmark comparison retains provider and per-tool attribution",
+              loaded_timing["provider_timing_rounds"] == 1
+              and loaded_timing["provider_wall_s"] == 1.5
+              and loaded_timing["provider_max_duration_s"] == 1.5
+              and loaded_timing["builtin_tool_s"] == 0.25
+              and loaded_timing["by_tool_us"] == {"read_file": 50000, "bash": 200000})
+        round_delta = _RB._monotonic_stats_delta(
+            {"tool_calls": 9, "builtin_tool_us": 9000, "builtin_tool_samples": 5,
+             "by_tool_us": {"read_file": 3000, "bash": 6000},
+             "by_tool_samples": {"read_file": 2, "bash": 3}},
+            {"tool_calls": 4, "builtin_tool_us": 3500, "builtin_tool_samples": 2,
+             "by_tool_us": {"read_file": 3000, "bash": 500},
+             "by_tool_samples": {"read_file": 2, "bash": 0}})
+        check("benchmark round deltas remain exact for resumed additive timing counters",
+              round_delta == {
+                  "tool_calls": 5, "builtin_tool_us": 5500, "builtin_tool_samples": 3,
+                  "by_tool_us": {"bash": 5500}, "by_tool_samples": {"bash": 3}})
 
         # An operator interrupt must reap the isolated harness process group just like a timeout.
         class _InterruptedProcess:
@@ -6105,12 +6208,36 @@ def test_benchmark_integrity():
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
               and [record["usage"]["input_tokens"] for record in records] == [8, 5]
-              and [record["usage"]["output_tokens"] for record in records] == [3, 2])
+              and [record["usage"]["output_tokens"] for record in records] == [3, 2]
+              and all(record.get("started_at", 0) > 0
+                      and record.get("duration_s", -1) >= 0 for record in records))
         check("benchmark runner synchronizes and attributes provider usage by round",
-              round_usage == {"input_tokens": 13, "output_tokens": 5,
-                              "reasoning_tokens": 0, "cached_input_tokens": 0,
-                              "requests": 2, "client_disconnected_requests": 0,
-                              "synchronized": True})
+              {key: round_usage[key] for key in (
+                  "input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens",
+                  "requests", "client_disconnected_requests", "synchronized")} == {
+                      "input_tokens": 13, "output_tokens": 5,
+                      "reasoning_tokens": 0, "cached_input_tokens": 0,
+                      "requests": 2, "client_disconnected_requests": 0,
+                      "synchronized": True}
+              and round_usage["provider_duration_s"] >= round_usage["provider_wall_s"] >= 0
+              and round_usage["provider_duration_s"] >=
+              round_usage["provider_max_duration_s"] >= 0)
+
+        overlap_log = root / "overlapping-provider-usage.jsonl"
+        overlap_log.write_text("\n".join(json.dumps(record) for record in (
+            {"normalization": "reasoning_effort=none", "started_at": 8.0,
+             "time": 12.0, "duration_s": 4.0, "usage": {}},
+            {"normalization": "reasoning_effort=none", "started_at": 11.0,
+             "time": 13.0, "duration_s": 2.0, "usage": {}},
+            {"normalization": "reasoning_effort=none", "time": 20.0,
+             "duration_s": 1.0, "usage": {}},
+        )) + "\n")
+        overlap_usage = _RB._usage_log_since((overlap_log, 0), {})
+        check("benchmark provider timing distinguishes request-seconds from parallel wall time",
+              overlap_usage["requests"] == 3
+              and overlap_usage["provider_duration_s"] == 7.0
+              and overlap_usage["provider_wall_s"] == 6.0
+              and overlap_usage["provider_max_duration_s"] == 4.0)
 
         # A cancelled harness may disconnect while the provider is still generating its final usage
         # event. A 503 barrier is "busy", not a synchronization failure: retry it so the late record
@@ -6142,7 +6269,9 @@ def test_benchmark_integrity():
                   len(barrier_calls) == 2 and delayed_usage == {
                       "input_tokens": 21, "output_tokens": 8, "reasoning_tokens": 0,
                       "cached_input_tokens": 0, "requests": 1,
-                      "client_disconnected_requests": 0, "synchronized": True})
+                      "client_disconnected_requests": 0, "provider_duration_s": 0.0,
+                      "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
+                      "synchronized": True})
         finally:
             _RB.urlopen = old_urlopen
     finally:
@@ -6511,6 +6640,7 @@ def test_steering():
         _time.sleep(0.08)
         with _parallel_guard:
             _active -= 1
+        ctx.on_tool_timing(name, 80000)
         return f"read:{args['path']}"
     a.config.data["mode"] = "default"; a.config.data["hooks"] = {}
     a.config.permissions = {"allow": [], "ask": [], "deny": []}
@@ -6524,6 +6654,10 @@ def test_steering():
     check("independent read tools execute concurrently", _peak == 2)
     check("parallel read results preserve tool-call order",
           _parallel == {0: "read:one.py", 1: "read:two.py"})
+    check("parallel read timing aggregation is thread-safe and additive",
+          a.timing_totals["builtin_tool_us"] == 160000
+          and a.timing_totals["builtin_tool_samples"] == 2
+          and a.timing_totals["by_tool_samples"] == {"read_file": 2})
     a.config.data["mode"] = "plan"
     _plan_names = {tool["function"]["name"] for tool in a._tool_schemas()}
     check("plan mode exposes a lean read-only tool catalog",

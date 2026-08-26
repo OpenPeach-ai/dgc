@@ -20,7 +20,7 @@ Usage:
   python3 run_bench.py --model qwen122b-code:latest --base-url http://localhost:11434/v1 --out results/
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time
+import argparse, hashlib, json, math, os, platform, re, shlex, shutil, signal, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
@@ -258,13 +258,24 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
     path, offset = mark
     totals = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
               "cached_input_tokens": 0, "requests": 0,
-              "client_disconnected_requests": 0, "synchronized": synchronized}
+              "client_disconnected_requests": 0, "provider_duration_s": 0.0,
+              "provider_wall_s": 0.0, "provider_max_duration_s": 0.0,
+              "synchronized": synchronized}
     try:
         with path.open("r", encoding="utf-8") as stream:
             stream.seek(offset)
             lines = stream.readlines()
     except OSError:
         return totals
+    provider_intervals: list[tuple[float, float]] = []
+
+    def finite_float(value) -> float:
+        try:
+            parsed = float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return parsed if math.isfinite(parsed) else 0.0
+
     for line in lines:
         try:
             record = json.loads(line)
@@ -272,12 +283,31 @@ def _usage_log_since(mark: tuple[Path, int] | None, env: dict | None = None) -> 
             continue
         if not record.get("normalization"):
             continue
-        usage = record.get("usage") or {}
+        duration = max(0.0, finite_float(record.get("duration_s")))
+        finished = finite_float(record.get("time"))
+        started = finite_float(record.get("started_at"))
+        totals["provider_duration_s"] += duration
+        totals["provider_max_duration_s"] = max(
+            totals["provider_max_duration_s"], duration)
+        if duration > 0 and started > 0:
+            provider_intervals.append((started, started + duration))
+        elif duration > 0 and finished > 0:  # compatibility with earlier proxy logs
+            provider_intervals.append((finished - duration, finished))
+        usage = record.get("usage") if isinstance(record.get("usage"), dict) else {}
         totals["requests"] += 1
         if record.get("client_disconnected") is True:
             totals["client_disconnected_requests"] += 1
         for key in ("input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens"):
             totals[key] += max(0, int(usage.get(key, 0) or 0))
+    merged: list[list[float]] = []
+    for start, end in sorted(provider_intervals):
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    totals["provider_duration_s"] = round(totals["provider_duration_s"], 3)
+    totals["provider_wall_s"] = round(sum(end - start for start, end in merged), 3)
+    totals["provider_max_duration_s"] = round(totals["provider_max_duration_s"], 3)
     return totals
 
 
@@ -634,9 +664,13 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
         usage = data.get("usage", {}) if isinstance(data, dict) else {}
         msgs = data.get("messages", []) if isinstance(data, dict) else data
         activity = data.get("activity") if isinstance(data, dict) else None
+        transcript_has_timing = isinstance(data.get("timing"), dict)
+        timing = data.get("timing") if transcript_has_timing else {}
         journal_usage = journal.get("usage") if isinstance(journal.get("usage"), dict) else {}
         journal_activity = (journal.get("activity")
                             if isinstance(journal.get("activity"), dict) else None)
+        journal_has_timing = isinstance(journal.get("timing"), dict)
+        journal_timing = journal.get("timing") if journal_has_timing else {}
         if isinstance(activity, dict) or isinstance(journal_activity, dict):
             activity = activity if isinstance(activity, dict) else {}
             journal_activity = journal_activity if isinstance(journal_activity, dict) else {}
@@ -659,13 +693,43 @@ def session_stats(home: Path, work: Path | None = None) -> dict:
                     txt = str(m.get("content", ""))
                     if re.search(r"not found|no exact match|appears \d+ times|ambiguous|match.*exactly", txt, re.I):
                         edit_fail += 1
-        return {"tool_calls": tool_calls, "edits": edits, "edit_fails": edit_fail,
-                "input_tokens": max(0, int(usage.get("input_tokens", 0) or 0),
-                                    int(journal_usage.get("input_tokens", 0) or 0)),
-                "output_tokens": max(0, int(usage.get("output_tokens", 0) or 0),
-                                     int(journal_usage.get("output_tokens", 0) or 0)),
-                "requests": max(0, int(usage.get("requests", 0) or 0),
-                                int(journal_usage.get("requests", 0) or 0))}
+        def timing_counter(value) -> int:
+            try:
+                return min((1 << 63) - 1, max(0, int(value or 0)))
+            except (OverflowError, TypeError, ValueError):
+                return 0
+
+        def timing_scalar(key: str) -> int:
+            return max(timing_counter(timing.get(key)),
+                       timing_counter(journal_timing.get(key)))
+
+        def timing_map(key: str) -> dict[str, int]:
+            left = timing.get(key) if isinstance(timing.get(key), dict) else {}
+            right = (journal_timing.get(key)
+                     if isinstance(journal_timing.get(key), dict) else {})
+            names = {str(name) for name in left} | {str(name) for name in right}
+            valid_names = [name for name in sorted(names)
+                           if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name)][:64]
+            return {
+                name: max(timing_counter(left.get(name)), timing_counter(right.get(name)))
+                for name in valid_names
+            }
+
+        stats = {"tool_calls": tool_calls, "edits": edits, "edit_fails": edit_fail,
+                 "input_tokens": max(0, int(usage.get("input_tokens", 0) or 0),
+                                     int(journal_usage.get("input_tokens", 0) or 0)),
+                 "output_tokens": max(0, int(usage.get("output_tokens", 0) or 0),
+                                      int(journal_usage.get("output_tokens", 0) or 0)),
+                 "requests": max(0, int(usage.get("requests", 0) or 0),
+                                 int(journal_usage.get("requests", 0) or 0))}
+        if transcript_has_timing or journal_has_timing:
+            stats.update({
+                "builtin_tool_us": timing_scalar("builtin_tool_us"),
+                "builtin_tool_samples": timing_scalar("builtin_tool_samples"),
+                "by_tool_us": timing_map("by_tool_us"),
+                "by_tool_samples": timing_map("by_tool_samples"),
+            })
+        return stats
     except Exception as e:      # noqa
         return {"stats_error": str(e)[:200]}
 
@@ -705,6 +769,24 @@ def _reconcile_dgc_usage(run: dict, stats: dict) -> None:
 
 
 # ---------------------------------------------------------------- one run -----
+def _monotonic_stats_delta(cumulative: dict, previous: dict) -> dict:
+    """Return exact per-round deltas for additive crash-journal counters."""
+    stats: dict = {}
+    for key, value in cumulative.items():
+        if isinstance(value, int):
+            stats[key] = max(0, value - int(previous.get(key, 0) or 0))
+        elif isinstance(value, dict):
+            old = previous.get(key) if isinstance(previous.get(key), dict) else {}
+            deltas = {
+                name: max(0, int(amount or 0) - int(old.get(name, 0) or 0))
+                for name, amount in value.items()
+            }
+            stats[key] = {name: amount for name, amount in deltas.items() if amount > 0}
+        else:
+            stats[key] = value
+    return stats
+
+
 def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> dict:
     exdir = practice_dir(lang) / ex
     sol, test = read_meta(exdir)
@@ -755,12 +837,7 @@ def run_one(lang: str, ex: str, a, home: Path, env: dict, run_id: str = "") -> d
         last_out = out
         # session_stats only applies to DGC's own session dir; other engines have none.
         cumulative = session_stats(exercise_home, work) if a.engine == "dgc" else {}
-        stats = {}
-        for key, value in cumulative.items():
-            if isinstance(value, int):
-                stats[key] = max(0, value - int(prior_stats.get(key, 0) or 0))
-            else:
-                stats[key] = value
+        stats = _monotonic_stats_delta(cumulative, prior_stats)
         prior_stats = cumulative
         if "usage" not in run and a.engine == "dgc" and cumulative:
             run["usage"] = {key: stats.get(key, 0)
@@ -797,7 +874,15 @@ def aggregate(jsonl_path: Path) -> dict:
         p = per.setdefault(r["lang"], {"n": 0, "p1": 0, "p2": 0, "agent_s": 0.0,
                                        "edit_fails": 0, "timeouts": 0, "input_tokens": 0,
                                        "output_tokens": 0, "reasoning_tokens": 0,
-                                       "usage_rounds": 0, "rounds": 0})
+                                       "usage_rounds": 0, "rounds": 0,
+                                       "provider_duration_s": 0.0,
+                                       "provider_wall_s": 0.0,
+                                       "provider_max_duration_s": 0.0,
+                                       "provider_timing_rounds": 0,
+                                       "builtin_tool_s": 0.0,
+                                       "builtin_tool_samples": 0,
+                                       "builtin_timing_rounds": 0,
+                                       "by_tool_us": {}, "by_tool_samples": {}})
         p["n"] += 1
         if r.get("solved") and r.get("solved_round") == 1:
             p["p1"] += 1
@@ -809,7 +894,22 @@ def aggregate(jsonl_path: Path) -> dict:
             p["agent_s"] += agent_run.get("time", 0) or 0
             if agent_run.get("timeout"):
                 p["timeouts"] += 1
-            p["edit_fails"] += (rd.get("stats") or {}).get("edit_fails", 0) or 0
+            stats = rd.get("stats") or {}
+            p["edit_fails"] += stats.get("edit_fails", 0) or 0
+            if "builtin_tool_us" in stats:
+                p["builtin_timing_rounds"] += 1
+                p["builtin_tool_s"] += max(0, int(stats.get("builtin_tool_us", 0) or 0)) / 1_000_000
+                p["builtin_tool_samples"] += max(
+                    0, int(stats.get("builtin_tool_samples", 0) or 0))
+                for source_key, target_key in (("by_tool_us", "by_tool_us"),
+                                               ("by_tool_samples", "by_tool_samples")):
+                    values = stats.get(source_key) if isinstance(stats.get(source_key), dict) else {}
+                    valid_names = [str(name) for name in sorted(values)
+                                   if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(name))][:64]
+                    for name in valid_names:
+                        amount = values.get(name, 0)
+                        p[target_key][name] = p[target_key].get(name, 0) + max(
+                            0, int(amount or 0))
             if (isinstance(agent_run.get("usage"), dict)
                     and int(agent_run["usage"].get("requests", 0) or 0) > 0
                     and agent_run["usage"].get("synchronized", True) is not False):
@@ -817,6 +917,17 @@ def aggregate(jsonl_path: Path) -> dict:
                 p["usage_rounds"] += 1
                 for key in ("input_tokens", "output_tokens", "reasoning_tokens"):
                     p[key] += max(0, int(usage.get(key, 0) or 0))
+                timing_keys = ("provider_duration_s", "provider_wall_s",
+                               "provider_max_duration_s")
+                if all(key in usage for key in timing_keys):
+                    p["provider_timing_rounds"] += 1
+                    p["provider_duration_s"] += max(
+                        0.0, float(usage.get("provider_duration_s", 0) or 0))
+                    p["provider_wall_s"] += max(
+                        0.0, float(usage.get("provider_wall_s", 0) or 0))
+                    p["provider_max_duration_s"] = max(
+                        p["provider_max_duration_s"],
+                        max(0.0, float(usage.get("provider_max_duration_s", 0) or 0)))
     return per
 
 
@@ -825,29 +936,55 @@ def print_report(jsonl_path: Path, langs: list[str] | None = None) -> None:
     order = langs or sorted(per)
     tot = {"n": 0, "p1": 0, "p2": 0, "agent_s": 0.0, "edit_fails": 0,
            "timeouts": 0, "input_tokens": 0, "output_tokens": 0,
-           "reasoning_tokens": 0, "usage_rounds": 0, "rounds": 0}
+           "reasoning_tokens": 0, "usage_rounds": 0, "rounds": 0,
+           "provider_duration_s": 0.0, "provider_wall_s": 0.0,
+           "provider_max_duration_s": 0.0, "provider_timing_rounds": 0,
+           "builtin_tool_s": 0.0, "builtin_tool_samples": 0,
+           "builtin_timing_rounds": 0, "by_tool_us": {}, "by_tool_samples": {}}
     print(f"\n==== {Path(jsonl_path).name} ====")
     print(f"{'lang':11s} {'n':>4} {'pass@1':>14} {'pass@2':>14} {'avg_s':>7} "
-          f"{'avg_out':>9} {'editfail':>8} {'t/o':>4}")
+          f"{'prov_s':>7} {'tool_s':>7} {'avg_out':>9} {'editfail':>8} {'t/o':>4}")
     for lang in order:
         p = per.get(lang)
         if not p:
             continue
         for k in tot:
-            tot[k] += p[k]
+            if k == "provider_max_duration_s":
+                tot[k] = max(tot[k], p[k])
+            elif isinstance(tot[k], dict):
+                for name, amount in p[k].items():
+                    tot[k][name] = tot[k].get(name, 0) + amount
+            else:
+                tot[k] += p[k]
         avg = p["agent_s"] / p["n"] if p["n"] else 0
         avg_out = (str(round(p["output_tokens"] / p["n"]))
                    if p["usage_rounds"] == p["rounds"] else "?")
+        avg_provider = (f"{p['provider_wall_s'] / p['n']:.0f}"
+                        if p["provider_timing_rounds"] == p["rounds"] else "?")
+        avg_tool = (f"{p['builtin_tool_s'] / p['n']:.1f}"
+                    if p["builtin_timing_rounds"] == p["rounds"] else "?")
         print(f"{lang:11s} {p['n']:4d} {p['p1']:4d} ({100*p['p1']/p['n']:5.1f}%) "
               f"{p['p2']:4d} ({100*p['p2']/p['n']:5.1f}%) {avg:7.0f} "
-              f"{avg_out:>9} {p['edit_fails']:8d} {p['timeouts']:4d}")
+              f"{avg_provider:>7} {avg_tool:>7} {avg_out:>9} "
+              f"{p['edit_fails']:8d} {p['timeouts']:4d}")
     if tot["n"]:
         avg = tot["agent_s"] / tot["n"]
         avg_out = (str(round(tot["output_tokens"] / tot["n"]))
                    if tot["usage_rounds"] == tot["rounds"] else "?")
+        avg_provider = (f"{tot['provider_wall_s'] / tot['n']:.0f}"
+                        if tot["provider_timing_rounds"] == tot["rounds"] else "?")
+        avg_tool = (f"{tot['builtin_tool_s'] / tot['n']:.1f}"
+                    if tot["builtin_timing_rounds"] == tot["rounds"] else "?")
         print(f"{'TOTAL':11s} {tot['n']:4d} {tot['p1']:4d} ({100*tot['p1']/tot['n']:5.1f}%) "
               f"{tot['p2']:4d} ({100*tot['p2']/tot['n']:5.1f}%) {avg:7.0f} "
-              f"{avg_out:>9} {tot['edit_fails']:8d} {tot['timeouts']:4d}")
+              f"{avg_provider:>7} {avg_tool:>7} {avg_out:>9} "
+              f"{tot['edit_fails']:8d} {tot['timeouts']:4d}")
+        if tot["builtin_timing_rounds"] == tot["rounds"] and tot["by_tool_us"]:
+            ranked = sorted(tot["by_tool_us"].items(), key=lambda item: (-item[1], item[0]))
+            details = ", ".join(
+                f"{name}={elapsed / 1_000_000:.1f}s/{tot['by_tool_samples'].get(name, 0)}"
+                for name, elapsed in ranked[:8])
+            print("built-in tool-seconds (sum; parallel calls may overlap): " + details)
 
 
 def summary_line(rec: dict) -> str:

@@ -45,7 +45,7 @@ the editor registries: those are external release actions that require a reviewe
 | Model effectiveness | Typed provider profiles and endpoint+model capability negotiation; native Ollama chat/model discovery with exact thinking/tool continuation, options and usage; OpenAI Responses with opt-in stored continuation, default stateless encrypted-reasoning replay, prompt-cache routing, nested usage accounting; cancellation-safe bounded retry/backoff and streamed-response cleanup across all transports; compatible-provider tool-delta normalization without call corruption; independently scoped primary/fallback/sub-agent transports and credentials; idle-only serialized/cancelable title and suggestion generation; stable call IDs, hash-addressed atomic `apply_patch`, repository map, bounded static code intelligence plus explicitly configured managed LSP symbols/diagnostics/definitions/references with capped per-project reuse, adaptive intent-aware tool exposure, parallel independent reads, lean plan-mode tools, stronger convergence guards | Native transports beyond Ollama, server-side compaction, richer per-model discovery, optional tree-sitter parsing and measured code-intelligence accuracy/latency |
 | MCP / ACP | Dual-era stdio MCP negotiation: real stateless 2026 discovery/per-request metadata with fresh-process legacy fallback, deterministic resource-bounded tool catalogs, validated TTL/scope caching, generation-safe ID-correlated subscriptions plus legacy invalidation, and roots/elicitation/sampling MRTR; frontend-specific capability negotiation, credential-safe validated forms, consent-gated URL navigation, twice-approved tools/context-free sampling, associated legacy callbacks, typed content/resources, correlated progress, severity-filtered logging, cancellation, visible failures and process cleanup; stable ACP v1 multi-session operations, plan approval, resources, roots and stdio MCP | Wider external MCP/ACP conformance, durable/shared cache policy if measurements justify it, and a published SDK/schema package |
 | Editor | Adapter-backed authenticated model discovery (including native Ollama tags), endpoint-scoped SecretStorage with plaintext-setting removal and stale-key invalidation, installed-host migration/backend-restart/endpoint-invalidation evidence, typed selection/tab/diagnostic resources and canonical multi-root file mentions with display/path separation, acknowledged live multi-root grant reconciliation (including active-turn deferral and removal), accurate failures/IDs/usage/reset/plan feedback, modal auto warning, a single-source generated protocol-v3 Python/TypeScript/JSON contract, exact-wire validation with optional-field normalization, bounded startup/backpressure queues with priority decision/cancel frames, first-response-wins request correlation, stale/restart rejection, strict event shape/sequence validation, restart-on-next-command recovery, real installed-VS-Code activation/command registration/webview-handshake and live multi-root lifecycle evidence, and automated keyboard/ARIA/reduced-motion coverage | Cross-platform OS-keychain relaunch and installed-host decision interaction scenarios plus manual screen-reader, zoom, forced-colors, and contrast audit |
-| Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from traces |
+| Evaluation | Pinned six-harness toolchain; engine-scoped schema-v3 records; executable/toolchain provenance; bounded redacted traces; per-exercise HOME; real round-two session continuation; isolated grading; all 225 canonical references validated; transport-normalized reasoning; synchronized provider-side usage and overlap-aware latency; crash-safe argument-free DGC built-in timing by bounded tool name; strict clean/full-corpus publication gate | Complete 225-task same-model DGC/Codex/OpenCode/Goose/Pi/Aider league on controlled hardware, then optimize from attributed traces |
 | Delivery | Normal non-force Git flow scripts, Linux/macOS/Windows CI, CodeQL, Dependabot, pinned editor release tooling, deterministic source archive, dependency locks, CycloneDX SBOM, attestable tag release, transactional site promotion docs | Branch-protection configuration, external release signing/promotion rehearsal, clean-install matrix, public-history migration |
 
 **Current verdict:** the code is a substantially safer and more capable release candidate, not yet
@@ -547,8 +547,16 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 729/729 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 740/740 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
+
+Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
+wall time, and DGC built-in tool-seconds with per-tool sample counts. Built-in timings contain no
+arguments, commands, paths, prompts, or results; labels and counters are bounded, survive
+compaction/resume/crash journals, and use the existing activity persistence boundary rather than an
+extra write per execution. Round-two values are exact deltas of additive counters. Reports retain
+legacy timing as unknown and explicitly avoid treating parallel tool-seconds as subtractable wall
+time. This makes confinement regressions attributable without weakening the P0 boundary first.
 
 Implementation note for command-output continuity: foreground pipes are drained continuously rather
 than accumulated without a bound. Exact credentials are masked across arbitrary reader chunks before
@@ -645,7 +653,9 @@ installed-host decision interactions, and manual assistive-technology review rem
    commit, executable version, model digest, endpoint type, model parameters, hardware, task commit,
    prompts, budgets, usage, timings, exit reason, and artifact hashes.
 2. Remove keys from argv, preserve redacted structured traces even on kill, preflight all toolchains,
-   and distinguish harness/model/infrastructure failures.
+   and distinguish harness/model/infrastructure failures. Record provider request-seconds and the
+   union of overlapping provider intervals separately from bounded argument-free DGC tool timings;
+   never infer a round maximum by subtracting cumulative maxima.
 3. Fully validate all 225 reference solutions before scoring any engine.
 4. Run DGC, Codex, OpenCode, Goose, Pi, and Aider on the same exact local model, task manifest,
    timeout, context, sampling, permissions, and hardware. Publish confidence intervals, pass@1,
@@ -782,7 +792,7 @@ transitions are scoped and non-empty; plan previews have a dedicated loopback se
 and rendering are hardened; bare tool batches receive an ordered truthful preamble; the TUI and
 editor consume the canonical command registry; custom commands appear in palettes; and goals have
 bounded persisted lifecycle state plus typed headless/editor/ACP control. The focused evidence is
-729/729 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
+740/740 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code host smoke.
 Step 6's complete preflight was green before the latest timeout-journal change and must be rerun on
 the next clean candidate, including
 the 19,591-case edit corpus (17,443 applied, zero wrong applies), type/package checks, a 441-component

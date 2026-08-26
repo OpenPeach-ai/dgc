@@ -2301,17 +2301,26 @@ EXECUTORS = {
 
 
 def execute(name: str, args: dict, ctx) -> str:
-    fn = EXECUTORS.get(name)
-    if not fn:
-        return f"error: unknown tool {name!r}"
-    if "_unparsed" in args:
-        return f"error: could not parse tool arguments as JSON: {args['_unparsed'][:200]}"
+    started_ns = time.perf_counter_ns()
+    timing_name = name if isinstance(name, str) and name in EXECUTORS else "unknown"
     try:
+        fn = EXECUTORS.get(name)
+        if not fn:
+            return f"error: unknown tool {name!r}"
+        if "_unparsed" in args:
+            return f"error: could not parse tool arguments as JSON: {args['_unparsed'][:200]}"
         return fn(args, ctx)
     except WorkspaceBoundaryError as e:
         return f"error: {e}"
     except Exception as e:  # never let a tool crash the loop
         return f"error: {type(e).__name__}: {e}"
+    finally:
+        callback = getattr(ctx, "on_tool_timing", None)
+        if callable(callback):
+            try:
+                callback(timing_name, max(0, (time.perf_counter_ns() - started_ns) // 1000))
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":  # private process-isolated compatibility worker; not a public CLI
