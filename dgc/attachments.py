@@ -8,6 +8,7 @@ still be a real, non-symlink path and the exact read is bounded before allocatio
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -29,6 +30,7 @@ MAX_TEXT_TOTAL_CHARS = 64_000
 MAX_IMAGE_FILES = 4
 MAX_IMAGE_FILE_BYTES = 8_388_608
 MAX_IMAGE_TOTAL_BYTES = 20_971_520
+MAX_EDITOR_IMAGE_TOTAL_BYTES = 2_097_152
 
 _IMAGE_TYPES = {
     ".png": "image/png",
@@ -41,6 +43,9 @@ _IMAGE_TYPES = {
 _MENTION_RE = re.compile(
     r'''(?<![\w@])@(?:"([^"\r\n]{1,4096})"|'([^'\r\n]{1,4096})'|([\w./\\~:+-]{1,4096}))''')
 _BOUNDARY_RE = re.compile(r"(?i)<\s*/?\s*(?:dgc_attachment|content)\s*>")
+_DATA_IMAGE_RE = re.compile(
+    r"\Adata:([a-z0-9.+-]+/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})\Z",
+    re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,46 @@ def _image_matches(data: bytes, mime: str) -> bool:
     if mime == "image/bmp":
         return data.startswith(b"BM")
     return False
+
+
+def validate_image_data_uris(values, *, maximum_files: int = MAX_IMAGE_FILES,
+                             maximum_file_bytes: int = MAX_IMAGE_FILE_BYTES,
+                             maximum_total_bytes: int = MAX_IMAGE_TOTAL_BYTES) -> tuple[str, ...]:
+    """Validate typed frontend images before they become provider-bound message content."""
+    if values is None:
+        return ()
+    if not isinstance(values, list):
+        raise ValueError("images must be an array of base64 data URIs")
+    if len(values) > maximum_files:
+        raise ValueError(f"images exceed the {maximum_files}-image limit")
+    allowed = set(_IMAGE_TYPES.values())
+    total = 0
+    validated: list[str] = []
+    encoded_file_limit = 4 * ((maximum_file_bytes + 2) // 3)
+    for index, value in enumerate(values):
+        if not isinstance(value, str):
+            raise ValueError(f"image {index + 1} is not a data URI string")
+        match = _DATA_IMAGE_RE.fullmatch(value)
+        if match is None:
+            raise ValueError(f"image {index + 1} must be a base64 data URI, not a URL")
+        mime, payload = match.group(1).lower(), match.group(2)
+        if mime not in allowed:
+            raise ValueError(f"image {index + 1} has unsupported media type {mime}")
+        if len(payload) > encoded_file_limit:
+            raise ValueError(f"image {index + 1} exceeds its byte limit")
+        try:
+            raw = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError(f"image {index + 1} contains invalid base64 data") from None
+        if len(raw) > maximum_file_bytes:
+            raise ValueError(f"image {index + 1} exceeds its byte limit")
+        total += len(raw)
+        if total > maximum_total_bytes:
+            raise ValueError("images exceed the aggregate byte limit")
+        if not _image_matches(raw, mime):
+            raise ValueError(f"image {index + 1} media type does not match its data")
+        validated.append(f"data:{mime};base64,{payload}")
+    return tuple(validated)
 
 
 def _display_label(value: str, sanitizer) -> str:

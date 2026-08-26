@@ -3,7 +3,7 @@
 
 export const DGC_PROTOCOL_VERSION = 3 as const;
 export const MAX_EVENT_BYTES = 4194304;
-export const MAX_COMMAND_BYTES = 1048576;
+export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 

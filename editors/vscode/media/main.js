@@ -4,6 +4,9 @@
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
   const announcer = $("announcer");
   const queuedEl = $("queued");
+  const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
+  const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+  let pendingImageFiles = 0, pendingImageBytes = 0;
   let queuedCount = 0, customCommands = [];
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
@@ -593,9 +596,37 @@
     for (const it of items) {
       if (it.type && it.type.indexOf("image/") === 0) {
         const file = it.getAsFile(); if (!file) continue;
+        if (!SUPPORTED_IMAGE_TYPES.has(String(file.type || "").toLowerCase())) {
+          sysLine(`Unsupported pasted image type: ${file.type || "unknown"}.`, true); continue;
+        }
+        const current = attachments.filter((a) => a.img);
+        if (current.length + pendingImageFiles >= MAX_IMAGE_FILES) {
+          sysLine(`At most ${MAX_IMAGE_FILES} images can be attached to one prompt.`, true); continue;
+        }
+        const retainedBytes = current.reduce((total, image) => total + (image.bytes || 0), 0);
+        if (file.size > MAX_IMAGE_TOTAL_BYTES
+            || retainedBytes + pendingImageBytes + file.size > MAX_IMAGE_TOTAL_BYTES) {
+          sysLine("Pasted images exceed the 2 MiB prompt limit.", true); continue;
+        }
+        pendingImageFiles += 1; pendingImageBytes += file.size;
         const r = new FileReader();
-        r.onload = () => { attachments.push({ label: "📷 image", img: true, data: r.result, text: "" }); renderAtts(); };
-        r.readAsDataURL(file);
+        let settled = false;
+        const release = () => {
+          if (settled) return; settled = true;
+          pendingImageFiles -= 1; pendingImageBytes -= file.size;
+        };
+        r.onload = () => {
+          release();
+          if (typeof r.result !== "string" || !r.result.startsWith("data:image/")) {
+            sysLine("The pasted image could not be encoded safely.", true); return;
+          }
+          attachments.push({ label: "📷 image", img: true, data: r.result,
+            bytes: file.size, text: "" }); renderAtts();
+        };
+        r.onerror = () => { release(); sysLine("The pasted image could not be read.", true); };
+        r.onabort = release;
+        try { r.readAsDataURL(file); }
+        catch { release(); sysLine("The pasted image could not be read.", true); }
         e.preventDefault();
       }
     }

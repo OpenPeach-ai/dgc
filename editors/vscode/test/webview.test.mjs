@@ -164,6 +164,26 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   dom.window.close();
 });
 
+test("concurrent pasted images reserve bytes before FileReader can cross the aggregate ceiling", () => {
+  const { dom, errors, posted, doc } = makeDom();
+  const input = doc.getElementById("input");
+  dom.window.FileReader = class HoldingReader { readAsDataURL() {} };
+  const first = new dom.window.File(
+    [new Uint8Array(1280 * 1024)], "first.png", { type: "image/png" });
+  const second = new dom.window.File(
+    [new Uint8Array(1280 * 1024)], "second.png", { type: "image/png" });
+  const event = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { items: [
+    { type: "image/png", getAsFile: () => first },
+    { type: "image/png", getAsFile: () => second },
+  ] } });
+  input.dispatchEvent(event);
+  assert.match(doc.getElementById("log").textContent, /2 MiB prompt limit/);
+  assert.equal(posted.some((message) => message.type === "prompt"), false);
+  assert.deepEqual(errors, [], "oversized pasted-image rejection raised JS errors");
+  dom.window.close();
+});
+
 test("decision cards expire by exact ID and cannot double-submit across cancel/exit races", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });

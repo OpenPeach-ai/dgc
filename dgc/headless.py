@@ -16,6 +16,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
+from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
@@ -29,12 +30,23 @@ from .ui import arg_summary, split_diff, tool_output_is_error
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
 _MAX_QUEUED_TURNS = 32
+_MAX_QUEUED_TURN_BYTES = 16 * 1024 * 1024
+_MAX_PROMPT_CHARS = 1_000_000
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
     "resolve_retained_task",
 }
 _EDITOR_CONTEXT_LIMIT = 64_000
+
+
+def _turn_payload_bytes(text, images, context) -> int:
+    """Approximate the retained decoded queue payload with exact UTF-8 JSON bytes."""
+    try:
+        return len(json.dumps([text, images, context], ensure_ascii=False,
+                              separators=(",", ":")).encode("utf-8"))
+    except (TypeError, ValueError, UnicodeError):
+        return _MAX_QUEUED_TURN_BYTES + 1
 
 
 def _editor_context_json(value) -> str:
@@ -335,7 +347,10 @@ class Backend:
         lock = self._turn_state_lock()
         with lock:
             if getattr(self, "_worker", None) is not None:
-                if len(self._queue) >= _MAX_QUEUED_TURNS:
+                pending_bytes = sum(_turn_payload_bytes(*item) for item in self._queue)
+                if (len(self._queue) >= _MAX_QUEUED_TURNS
+                        or pending_bytes + _turn_payload_bytes(text, images, context)
+                        > _MAX_QUEUED_TURN_BYTES):
                     return "full", len(self._queue)
                 self._queue.append((text, images, context))
                 return "queued", len(self._queue)
@@ -491,7 +506,18 @@ class Backend:
 
         if t == "prompt":
             text = str(cmd.get("text", ""))
-            images = cmd.get("images")             # list of data: URIs (vision models)
+            if len(text) > _MAX_PROMPT_CHARS:
+                self.em.emit("command_rejected", command=t, reason="prompt_too_large",
+                             message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit")
+                return
+            try:
+                images = validate_image_data_uris(
+                    cmd.get("images"), maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
+                    maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
+            except ValueError as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_images",
+                             message=f"prompt images rejected: {exc}")
+                return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
             if text.startswith("/"):               # render a custom slash-command template
                 parts = text[1:].split(None, 1)
@@ -504,8 +530,8 @@ class Backend:
                 self.em.emit("queued", count=count, text=text)
             elif state == "full":
                 self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
-                             message=(f"follow-up queue is full ({_MAX_QUEUED_TURNS}); "
-                                      "cancel it or wait for a turn to finish"))
+                             message=("follow-up queue reached its count or aggregate byte limit "
+                                      f"({count} queued); cancel it or wait for a turn to finish"))
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()

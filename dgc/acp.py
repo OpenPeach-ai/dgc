@@ -24,6 +24,7 @@ from pathlib import Path
 from . import __version__
 from . import sessions
 from .agent import Agent
+from .attachments import validate_image_data_uris
 from .commands import custom_command_names
 from .config import Config
 from .permissions import MODE_DESCRIPTIONS, MODES, rule_for
@@ -38,6 +39,34 @@ _KIND = {  # DGC tool -> ACP tool-call kind
     "todo": "think", "task": "think", "skill": "other", "save_memory": "other",
 }
 _TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed"}
+MAX_ACP_FRAME_BYTES = 32 * 1024 * 1024
+MAX_ACP_PROMPT_BLOCKS = 256
+MAX_ACP_PROMPT_CHARS = 1_000_000
+
+
+def _json_rpc_lines(stream):
+    """Yield bounded UTF-8 JSON-RPC records and drain one oversized record before recovery."""
+    binary = getattr(stream, "buffer", None)
+    if binary is None:
+        for line in stream:
+            if len(line.encode("utf-8")) > MAX_ACP_FRAME_BYTES:
+                yield None, f"JSON-RPC frame exceeded {MAX_ACP_FRAME_BYTES} bytes"
+            else:
+                yield line, None
+        return
+    while True:
+        raw = binary.readline(MAX_ACP_FRAME_BYTES + 1)
+        if not raw:
+            return
+        if len(raw) > MAX_ACP_FRAME_BYTES:
+            while raw and not raw.endswith(b"\n"):
+                raw = binary.readline(65_536)
+            yield None, f"JSON-RPC frame exceeded {MAX_ACP_FRAME_BYTES} bytes"
+            continue
+        try:
+            yield raw.decode("utf-8", errors="strict"), None
+        except UnicodeDecodeError:
+            yield None, "JSON-RPC frame is not valid UTF-8"
 
 
 def _mode_state(agent: Agent) -> dict:
@@ -198,7 +227,11 @@ class ACPServer:
 
     # -- main loop -------------------------------------------------------------
     def serve(self) -> None:
-        for line in sys.stdin:
+        for line, frame_error in _json_rpc_lines(sys.stdin):
+            if frame_error:
+                self.respond(None, error={"code": -32600, "message": frame_error})
+                continue
+            assert line is not None
             line = line.strip()
             if not line:
                 continue
@@ -349,8 +382,18 @@ class ACPServer:
             if not state:
                 self.respond(rid, error={"code": -32002, "message": "unknown session"})
                 return
-            text = _prompt_text(params.get("prompt", []))
-            images = _prompt_images(params.get("prompt", []))
+            prompt_blocks = params.get("prompt", [])
+            if not isinstance(prompt_blocks, list):
+                self.respond(rid, error={"code": -32602,
+                                         "message": "prompt must be an array of content blocks"})
+                return
+            try:
+                text = _prompt_text(prompt_blocks)
+                images = _prompt_images(prompt_blocks)
+            except ValueError as exc:
+                self.respond(rid, error={"code": -32602,
+                                         "message": f"invalid prompt content: {exc}"})
+                return
 
             def run():
                 result, error = None, None
@@ -466,22 +509,56 @@ class ACPServer:
 
 
 def _prompt_text(blocks) -> str:
+    if len(blocks) > MAX_ACP_PROMPT_BLOCKS:
+        raise ValueError(f"prompt exceeds the {MAX_ACP_PROMPT_BLOCKS}-block limit")
     parts: list[str] = []
+    total_chars = 0
+
+    def append(value: str) -> None:
+        nonlocal total_chars
+        updated = total_chars + len(value) + (1 if parts else 0)
+        if updated > MAX_ACP_PROMPT_CHARS:
+            raise ValueError(f"prompt exceeds the {MAX_ACP_PROMPT_CHARS}-character limit")
+        parts.append(value)
+        total_chars = updated
+
     for block in blocks:
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
         if kind == "text":
-            parts.append(str(block.get("text", "")))
+            value = block.get("text", "")
+            if not isinstance(value, str):
+                raise ValueError("text block content must be a string")
+            if len(value) > MAX_ACP_PROMPT_CHARS:
+                raise ValueError(f"prompt exceeds the {MAX_ACP_PROMPT_CHARS}-character limit")
+            append(value)
         elif kind == "resource":
             resource = block.get("resource") or {}
+            if not isinstance(resource, dict):
+                raise ValueError("embedded resource must be an object")
             text = resource.get("text")
             if text is not None:
+                if not isinstance(text, str):
+                    raise ValueError("embedded resource text must be a string")
+                if len(text) > MAX_ACP_PROMPT_CHARS:
+                    raise ValueError(
+                        f"prompt exceeds the {MAX_ACP_PROMPT_CHARS}-character limit")
                 uri = resource.get("uri") or block.get("uri") or "embedded"
-                parts.append(f"<embedded-resource uri={uri!r}>\n{text}\n</embedded-resource>")
+                payload = json.dumps(
+                    {"uri": str(uri)[:2_048], "text": text}, ensure_ascii=False,
+                    separators=(",", ":")).replace("&", "\\u0026").replace(
+                        "<", "\\u003c").replace(">", "\\u003e")
+                append("<embedded-resource-json trust=\"untrusted-reference-data\">\n"
+                       + payload + "\n</embedded-resource-json>")
         elif kind == "resource_link":
             uri = block.get("uri", "")
-            parts.append(f"<resource-link uri={uri!r}>{block.get('name') or uri}</resource-link>")
+            payload = json.dumps(
+                {"uri": str(uri)[:2_048], "name": str(block.get("name") or uri)[:512]},
+                ensure_ascii=False, separators=(",", ":")).replace("&", "\\u0026").replace(
+                    "<", "\\u003c").replace(">", "\\u003e")
+            append("<resource-link-json trust=\"untrusted-reference-data\">"
+                   + payload + "</resource-link-json>")
     return "\n".join(parts).strip()
 
 
@@ -490,9 +567,12 @@ def _prompt_images(blocks) -> list:
     for b in blocks:
         if isinstance(b, dict) and b.get("type") == "image":
             data, mime = b.get("data"), b.get("mimeType", "image/png")
-            if data:
-                out.append(f"data:{mime};base64,{data}")
-    return out
+            if not isinstance(data, str) or not data:
+                raise ValueError("image data must be a non-empty base64 string")
+            if not isinstance(mime, str) or not mime:
+                raise ValueError("image mimeType must be a non-empty string")
+            out.append(f"data:{mime};base64,{data}")
+    return list(validate_image_data_uris(out))
 
 
 class _ACPUi:

@@ -12,7 +12,7 @@ import {
   dgcEventError,
 } from "./protocol.generated";
 
-export { DGC_PROTOCOL_VERSION };
+export { DGC_PROTOCOL_VERSION, MAX_COMMAND_BYTES };
 export type { DgcEvent };
 const RESERVED_EVENT_NAMES = new Set(["error", "event", "newListener", "removeListener"]);
 

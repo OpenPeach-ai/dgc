@@ -19,7 +19,7 @@ await build({
   outfile: bundle,
   logLevel: "silent",
 });
-const { DgcBackend, DGC_PROTOCOL_VERSION } = createRequire(import.meta.url)(bundle);
+const { DgcBackend, DGC_PROTOCOL_VERSION, MAX_COMMAND_BYTES } = createRequire(import.meta.url)(bundle);
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 function executable(name, body) {
@@ -315,7 +315,7 @@ test("backend fails closed on malformed events and oversized or invalid commands
   assert.equal(validator.send({ nope: true }), false);
   assert.equal(validator.send({ type: "set_mode", mode: "unsafe-surprise" }), false);
   assert.equal(validator.send({ type: "prompt", text: 7 }), false);
-  assert.equal(validator.send({ type: "prompt", text: "x".repeat(1024 * 1024) }), false);
+  assert.equal(validator.send({ type: "prompt", text: "x".repeat(MAX_COMMAND_BYTES) }), false);
   assert.deepEqual(rejected.map((event) => event.type),
     ["command_rejected", "command_rejected", "command_rejected", "command_rejected"]);
 
