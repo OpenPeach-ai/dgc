@@ -2883,6 +2883,119 @@ def unit_tests(tmp: Path):
           and "Implemented and verified" in _green_agent.messages[-1]["content"]
           and "`answer.txt`" in _green_agent.messages[-1]["content"]
           and "test command passed" in _green_agent.messages[-1]["content"])
+    _edit_verify_root = Path(tempfile.mkdtemp())
+    _edit_verify_agent = _Ag(_Cfg(_edit_verify_root), _AgUI())
+    _edit_verify_agent.config.data.update({
+        "mode": "auto", "turn_budget_s": 60,
+        "verify_before_done": True,
+        "verify_command": "test \"$(cat answer.txt)\" = good",
+    })
+    class _EditOnlyGreenClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            return _ChatResult(tool_calls=[_ToolCall(
+                f"edit-only-green-{self.n}", "write_file", {
+                    "path": "answer.txt",
+                    "content": "good\n" if self.n == 1 else "must not run\n",
+                })])
+    _edit_verify_agent.client = _EditOnlyGreenClient()
+    _edit_verify_agent.run_turn("write the verified answer")
+    check("timed edit-only batches run the known verifier without another generation",
+          _edit_verify_agent.client.n == 1
+          and (_edit_verify_root / "answer.txt").read_text() == "good\n"
+          and any("automatically ran the configured verifier" in str(message.get("content") or "")
+                  for message in _edit_verify_agent.messages)
+          and "Implemented and verified" in _edit_verify_agent.messages[-1]["content"])
+    _timed_interactive_root = Path(tempfile.mkdtemp())
+    _timed_interactive = _Ag(_Cfg(_timed_interactive_root), _AgUI())
+    _timed_interactive.config.data.update({
+        "mode": "acceptEdits", "turn_budget_s": 60,
+        "verify_before_done": True,
+        "verify_command": "test \"$(cat answer.txt)\" = good",
+    })
+    class _TimedInteractiveClient:
+        tools_supported = True
+        n = 0
+        saw_automatic_verifier = False
+        def chat(self, messages, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "timed-interactive-edit", "write_file", {
+                        "path": "answer.txt", "content": "good\n",
+                    })])
+            self.saw_automatic_verifier = any(
+                "automatically ran the configured verifier" in str(message.get("content") or "")
+                for message in messages)
+            kwargs["on_text"]("Implemented the requested interactive change.")
+            return _ChatResult(content="Implemented the requested interactive change.")
+    _timed_interactive.client = _TimedInteractiveClient()
+    _timed_interactive.run_turn("write the answer interactively")
+    check("timed interactive modes retain model-authored final cadence",
+          _timed_interactive.client.n == 2
+          and not _timed_interactive.client.saw_automatic_verifier
+          and (_timed_interactive_root / "answer.txt").read_text() == "good\n")
+    _edit_repair_root = Path(tempfile.mkdtemp())
+    _edit_repair_agent = _Ag(_Cfg(_edit_repair_root), _AgUI())
+    _edit_repair_agent.config.data.update({
+        "mode": "auto", "turn_budget_s": 60,
+        "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; test \"$(cat answer.txt)\" = good",
+    })
+    class _EditRepairClient:
+        tools_supported = True
+        n = 0
+        saw_red_evidence = False
+        def chat(self, messages, *args, **kwargs):
+            self.n += 1
+            if self.n == 2:
+                self.saw_red_evidence = any(
+                    "immediately after your edit batch" in str(message.get("content") or "")
+                    and "did not pass" in str(message.get("content") or "")
+                    for message in messages)
+            return _ChatResult(tool_calls=[_ToolCall(
+                f"edit-repair-{self.n}", "write_file", {
+                    "path": "answer.txt",
+                    "content": "bad\n" if self.n == 1 else "good\n",
+                })])
+    _edit_repair_agent.client = _EditRepairClient()
+    _edit_repair_agent.run_turn("repair the answer from verifier evidence")
+    check("a red post-edit verifier feeds evidence directly into the corrective generation",
+          _edit_repair_agent.client.n == 2
+          and _edit_repair_agent.client.saw_red_evidence
+          and (_edit_repair_root / ".verify-runs").read_text() == "xx"
+          and (_edit_repair_root / "answer.txt").read_text() == "good\n")
+    _denied_edit_root = Path(tempfile.mkdtemp())
+    _denied_edit_agent = _Ag(_Cfg(_denied_edit_root), _AgUI())
+    _denied_edit_agent.config.data.update({
+        "mode": "auto", "turn_budget_s": 60,
+        "verify_before_done": True,
+        "verify_command": "printf x >> .verify-runs; true",
+    })
+    _denied_edit_agent.config.permissions = {
+        "allow": [], "ask": [], "deny": ["Write(*)"],
+    }
+    class _DeniedEditClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    "denied-edit", "write_file", {
+                        "path": "answer.txt", "content": "not allowed\n",
+                    })])
+            return _ChatResult(content="The requested write was denied.")
+    _denied_edit_agent.client = _DeniedEditClient()
+    _denied_edit_agent.run_turn("attempt the denied edit")
+    check("denied edits never trigger verification or count as landed mutations",
+          _denied_edit_agent.client.n == 2
+          and not (_denied_edit_root / "answer.txt").exists()
+          and not (_denied_edit_root / ".verify-runs").exists()
+          and _denied_edit_agent.activity_totals == {
+              "tool_calls": 1, "edits": 0, "edit_fails": 1})
     _steered_green_root = Path(tempfile.mkdtemp())
     _steered_green_agent = _Ag(_Cfg(_steered_green_root), _AgUI())
     _steered_green_agent.config.data.update({
@@ -7209,7 +7322,19 @@ def test_benchmark_integrity():
     sys.path.insert(0, str(bench_dir))
     try:
         import run_bench as _RB
+        import prompt_surface as _PS
         import runtime_micro as _RM
+        _prompt_probe = _PS.run_probe()
+        check("benchmark prompt probe is endpoint-free, isolated, and schema-complete",
+              _prompt_probe.get("schema_version") == 1
+              and _prompt_probe.get("kind") == "dgc_prompt_surface"
+              and _prompt_probe.get("active_skills") == []
+              and len(_prompt_probe.get("tools", [])) == 11
+              and "skill" not in {tool.get("name") for tool in _prompt_probe.get("tools", [])}
+              and _prompt_probe.get("estimated_wire_tokens", 0) > 0
+              and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
+                  >= {"# Environment", "# How to work", "# Response cadence",
+                      "# Permission mode: auto"})
         check("runtime overhead probe reports deterministic nearest-rank distributions",
               _RM.summarize_ms([4, 1, 3, 2]) == {
                   "samples": 4, "median_ms": 2.5, "p95_ms": 4.0, "mean_ms": 2.5})
@@ -8572,6 +8697,17 @@ def test_steering():
     a._activate_skill_intents("Use the code-review skill on this diff.", replace=True)
     check("an explicitly named skill does not expand the whole reusable catalog",
           [skill.name for skill in a._skill_catalog()] == ["code-review"])
+    a._activate_skill_intents(
+        "The provided tests are authoritative. Do not dismiss a failing test as inconsistent; "
+        "implement the complete solution.", replace=True)
+    check("incidental benchmark guard text does not activate the debug skill",
+          not a._skill_catalog())
+    a._activate_skill_intents("Fix the failing tests in this repository.", replace=True)
+    check("an explicit failing-test task still activates the debug skill",
+          [skill.name for skill in a._skill_catalog()] == ["debug"])
+    a._activate_skill_intents("The tests still fail after the first correction.", replace=True)
+    check("a failed verification follow-up activates the debug skill",
+          [skill.name for skill in a._skill_catalog()] == ["debug"])
     from dgc.skills import Skill as _Skill
     a.skills["custom-motion"] = _Skill(
         name="custom-motion", description="Apply the quasar nebula choreography protocol",

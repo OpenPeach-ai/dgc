@@ -43,7 +43,10 @@ _BUILTIN_SKILL_PATTERNS = {
     "batch": re.compile(r"\b(?:batch|fan[- ]?out|repetitive change|many[- ]file change)\b", re.I),
     "code-review": re.compile(r"\b(?:code review|review (?:the )?(?:diff|changes|pr)|pull request review)\b", re.I),
     "dataviz": re.compile(r"\b(?:data ?viz|visuali[sz]ation|chart|plot|graph)\b", re.I),
-    "debug": re.compile(r"\b(?:debug|diagnos(?:e|is)|regression|crash|failing tests?)\b", re.I),
+    "debug": re.compile(
+        r"\b(?:debug|diagnos(?:e|is)|investigate|fix)\b.{0,32}"
+        r"\b(?:failing tests?|regression|crash|wrong behavior)\b|"
+        r"\btests? (?:still )?fail(?:s|ing)?\b|\b(?:regression|crash)\b", re.I),
     "deep-research": re.compile(r"\b(?:deep research|research (?:online|the web)|cross[- ]check sources|cited research)\b", re.I),
     "dgc-design": re.compile(r"\b(?:dgc design|web ui|front[- ]?end design|artifact|dashboard|mockup)\b", re.I),
     "handoff": re.compile(r"\b(?:handoff|hand[- ]off|resume context|continuation document)\b", re.I),

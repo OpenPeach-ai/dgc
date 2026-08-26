@@ -119,6 +119,20 @@ scale with provider request-seconds and generations per task before weakening a 
 filesystem, process, or sandbox boundary; a few dozen milliseconds of process startup cannot by
 itself explain a multi-minute model trajectory.
 
+Measure the model-request surface separately from runtime boundaries:
+
+```bash
+python3 prompt_surface.py
+python3 prompt_surface.py --json
+```
+
+This endpoint-free probe constructs the same timed auto/native-Ollama profile and canonical exercise
+prompt as the controlled DGC runner in an isolated temporary project. It reports system-prompt and
+compact tool-schema characters, the four-characters-per-token wire estimate, section sizes, active
+bundled skills, and per-tool schema sizes. User-installed skills and model endpoints are excluded.
+Use it to catch accidental prompt/schema expansion; it does not measure generation latency or coding
+quality.
+
 Round-two compiler/test diagnostics are path-normalized before they are returned to a harness. The
 official grader runs in a disposable clean fixture, so absolute paths from that deleted fixture are
 mapped to `./...` in the still-live exercise worktree; diagnostic text and line numbers are otherwise

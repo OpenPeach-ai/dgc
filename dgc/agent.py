@@ -50,6 +50,10 @@ _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
                      "add_skill", "save_memory"}
 _FILE_EDIT_CALLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
+_FILE_EDIT_SUCCESS_PREFIX = {
+    "write_file": "wrote ", "edit_file": "edited ",
+    "multi_edit": "applied ", "apply_patch": "patched ",
+}
 _PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search",
                    "skill", "bash_output"}
 _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel"}
@@ -176,6 +180,12 @@ def _tool_batch_preamble(calls: list[ToolCall], *, did_tools: bool = False,
     if "todo" in names:
         return "I’m organizing the work into concrete steps first."
     return "I’m taking the next concrete step now."
+
+
+def _file_edit_landed(name: str, output: str) -> bool:
+    """Recognize executor-confirmed mutations; denials and hook blocks never count as edits."""
+    prefix = _FILE_EDIT_SUCCESS_PREFIX.get(str(name))
+    return bool(prefix and str(output).lstrip().lower().startswith(prefix))
 
 
 def _sampling(cfg) -> dict:
@@ -2041,6 +2051,38 @@ class Agent:
             clear_held_final()
             self.ui.end_stream()
 
+        def run_configured_verifier() -> tuple[str, str]:
+            """Run the explicit verifier within this turn's cancellation/deadline boundary."""
+            cmd = str(self.config.get("verify_command"))
+            safe_cmd = self._safe_text(cmd)
+            self.ui.info(f"⧗ verify: {safe_cmd}")
+            try:
+                verify_timeout = max(1, int(self.config.get("bash_timeout", 120)))
+            except (TypeError, ValueError):
+                verify_timeout = 120
+            verify_cancel = self.cancelled
+            if deadline is not None:
+                cutoff = deadline - 0.06 * budget
+                verify_cancel = _DeadlineCancel(self.cancelled, cutoff)
+                verify_timeout = max(
+                    1, min(verify_timeout, int(max(1, cutoff - time.monotonic()))))
+            lease = workspace_mutation_lock(self.config.project_root)
+            acquired = False
+            try:
+                acquired = acquire_cancellable(lease, verify_cancel)
+                if not acquired:
+                    out = (f"error: {lease.last_error}" if lease.last_error else
+                           "error: verification cancelled while waiting for the workspace lease")
+                else:
+                    out = str(execute(
+                        "bash", {"command": cmd, "timeout": verify_timeout}, self.ctx))
+            except Exception as exc:
+                out = f"error: {type(exc).__name__}: {exc}"
+            finally:
+                if acquired:
+                    lease.release()
+            return safe_cmd, self._safe_text(out)
+
         for _ in range(max_turns):
             if self.cancelled.is_set():
                 if held_final_messages:
@@ -2333,35 +2375,7 @@ class Agent:
                         "again without taking corrective action")
                 if needs_verifier:                                  # E: verify-before-done gate
                     verify_runs += 1
-                    cmd = str(self.config.get("verify_command"))
-                    safe_cmd = self._safe_text(cmd)
-                    self.ui.info(f"⧗ verify: {safe_cmd}")
-                    try:
-                        verify_timeout = max(1, int(self.config.get("bash_timeout", 120)))
-                    except (TypeError, ValueError):
-                        verify_timeout = 120
-                    verify_cancel = self.cancelled
-                    if deadline is not None:
-                        cutoff = deadline - 0.06 * budget
-                        verify_cancel = _DeadlineCancel(self.cancelled, cutoff)
-                        verify_timeout = max(1, min(verify_timeout,
-                                                    int(max(1, cutoff - time.monotonic()))))
-                    lease = workspace_mutation_lock(self.config.project_root)
-                    acquired = False
-                    try:
-                        acquired = acquire_cancellable(lease, verify_cancel)
-                        if not acquired:
-                            verify_out = (f"error: {lease.last_error}" if lease.last_error else
-                                          "error: verification cancelled while waiting for the workspace lease")
-                        else:
-                            verify_out = str(execute(
-                                "bash", {"command": cmd, "timeout": verify_timeout}, self.ctx))
-                    except Exception as e:
-                        verify_out = f"error: {type(e).__name__}: {e}"
-                    finally:
-                        if acquired:
-                            lease.release()
-                    verify_out = self._safe_text(verify_out)
+                    safe_cmd, verify_out = run_configured_verifier()
                     if not verify_out.startswith("exit code: 0\n"):
                         self.messages.append({"role": "user", "content":
                             "<system-reminder>\nverify_before_done: the configured verifier did not "
@@ -2460,8 +2474,8 @@ class Agent:
                 # Compaction may replace old tool messages, but it must never erase observable
                 # activity. Count model-issued calls in native and fenced text-tool modes alike;
                 # a file edit counts only after the tool reports that it landed.
-                edit_failed = (call.name in _FILE_EDIT_CALLS
-                               and out.lstrip().lower().startswith("error"))
+                landed_file_edit = _file_edit_landed(call.name, out)
+                edit_failed = call.name in _FILE_EDIT_CALLS and not landed_file_edit
                 self._record_activity(call.name, edit_failed)
                 if call.name == "bash" and out.startswith("exit code: "):   # grind guard
                     head, _, body = out.partition("\n")
@@ -2500,14 +2514,12 @@ class Agent:
                     batch_verified = verified = False
                     verify_nudged = False
                 if call.name in ("edit_file", "multi_edit", "apply_patch"):  # varied edit grind
-                    if out.lstrip().lower().startswith("error"):  # identical-call loop guard) → count it
+                    if not landed_file_edit:  # denied/blocked/missed edits are all non-progress
                         edit_fail_streak += 1
                     else:
                         edit_fail_streak = 0
-                elif call.name == "write_file" and not out.lstrip().lower().startswith("error"):
+                elif call.name == "write_file" and landed_file_edit:
                     edit_fail_streak, edit_grind_nudged = 0, False   # the recommended recovery landed
-                landed_file_edit = (call.name in _FILE_EDIT_CALLS
-                                    and not out.lstrip().lower().startswith("error"))
                 landed_task_edit = call.name == "task" and task_integrated
                 if landed_file_edit or landed_task_edit:
                     batch_landed_edits += 1
@@ -2534,6 +2546,52 @@ class Agent:
                 else:
                     text_results.append(f"<result tool=\"{call.name}\">\n{out}\n</result>")
             flush_text_results()
+
+            # In a timed autonomous run, the configured verifier is an authoritative controller
+            # primitive, not a decision that needs another model generation. If the model lands an
+            # edit-only batch without using bash, run that known command immediately. This collapses
+            # the common local-model trajectory `edit -> ask to test -> test -> ask to summarize` to
+            # `edit -> test result`: red evidence reaches the next request directly, while green
+            # evidence arms the existing provider-free closeout. Untimed interactive turns retain
+            # model-authored cadence, and a batch containing any shell call is never double-tested.
+            auto_verify = bool(
+                self.mode == "auto" and deadline is not None and batch_landed_edits > 0
+                and self.config.get("verify_before_done")
+                and self.config.get("verify_command")
+                and not any(call.name == "bash" for call in result.tool_calls))
+            if auto_verify:
+                safe_cmd, verify_out = run_configured_verifier()
+                passed = verify_out.startswith("exit code: 0\n")
+                unverified_target_edits.clear()
+                unverified_edit_nudged = False
+                if passed:
+                    fail_streak, fail_nudged, same_fail, last_fail_fp = 0, False, 0, None
+                    verify_fail_cycles, verify_cycle_nudged = 0, False
+                    batch_verified = verified = True
+                else:
+                    fail_streak += 1
+                    verify_fail_cycles += 1
+                    _, _, failure_body = verify_out.partition("\n")
+                    fp = "".join(c for c in failure_body if not c.isdigit())[:400]
+                    same_fail = same_fail + 1 if fp == last_fail_fp else 1
+                    last_fail_fp = fp
+                    batch_verified = verified = False
+                    verify_nudged = False
+                verdict = "passed" if passed else "did not pass"
+                note = (
+                    "<system-reminder>\n"
+                    "DGC automatically ran the configured verifier immediately after your edit "
+                    f"batch; `{safe_cmd}` {verdict}:\n{verify_out[-3000:]}\n"
+                    + ("The checkout is verified. Do not make another change or rerun the same "
+                       "command; DGC will close this timed turn now.\n"
+                       if passed else
+                       "Use this evidence to make the next focused correction; do not spend a "
+                       "generation asking to run the same verifier.\n")
+                    + "</system-reminder>")
+                if self.messages and self.messages[-1]["role"] == "user":
+                    self.messages[-1]["content"] = f"{self.messages[-1]['content']}\n{note}"
+                else:
+                    self.messages.append({"role": "user", "content": note})
 
             if (deadline is not None and batch_verified
                     and edited_total + batch_landed_edits > 0):

@@ -79,7 +79,8 @@ DEFAULTS: dict = {
     "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
                                                 #   only sent to the ollama provider; "" = don't send)
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
-    "verify_command": "",                       #   feed failures back once. e.g. "npm test" / "pytest -q"
+    "verify_command": "",                       #   timed auto runs it after edit-only batches so red evidence
+                                                #   skips a model round. e.g. "npm test" / "pytest -q"
     "bash_timeout": 120,
     "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)

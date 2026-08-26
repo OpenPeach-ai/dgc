@@ -119,7 +119,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 897 / 897 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 905 / 905 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -167,7 +167,12 @@ bound for DGC was 8.2. The old `rust/acronym` trace made the mechanism visible: 
 candidate write and test in one shell request, while DGC repeatedly alternated one structured write
 and one test across separate generations. DGC already executes dependent tool calls in model order;
 the current auto-mode prompt now explicitly tells a confident local model to batch ordered edits and
-the verifier in one response. This remains a measured hypothesis until the replacement league runs.
+the verifier in one response. The current timed controller also runs the already-configured
+authoritative verifier immediately after an edit-only batch: a failure is inserted directly into the
+next request, while success uses the existing provider-free closeout. Deterministic trajectory tests
+prove the green edit→test path closes in one model request instead of two and the
+red-edit→test→correct→test path closes in two instead of four; the replacement league must determine
+the real quality/latency effect.
 DGC also now retains a separate count of recognized red verification cycles across successful edits:
 after three, it issues one bounded reminder to stop patching the latest assertion in isolation and
 derive one coherent correction from all tests and failures already in context. It never aborts useful
@@ -591,7 +596,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 897/897 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 905/905 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Windows confinement remains deliberately unavailable rather than emulated by a shell prefix. The
@@ -631,7 +636,13 @@ failure is never mislabeled as a speed win. Missing or unsynchronized task usage
 JSON `null`, so the next league can be triaged without ad hoc scripts or accidental partial
 attribution. A budgeted turn now closes immediately with a bounded outcome-first summary after a
 recognized verifier passes (the controlled league supplies the exact authoritative command), avoiding
-one evidence-free provider generation and its deadline risk. A user interjection queued during that
+one evidence-free provider generation and its deadline risk. In the same timed profile, an edit-only
+batch now runs that verifier at the controller boundary instead of spending another provider request
+asking the model to call the known command. A red result is bounded and fed straight into the next
+corrective request; a green result captures last-good state and closes locally. Any model-issued bash
+in the batch suppresses this automatic run, so an explicit edit-plus-test response is never tested
+twice. Denied, blocked, or failed edits are recognized from executor-confirmed success prefixes and
+cannot trigger verification or inflate landed-edit metrics. A user interjection queued during that
 final edit/test batch supersedes the armed closeout, re-enters the model/tool loop with the exact
 steering message, and requires any subsequent mutation to establish a fresh green state; it is never
 discarded behind a stale completion claim. Normal interactive turns remain model-authored.
@@ -644,6 +655,13 @@ compaction/resume/crash journals, and use the existing activity persistence boun
 extra write per execution. Round-two values are exact deltas of additive counters. Reports retain
 legacy timing as unknown and explicitly avoid treating parallel tool-seconds as subtractable wall
 time. This makes confinement regressions attributable without weakening the P0 boundary first.
+The endpoint-free `bench/prompt_surface.py` probe now locks the complementary request-side evidence
+to the exact benchmark auto/native-Ollama profile and canonical prompt shape while excluding ambient
+user skills. On the 2026-08-26 GB10 candidate it measured 3,522 system characters (approximately 881
+tokens), 5,555 compact schema characters (approximately 1,389 tokens across 11 tools), and 2,596
+estimated provider-visible input tokens including the 826-character task prompt. No bundled skill was
+active: incidental guard prose such as “do not dismiss a failing test” no longer injects the debug
+catalog/schema, while explicit “fix failing tests” and round-two “tests still fail” requests still do.
 The endpoint-free `bench/runtime_micro.py` probe now makes the fixed boundary costs reproducible
 without starting a model or touching real project/session state. On the 2026-08-26 GB10 audit host,
 default-sample medians were 0.028 ms for a crash-safe workspace lease, 1.397 ms for an exact 768-byte
@@ -961,7 +979,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 897/897 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 905/905 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including
