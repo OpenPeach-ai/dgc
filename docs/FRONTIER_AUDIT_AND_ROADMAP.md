@@ -116,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 850 / 850 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 860 / 860 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -268,8 +268,10 @@ listed under “still required.”
 1. The single Chat Completions compatibility path cannot use Responses API state, persisted
    reasoning, prompt caching, server-side compaction, usage data, provider-native tool controls, or
    modern streaming semantics.
-2. Provider/model capabilities are inferred from static substrings or failed production requests.
-   Capability rejection is cached forever on the client.
+2. **Partly resolved in the current implementation.** Native Ollama now discovers bounded
+   selected-model metadata before the first generation and caches it by endpoint+model; explicit
+   overrides win and transient failures retain optimistic compatibility. Other compatible providers
+   still rely on family profiles and bounded rejection negotiation rather than richer model metadata.
 3. A generic request mixes provider-specific reasoning fields; on rejection it strips features
    broadly rather than selecting a validated adapter shape.
 4. The full tool catalog and large protocol instructions are exposed too often. Frontier guidance
@@ -523,6 +525,16 @@ Exit gate: full provider contract suite passes; no settings disappear on fallbac
 actual usage powers context UI; median/p95 task latency and timeout rate improve without reducing
 pass@2; zero wrong-applies in the edit corpus.
 
+Implementation note for step 1: native Ollama performs a bounded `/api/show` lookup before the first
+turn schema snapshot. A structurally valid capability list is authoritative for tools, thinking, and
+vision, so unsupported native fields are omitted and a tool-less model receives the adaptive text
+protocol on generation one. Metadata bodies, model-info traversal, context values, timeouts, cache
+lifetimes, and diagnostic fields are bounded; failures are briefly negative-cached and do not disable
+features on old/proxied endpoints. The cache key contains endpoint+model but no API key, explicit
+configuration overrides discovery, invalidation clears both negotiated failures and metadata, and
+the controlled benchmark excludes `/api/show` from generation/request/token totals while retaining
+the proxy record for audit. Rich compatible-provider discovery and server compaction remain open.
+
 Implementation note for step 7: independent read batches execute concurrently. In a Git-backed
 full-auto turn, an all-`task` response now snapshots siblings from one stable baseline, executes them
 concurrently with a configurable bounded pool, replays each completed child trace without stream
@@ -562,7 +574,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 850/850 Python checks, 19/19 editor transport/webview checks, and
+The complete offline evidence is 860/860 Python checks, 19/19 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -863,7 +875,7 @@ prefix search discovers the canonical action without sending command text to the
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 850/850 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 860/860 Python checks, 19/19 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

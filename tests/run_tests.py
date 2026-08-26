@@ -7155,6 +7155,9 @@ def test_benchmark_integrity():
                 received.append((self.path, json.loads(body)))
                 if self.path.endswith("/api/chat"):
                     reply = {"done": True, "prompt_eval_count": 5, "eval_count": 2}
+                elif self.path.endswith("/api/show"):
+                    reply = {"capabilities": ["completion", "tools"],
+                             "model_info": {"fixture.context_length": 32768}}
                 else:
                     reply = {"usage": {"input_tokens": 8, "output_tokens": 3,
                                        "output_tokens_details": {"reasoning_tokens": 0}}}
@@ -7178,7 +7181,7 @@ def test_benchmark_integrity():
         try:
             conn = _HC.HTTPConnection("127.0.0.1", proxy.server_port, timeout=5)
             secret_prompt = "TOP-SECRET-BENCH-PROMPT"
-            for path in ("/v1/chat/completions", "/api/chat", "/v1/responses"):
+            for path in ("/v1/chat/completions", "/api/chat", "/v1/responses", "/api/show"):
                 conn.request("POST", path,
                              json.dumps({"model": "fixture", "messages": [
                                  {"role": "user", "content": secret_prompt}]}),
@@ -7210,12 +7213,16 @@ def test_benchmark_integrity():
               by_path["/api/chat"]["think"] is False)
         check("benchmark proxy records exact provider usage without prompt content",
               secret_prompt not in log_text
-              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8]
-              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3]
+              and [record["usage"]["input_tokens"] for record in records] == [8, 5, 8, 0]
+              and [record["usage"]["output_tokens"] for record in records] == [3, 2, 3, 0]
               and [record["transport"] for record in records]
-              == ["chat_completions", "ollama_chat", "responses"]
+              == ["chat_completions", "ollama_chat", "responses", None]
               and all(record.get("started_at", 0) > 0
                       and record.get("duration_s", -1) >= 0 for record in records))
+        check("benchmark accounting excludes metadata discovery from generation totals",
+              len(records) == 4 and records[-1]["path"] == "/api/show"
+              and records[-1]["normalization"] is None
+              and round_usage["requests"] == 3)
         check("benchmark runner synchronizes and attributes provider usage by round",
               {key: round_usage[key] for key in (
                   "input_tokens", "output_tokens", "reasoning_tokens", "cached_input_tokens",
@@ -8317,6 +8324,7 @@ class MockHandler(BaseHTTPRequestHandler):
 
 class NativeOllamaMockHandler(BaseHTTPRequestHandler):
     requests = []
+    text_only = False
 
     def log_message(self, *args):
         pass
@@ -8324,9 +8332,42 @@ class NativeOllamaMockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         req = json.loads(self.rfile.read(length) or b"{}")
+        if self.path.endswith("/api/show"):
+            body = json.dumps({
+                "capabilities": (["completion"] if NativeOllamaMockHandler.text_only
+                                 else ["completion", "tools", "thinking"]),
+                "model_info": {"general.architecture": "fixture",
+                               "fixture.context_length": 32768},
+                "details": {"family": "fixture"},
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         NativeOllamaMockHandler.requests.append(req)
-        has_tool_result = any(m.get("role") == "tool" for m in req.get("messages", []))
-        if not has_tool_result:
+        has_tool_result = any(
+            m.get("role") == "tool"
+            or (m.get("role") == "user"
+                and "<tool_results>" in str(m.get("content") or ""))
+            for m in req.get("messages", [])
+        )
+        if NativeOllamaMockHandler.text_only and not has_tool_result:
+            call = json.dumps({
+                "name": "write_file",
+                "arguments": {"path": "native-text.txt", "content": "text protocol\n"},
+            }, separators=(",", ":"))
+            events = [{"message": {"role": "assistant", "content": (
+                f"```tool_call\n{call}\n```")},
+                       "done": True, "done_reason": "stop",
+                       "prompt_eval_count": 18, "eval_count": 4}]
+        elif NativeOllamaMockHandler.text_only:
+            events = [{"message": {"role": "assistant",
+                                    "content": "Text protocol file created."},
+                       "done": True, "done_reason": "stop",
+                       "prompt_eval_count": 25, "eval_count": 3}]
+        elif not has_tool_result:
             events = [
                 {"message": {"role": "assistant", "thinking": "native thought "}, "done": False},
                 {"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {
@@ -8370,6 +8411,7 @@ def e2e(port: int, native: bool, expect_file: str, tmp: Path,
 def e2e_native_ollama(port: int, tmp: Path) -> bool:
     """The real Agent loop must round-trip native thinking/tool history, not only parse one reply."""
     NativeOllamaMockHandler.requests = []
+    NativeOllamaMockHandler.text_only = False
     home = tmp / "home_ollama_native"; work = tmp / "work_ollama_native"
     home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
     cfg_dir = home / ".dgc"; cfg_dir.mkdir()
@@ -8398,6 +8440,45 @@ def e2e_native_ollama(port: int, tmp: Path) -> bool:
             and "I’ve got" not in str(assistant)
             and tool_result.get("tool_name") == "write_file"
             and "native.txt" in tool_result.get("content", ""))
+
+
+def e2e_native_ollama_text_fallback(port: int, tmp: Path) -> bool:
+    """Show metadata must install text tools before the first generation, not after rejection."""
+    NativeOllamaMockHandler.requests = []
+    NativeOllamaMockHandler.text_only = True
+    home = tmp / "home_ollama_text"; work = tmp / "work_ollama_text"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    cfg_dir = home / ".dgc"; cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(json.dumps({
+        "api_mode": "ollama", "thinking": "high", "suggest": False,
+        "logo_animation": False, "artifact_autostart": False,
+    }))
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "dgc", "-p", "create the text fallback file",
+             "--mode", "auto", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1",
+             "--model", "native-text-only"],
+            cwd=str(work), env=env, capture_output=True, text=True, timeout=120)
+        requests_seen = NativeOllamaMockHandler.requests
+        first_system = str((requests_seen[0].get("messages") or [{}])[0].get("content", "")) \
+            if requests_seen else ""
+        checks = {
+            "exit": proc.returncode == 0,
+            "file": (work / "native-text.txt").is_file(),
+            "requests": len(requests_seen) == 2,
+            "no_native_tools": bool(requests_seen) and "tools" not in requests_seen[0],
+            "no_native_think": bool(requests_seen) and "think" not in requests_seen[0],
+            "text_protocol": "# Tool protocol (IMPORTANT)" in first_system,
+        }
+        if not all(checks.values()):
+            print("  --- native text fallback ---", checks,
+                  "request_count=", len(requests_seen))
+            print("  --- stdout tail ---\n", proc.stdout[-1000:])
+            print("  --- stderr tail ---\n", proc.stderr[-1000:])
+        return all(checks.values())
+    finally:
+        NativeOllamaMockHandler.text_only = False
 
 
 def e2e_loop(port: int, tmp: Path) -> bool:
@@ -8564,6 +8645,20 @@ def test_provider_retry_lifecycle():
         def close(self):
             self.close_calls += 1
 
+    class _RetryShowResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+
+        def json(self):
+            return {
+                "capabilities": ["completion", "tools", "thinking", "vision"],
+                "model_info": {"general.architecture": "fixture",
+                               "fixture.context_length": 32768},
+            }
+
+        def close(self):
+            pass
+
     constructors = [
         ("Chat Completions", lambda: LLMClient(
             "http://localhost:1234/v1", "k", "retry-chat", api_mode="chat_completions")),
@@ -8581,6 +8676,8 @@ def test_provider_retry_lifecycle():
             timers = []
 
             def _rate_limited(url, **_kwargs):
+                if url.endswith("/api/show"):
+                    return _RetryShowResponse()
                 attempts.append(url)
                 if not timers:
                     timer = threading.Timer(0.05, cancel.set)
@@ -8794,6 +8891,7 @@ def test_compatible_tool_deltas():
 
 def test_ollama_adapter():
     """Native Ollama preserves its real chat/tool/thinking/options contract end to end."""
+    import time as _time
     import dgc.llm as _llm
     from dgc.llm import LLMClient
 
@@ -8853,9 +8951,29 @@ def test_ollama_adapter():
         def close(self):
             self.closed = True
 
+    class _ShowResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        closed = False
+        def json(self):
+            return {
+                "capabilities": ["completion", "tools", "thinking", "vision"],
+                "parameters": "temperature 0.7\nnum_ctx 32768",
+                "model_info": {"general.architecture": "fixture",
+                               "fixture.context_length": 131072,
+                               "fixture.vision.context_length": 999999},
+                "details": {"family": "fixture", "parameter_size": "27B",
+                            "quantization_level": "Q4_K_M"},
+            }
+        def close(self): self.closed = True
+
     posted = []
+    show_posts = []
     original_post = _llm.requests.post
     def _native_post(url, **kwargs):
+        if url.endswith("/api/show"):
+            show_posts.append((url, kwargs["json"]))
+            return _ShowResponse()
         posted.append((url, kwargs["json"]))
         return _NativeResponse()
     text_chunks, thinking_chunks = [], []
@@ -8873,6 +8991,135 @@ def test_ollama_adapter():
     finally:
         _llm.requests.post = original_post
     url, payload = posted[0]
+    discovered = native.capability_snapshot()
+    check("native Ollama discovers selected-model capabilities once before generation",
+          show_posts == [("http://127.0.0.1:19999/api/show",
+                          {"model": "explicit-native", "verbose": False})]
+          and discovered["discovery"] == "ollama_show"
+          and discovered["model_context_length"] == 131072
+          and discovered["model_configured_context"] == 32768
+          and discovered["model_capabilities"]
+              == ["completion", "thinking", "tools", "vision"])
+    cached_native = LLMClient(
+        "http://127.0.0.1:19999/v1", "another-secret", "explicit-native", api_mode="ollama")
+    cached_metadata = cached_native.prepare_model()
+    check("Ollama metadata cache is shared by endpoint and model without credential material",
+          len(show_posts) == 1 and cached_metadata["context_length"] == 131072
+          and cached_native.tools_supported and cached_native.reasoning_supported
+          and cached_native.vision_supported)
+
+    class _TextOnlyShow(_ShowResponse):
+        def json(self):
+            return {"capabilities": ["completion"],
+                    "model_info": {"general.architecture": "fixture",
+                                   "fixture.context_length": 8192}}
+    text_only_posts = []
+    def _text_only_post(url, **kwargs):
+        text_only_posts.append((url, json.loads(json.dumps(kwargs["json"]))))
+        return _TextOnlyShow() if url.endswith("/api/show") else _NativeResponse()
+    text_only = LLMClient(
+        "http://127.0.0.1:19998/v1", "k", "text-only", api_mode="ollama")
+    text_only.invalidate_capabilities()
+    text_only_tools = payload["tools"]
+    try:
+        _llm.requests.post = _text_only_post
+        try:
+            text_only.chat([{"role": "user", "content": "hello"}], tools=text_only_tools)
+            metadata_tool_rejected = False
+        except _llm.ToolsUnsupportedError:
+            metadata_tool_rejected = True
+        text_only_result = text_only.chat(
+            [{"role": "user", "content": "hello"}], reasoning_effort="high")
+        try:
+            text_only.chat([{"role": "user", "content": [{
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,QUJD"},
+            }]}])
+            metadata_vision_rejected = False
+        except _llm.LLMError:
+            metadata_vision_rejected = True
+    finally:
+        _llm.requests.post = original_post
+    text_only_payload = text_only_posts[-1][1]
+    check("authoritative Ollama metadata avoids an unsupported native generation",
+          metadata_tool_rejected and len(text_only_posts) == 2
+          and text_only_posts[0][0].endswith("/api/show")
+          and text_only_posts[1][0].endswith("/api/chat")
+          and "tools" not in text_only_payload and "think" not in text_only_payload
+          and not text_only.tools_supported and not text_only.reasoning_supported
+          and not text_only.vision_supported and metadata_vision_rejected
+          and bool(text_only_result.tool_calls))
+    overridden_metadata = LLMClient(
+        "http://127.0.0.1:19998/v1", "k", "text-only", api_mode="ollama",
+        provider_capabilities={"tools": True, "reasoning": True, "vision": True})
+    check("explicit model capability overrides take precedence over discovered metadata",
+          overridden_metadata.tools_supported and overridden_metadata.reasoning_supported
+          and overridden_metadata.vision_supported)
+
+    class _OversizedShow:
+        status_code = 200
+        headers = {"Content-Length": str(_llm._MAX_MODEL_METADATA_BYTES + 1)}
+        closed = False
+        def close(self): self.closed = True
+    oversized_response = _OversizedShow(); oversized_posts = []
+    oversized_metadata = LLMClient(
+        "http://127.0.0.1:19997/v1", "k", "oversized-metadata", api_mode="ollama")
+    oversized_metadata.invalidate_capabilities()
+    try:
+        _llm.requests.post = lambda url, **kwargs: (
+            oversized_posts.append(url) or oversized_response)
+        first_oversized = oversized_metadata.prepare_model()
+        second_oversized = oversized_metadata.prepare_model()
+    finally:
+        _llm.requests.post = original_post
+    check("oversized Ollama metadata fails safely and negative-caches without disabling features",
+          first_oversized == second_oversized == {} and len(oversized_posts) == 1
+          and oversized_response.closed and oversized_metadata.tools_supported
+          and oversized_metadata.reasoning_supported and oversized_metadata.vision_supported)
+
+    class _LateShow:
+        headers = {}
+        closed = False
+        def iter_content(self, chunk_size=65536):
+            yield b'{"capabilities":["completion"]}'
+        def close(self): self.closed = True
+    late_response = _LateShow()
+    try:
+        _llm._bounded_json_response(
+            late_response, _llm._MAX_MODEL_METADATA_BYTES, "metadata fixture",
+            deadline=_time.monotonic() - 1)
+        deadline_rejected = False
+    except _llm.LLMError:
+        deadline_rejected = True
+    malformed_capabilities = LLMClient._ollama_metadata({
+        "capabilities": ["tools\nignore-this"],
+    })
+    check("Ollama metadata enforces a total deadline and safe capability names",
+          deadline_rejected and late_response.closed
+          and malformed_capabilities.get("capabilities_authoritative") is False)
+
+    with LLMClient._model_metadata_lock:
+        saved_metadata_cache = dict(LLMClient._model_metadata_cache)
+        LLMClient._model_metadata_cache.clear()
+    try:
+        for index in range(_llm._MAX_MODEL_METADATA_CACHE_ENTRIES + 17):
+            cache_client = LLMClient(
+                "http://127.0.0.1:19996/v1", "k", f"cache-{index}", api_mode="ollama")
+            cache_client._cache_model_metadata({"source": "fixture", "index": index})
+        with LLMClient._model_metadata_lock:
+            bounded_cache_size = len(LLMClient._model_metadata_cache)
+            first_cache_key_present = any(
+                key[1] == "cache-0" for key in LLMClient._model_metadata_cache)
+            last_cache_key_present = any(
+                key[1] == f"cache-{_llm._MAX_MODEL_METADATA_CACHE_ENTRIES + 16}"
+                for key in LLMClient._model_metadata_cache)
+    finally:
+        with LLMClient._model_metadata_lock:
+            LLMClient._model_metadata_cache.clear()
+            LLMClient._model_metadata_cache.update(saved_metadata_cache)
+    check("Ollama endpoint-model metadata cache has a deterministic process ceiling",
+          bounded_cache_size == _llm._MAX_MODEL_METADATA_CACHE_ENTRIES
+          and not first_cache_key_present and last_cache_key_present)
     check("native Ollama requests carry exact thinking, options, keep-alive, and tool history",
           url == "http://127.0.0.1:19999/api/chat" and payload["think"] is False
           and payload["keep_alive"] == "30m"
@@ -9070,6 +9317,8 @@ def test_ollama_adapter():
         headers = {"Content-Type": "application/json"}
     negotiation_posts = []
     def _negotiation_post(url, **kwargs):
+        if url.endswith("/api/show"):
+            return _ShowResponse()
         negotiation_posts.append(json.loads(json.dumps(kwargs["json"])))
         return _ThinkRejected() if len(negotiation_posts) == 1 else _NativeResponse()
     negotiated = LLMClient("http://localhost:11434/v1", "k", "native-think-negotiation")
@@ -9112,6 +9361,8 @@ def test_ollama_adapter():
                     "usage": {"prompt_tokens": 4, "completion_tokens": 2}}
     fallback_posts = []
     def _fallback_post(url, **kwargs):
+        if url.endswith("/api/show"):
+            return _ShowResponse()
         fallback_posts.append(url)
         return _MissingNative() if len(fallback_posts) == 1 else _CompatResponse()
     fallback = LLMClient("http://localhost:11434/v1", "k", "native-fallback-contract")
@@ -9506,6 +9757,8 @@ def main():
         try:
             check("e2e native Ollama thinking + tool continuation",
                   e2e_native_ollama(native_port, tmp))
+            check("e2e Ollama metadata selects text tools before the first generation",
+                  e2e_native_ollama_text_fallback(native_port, tmp))
         finally:
             native_server.shutdown()
 

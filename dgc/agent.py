@@ -1898,6 +1898,13 @@ class Agent:
                 self._last_turn_error = (self._last_persist_error
                                          or "could not durably open the turn checkpoint")
                 return False  # the finalizer reports the save conflict; never start an unsafe turn
+        prepare_model = getattr(self.client, "prepare_model", None)
+        if callable(prepare_model):
+            # Native model metadata is cheap and cached by endpoint+model. Resolve it before the
+            # first schema snapshot so a model without native tools receives DGC's text protocol on
+            # its first generation instead of spending a rejected model request to negotiate.
+            prepare_model(cancel=self.cancelled)
+            self._refresh_system()
         images = self._pending_images
         self._pending_images = None
         if images:                                 # vision: OpenAI-style multimodal content

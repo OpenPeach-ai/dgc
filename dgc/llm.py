@@ -23,6 +23,12 @@ _DATA_IMAGE_RE = re.compile(
 _IMAGE_PREFIX_BYTES = 256 * 1024
 _IMAGE_PATCH_PIXELS = 28
 _MAX_ESTIMATED_IMAGE_TOKENS = 16_384
+_MAX_MODEL_METADATA_BYTES = 2 * 1024 * 1024
+_MAX_MODEL_INFO_FIELDS = 4_096
+_MAX_MODEL_METADATA_CACHE_ENTRIES = 256
+_MODEL_METADATA_FAILURE_TTL_S = 30
+_MODEL_METADATA_TOTAL_S = 4.0
+_MODEL_CAPABILITY_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 
 def _decoded_base64_size(payload: str) -> int:
@@ -195,6 +201,52 @@ def _error_body(response, limit: int = 600) -> str:
         _close_response(response)
 
 
+def _bounded_json_response(response, maximum: int, label: str,
+                           *, deadline: float | None = None):
+    """Decode one streamed JSON response without trusting its declared or actual body size."""
+    def check_deadline() -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise LLMError(f"{label} exceeded its time limit")
+
+    try:
+        check_deadline()
+        raw_length = str((getattr(response, "headers", {}) or {}).get("Content-Length") or "")
+        if raw_length:
+            try:
+                declared = int(raw_length)
+            except (TypeError, ValueError):
+                raise LLMError(f"{label} returned an invalid Content-Length") from None
+            if declared < 0 or declared > maximum:
+                raise LLMError(f"{label} exceeded {maximum} bytes")
+        iterator = getattr(response, "iter_content", None)
+        if callable(iterator):
+            body = bytearray()
+            for chunk in iterator(chunk_size=65_536):
+                check_deadline()
+                if not chunk:
+                    continue
+                body.extend(chunk)
+                if len(body) > maximum:
+                    raise LLMError(f"{label} exceeded {maximum} bytes")
+            check_deadline()
+            try:
+                return json.loads(bytes(body).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise LLMError(f"{label} returned malformed JSON") from exc
+        # Lightweight injected/test responses may expose only json(). Bound their normalized shape.
+        value = response.json()
+        check_deadline()
+        try:
+            encoded = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
+        except (RecursionError, TypeError, ValueError) as exc:
+            raise LLMError(f"{label} returned malformed JSON") from exc
+        if len(encoded) > maximum:
+            raise LLMError(f"{label} exceeded {maximum} bytes")
+        return value
+    finally:
+        _close_response(response)
+
+
 def _retry_delay(headers, default: float, cap: float = 10.0) -> float:
     """Return a safe bounded Retry-After delay, accepting seconds or an HTTP date."""
     try:
@@ -344,6 +396,7 @@ class ProviderCapabilities:
     parallel_tools: bool = True
     max_output_tokens: bool = True
     sampling: bool = True
+    vision: bool = True
 
 
 @dataclass(frozen=True)
@@ -722,6 +775,8 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
 class LLMClient:
     _capability_rejections: dict[tuple[str, str, str], float] = {}
     _capability_lock = threading.Lock()
+    _model_metadata_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+    _model_metadata_lock = threading.Lock()
 
     def __init__(self, base_url: str, api_key: str, model: str, read_timeout: int = 1800,
                  think_budget_tokens: int = 8000, max_tokens: int = 0, ollama_keep_alive: str = "",
@@ -774,8 +829,140 @@ class LLMClient:
     def _capability_key(self, feature: str) -> tuple[str, str, str]:
         return (self.base_url.lower(), self.model, feature)
 
+    def _model_metadata_key(self) -> tuple[str, str]:
+        return (self.base_url.lower(), self.model)
+
+    def _cached_model_metadata(self) -> tuple[bool, dict]:
+        key = self._model_metadata_key()
+        now = time.monotonic()
+        with self._model_metadata_lock:
+            entry = self._model_metadata_cache.get(key)
+            if entry and entry[0] <= now:
+                self._model_metadata_cache.pop(key, None)
+                entry = None
+            return (True, dict(entry[1])) if entry else (False, {})
+
+    def _cache_model_metadata(self, metadata: dict, ttl: int | float | None = None) -> None:
+        lifetime = self.capability_cache_ttl_s if ttl is None else max(1, float(ttl))
+        now = time.monotonic()
+        key = self._model_metadata_key()
+        with self._model_metadata_lock:
+            for stale in [candidate for candidate, entry in self._model_metadata_cache.items()
+                          if entry[0] <= now]:
+                self._model_metadata_cache.pop(stale, None)
+            if (key not in self._model_metadata_cache
+                    and len(self._model_metadata_cache) >= _MAX_MODEL_METADATA_CACHE_ENTRIES):
+                oldest = min(self._model_metadata_cache,
+                             key=lambda candidate: self._model_metadata_cache[candidate][0])
+                self._model_metadata_cache.pop(oldest, None)
+            self._model_metadata_cache[key] = (now + lifetime, dict(metadata))
+
+    @staticmethod
+    def _ollama_metadata(value) -> dict:
+        if (not isinstance(value, dict)
+                or not any(key in value for key in
+                           ("capabilities", "model_info", "details", "parameters"))):
+            return {}
+        raw_capabilities = value.get("capabilities")
+        authoritative = (isinstance(raw_capabilities, list)
+                         and len(raw_capabilities) <= 64
+                         and all(isinstance(item, str)
+                                 and bool(_MODEL_CAPABILITY_RE.fullmatch(item.strip().lower()))
+                                 for item in raw_capabilities))
+        capabilities = (sorted({item.strip().lower() for item in raw_capabilities if item.strip()})
+                        if authoritative else [])
+        info = value.get("model_info")
+        info = info if isinstance(info, dict) else {}
+
+        def bounded_context(raw) -> int:
+            if isinstance(raw, bool):
+                return 0
+            try:
+                parsed = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                return 0
+            return parsed if 0 < parsed <= 10_000_000 else 0
+
+        architecture = str(info.get("general.architecture") or "")[:128]
+        preferred = bounded_context(info.get(f"{architecture}.context_length")) if architecture else 0
+        contexts = []
+        for index, (key, raw) in enumerate(info.items()):
+            if index >= _MAX_MODEL_INFO_FIELDS:
+                break
+            normalized = str(key).lower()
+            if (normalized.endswith(".context_length")
+                    and ".vision." not in normalized and ".mm." not in normalized):
+                context = bounded_context(raw)
+                if context:
+                    contexts.append(context)
+        context_length = preferred or (max(contexts) if contexts else 0)
+        parameters = value.get("parameters")
+        configured_context = 0
+        if isinstance(parameters, str) and len(parameters) <= 64_000:
+            match = re.search(r"(?im)^\s*num_ctx\s+(\d+)\s*$", parameters)
+            configured_context = bounded_context(match.group(1)) if match else 0
+        details = value.get("details")
+        details = details if isinstance(details, dict) else {}
+        return {
+            "source": "ollama_show",
+            "capabilities_authoritative": authoritative,
+            "capabilities": capabilities,
+            "context_length": context_length,
+            "configured_context": (min(configured_context, context_length)
+                                   if configured_context and context_length else configured_context),
+            "family": str(details.get("family") or architecture)[:128],
+            "parameter_size": str(details.get("parameter_size") or "")[:64],
+            "quantization_level": str(details.get("quantization_level") or "")[:64],
+        }
+
+    def prepare_model(self, *, force: bool = False, cancel=None) -> dict:
+        """Discover selected native-Ollama model metadata once per bounded cache generation.
+
+        Discovery is advisory and never prevents a chat when an older/proxied endpoint lacks
+        `/api/show`. A valid capabilities array is authoritative unless the user explicitly
+        overrides that feature; failures retain the adapter's optimistic compatibility behavior.
+        """
+        if self.api_mode != "ollama" or not self.model:
+            return {}
+        if cancel is not None and cancel.is_set():
+            return {}
+        cached, metadata = self._cached_model_metadata()
+        if cached and not force:
+            return metadata
+        deadline = time.monotonic() + _MODEL_METADATA_TOTAL_S
+        try:
+            response = requests.post(
+                f"{self._ollama_root}/api/show", headers=self._headers(),
+                json={"model": self.model, "verbose": False}, stream=True, timeout=(2, 2))
+            if response.status_code != 200:
+                _close_response(response)
+                self._cache_model_metadata({}, min(
+                    self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
+                return {}
+            value = _bounded_json_response(response, _MAX_MODEL_METADATA_BYTES,
+                                           "Ollama model metadata", deadline=deadline)
+            metadata = self._ollama_metadata(value)
+        except (LLMError, requests.RequestException, ValueError, TypeError):
+            self._cache_model_metadata({}, min(
+                self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
+            return {}
+        if cancel is not None and cancel.is_set():
+            return {}
+        self._cache_model_metadata(
+            metadata, None if metadata else min(
+                self.capability_cache_ttl_s, _MODEL_METADATA_FAILURE_TTL_S))
+        return dict(metadata)
+
     def _feature_supported(self, feature: str) -> bool:
-        if not bool(getattr(self.capabilities, feature, False)):
+        supported = bool(getattr(self.capabilities, feature, False))
+        _, metadata = self._cached_model_metadata()
+        if (feature not in self._capability_overrides
+                and metadata.get("capabilities_authoritative") is True):
+            capability = {"tools": "tools", "reasoning": "thinking",
+                          "vision": "vision"}.get(feature)
+            if capability:
+                supported = capability in set(metadata.get("capabilities") or ())
+        if not supported:
             return False
         key = self._capability_key(feature)
         now = time.monotonic()
@@ -798,6 +985,8 @@ class LLMClient:
             for key in list(self._capability_rejections):
                 if key[:2] == prefix:
                     self._capability_rejections.pop(key, None)
+        with self._model_metadata_lock:
+            self._model_metadata_cache.pop(self._model_metadata_key(), None)
 
     @property
     def tools_supported(self) -> bool:
@@ -807,13 +996,26 @@ class LLMClient:
     def reasoning_supported(self) -> bool:
         return self._feature_supported("reasoning")
 
-    def capability_snapshot(self) -> dict[str, bool | str]:
+    @property
+    def vision_supported(self) -> bool:
+        return self._feature_supported("vision")
+
+    def capability_snapshot(self) -> dict[str, bool | str | int | list]:
         snapshot = {name: self._feature_supported(name)
                     for name in ProviderCapabilities.__dataclass_fields__}
         # An explicit native transport can intentionally sit behind a generic loopback proxy whose
         # URL cannot identify Ollama. Report the transport actually in use, not only URL inference.
         snapshot["native_chat"] = self.api_mode == "ollama" or snapshot["native_chat"]
-        return {"provider": self.family, **snapshot}
+        _, metadata = self._cached_model_metadata()
+        result: dict[str, bool | str | int | list] = {"provider": self.family, **snapshot}
+        if metadata.get("source") == "ollama_show":
+            result["discovery"] = "ollama_show"
+            result["model_capabilities"] = list(metadata.get("capabilities") or ())
+            if metadata.get("context_length"):
+                result["model_context_length"] = int(metadata["context_length"])
+            if metadata.get("configured_context"):
+                result["model_configured_context"] = int(metadata["configured_context"])
+        return result
 
     def estimate_input_tokens(self, messages: list[dict],
                               tools: list[dict] | None = None) -> int:
@@ -1172,7 +1374,16 @@ class LLMClient:
         on_thinking=None,
         cancel=None,
     ) -> ChatResult:
-        payload: dict = {"model": self.model, "messages": self._ollama_messages(messages),
+        self.prepare_model(cancel=cancel)
+        if tools and not self.tools_supported:
+            raise ToolsUnsupportedError(
+                "Ollama model metadata reports no native tool-calling capability")
+        ollama_messages = self._ollama_messages(messages)
+        if (any(message.get("images") for message in ollama_messages)
+                and not self.vision_supported):
+            raise LLMError(
+                f"Ollama model {self.model!r} does not advertise vision input support")
+        payload: dict = {"model": self.model, "messages": ollama_messages,
                          "stream": True}
         if tools and self.tools_supported:
             payload["tools"] = tools

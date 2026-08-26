@@ -219,11 +219,17 @@ conversation, checkpoint-message, goal, title, or plan state is written. Live mo
 credential masking and one-time-only sensitive approvals remain mandatory. Exact file rewind bytes
 are intentionally unchanged and protected by the session directory's owner-only permissions.
 
-With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat` and
-`/api/tags` contracts; DGC carries native thinking, tool history, `tool_name`, context/output
+With `api_mode: "auto"`, a directly detected Ollama endpoint uses its native `/api/chat`,
+`/api/tags`, and `/api/show` contracts; DGC carries native thinking, tool history, `tool_name`, context/output
 limits, sampling, keep-alive, multimodal data, and provider token counts without an OpenAI
 translation layer. Set `api_mode` to `"ollama"` when Ollama sits behind a URL that cannot be
 detected (for example, a loopback proxy), or to `"chat_completions"` to force compatibility mode.
+Before the selected model's first generation, DGC makes one bounded, short-lived metadata request
+and caches the result by endpoint and model. A valid capability list selects native tools, thinking,
+and vision before schemas are built; a text-only model therefore receives DGC's text tool protocol
+on its first generation instead of spending a failed tool request. Explicit capability overrides
+still win. Missing, malformed, oversized, or unavailable metadata is negative-cached briefly and
+falls back to the compatible optimistic behavior used by older Ollama servers and proxies.
 Context budgeting uses each adapter's provider-visible transcript and exact active tool schemas.
 Validated base64 image transport is accounted through a bounded visual-dimension estimate rather
 than misclassified as language text, so image compression does not cause premature compaction.
