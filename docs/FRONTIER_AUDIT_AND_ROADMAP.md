@@ -52,6 +52,29 @@ the editor registries: those are external release actions that require a reviewe
 a proven frontier leader. The blocking evidence is the complete same-model peer league and production
 release rehearsal—not another round of unmeasured feature claims.
 
+## Completion audit — 2026-08-27 local-only candidate
+
+This audit evaluates the original company objective against commit `7f87461`; it does not treat a
+green narrow test as proof of competitive leadership. Public release state is intentionally excluded:
+the site/updater files and `output/` remain protected user-owned working state, and no push, deploy,
+publish, release, public-version bump, model-endpoint benchmark, or release script was run.
+
+| Original requirement | Authoritative current evidence | Status |
+|---|---|---|
+| Audit the complete harness, coding loop, tools, CLI/TUI, editor, MCP/ACP, evaluation, and delivery paths | This roadmap records source-level findings, competitor gaps, ordered P0/P1 work, implementation notes, and release gates across every named surface | Locally complete |
+| Implement the P0/P1 frontier-hardening plan | Current source and regression corpus cover permissions/filesystem, transcript/session recovery, process ownership, concurrency, providers, editing/navigation, plan/goal/cadence, slash commands, skills/hooks/MCP, protocol clients, and editor parity | Locally complete |
+| Prove current Python/runtime behavior | `tests/run_tests.py` on `7f87461`: **1015/1015**; `compileall` and source `git diff --check` pass | Proven locally |
+| Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies** | Proven for the deterministic edit primitive; model-level performance remains unproven |
+| Prove VS Code/Cursor implementation | Editor tests: **20/20**; TypeScript check, development bundle, and production bundle pass; installed VS Code host smoke passes activation plus 13 commands, handshake, live multi-root, SecretStorage, permission, and plan lifecycles | Automated local evidence complete; manual/cross-platform evidence remains |
+| Prove package consistency | `pip check`: no broken requirements | Proven locally |
+| Demonstrate DGC is equal to or better than Codex/OpenCode/Goose/Pi/Aider | Requires the complete controlled 225-task same-model six-harness league and attributed comparison; preserved partial/stratified runs are diagnostic only | **Not proven; external league evidence required** |
+| Validate real cross-platform UX and confinement | Windows sandbox/keychain, macOS integration, screen reader, 200% zoom, Windows High Contrast, and fleet crash/reopen evidence require those hosts and manual review | **External/manual evidence required** |
+| Validate GitHub/site/release management without shipping working-tree state | Delivery design and scripts are audited and locally implemented, but authoritative clean-commit build, audit/SBOM/signing, promotion rehearsal, branch protection, and clean-install matrix are release gates | **Explicitly frozen pending owner sign-off** |
+
+Therefore the local implementation phase is exhausted without inventing more unmeasured changes.
+The company objective itself remains incomplete until competitive, cross-platform/manual, and
+release-governance evidence clears the rows above.
+
 ## What is correct today
 
 ### Agent and local-model behavior
@@ -1037,13 +1060,15 @@ slash reference is generated from the same TUI registry and has one unique, reac
 cannot silently omit live commands or shadow itself with a duplicate title. Custom
 prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
-the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 1015/1015 Python checks, 20/20 editor transport/webview checks, and 1/1 installed-VS-Code
-host smoke.
-Step 6's complete preflight was green before the current post-preflight hardening series and must be
-rerun on the next clean candidate, including
-the 19,591-case edit corpus (19,560 applied, zero wrong applies), type/package checks, a 441-component
-SBOM, and zero npm audit findings. A clean synthetic-snapshot release rehearsal also caught and fixed
+the exact workspace reader rather than disclosing outside content to the model. On 2026-08-27 the
+safe current-HEAD gates were rerun: 1015/1015 Python checks, 19,560/19,591 edit cases with zero wrong
+applies, zero dangerous applications in 14,197 duplicate-target transformations, 20/20 editor
+transport/webview checks, TypeScript plus development/production bundles, 1/1 installed-VS-Code host
+smoke, `compileall`, `pip check`, and source `git diff --check` all passed.
+Step 6's release-specific gates were green on the earlier clean candidate but were deliberately not
+rerun under the explicit release freeze: clean-tree preflight, online dependency audit, current SBOM,
+reproducible release archive, signing/attestation, and clean-install rehearsal remain next-candidate
+release evidence. A clean synthetic-snapshot release rehearsal also caught and fixed
 a `pipefail`/SIGPIPE failure in archive membership validation; two subsequent builds were
 byte-identical and checksum-valid. Authoritative reviewed-commit release evidence and the clean full
 league remain outstanding.
