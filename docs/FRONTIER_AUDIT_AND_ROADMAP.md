@@ -38,7 +38,7 @@ the editor registries: those are external release actions that require a reviewe
 
 | Area | Implemented and verified in this local candidate | Still required for a defensible frontier claim |
 |---|---|---|
-| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including bounded descendant discovery, exact model-visible grep reads, exact bounded memory/AGENTS instruction loading, and late parent swaps across structured files, repository maps, static code intelligence, checkpoints and recovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
+| Policy and filesystem | Fail-closed shell approval, canonical workspace boundary, symlink/traversal rejection (including bounded descendant discovery, exact model-visible grep reads, exact bounded memory/AGENTS instruction loading, exact explicit-user text/image attachments, and late parent swaps across structured files, repository maps, static code intelligence, checkpoints and recovery), explicit session-scoped external roots, deny→ask→allow precedence | Windows OS sandbox and a larger cross-platform adversarial corpus |
 | OS sandbox | Linux bubblewrap isolates user/process/network namespaces, hides ambient home/secrets, uses private tmp/run, exposes only the writable project, blocks network by default, and never bypasses approval; macOS policy also blocks writes/network; an explicitly requested sandbox fails closed if its backend is unavailable, inside the writable workspace, or resolves to a non-executable; runtime-injection environment names cannot be opted back in | Windows implementation; macOS integration runner and seccomp/resource quotas |
 | Runtime correctness | Atomic file/session writes with bounded post-crash temp reclamation, UUID/private schema-v6 sessions with validated monotonic generations, crash-released cross-process session-family leases and compare-and-swap writes, content-addressed exact conversation/file checkpoints durable across resume and compaction with late-symlink-safe capture/restore, fail-closed pre-edit persistence, transactional rewind persistence/rollback, exact bounded transactional last-known-good recovery, atomic lease/CAS memory appends without lost concurrent facts, transactional exact-generation compaction, provider-safe tool-group repair/compaction including final-commit closure after interruption, truthful terminal turn outcomes, split-stream-safe credential redaction across model/tool/wire/durable conversation boundaries, immediate text-tool fallback, full process-group cleanup, bounded redacted lifecycle-hook output, bounded internal-Git diagnostics, and bounded/redacted/cancellable foreground, background, and direct-terminal command output with session-scoped continuation handles | Optional at-rest encryption for exact rewind file snapshots and broader cross-platform crash-fuzz campaigns |
 | Concurrency | Per-session ACP/headless runtimes, truthful busy/error completion, race-free bounded editor follow-up FIFO across completion/cancel boundaries, startup-safe cancellation in editor/ACP/classic/TUI workers, owner-private crash-safe cross-process checkout/session-family/full-turn leases, generation preflight before hooks or model execution, revision/existence guards that reject stale transcript/metrics/goal/name/plan/workspace/delete mutations, active-turn exclusion for deletion/rewind/compaction/retained work and TUI workspace attach/finalize, pre-edit snapshots and rewind captured/restored inside the checkout lease, background leases held to process exit, lifecycle hooks serialized under the same checkout lease with one cancellable batch deadline, separate TUI config/MCP state, automatic source-leased TUI fleet worktrees whose internal Git is pinned outside the repository, non-interactive, hook-suppressed, output-bounded, and process-group reaped, exact dirty baselines and safe resume/retention, manual named worktrees, automatic `task` worktrees, bounded concurrent all-task batches, deterministic conflict-safe integration, plus typed terminal/editor retained-task inspect/apply/drop recovery with parent rewind | Cross-platform fleet crash/reopen soak and measured local/remote fan-out latency/throughput |
@@ -88,6 +88,10 @@ release rehearsal—not another round of unmeasured feature claims.
 - `# note` and `/memory add [user] TEXT` now behave consistently in both terminal modes. Memory
   appends are bounded, crash-safe, concurrent-writer-safe, and reject link escapes; prompt and UI
   views preserve the file head and newest facts under explicit ceilings.
+- `@path` text/image input now behaves consistently in classic, one-shot, and full-screen terminal
+  turns. Explicit files use exact no-link reads, byte/count/context ceilings, complete-before-clip
+  credential redaction, image magic validation, truthful skip notices, and boundary-safe
+  untrusted-data framing. Naming one external file discloses only that file and grants no tool root.
 - The live website accurately communicates the product's strongest visual differentiator and is
   responsive at desktop and phone widths.
 
@@ -112,7 +116,7 @@ release rehearsal—not another round of unmeasured feature claims.
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 788 / 788 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 797 / 797 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -558,7 +562,7 @@ Ripgrep remains a discovery accelerator, but its reported line is disclosed only
 exact-path reread matches it, so a transient descendant swap cannot smuggle outside content through
 the fast path. Non-dirfd platforms retain bounded repeated validation; their stronger OS boundary
 remains covered by the explicit Windows sandbox/cross-platform evidence gap above.
-The complete offline evidence is 788/788 Python checks, 18/18 editor transport/webview checks, and
+The complete offline evidence is 797/797 Python checks, 18/18 editor transport/webview checks, and
 1/1 installed-VS-Code host smoke.
 
 Performance evidence now separates synchronized provider request-seconds, overlap-aware provider
@@ -811,7 +815,7 @@ canonical registry; and goals have bounded persisted lifecycle state plus typed 
 control. Custom prompt catalogs reserve every built-in name and alias, prefer project templates,
 and bound names, entries, and bytes. Directory/final symlinks and late file swaps fail closed through
 the exact workspace reader rather than disclosing outside content to the model. The current offline
-evidence is 788/788 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
+evidence is 797/797 Python checks, 18/18 editor transport/webview checks, and 1/1 installed-VS-Code
 host smoke.
 Step 6's complete preflight was green before the current post-preflight hardening series and must be
 rerun on the next clean candidate, including

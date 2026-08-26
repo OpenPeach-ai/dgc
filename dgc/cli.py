@@ -21,7 +21,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, glyphs, logo as logo_mod, memory as memory_mod, render, sessions as sessions_mod
+from . import (__version__, attachments as attachments_mod, glyphs, logo as logo_mod,
+               memory as memory_mod, render, sessions as sessions_mod)
 from . import style as style_mod
 from .agent import Agent
 from .commands import command_pairs_with_custom, command_specs, custom_command_names
@@ -450,7 +451,7 @@ def render_help(console, project_root: Path | None = None) -> None:
         ("just type", "ask dgc anything; it uses tools to act on your project"),
         ("#fact", "quick-add a memory to DGC.md"),
         ("!cmd", "run a shell command directly"),
-        ("@path/to/file", "attach a file's contents to your message"),
+        ("@path/to/file", "attach one exact bounded text or image file"),
     ))
 
     console.print()
@@ -1063,37 +1064,17 @@ class CLI:
         self.ui.info(f"memory saved to {path}")
 
     # ----------------------------------------------------------- input prep ---
-    _IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-
     def expand_mentions(self, text: str) -> str:
-        """Inline @path text files; attach @path image files to the next prompt (vision models)."""
-        attachments, images = [], []
-        for token in re.findall(r"@([\w./\-~]+)", text):
-            p = Path(token).expanduser()
-            if not p.is_absolute():
-                p = self.config.project_root / p
-            if not p.is_file():
-                continue
-            if p.suffix.lower() in self._IMG_EXT:
-                try:
-                    import base64
-                    data = base64.b64encode(p.read_bytes()).decode()
-                    ext = p.suffix.lower().lstrip(".")
-                    mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
-                    images.append(f"data:{mime};base64,{data}")
-                except OSError:
-                    pass
-            else:
-                try:
-                    content = p.read_text(errors="replace")[:20000]
-                    attachments.append(f"<file path=\"{p}\">\n{content}\n</file>")
-                except OSError:
-                    pass
-        if images:
-            self.agent._pending_images = images
-        if attachments:
-            text += "\n\n" + "\n".join(attachments)
-        return text
+        """Prepare @path attachments through the shared explicit-user disclosure boundary."""
+        self.agent._pending_images = None
+        result = attachments_mod.expand_attachments(
+            text, self.config.project_root,
+            sanitizer=lambda value: redact_text(value, secret_values(self.config)),
+            cancelled=self.agent.cancelled)
+        self.agent._pending_images = list(result.images) or None
+        for notice in result.notices:
+            self.ui.info(notice)
+        return result.text
 
     def run_bang(self, command: str) -> None:
         from .tools import direct_bash

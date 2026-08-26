@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import USER_MEMORY
-from .redaction import REDACTED
+from .redaction import bounded_redacted_view
 from .workspace import (WorkspaceBoundaryError, atomic_write_bytes, canonical_root,
                         read_regular_bytes)
 
@@ -50,45 +50,8 @@ def bounded_memory_view(text: str, maximum: int = MAX_MEMORY_PROMPT_CHARS) -> st
     """Return a useful bounded head/newest-tail view for a prompt or terminal surface."""
     maximum = max(256, min(MAX_MEMORY_PROMPT_CHARS, int(maximum)))
     text = str(text or "").strip()
-    if len(text) <= maximum:
-        return text
-
-    def safe_prefix(limit: int) -> str:
-        cut = max(0, min(len(text), limit))
-        start = text.rfind(REDACTED, max(0, cut - len(REDACTED) + 1),
-                           min(len(text), cut + len(REDACTED)))
-        if start >= 0 and start < cut < start + len(REDACTED):
-            cut = start + len(REDACTED)  # retain the complete sentinel; tail pays the difference.
-        return text[:cut]
-
-    def safe_suffix(limit: int) -> str:
-        if limit <= 0:
-            return ""
-        start = max(0, len(text) - limit)
-        marker_start = text.rfind(
-            REDACTED, max(0, start - len(REDACTED) + 1),
-            min(len(text), start + len(REDACTED)))
-        if marker_start >= 0 and marker_start < start < marker_start + len(REDACTED):
-            start = marker_start + len(REDACTED)  # omit it whole rather than disclose a fragment.
-        return text[start:]
-
-    marker = ""
-    head = tail = ""
-    for _ in range(6):
-        kept = max(0, maximum - len(marker))
-        head = safe_prefix(kept // 3)
-        tail = safe_suffix(max(0, kept - len(head)))
-        omitted = max(0, len(text) - len(head) - len(tail))
-        updated = f"\n… [{omitted} memory characters omitted from this bounded view] …\n"
-        if updated == marker:
-            break
-        marker = updated
-    # Marker digit growth can change the budget by one; enforce the hard ceiling without ever
-    # slicing a redaction sentinel.
-    kept = max(0, maximum - len(marker))
-    head = safe_prefix(kept // 3)
-    tail = safe_suffix(max(0, kept - len(head)))
-    return head + marker + tail
+    return bounded_redacted_view(
+        text, maximum, label="memory characters", head_fraction=1 / 3)
 
 
 def load_instruction_file(path: Path, *, sanitizer=None) -> str:

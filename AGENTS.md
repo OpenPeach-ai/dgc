@@ -10,6 +10,7 @@ dgc/
   llm.py           Responses + Chat Completions adapters, streaming, reasoning and tool fallback
   permissions.py   fail-closed modes/rules plus canonical external-directory approval
   workspace.py     canonical project-boundary resolution used by filesystem consumers
+  attachments.py   exact bounded @path text/image input shared by classic CLI and TUI
   codeintel.py     bounded static symbols/diagnostics plus optional one-shot stdio LSP queries
   tools.py         read/map/search/intelligence, atomic patch/edit/write, process, web, skill and memory tools
   agent.py         deterministic tool loop, transcript repair, usage, convergence and compaction

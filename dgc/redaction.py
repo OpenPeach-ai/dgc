@@ -176,6 +176,61 @@ def redact_text(value, secrets: Iterable[str] = ()) -> str:
     return text.replace(_MARKER, REDACTED)
 
 
+def bounded_redacted_view(value, maximum: int, *, label: str = "characters",
+                          head_fraction: float = 0.5) -> str:
+    """Bound already-redacted text without ever slicing the disclosure sentinel.
+
+    Callers must sanitize the complete source first.  Keeping a useful head and tail avoids both
+    the credential-fragment bug caused by clip-before-redact and the ambiguity of a partial
+    ``[REDACTED]`` marker at either retained boundary.
+    """
+    text = str(value or "")
+    maximum = int(maximum)
+    if maximum < 128:
+        raise ValueError("a bounded redacted view must retain at least 128 characters")
+    if len(text) <= maximum:
+        return text
+    ratio = max(0.0, min(1.0, float(head_fraction)))
+    safe_label = re.sub(r"[^a-zA-Z0-9 _-]", "", str(label or "characters"))[:48] \
+        or "characters"
+
+    def prefix(limit: int) -> str:
+        cut = max(0, min(len(text), limit))
+        start = text.rfind(
+            REDACTED, max(0, cut - len(REDACTED) + 1),
+            min(len(text), cut + len(REDACTED)))
+        if start >= 0 and start < cut < start + len(REDACTED):
+            cut = start  # omit the sentinel whole; never retain a disclosure-looking fragment.
+        return text[:cut]
+
+    def suffix(limit: int) -> str:
+        if limit <= 0:
+            return ""
+        start = max(0, len(text) - limit)
+        marker = text.rfind(
+            REDACTED, max(0, start - len(REDACTED) + 1),
+            min(len(text), start + len(REDACTED)))
+        if marker >= 0 and marker < start < marker + len(REDACTED):
+            start = marker + len(REDACTED)
+        return text[start:]
+
+    marker = "\n… [bounded content omitted] …\n"
+    head = tail = ""
+    for _ in range(10):
+        available = max(0, maximum - len(marker))
+        head = prefix(int(available * ratio))
+        tail = suffix(max(0, available - len(head)))
+        omitted = max(0, len(text) - len(head) - len(tail))
+        updated = f"\n… [{omitted} {safe_label} omitted from this bounded view] …\n"
+        if updated == marker:
+            break
+        marker = updated
+    available = max(0, maximum - len(marker))
+    head = prefix(int(available * ratio))
+    tail = suffix(max(0, available - len(head)))
+    return head + marker + tail
+
+
 def redact_known_text(value, secrets: Iterable[str] = ()) -> str:
     """Redact only exact known values, preserving opaque provider continuation payloads."""
     text = str(value or "").replace(REDACTED, _MARKER)

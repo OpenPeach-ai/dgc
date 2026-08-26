@@ -36,7 +36,8 @@ from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProce
 from rich.console import Console
 from rich.text import Text
 
-from . import __version__, glyphs, logo as logo_mod, render as render_mod, style as style_mod
+from . import (__version__, attachments as attachments_mod, glyphs, logo as logo_mod,
+               render as render_mod, style as style_mod)
 from .update import cached_update
 from .agent import Agent
 from .commands import command_pairs, command_pairs_with_custom
@@ -1182,7 +1183,8 @@ class TUI:
         th = style_mod.theme()
         groups = [
             ("Compose", [("Enter", "send"), ("Shift+Enter", "newline"), ("Shift+Tab", "cycle permission mode"),
-                         ("/", "command palette"), ("@ path", "attach a file"), ("Ctrl+R", "recall a past prompt"),
+                         ("/", "command palette"), ("@path", "attach one exact bounded file"),
+                         ("Ctrl+R", "recall a past prompt"),
                          ("! command", "run a shell command"), ("# note", "save a memory")]),
             ("This turn", [("Esc", "stop the turn"), ("Ctrl+C", "cancel · clear draft · quit")]),
             ("Navigate", [("PageUp / PageDn", "scroll the transcript"), ("End", "jump to the latest"),
@@ -3933,7 +3935,8 @@ class TUI:
                 self._foreground_aux_barrier()
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
-                succeeded = self.agent.run_turn(text, reset_cancel=False) is not False
+                model_text = self._expand_mentions(text)
+                succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:
@@ -3978,6 +3981,18 @@ class TUI:
         sess._worker_thread = threading.Thread(
             target=work, name=f"dgc-turn-{sess.id}", daemon=True)
         sess._worker_thread.start()
+
+    def _expand_mentions(self, text: str) -> str:
+        """Prepare the same bounded @path payload used by classic and one-shot CLI turns."""
+        self.agent._pending_images = None
+        result = attachments_mod.expand_attachments(
+            text, self.config.project_root,
+            sanitizer=lambda value: redact_text(value, secret_values(self.config)),
+            cancelled=self._cancel)
+        self.agent._pending_images = list(result.images) or None
+        for notice in result.notices:
+            self.info(notice)
+        return result.text
 
     def _save_memory_direct(self, text: str, scope: str = "project", *, show_entry: bool = True) -> bool:
         """Persist an explicit terminal memory action without asking the model to interpret it."""
