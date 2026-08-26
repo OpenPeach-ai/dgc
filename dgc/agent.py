@@ -68,6 +68,8 @@ _MAX_TIMING_NAMES = 64
 _MAX_TIMING_VALUE = (1 << 63) - 1
 _MAX_MCP_SEARCH_OUTPUT_CHARS = 16_000
 _MAX_VERIFIED_FINAL_CHARS = 512_000  # bounded across output-limit continuations
+_MAX_HANDOFF_INPUT_CHARS = 40_000
+_MAX_HANDOFF_OUTPUT_CHARS = 64_000
 
 # Mirror sessions.REQUEST_REASON_LABELS without eagerly importing the persistence layer at Agent
 # module startup. The regression suite locks this set to the session and benchmark readers.
@@ -1865,46 +1867,129 @@ class Agent:
         s = _re.sub(r"\s+", " ", s)[:120]
         return s or None
 
-    def generate_handoff(self) -> str:
-        """A self-contained HANDOFF document from the WHOLE session, so a different agent (or a fresh
-        session) can pick the work up cold. Best-effort model call, no tools/thinking."""
-        lines = []
-        for m in self.messages:
-            role = m.get("role")
-            if role == "system":
-                continue
-            content = self._safe_text(str(m.get("content", "")))[:2000]
-            calls = ""
-            if m.get("tool_calls"):
-                calls = " [tools: " + ", ".join(c.get("function", {}).get("name", "?")
-                                                for c in m["tool_calls"]) + "]"
-            lines.append(f"{role}{calls}: {content}")
-        if not lines:
-            return "# Handoff\n\n(Nothing has happened in this session yet.)"
-        sysmsg = (
-            "You are writing a HANDOFF document so a DIFFERENT agent (or a fresh session) can continue "
-            "this coding work with zero prior context. Read the whole session below and write a clear, "
-            "self-contained Markdown handoff with EXACTLY these sections:\n"
-            "# Handoff\n"
-            "## Objective — what the user ultimately wants\n"
-            "## Done — what's been implemented: files created/edited, commands run + their outcomes, "
-            "commits made\n"
-            "## Current state — what works and is verified, what's broken or uncertain\n"
-            "## Key decisions — choices made and why\n"
-            "## Next steps — the immediate next actions, in order\n"
-            "## How to continue — exact commands, file paths, and names to resume (repro steps, the "
-            "verify command, files to open)\n"
-            "Be specific with REAL names/paths from the session; do not invent. Terse bullets. Output "
-            "nothing outside these sections.")
+    def generate_handoff(self, *, save: bool = False) -> str:
+        """Build one bounded handoff from a generation-stable snapshot of the session.
+
+        Handoff is an auxiliary model request, but it still reads the whole live transcript and
+        charges usage to the session. Reserve the same session-family turn lease as a normal prompt
+        so a TUI background request or another DGC process cannot mutate that transcript underneath
+        the snapshot or race its metrics journal.
+        """
+        self._last_handoff_error = ""
+        self._last_handoff_path: Path | None = None
+
+        def finish(markdown: str) -> str:
+            if save and not self._last_handoff_error:
+                self._last_handoff_path = self.save_handoff(markdown)
+            return markdown
+
+        with self._session_turn_scope(reentrant=False) as reserved:
+            if not reserved:
+                self._last_handoff_error = (
+                    "this session has an active turn; wait for it to finish before generating a handoff")
+                return f"# Handoff\n\n(generation failed: {self._last_handoff_error})"
+            if self.session_file:
+                from . import sessions
+                if not sessions.generation_matches(
+                        self.session_file, self.session_root,
+                        expected_revision=self._session_revision,
+                        expected_exists=self._session_exists):
+                    self._last_handoff_error = (
+                        "the saved session changed in another process; resume it before generating a handoff")
+                    return f"# Handoff\n\n(generation failed: {self._last_handoff_error})"
+            try:
+                with self._session_persist_lock:
+                    snapshot = copy.deepcopy(self.messages)
+            except Exception as exc:
+                self._last_handoff_error = (
+                    f"could not snapshot the session ({type(exc).__name__})")
+                return f"# Handoff\n\n(generation failed: {self._last_handoff_error})"
+
+            lines = []
+            for m in snapshot:
+                if not isinstance(m, dict):
+                    continue
+                role = m.get("role")
+                if role == "system":
+                    continue
+                content = self._safe_text(str(m.get("content", "")))[:2000]
+                calls = ""
+                tool_calls = m.get("tool_calls")
+                if isinstance(tool_calls, list) and tool_calls:
+                    names = [self._safe_text(c.get("function", {}).get("name", "?"))[:128]
+                             for c in tool_calls[:64] if isinstance(c, dict)
+                             and isinstance(c.get("function"), dict)]
+                    if names:
+                        calls = " [tools: " + ", ".join(names) + "]"
+                lines.append(f"{role}{calls}: {content}")
+            if not lines:
+                return finish("# Handoff\n\n(Nothing has happened in this session yet.)")
+            sysmsg = (
+                "You are writing a HANDOFF document so a DIFFERENT agent (or a fresh session) can continue "
+                "this coding work with zero prior context. Read the whole session below and write a clear, "
+                "self-contained Markdown handoff with EXACTLY these sections:\n"
+                "# Handoff\n"
+                "## Objective — what the user ultimately wants\n"
+                "## Done — what's been implemented: files created/edited, commands run + their outcomes, "
+                "commits made\n"
+                "## Current state — what works and is verified, what's broken or uncertain\n"
+                "## Key decisions — choices made and why\n"
+                "## Next steps — the immediate next actions, in order\n"
+                "## How to continue — exact commands, file paths, and names to resume (repro steps, the "
+                "verify command, files to open)\n"
+                "Be specific with REAL names/paths from the session; do not invent. Terse bullets. Output "
+                "nothing outside these sections.")
+            try:
+                res = self._aux_client(max_tokens=4096, read_timeout=120).chat(
+                    [{"role": "system", "content": sysmsg},
+                     {"role": "user",
+                      "content": "\n\n".join(lines)[:_MAX_HANDOFF_INPUT_CHARS]}],
+                    tools=None, reasoning_effort="off", cancel=self.cancelled)
+                self._record_usage(getattr(res, "usage", None), "handoff")
+                rendered = self._safe_text(
+                    (getattr(res, "content", "") or "").strip())[:_MAX_HANDOFF_OUTPUT_CHARS]
+                if rendered:
+                    return finish(rendered)
+                self._last_handoff_error = "generation returned nothing"
+            except Exception as exc:
+                self._last_handoff_error = self._safe_text(
+                    str(exc).strip() or type(exc).__name__)[:500]
+            return f"# Handoff\n\n(generation failed: {self._last_handoff_error})"
+
+    def save_handoff(self, markdown: str) -> Path | None:
+        """Save handoff Markdown as a new private workspace file without following links."""
+        from .workspace import WorkspaceBoundaryError, atomic_write_bytes
+
+        self._last_handoff_error = ""
+        body = self._safe_text(str(markdown or ""))[:_MAX_HANDOFF_OUTPUT_CHARS]
+        if not body:
+            self._last_handoff_error = "the handoff document was empty"
+            return None
+        lease = workspace_mutation_lock(self.config.project_root)
+        if not acquire_cancellable(lease, self.cancelled):
+            self._last_handoff_error = (
+                lease.last_error or "cancelled while waiting for the workspace write lease")
+            return None
         try:
-            res = self._aux_client().chat([{"role": "system", "content": sysmsg},
-                                           {"role": "user", "content": "\n\n".join(lines)[:40000]}],
-                                          tools=None, reasoning_effort="off", cancel=self.cancelled)
-            self._record_usage(getattr(res, "usage", None), "handoff")
-            return (self._safe_text((getattr(res, "content", "") or "").strip())
-                    or "# Handoff\n\n(generation returned nothing)")
-        except LLMError as e:
-            return self._safe_text(f"# Handoff\n\n(generation failed: {e})")
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            # An unpredictable suffix prevents a pre-created filename from turning a deliberate
+            # user command into an overwrite. expected=None also rejects a late file or symlink.
+            for _ in range(4):
+                target = (self.config.project_root
+                          / f"HANDOFF-{stamp}-{uuid.uuid4().hex[:8]}.md")
+                try:
+                    atomic_write_bytes(target, body.encode("utf-8"), expected=None, mode=0o600)
+                    return target
+                except WorkspaceBoundaryError:
+                    continue
+                except (OSError, UnicodeError) as exc:
+                    self._last_handoff_error = (
+                        f"could not save the handoff ({type(exc).__name__})")
+                    return None
+            self._last_handoff_error = "could not allocate a new handoff filename safely"
+            return None
+        finally:
+            lease.release()
 
     def load_session(self, path) -> int:
         """Restore a saved conversation, keeping a fresh system prompt. Returns restored msg count."""

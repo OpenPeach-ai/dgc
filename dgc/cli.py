@@ -796,13 +796,12 @@ class CLI:
                         table.add_row(art.id, art.name, art.url, art.uptime)
                     self.console.print(table)
         elif cmd in ("handoff", "handover"):
-            md = self.agent.generate_handoff()
-            path = cfg.project_root / f"HANDOFF-{time.strftime('%Y%m%d-%H%M%S')}.md"
-            try:
-                path.write_text(md)
+            md = self.agent.generate_handoff(save=True)
+            path = self.agent._last_handoff_path
+            if path:
                 self.ui.info(f"handoff saved → {path}")
-            except OSError as e:
-                self.ui.error(f"could not save handoff: {e}")
+            elif self.agent._last_handoff_error:
+                self.ui.error(self.agent._last_handoff_error)
             self.console.print(render.render_markdown(md))
         elif cmd == "name":
             if rest.strip():

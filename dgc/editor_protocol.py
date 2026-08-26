@@ -137,6 +137,13 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "status": _f("string", enum=("completed", "denied", "cancelled", "error")),
         "output": _S(),
     },
+    "skill_catalog": {"request_id": _S(), "items": _A(), "total": _I()},
+    "handoff_started": {"request_id": _S()},
+    "handoff": {
+        "request_id": _S(),
+        "status": _f("string", enum=("completed", "cancelled", "error")),
+        "markdown": _S(), "path": _NS(False), "error": _NS(False),
+    },
     "queued": {"count": _I(), "text": _S()},
     "command_rejected": {
         "message": _S(), "command": _S(False), "reason": _S(False), "count": _I(False),
@@ -190,6 +197,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "call_mcp_tool": {
         "request_id": _S(), "call_id": _S(False), "name": _S(), "arguments": _O(),
     },
+    "list_skills": {"request_id": _S()},
+    "generate_handoff": {"request_id": _S(), "save": _B(False)},
     "set_think": {"level": _f("string", enum=("off", "low", "medium", "high"))},
     "set_goal": {
         "text": _S(False),

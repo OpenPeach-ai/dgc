@@ -2323,26 +2323,20 @@ class TUI:
         can hand to another agent, and show it in the transcript (selectable via /copy)."""
         self._tls.session = sess        # route the transcript output to the session /handoff was run in
         try:
-            md = self.agent.generate_handoff()
+            md = self.agent.generate_handoff(save=True)
         except Exception as e:
             self.error(f"handoff failed: {type(e).__name__}: {e}")
             return
-        import time as _t
-        name = f"HANDOFF-{_t.strftime('%Y%m%d-%H%M%S')}.md"
-        saved = ""
-        try:
-            path = self.config.project_root / name
-            path.write_text(md)
-            saved = str(path)
-        except OSError:
-            pass
+        path = self.agent._last_handoff_path
+        saved = str(path) if path else ""
         self._append(self._rich(self._md(md)))          # show the handoff in the chat
         th = style_mod.theme()
         if saved:
             self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} handoff saved to [/]"
                                     f"[{th.accent_bright}]{_esc(saved)}[/]"
                                     f"[{th.faint}] — hand this file (or the text above) to another agent[/]"))
-        self._flash(f"handoff saved → {name}" if saved else "handoff ready above (couldn't write a file)")
+        self._flash(f"handoff saved → {path.name}" if path else
+                    (self.agent._last_handoff_error or "handoff ready above (couldn't write a file)"))
 
     def _compute_suggestion(self, sess, prompt: str, resp: str, cancel=None) -> None:
         """Background: predict the next prompt (ghost text)."""

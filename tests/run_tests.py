@@ -1978,7 +1978,7 @@ def unit_tests(tmp: Path):
         def __init__(self): super().__init__(); self.done = _th.Event()
         def emit(self, typ, **fields):
             super().emit(typ, **fields)
-            if typ in ("mcp_tools", "mcp_call_complete"): self.done.set()
+            if typ in ("mcp_tools", "mcp_call_complete", "handoff"): self.done.set()
 
     _direct_cap = _HeadlessMCPCapture(); _direct_pending = PendingRequests()
     _direct_ui = HeadlessUI(_direct_cap, _direct_pending, approval_timeout_s=1)
@@ -1986,7 +1986,7 @@ def unit_tests(tmp: Path):
     _direct_backend = object.__new__(Backend)
     _direct_backend.em = _direct_cap; _direct_backend.pending = _direct_pending
     _direct_backend.ui = _direct_ui; _direct_backend.agent = _direct_agent
-    _direct_backend._worker = None; _direct_backend._mcp_worker = None
+    _direct_backend._worker = None; _direct_backend._foreground_worker = None
     _direct_backend._queue = []; _direct_backend._turn_lock = _th.RLock()
     _direct_backend.dispatch({"type": "call_mcp_tool", "request_id": "unknown-7",
                               "name": "mcp__fixture__missing", "arguments": {}})
@@ -2000,7 +2000,7 @@ def unit_tests(tmp: Path):
     _direct_backend.dispatch({"type": "list_mcp_tools", "request_id": "catalog-7",
                               "offset": 0, "limit": 10})
     _direct_cap.done.wait(2)
-    _listed_worker = _direct_backend._mcp_worker
+    _listed_worker = _direct_backend._foreground_worker
     if isinstance(_listed_worker, _th.Thread): _listed_worker.join(1)
     _catalog_event = next((event for event in _direct_cap.events
                            if event["type"] == "mcp_tools"), {})
@@ -2023,7 +2023,7 @@ def unit_tests(tmp: Path):
     _direct_backend.dispatch({"type": "permission_response", "id": _permission_event.get("id"),
                               "decision": "once"})
     _direct_cap.done.wait(2)
-    _called_worker = _direct_backend._mcp_worker
+    _called_worker = _direct_backend._foreground_worker
     if isinstance(_called_worker, _th.Thread): _called_worker.join(1)
     _complete_event = next((event for event in reversed(_direct_cap.events)
                             if event["type"] == "mcp_call_complete"), {})
@@ -2049,6 +2049,49 @@ def unit_tests(tmp: Path):
     check("headless cancel terminates a pending direct MCP consent lifecycle",
           _cancelled_complete.get("request_id") == "cancel-7"
           and _cancelled_complete.get("status") == "cancelled")
+
+    _surface_root = Path(tempfile.mkdtemp())
+    _surface_skill_path = _surface_root / ".dgc" / "skills" / "matrix-fixture" / "SKILL.md"
+    _surface_skill_path.parent.mkdir(parents=True)
+    _surface_skill_path.write_text("fixture")
+    _surface_skill = _skills_mod.Skill(
+        "matrix-fixture", "Independent matrix fixture", "fixture", _surface_skill_path)
+    class _SurfaceConfig:
+        project_root = _surface_root
+        def get(self, key, default=None): return default
+    class _SurfaceAgent:
+        def __init__(self):
+            self.skills = {"matrix-fixture": _surface_skill}
+            self.cancelled = _th.Event(); self.usage_totals = {}
+            self._last_handoff_error = ""
+        def generate_handoff(self, *, save=False):
+            self._last_handoff_path = None
+            return "# Handoff\n\n## Objective\n\nContinue safely."
+        def estimate_tokens(self): return 0
+    _surface_cap = _HeadlessMCPCapture(); _surface_backend = object.__new__(Backend)
+    _surface_backend.em = _surface_cap; _surface_backend.config = _SurfaceConfig()
+    _surface_backend.agent = _SurfaceAgent(); _surface_backend._worker = None
+    _surface_backend._foreground_worker = None; _surface_backend._queue = []
+    _surface_backend._turn_lock = _th.RLock()
+    _surface_backend.dispatch({"type": "list_skills", "request_id": "skills-7"})
+    _skills_event = _surface_cap.events[-1]
+    check("headless skill catalog proves the loaded precedence layer without exposing host paths",
+          _skills_event == {"type": "skill_catalog", "request_id": "skills-7", "total": 1,
+                            "items": [{"name": "matrix-fixture",
+                                       "description": "Independent matrix fixture",
+                                       "source": "project"}]})
+    _surface_cap.done.clear()
+    _surface_backend.dispatch({"type": "generate_handoff", "request_id": "handoff-7",
+                               "save": False})
+    _surface_cap.done.wait(2)
+    _handoff_events = [event for event in _surface_cap.events
+                       if event["type"] in ("handoff_started", "handoff")]
+    check("headless handoff is correlated, bounded, cancellable, and terminal only after slot release",
+          [event["type"] for event in _handoff_events] == ["handoff_started", "handoff"]
+          and _handoff_events[-1].get("request_id") == "handoff-7"
+          and _handoff_events[-1].get("status") == "completed"
+          and _handoff_events[-1].get("path") is None
+          and _surface_backend._foreground_worker is None)
 
     _cap = _Capture(); _hb = object.__new__(Backend)
     _hb.em = _cap; _hb._worker = type("Alive", (), {"is_alive": lambda self: True})()
@@ -3621,7 +3664,7 @@ def unit_tests(tmp: Path):
     class _HR: content = "# Handoff\n## Objective\n- x\n## Next steps\n- y"
     _hcap = {}
     _h.client.chat = lambda msgs, **kw: (_hcap.update(sys=msgs[0]["content"], body=msgs[1]["content"]) or _HR())
-    _h._aux_client = lambda: _h.client
+    _h._aux_client = lambda **_kw: _h.client
     _h.messages = [{"role":"system","content":"s"}, {"role":"user","content":"do the thing"},
                    {"role":"assistant","content":"did it","tool_calls":[{"function":{"name":"write_file"}}]}]
     _hd = _h.generate_handoff()
@@ -3632,6 +3675,27 @@ def unit_tests(tmp: Path):
           and _h.timing_totals["by_request_reason"] == {"handoff": 1})
     check("handoff on an empty session is graceful",
           "Nothing has happened" in _Ag(_Cfg(), _AgUI()).generate_handoff())
+    _handoff_race_root = Path(tempfile.mkdtemp())
+    _handoff_race_agent = _Ag(_Cfg(_handoff_race_root), _AgUI())
+    _handoff_race_agent.session_file = _Sg.new_path(_handoff_race_root)
+    _handoff_race_agent.messages.append({"role": "user", "content": "stable snapshot"})
+    _handoff_race = []
+    with _handoff_race_agent._session_turn_scope(reentrant=False) as _handoff_reserved:
+        _handoff_thread = _th.Thread(
+            target=lambda: _handoff_race.append(_handoff_race_agent.generate_handoff()))
+        _handoff_thread.start(); _handoff_thread.join(2)
+    check("handoff snapshots cannot race another local or cross-process session turn",
+          _handoff_reserved and len(_handoff_race) == 1
+          and "active turn" in _handoff_race[0])
+    _handoff_root = Path(tempfile.mkdtemp())
+    _handoff_agent = _Ag(_Cfg(_handoff_root), _AgUI())
+    _saved_handoff_doc = _handoff_agent.generate_handoff(save=True)
+    _saved_handoff = _handoff_agent._last_handoff_path
+    check("handoff saving stays inside the stable session scope and uses a new private workspace file",
+          _saved_handoff is not None and _saved_handoff.parent == _handoff_root
+          and _saved_handoff.name.startswith("HANDOFF-")
+          and _saved_handoff.read_text() == _saved_handoff_doc
+          and (_saved_handoff.stat().st_mode & 0o777) == 0o600)
 
     # --- pi adopt: context-overflow classifier matches local-server strings, not other 400s
     from dgc.llm import _OVERFLOW_RE, ContextOverflowError, LLMError as _LLME

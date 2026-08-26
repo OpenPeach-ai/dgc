@@ -250,6 +250,10 @@
         break;
       case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "handoff_started":
+        startTurn(); setSending(true); speak("DGC is generating a handoff");
+        if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
+        break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
       case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
       case "thinking_delta":
@@ -474,6 +478,27 @@
         if (ev.exists) decisionCard(`<div class="q"><span class="codicon codicon-checklist"></span> Saved plan</div><pre>${esc(ev.plan)}</pre>`);
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
+      case "skill_catalog": {
+        const items = Array.isArray(ev.items) ? ev.items : [];
+        if (!items.length) { sysLine("No skills are installed."); break; }
+        const rows = items.map((skill) => {
+          const description = String(skill.description || "skill");
+          return `${String(skill.name || "")}  [${String(skill.source || "unknown")}]  ${description}`;
+        }).join("\n");
+        decisionCard(`<div class="q"><span class="codicon codicon-library"></span> Installed skills · ${items.length}</div><pre>${esc(rows)}</pre>`, "Installed skills");
+        break;
+      }
+      case "handoff": {
+        ensureTurn();
+        const markdown = String(ev.markdown || "");
+        turn.chars += markdown.length;
+        textBlock().innerHTML = md(markdown);
+        if (ev.path) sysLine(`Handoff saved to ${ev.path}`);
+        if (ev.status !== "completed") sysLine(String(ev.error || `Handoff ${ev.status}`), true);
+        speak(ev.status === "completed" ? "Handoff ready" : `Handoff ${ev.status}`);
+        endTurn(); setSending(false);
+        break;
+      }
       case "goal_changed": {
         const text = String(ev.goal || "");
         sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");

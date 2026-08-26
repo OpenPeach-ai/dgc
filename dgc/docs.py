@@ -209,11 +209,14 @@ particular kind of work — a house style, a workflow, a checklist. DGC ships a
 few built in and you can add your own under `~/.dgc/skills/` or a project's
 `.dgc/skills/`.
 
-- **/skills** — browse installed skills (built-in + yours), toggle them on/off,
-  or add one by URL.
-- A skill that is **on** has its instructions injected for every turn.
-- **dgc-design** ships by default but stays **off** for normal coding — it only
-  switches on automatically when the agent builds an artifact frontend.
+- **/skills** — browse installed skills (built-in + yours), add one by URL,
+  remove a personal copy, or reload the catalog.
+- Adaptive mode injects only an explicitly named or narrowly matching skill for
+  the current turn. `tool_profile: full` exposes the whole loaded catalog.
+- Project skills override personal skills, which override built-in skills. Typed
+  headless/editor listings report that source layer without exposing host paths.
+- **dgc-design** ships by default but stays dormant for normal coding — artifact
+  frontend work activates it automatically.
 """.strip()),
 
     ("Multiple agents", "run a fleet of agents at once + the dashboard", """
@@ -266,6 +269,9 @@ Every conversation is a session, saved as you go.
 - **/name** — rename the current session.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
+- **/handoff** — create a bounded, redacted continuation document from one stable
+  session generation. DGC saves it as a new private `HANDOFF-*.md` through the
+  workspace lease; an overlapping turn is rejected instead of mixed into the file.
 - **/rewind** — restore both the code *and* the conversation to how they were at
   a chosen turn. Exact conversation prefixes and project-root file snapshots are
   saved with the private session, so rewind survives resume and context compaction.

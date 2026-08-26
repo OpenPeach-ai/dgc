@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import USER_SKILLS, BUILTIN_SKILLS
-from .workspace import WorkspaceBoundaryError, read_regular_bytes, scan_directory_entries
+from .workspace import WorkspaceBoundaryError, is_within, read_regular_bytes, scan_directory_entries
 
 
 MAX_SKILL_FILE_BYTES = 65_536
@@ -168,6 +168,24 @@ def discover_skills(project_root: Path) -> dict[str, Skill]:
             if skill and (skill.name in skills or len(skills) < MAX_SKILLS):
                 skills.setdefault(skill.name, skill)
     return dict(sorted(skills.items()))
+
+
+def skill_catalog(skills: dict[str, Skill], project_root: Path) -> list[dict[str, str]]:
+    """Return bounded public metadata, including which precedence layer supplied each skill."""
+    project_skills = _frozen(Path(project_root) / ".dgc" / "skills")
+    rows = []
+    for index, skill in enumerate(skills.values()):
+        if index >= MAX_SKILLS:
+            break
+        if not isinstance(skill, Skill):
+            continue
+        source = ("project" if is_within(skill.path, project_skills) else
+                  "user" if is_within(skill.path, USER_SKILLS) else
+                  "builtin" if is_within(skill.path, BUILTIN_SKILLS) else "unknown")
+        rows.append({"name": normalize_skill_name(skill.name),
+                     "description": _clean_description(skill.description),
+                     "source": source})
+    return rows
 
 
 def matching_skill_names(skills: dict[str, Skill], text: str) -> set[str]:

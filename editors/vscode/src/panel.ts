@@ -36,6 +36,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                     goal: { text: "", status: "none" } };
   private _installPrompted = false;
   private modelRequest = 0;
+  private featureRequest = 0;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
@@ -279,6 +280,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "turn_start":
         this.turnActive = true;
+        break;
+      case "handoff_started":
+        this.turnActive = true;
+        break;
+      case "handoff":
+        this.turnActive = false;
+        this.syncWorkspaceRoots();
         break;
       case "command_rejected":
         if (ev.command === "set_workspace_roots" && this.workspaceRootsInFlight !== undefined) {
@@ -535,6 +543,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "artifacts": this.ensureBackend().send({ type: "list_artifacts" }); break;
       case "status": this.ensureBackend().send({ type: "status" }); break;
       case "goal": this.ensureBackend().send({ type: "get_goal" }); break;
+      case "skills": this.ensureBackend().send({
+        type: "list_skills", request_id: `skills-${Date.now()}-${++this.featureRequest}`,
+      }); break;
+      case "handoff": {
+        const accepted = this.ensureBackend().send({
+          type: "generate_handoff", request_id: `handoff-${Date.now()}-${++this.featureRequest}`,
+          save: true,
+        });
+        if (accepted) { this.turnActive = true; }
+        break;
+      }
     }
   }
 
@@ -577,6 +596,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       "view-plan": "viewPlan", artifact: "artifacts", status: "status", compact: "compact",
       clear: "clear", new: "new", resume: "resume", rewind: "rewind", connect: "connect",
       subagent: "subagent", tasks: "retainedTasks", settings: "settings", bug: "bug",
+      skills: "skills", handoff: "handoff",
     };
     if (direct[name]) { this.slash(direct[name]); return; }
     be.send({ type: "slash_command", text }); // custom command, or a typed unknown-command error

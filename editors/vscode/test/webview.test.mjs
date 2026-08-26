@@ -371,7 +371,7 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   dom.window.close();
 });
 
-test("backend-driven slash menu routes goal/plan/artifact commands without prompting the model", () => {
+test("backend-driven slash menu routes goal/plan/artifact/skill/handoff commands without prompting the model", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: {
     type: "ready",
@@ -379,6 +379,8 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
       { name: "goal", description: "standing objective", action: "goal", accepts_args: true },
       { name: "view-plan", description: "saved plan", action: "viewPlan", aliases: ["viewplan"] },
       { name: "artifact", description: "previews", action: "artifacts", aliases: ["artifacts"] },
+      { name: "skills", description: "installed skills", action: "skills", aliases: ["extensions"] },
+      { name: "handoff", description: "continuation document", action: "handoff", aliases: ["handover"] },
     ],
     custom_commands: ["review-api"],
   } });
@@ -402,6 +404,13 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
   assert.match(panelSrc, /slashAliases\.get\(typedName\) \|\| typedName/,
     "the extension host must canonicalize typed aliases before dispatch");
 
+  input.value = "/extensions";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  input.value = "/handover";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.deepEqual(posted.filter((m) => m.type === "slashText").slice(-2).map((m) => m.text),
+    ["/extensions", "/handover"]);
+
   doc.getElementById("btn-cmd").click();
   assert.match(doc.getElementById("pop").textContent, /standing objective/);
   assert.match(doc.getElementById("pop").textContent, /review-api/);
@@ -411,9 +420,20 @@ test("backend-driven slash menu routes goal/plan/artifact commands without promp
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
   ] } });
+  send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
+    items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
+  send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
+  send({ type: "event", event: { type: "handoff", request_id: "handoff-1", status: "completed",
+    markdown: "# Handoff\n\nContinue with **tests**. <script>bad()</script>", path: "HANDOFF-safe.md" } });
   assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
+  assert.match(doc.getElementById("log").textContent, /matrix-fixture.*project.*Loaded/s);
+  assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
+  assert.equal(doc.getElementById("log").querySelector("img"), null,
+    "skill and handoff metadata must remain inert text");
+  assert.equal(doc.getElementById("log").querySelector("script"), null,
+    "handoff markdown must not synthesize executable elements");
   assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");
   dom.window.close();
 });

@@ -25,6 +25,7 @@ from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error,
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests
 from .redaction import redact_value, secret_values
+from .skills import skill_catalog
 from .tools import TOOL_SCHEMAS
 from .ui import arg_summary, split_diff, tool_output_is_error
 
@@ -38,7 +39,7 @@ _MAX_MCP_LIST_LIMIT = 100
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
-    "resolve_retained_task",
+    "resolve_retained_task", "list_skills", "generate_handoff",
 }
 _EDITOR_CONTEXT_LIMIT = 64_000
 
@@ -300,7 +301,7 @@ class Backend:
         self.ui._rule_hook = self._add_rule
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
-        self._mcp_worker: threading.Thread | None = None
+        self._foreground_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
@@ -320,7 +321,8 @@ class Backend:
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
                           "goal_state": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
-                          "headless_mcp_call": True},
+                          "headless_mcp_call": True, "headless_skill_catalog": True,
+                          "headless_handoff": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             subagent_base_url=self.config.get("subagent_base_url", ""),
@@ -353,7 +355,7 @@ class Backend:
             # worker's final queue check but before the thread has technically exited and become
             # stranded forever.
             return (getattr(self, "_worker", None) is not None
-                    or getattr(self, "_mcp_worker", None) is not None)
+                    or getattr(self, "_foreground_worker", None) is not None)
 
     def _turn_state_lock(self) -> threading.RLock:
         """Return the queue lock (lazy only for small object.__new__ protocol fixtures)."""
@@ -366,7 +368,7 @@ class Backend:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         lock = self._turn_state_lock()
         with lock:
-            if getattr(self, "_mcp_worker", None) is not None:
+            if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
             if getattr(self, "_worker", None) is not None:
                 pending_bytes = sum(_turn_payload_bytes(*item) for item in self._queue)
@@ -437,30 +439,37 @@ class Backend:
                 if self._worker is current:
                     self._worker = None
 
-    def _start_mcp_worker(self, operation) -> bool:
-        """Reserve the foreground operation slot while keeping stdin responses responsive."""
+    def _start_foreground_worker(self, operation, *, label: str = "operation") -> bool:
+        """Reserve a non-prompt foreground slot while stdin decisions/cancellation stay live."""
         lock = self._turn_state_lock()
         with lock:
             if (getattr(self, "_worker", None) is not None
-                    or getattr(self, "_mcp_worker", None) is not None):
+                    or getattr(self, "_foreground_worker", None) is not None):
                 return False
             self.agent.cancelled.clear()
 
             def run():
                 current = threading.current_thread()
+                terminal = None
                 try:
-                    operation()
+                    terminal = operation()
                 finally:
                     with self._turn_state_lock():
-                        if self._mcp_worker is current:
-                            self._mcp_worker = None
+                        if self._foreground_worker is current:
+                            self._foreground_worker = None
+                # A terminal event means the next foreground command is admissible. Emit it only
+                # after releasing the slot, otherwise a fast controller can receive completion and
+                # have its immediately following prompt rejected against a worker that is unwinding.
+                if callable(terminal):
+                    terminal()
 
-            worker = threading.Thread(target=run, daemon=True, name="dgc-headless-mcp")
-            self._mcp_worker = worker
+            worker = threading.Thread(target=run, daemon=True,
+                                      name=f"dgc-headless-{label[:32]}")
+            self._foreground_worker = worker
             worker.start()
             return True
 
-    def _list_mcp_tools(self, request_id: str, offset: int, limit: int) -> None:
+    def _list_mcp_tools(self, request_id: str, offset: int, limit: int):
         try:
             schemas = self.agent.mcp.tool_schemas()
             rows = []
@@ -488,16 +497,17 @@ class Backend:
                 used += len(encoded) + 1
             statuses = getattr(self.agent.mcp, "status", lambda: [])()
             next_offset = offset + len(rows)
-            self.em.emit("mcp_tools", request_id=request_id,
-                         servers=list(statuses)[:100], tools=rows, total=len(schemas), offset=offset,
-                         next_offset=(next_offset if next_offset < len(schemas) else None))
+            payload = dict(request_id=request_id, servers=list(statuses)[:100], tools=rows,
+                           total=len(schemas), offset=offset,
+                           next_offset=(next_offset if next_offset < len(schemas) else None))
         except Exception as exc:
-            self.em.emit("mcp_tools", request_id=request_id, servers=[], tools=[], total=0,
-                         offset=offset, next_offset=None,
-                         error=f"MCP catalog listing failed ({type(exc).__name__})")
+            payload = dict(request_id=request_id, servers=[], tools=[], total=0,
+                           offset=offset, next_offset=None,
+                           error=f"MCP catalog listing failed ({type(exc).__name__})")
+        return lambda: self.em.emit("mcp_tools", **payload)
 
     def _call_mcp_tool(self, request_id: str, call_id: str,
-                       name: str, arguments: dict) -> None:
+                       name: str, arguments: dict):
         status = "completed"
         try:
             output = self.agent.execute_mcp_tool(name, arguments, call_id)
@@ -511,15 +521,53 @@ class Backend:
         except Exception as exc:
             output = f"error: MCP tool call failed ({type(exc).__name__})"
             status = "error"
-        self.em.emit("mcp_call_complete", request_id=request_id, call_id=call_id,
-                     name=name, status=status, output=str(output))
+        return lambda: self.em.emit(
+            "mcp_call_complete", request_id=request_id, call_id=call_id,
+            name=name, status=status, output=str(output))
+
+    def _emit_skill_catalog(self, request_id: str) -> None:
+        rows = skill_catalog(self.agent.skills, self.config.project_root)
+        self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
+
+    def _generate_handoff(self, request_id: str, save: bool):
+        self.em.emit("handoff_started", request_id=request_id)
+        try:
+            markdown = self.agent.generate_handoff(save=save)
+            error = str(getattr(self.agent, "_last_handoff_error", "") or "")[:500]
+        except Exception as exc:
+            error = f"handoff generation failed ({type(exc).__name__})"
+            markdown = f"# Handoff\n\n({error})"
+        path = None
+        if error:
+            status = "cancelled" if self.agent.cancelled.is_set() else "error"
+        else:
+            status = "completed"
+            if save:
+                saved = getattr(self.agent, "_last_handoff_path", None)
+                if saved is None:
+                    status = "error"
+                    error = str(getattr(self.agent, "_last_handoff_error", "")
+                                or "could not save the handoff")[:500]
+                else:
+                    try:
+                        path = str(saved.relative_to(self.config.project_root))
+                    except ValueError:
+                        status = "error"
+                        error = "the saved handoff escaped the project boundary"
+                        path = None
+        def terminal():
+            self.em.emit("handoff", request_id=request_id, status=status,
+                         markdown=str(markdown)[:64_000], path=path, error=error or None)
+            self._emit_context()
+        return terminal
 
     def close(self) -> None:
         """Cancel foreground work and release pending controller decisions on backend exit."""
         with self._turn_state_lock():
             self.agent.cancelled.set()
             self._queue.clear()
-            workers = [getattr(self, "_worker", None), getattr(self, "_mcp_worker", None)]
+            workers = [getattr(self, "_worker", None),
+                       getattr(self, "_foreground_worker", None)]
         self.pending.cancel_all({"decision": "no", "choice": None, "action": "cancel"})
         for worker in workers:
             if isinstance(worker, threading.Thread) and worker is not threading.current_thread():
@@ -647,7 +695,7 @@ class Backend:
                                       f"({count} queued); cancel it or wait for a turn to finish"))
             elif state == "busy":
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                             message="an MCP operation is running; cancel or wait for it to finish")
+                             message="a foreground operation is running; cancel or wait for it to finish")
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
@@ -670,7 +718,7 @@ class Backend:
                                           "cancel it or wait for a turn to finish"))
                 elif state == "busy":
                     self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                                 message="an MCP operation is running; cancel or wait for it to finish")
+                                 message="a foreground operation is running; cancel or wait for it to finish")
 
         elif t == "list_mcp_tools":
             request_id = str(cmd.get("request_id") or "")
@@ -685,8 +733,8 @@ class Backend:
                              message=(f"offset must be 0-1000000 and limit 1-"
                                       f"{_MAX_MCP_LIST_LIMIT}"))
                 return
-            if not self._start_mcp_worker(
-                    lambda: self._list_mcp_tools(request_id, offset, limit)):
+            if not self._start_foreground_worker(
+                    lambda: self._list_mcp_tools(request_id, offset, limit), label="mcp-list"):
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                              message="a prompt or MCP operation is already running; cancel or wait")
 
@@ -718,10 +766,31 @@ class Backend:
                              message=("MCP arguments must be valid JSON within the "
                                       f"{_MAX_MCP_ARGUMENT_BYTES}-byte limit"))
                 return
-            if not self._start_mcp_worker(
-                    lambda: self._call_mcp_tool(request_id, call_id, name, arguments)):
+            if not self._start_foreground_worker(
+                    lambda: self._call_mcp_tool(request_id, call_id, name, arguments),
+                    label="mcp-call"):
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                              message="a prompt or MCP operation is already running; cancel or wait")
+
+        elif t == "list_skills":
+            request_id = str(cmd.get("request_id") or "")
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
+            self._emit_skill_catalog(request_id)
+
+        elif t == "generate_handoff":
+            request_id = str(cmd.get("request_id") or "")
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
+            if not self._start_foreground_worker(
+                    lambda: self._generate_handoff(request_id, bool(cmd.get("save", False))),
+                    label="handoff"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="a prompt or foreground operation is already running; cancel or wait")
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
