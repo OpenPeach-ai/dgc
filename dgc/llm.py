@@ -29,6 +29,9 @@ _MAX_MODEL_INFO_FIELDS = 4_096
 _MAX_MODEL_METADATA_CACHE_ENTRIES = 256
 _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
+_MAX_RESPONSES_JSON_BYTES = 8 * 1024 * 1024
+_MAX_RESPONSES_STREAM_BYTES = 8 * 1024 * 1024
+_MAX_RESPONSES_OUTPUT_ITEMS = 4_096
 _MAX_RESPONSES_COMPACTION_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSES_COMPACTION_ITEMS = 4_096
 _MODEL_CAPABILITY_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -2886,11 +2889,12 @@ class LLMClient:
                 result = self._consume_responses(response, on_text, on_thinking, cancel)
             finally:
                 _close_response(response)
-            if stateful and result.response_id and result.finish_reason != "cancelled":
+            if (stateful and result.response_id
+                    and result.finish_reason in ("stop", "tool_calls")):
                 self._response_id = result.response_id
                 self._response_cursor = len(messages)
                 self._response_prefix_hash = self._messages_hash(messages)
-            elif not stateful:
+            else:
                 self._reset_response_state()
             return result
         raise LLMError("Responses API request failed repeatedly")
@@ -2898,10 +2902,20 @@ class LLMClient:
     def _consume_responses(self, response: requests.Response, on_text, on_thinking,
                            cancel=None) -> ChatResult:
         if "application/json" in response.headers.get("Content-Type", ""):
-            return self._consume_responses_json(response.json(), on_text, on_thinking)
+            value = _bounded_json_response(
+                response, _MAX_RESPONSES_JSON_BYTES, "Responses API response")
+            return self._consume_responses_json(value, on_text, on_thinking)
         result = ChatResult()
         calls: dict[str, dict] = {}
-        provider_items: dict[str, dict] = {}
+        # `response.output_item.done` may arrive in a different completion order from its declared
+        # output position. Preserve both coordinates so stateless replay follows `response.output`,
+        # never network timing. The terminal response's complete output array remains authoritative
+        # when the provider includes it.
+        provider_items: dict[str, tuple[int | None, int, dict]] = {}
+        provider_item_arrival = 0
+        terminal = ""
+        terminal_output: list[dict] | None = None
+        incomplete_reason = ""
         stop_watch = threading.Event()
         if cancel is not None:
             def _watch():
@@ -2924,7 +2938,8 @@ class LLMClient:
             threading.Thread(target=_watch, daemon=True).start()
         response.encoding = "utf-8"
         try:
-            for line in response.iter_lines(decode_unicode=True):
+            for line in _bounded_stream_lines(
+                    response, _MAX_RESPONSES_STREAM_BYTES, "Responses API stream"):
                 if cancel is not None and cancel.is_set():
                     result.finish_reason = "cancelled"; break
                 if not line or not line.startswith("data:"):
@@ -2934,9 +2949,13 @@ class LLMClient:
                     break
                 try:
                     event = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+                except (json.JSONDecodeError, RecursionError) as exc:
+                    raise LLMError("Responses API emitted malformed streaming JSON") from exc
+                if not isinstance(event, dict):
+                    raise LLMError("Responses API emitted a non-object streaming event")
                 typ = str(event.get("type") or "")
+                if terminal:
+                    raise LLMError("Responses API emitted data after its terminal response event")
                 if typ == "response.output_text.delta":
                     delta = str(event.get("delta") or "")
                     result.content += delta
@@ -2947,12 +2966,27 @@ class LLMClient:
                     if on_thinking and delta: on_thinking(delta)
                 elif typ in ("response.output_item.added", "response.output_item.done"):
                     item = event.get("item") or {}
-                    if typ == "response.output_item.done" and isinstance(item, dict) and item:
-                        key = _wire_key(item.get("id"), event.get("output_index"), len(provider_items))
-                        provider_items[key] = dict(item)
+                    if not isinstance(item, dict):
+                        raise LLMError("Responses API emitted a malformed output item")
+                    if typ == "response.output_item.done" and item:
+                        output_index = _tool_call_index(event.get("output_index"))
+                        key = (f"index:{output_index}" if output_index is not None else
+                               "id:" + _wire_key(item.get("id"), None, provider_item_arrival))
+                        completed_item = dict(item)
+                        previous = provider_items.get(key)
+                        if previous is not None and previous[2] != completed_item:
+                            raise LLMError("Responses API reused an output position for another item")
+                        if previous is None:
+                            if len(provider_items) >= _MAX_RESPONSES_OUTPUT_ITEMS:
+                                raise LLMError("Responses API emitted too many output items")
+                            provider_items[key] = (
+                                output_index, provider_item_arrival, completed_item)
+                            provider_item_arrival += 1
                     if item.get("type") == "function_call":
                         key = _wire_key(item.get("id"), event.get("output_index"), len(calls))
                         slot = calls.setdefault(key, {})
+                        if len(calls) > _MAX_RESPONSES_OUTPUT_ITEMS:
+                            raise LLMError("Responses API emitted too many function calls")
                         output_index = _tool_call_index(event.get("output_index"))
                         if output_index is not None:
                             slot["_output_index"] = output_index
@@ -2965,9 +2999,14 @@ class LLMClient:
                             slot["arguments"] = ((raw_arguments if raw_arguments != "" else "{}")
                                                  if typ == "response.output_item.done"
                                                  else raw_arguments)
+                        if typ == "response.output_item.done":
+                            slot["_done"] = True
+                            slot["_status"] = item.get("status")
                 elif typ == "response.function_call_arguments.delta":
                     key = _wire_key(event.get("item_id"), event.get("output_index"), 0)
                     slot = calls.setdefault(key, {})
+                    if len(calls) > _MAX_RESPONSES_OUTPUT_ITEMS:
+                        raise LLMError("Responses API emitted too many function calls")
                     output_index = _tool_call_index(event.get("output_index"))
                     if output_index is not None:
                         slot["_output_index"] = output_index
@@ -2975,11 +3014,25 @@ class LLMClient:
                         slot.get("arguments", ""), event.get("delta"))
                 elif typ in ("response.completed", "response.incomplete"):
                     obj = event.get("response") or {}
+                    if not isinstance(obj, dict):
+                        raise LLMError("Responses API emitted a malformed terminal response")
+                    terminal = "completed" if typ == "response.completed" else "incomplete"
+                    reported_status = str(obj.get("status") or "")
+                    if reported_status and reported_status != terminal:
+                        raise LLMError("Responses API terminal event contradicted its response status")
                     result.response_id = str(obj.get("id") or "")
                     result.usage = obj.get("usage") or {}
+                    if "output" in obj:
+                        raw_output = obj.get("output")
+                        if (not isinstance(raw_output, list)
+                                or len(raw_output) > _MAX_RESPONSES_OUTPUT_ITEMS
+                                or not all(isinstance(item, dict) for item in raw_output)):
+                            raise LLMError("Responses API emitted a malformed terminal output array")
+                        terminal_output = [dict(item) for item in raw_output]
                     if typ == "response.incomplete":
-                        reason = (obj.get("incomplete_details") or {}).get("reason", "")
-                        result.finish_reason = "length" if "token" in reason else "max_turn_requests"
+                        details = obj.get("incomplete_details") or {}
+                        incomplete_reason = (str(details.get("reason") or "")
+                                             if isinstance(details, dict) else "")
                 elif typ in ("error", "response.failed"):
                     err = event.get("error") or (event.get("response") or {}).get("error") or {}
                     raise LLMError(str(err.get("message") or err or "Responses API stream failed"))
@@ -2989,14 +3042,61 @@ class LLMClient:
             result.finish_reason = "cancelled"
         finally:
             stop_watch.set()
+        if result.finish_reason == "cancelled":
+            return result
+        if not terminal:
+            raise LLMError("Responses API stream ended before a terminal response event")
+
+        completed_items = (terminal_output if terminal_output is not None else [
+            row[2] for row in sorted(
+                provider_items.values(),
+                key=lambda row: (row[0] is None, row[0] if row[0] is not None else 0, row[1]))
+        ])
+        if terminal_output is not None:
+            # The terminal response contains the authoritative, already ordered output array.
+            calls = {}
+            for output_index, item in enumerate(terminal_output):
+                if item.get("type") != "function_call":
+                    continue
+                key = _wire_key(item.get("id"), output_index, len(calls))
+                calls[key] = {
+                    "call_id": item.get("call_id"), "name": item.get("name"),
+                    "arguments": item.get("arguments"), "_output_index": output_index,
+                    "_done": True, "_status": item.get("status"),
+                }
         ordered_calls = sorted(
             calls.values(),
             key=lambda slot: (slot.get("_output_index") is None, slot.get("_output_index", 0)))
+        if terminal == "completed":
+            def _invalid_completed_call(slot: dict) -> bool:
+                if (not isinstance(slot.get("call_id"), str) or not slot.get("call_id")
+                        or not isinstance(slot.get("name"), str) or not slot.get("name")):
+                    return True
+                if slot.get("_done"):
+                    return (slot.get("_status") not in (None, "completed")
+                            or not isinstance(slot.get("arguments"), str)
+                            or set(_tool_arguments(slot.get("arguments"))) == {"_unparsed"})
+                # A few Responses-compatible gateways omit output_item.done but still send an
+                # explicit response.completed event. Retain that compatibility only when the final
+                # cumulative/object arguments form is a complete JSON object. An unterminated or
+                # otherwise unparseable call remains non-executable.
+                parsed = _tool_arguments(slot.get("arguments"))
+                return set(parsed) == {"_unparsed"}
+
+            invalid_call = any(_invalid_completed_call(slot) for slot in ordered_calls)
+            if invalid_call:
+                raise LLMError("Responses API completed with an unfinished function-call item")
         for slot in ordered_calls:
             result.tool_calls.append(ToolCall(id=str(slot.get("call_id") or f"call_{len(result.tool_calls)}"),
                                               name=str(slot.get("name") or ""),
                                               arguments=_tool_arguments(slot.get("arguments"))))
-        result.provider_items = list(provider_items.values())
+        # Incomplete provider state must never be replayed as though it were a completed response.
+        # The Agent's existing length path records non-executable tool errors and requests one clean
+        # re-issue; stateful continuation is reset by the caller.
+        result.provider_items = completed_items if terminal == "completed" else []
+        if terminal == "incomplete":
+            result.finish_reason = ("length" if result.tool_calls or "token" in incomplete_reason
+                                    else "max_turn_requests")
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:
@@ -3006,11 +3106,26 @@ class LLMClient:
         return result
 
     def _consume_responses_json(self, obj: dict, on_text, on_thinking) -> ChatResult:
-        output = [dict(item) for item in (obj.get("output") or []) if isinstance(item, dict)]
+        if not isinstance(obj, dict):
+            raise LLMError("Responses API emitted a non-object JSON response")
+        status = str(obj.get("status") or "")
+        if status not in ("completed", "incomplete"):
+            raise LLMError(f"Responses API returned non-terminal status: {status or 'missing'}")
+        raw_output = obj.get("output")
+        if raw_output is None:
+            raw_output = []
+        if (not isinstance(raw_output, list)
+                or len(raw_output) > _MAX_RESPONSES_OUTPUT_ITEMS
+                or not all(isinstance(item, dict) for item in raw_output)):
+            raise LLMError("Responses API emitted a malformed output array")
+        output = [dict(item) for item in raw_output]
         result = ChatResult(response_id=str(obj.get("id") or ""), usage=obj.get("usage") or {},
-                            provider_items=output)
-        if obj.get("status") == "incomplete":
-            reason = (obj.get("incomplete_details") or {}).get("reason", "")
+                            provider_items=(output if status == "completed" else []))
+        if status == "incomplete":
+            details = obj.get("incomplete_details") or {}
+            if not isinstance(details, dict):
+                raise LLMError("Responses API emitted malformed incomplete details")
+            reason = str(details.get("reason") or "")
             result.finish_reason = "length" if "token" in reason else "max_turn_requests"
         for item in output:
             if item.get("type") == "message":
@@ -3025,9 +3140,19 @@ class LLMClient:
                     result.thinking += text
                     if on_thinking and text: on_thinking(text)
             elif item.get("type") == "function_call":
+                if (status == "completed"
+                        and (item.get("status") not in (None, "completed")
+                             or not isinstance(item.get("call_id"), str)
+                             or not item.get("call_id")
+                             or not isinstance(item.get("name"), str) or not item.get("name")
+                             or not isinstance(item.get("arguments"), str)
+                             or set(_tool_arguments(item.get("arguments"))) == {"_unparsed"})):
+                    raise LLMError("Responses API completed with an unfinished function-call item")
                 result.tool_calls.append(ToolCall(id=str(item.get("call_id") or item.get("id") or "call_0"),
                                                   name=str(item.get("name") or ""),
                                                   arguments=_tool_arguments(item.get("arguments"))))
+        if status == "incomplete" and result.tool_calls:
+            result.finish_reason = "length"
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:

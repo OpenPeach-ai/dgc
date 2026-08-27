@@ -2978,6 +2978,32 @@ def unit_tests(tmp: Path):
           and _length_turn.timing_totals["by_request_reason"] == {
               "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
 
+    _truncated_tool_root = Path(tempfile.mkdtemp())
+    _truncated_tool_cfg = _Cfg(_truncated_tool_root)
+    _truncated_tool_cfg.data["mode"] = "auto"
+    class _TruncatedToolClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0; self.saw_rejection = False
+        def chat(self, messages, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _ChatResult(
+                    finish_reason="length",
+                    tool_calls=[_ToolCall("truncated-write", "write_file", {
+                        "path": "must-not-exist.py", "content": "unsafe partial",
+                    })])
+            self.saw_rejection = any(
+                m.get("role") == "tool" and m.get("tool_call_id") == "truncated-write"
+                and "were NOT run" in str(m.get("content") or "") for m in messages)
+            return _ChatResult(content="Stopped safely after reissuing the response.")
+    _truncated_tool_turn = _Ag(_truncated_tool_cfg, _AgUI())
+    _truncated_tool_turn.client = _TruncatedToolClient()
+    check("length-truncated tool calls are rejected before the executor boundary",
+          _truncated_tool_turn.run_turn("do not execute a partial tool call") is True
+          and _truncated_tool_turn.client.calls == 2
+          and _truncated_tool_turn.client.saw_rejection
+          and not (_truncated_tool_root / "must-not-exist.py").exists())
+
     _agent_copy = __import__("copy")
     _paused_state = {"provider": "anthropic", "content": [
         {"type": "server_tool_use", "id": "srvtoolu_pause", "name": "web_search",
@@ -12048,7 +12074,7 @@ def test_anthropic_adapter():
 
 def test_responses_adapter():
     """OpenAI Responses history/tool streaming maps losslessly onto DGC's agent contract."""
-    from dgc.llm import LLMClient
+    from dgc.llm import LLMClient, LLMError
 
     client = LLMClient("https://api.openai.com/v1", "k", "gpt-5.4", api_mode="auto")
     instructions, items = client._responses_input([
@@ -12158,6 +12184,151 @@ def test_responses_adapter():
           and result.tool_calls[0].id == "call-9"
           and result.tool_calls[0].arguments == {"path": "main.py"}
           and result.usage.get("input_tokens") == 12)
+
+    class _ResponsesEvents(_Resp):
+        def __init__(self, events): self.events = events
+        def iter_lines(self, decode_unicode=True):
+            for event in self.events:
+                yield "data: " + (event if isinstance(event, str) else json.dumps(event))
+            yield "data: [DONE]"
+
+    partial_call_events = [
+        {"type": "response.output_item.added", "output_index": 0,
+         "item": {"id": "partial-item", "type": "function_call",
+                  "call_id": "partial-call", "name": "write_file", "arguments": ""}},
+        {"type": "response.function_call_arguments.delta", "output_index": 0,
+         "item_id": "partial-item", "delta": '{"path":"unsafe.py","content":"partial"}'},
+    ]
+    try:
+        client._consume_responses(_ResponsesEvents(partial_call_events), None, None)
+        truncated_responses_failed = False
+    except LLMError:
+        truncated_responses_failed = True
+    try:
+        client._consume_responses(_ResponsesEvents([
+            partial_call_events[0],
+            {"type": "response.function_call_arguments.delta", "output_index": 0,
+             "item_id": "partial-item", "delta": '{"path":"unsafe.py","content":"partial"'},
+            {"type": "response.completed", "response": {
+                "id": "contradictory-complete", "status": "completed", "usage": {},
+            }},
+        ]), None, None)
+        unfinished_responses_failed = False
+    except LLMError:
+        unfinished_responses_failed = True
+    check("Responses truncated and unfinished streams cannot become executable tool calls",
+          truncated_responses_failed and unfinished_responses_failed)
+
+    incomplete_call = {
+        "id": "incomplete-item", "type": "function_call", "status": "in_progress",
+        "call_id": "incomplete-call", "name": "write_file",
+        "arguments": '{"path":"unsafe.py","content":"partial"}',
+    }
+    incomplete_result = client._consume_responses(_ResponsesEvents([
+        {"type": "response.output_item.done", "output_index": 0, "item": incomplete_call},
+        {"type": "response.incomplete", "response": {
+            "id": "incomplete-response", "status": "incomplete", "output": [incomplete_call],
+            "incomplete_details": {"reason": "max_output_tokens"}, "usage": {},
+        }},
+    ]), None, None)
+    check("Responses incomplete tool output is non-replayable and forced through safe reissue",
+          incomplete_result.finish_reason == "length"
+          and incomplete_result.tool_calls[0].id == "incomplete-call"
+          and incomplete_result.provider_items == [])
+
+    ordered_result = client._consume_responses(_ResponsesEvents([
+        {"type": "response.output_item.done", "output_index": 2,
+         "item": {"id": "item-two", "type": "reasoning", "summary": []}},
+        {"type": "response.output_item.done", "output_index": 0,
+         "item": {"id": "item-zero", "type": "message", "role": "assistant",
+                  "status": "completed", "content": []}},
+        {"type": "response.completed", "response": {
+            "id": "ordered-response", "status": "completed", "usage": {},
+        }},
+    ]), None, None)
+    check("Responses stateless replay follows output_index rather than completion timing",
+          [item.get("id") for item in ordered_result.provider_items]
+          == ["item-zero", "item-two"])
+
+    try:
+        client._consume_responses(_ResponsesEvents([
+            "{malformed-json",
+            {"type": "response.completed", "response": {
+                "id": "malformed-response", "status": "completed", "output": [], "usage": {},
+            }},
+        ]), None, None)
+        malformed_stream_failed = False
+    except LLMError:
+        malformed_stream_failed = True
+    import dgc.llm as _responses_llm
+    saved_responses_stream_bound = _responses_llm._MAX_RESPONSES_STREAM_BYTES
+    try:
+        _responses_llm._MAX_RESPONSES_STREAM_BYTES = 128
+        client._consume_responses(_ResponsesEvents([
+            {"type": "response.output_text.delta", "delta": "x" * 512},
+            {"type": "response.completed", "response": {
+                "id": "oversized-response", "status": "completed", "output": [], "usage": {},
+            }},
+        ]), None, None)
+        oversized_stream_failed = False
+    except LLMError:
+        oversized_stream_failed = True
+    finally:
+        _responses_llm._MAX_RESPONSES_STREAM_BYTES = saved_responses_stream_bound
+    saved_responses_item_bound = _responses_llm._MAX_RESPONSES_OUTPUT_ITEMS
+    try:
+        _responses_llm._MAX_RESPONSES_OUTPUT_ITEMS = 2
+        client._consume_responses(_ResponsesEvents([
+            {"type": "response.output_item.done", "output_index": index,
+             "item": {"id": f"too-many-{index}", "type": "reasoning", "summary": []}}
+            for index in range(3)
+        ] + [{"type": "response.completed", "response": {
+            "id": "too-many-response", "status": "completed", "usage": {},
+        }}]), None, None)
+        too_many_items_failed = False
+    except LLMError:
+        too_many_items_failed = True
+    finally:
+        _responses_llm._MAX_RESPONSES_OUTPUT_ITEMS = saved_responses_item_bound
+    class _OversizedResponsesJSON:
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": str(_responses_llm._MAX_RESPONSES_JSON_BYTES + 1)}
+        def __init__(self): self.closed = False
+        def json(self): raise AssertionError("oversized Responses JSON must not be decoded")
+        def close(self): self.closed = True
+    oversized_json_response = _OversizedResponsesJSON()
+    try:
+        client._consume_responses(oversized_json_response, None, None)
+        oversized_json_failed = False
+    except LLMError:
+        oversized_json_failed = True
+    try:
+        client._consume_responses_json({"status": "in_progress", "output": []}, None, None)
+        nonterminal_json_failed = False
+    except LLMError:
+        nonterminal_json_failed = True
+    try:
+        client._consume_responses_json({
+            "status": "completed", "output": [{
+                "id": "unsafe-call", "type": "function_call", "status": "completed",
+                "call_id": "unsafe-call", "name": "write_file",
+                "arguments": '{"path":"unsafe.py"',
+            }],
+        }, None, None)
+        unfinished_json_call_failed = False
+    except LLMError:
+        unfinished_json_call_failed = True
+    incomplete_json = client._consume_responses_json({
+        "id": "incomplete-json", "status": "incomplete", "output": [incomplete_call],
+        "incomplete_details": {"reason": "max_output_tokens"}, "usage": {},
+    }, None, None)
+    check("Responses malformed/oversized SSE and nonterminal JSON fail closed",
+          malformed_stream_failed and oversized_stream_failed
+          and too_many_items_failed
+          and oversized_json_failed and oversized_json_response.closed
+          and nonterminal_json_failed and unfinished_json_call_failed
+          and incomplete_json.finish_reason == "length"
+          and incomplete_json.provider_items == [])
 
     class _JSONResp:
         status_code = 200
@@ -12347,6 +12518,23 @@ def test_responses_adapter():
           captured[0].get("instructions") == captured[1].get("instructions") == "same instructions"
           and captured[0].get("prompt_cache_key") == captured[1].get("prompt_cache_key")
           and len(captured[0].get("prompt_cache_key", "")) <= 64)
+
+    incomplete_state_response = _JSONResp("incomplete-state")
+    incomplete_state_response.json = lambda: {
+        "id": "incomplete-state", "status": "incomplete", "output": [incomplete_call],
+        "incomplete_details": {"reason": "max_output_tokens"}, "usage": {},
+    }
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: incomplete_state_response
+        state._response_id = "prior-complete-state"
+        incomplete_state_result = state.chat(
+            first_messages, tools=None, reasoning_effort="low")
+    finally:
+        _llm.requests.post = original_post
+    check("incomplete Responses cannot survive as stateful continuation",
+          incomplete_state_result.finish_reason == "length"
+          and state._response_id == "" and state._response_cursor == 0
+          and state._response_prefix_hash == "")
 
     stateless_calls = []
 

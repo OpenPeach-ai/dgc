@@ -63,7 +63,7 @@ publish, release, public-version bump, model-endpoint benchmark, or release scri
 |---|---|---|
 | Audit the complete harness, coding loop, tools, CLI/TUI, editor, MCP/ACP, evaluation, and delivery paths | This roadmap records source-level findings, competitor gaps, ordered P0/P1 work, implementation notes, and release gates across every named surface | Locally complete |
 | Implement the P0/P1 frontier-hardening plan | Current source and regression corpus cover permissions/filesystem, transcript/session recovery, process ownership, concurrency, providers, editing/navigation, plan/goal/cadence, slash commands, skills/hooks/MCP, protocol clients, and editor parity | Locally complete |
-| Prove current Python/runtime behavior | `tests/run_tests.py`: **1024/1024**; `compileall` and source `git diff --check` pass | Proven locally |
+| Prove current Python/runtime behavior | `tests/run_tests.py`: **1030/1030**; `compileall` and source `git diff --check` pass | Proven locally |
 | Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies** | Proven for the deterministic edit primitive; model-level performance remains unproven |
 | Prove VS Code/Cursor implementation | Editor tests: **22/22**; TypeScript check and development bundle pass; the installed VS Code host smoke passes activation plus 13 commands, an exact correlated handshake barrier, live multi-root, SecretStorage, permission, and plan lifecycles | Automated local evidence complete; manual/cross-platform evidence remains |
 | Prove package consistency | `pip check`: no broken requirements | Proven locally |
@@ -148,7 +148,7 @@ until competitive, cross-platform/manual, and release-governance evidence clears
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 1024 / 1024 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 1030 / 1030 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -1135,8 +1135,12 @@ The provider-runtime slice is also implemented and contract-tested:
    precedence; production rejections are cached only for a bounded endpoint+model TTL and can be
    invalidated after a server upgrade.
 2. OpenAI Responses remains privacy-preserving by default (`store: false`), requests encrypted
-   reasoning content and replays exact output items across stateless tool loops. Provider-private
-   items are stripped on any Chat Completions fallback.
+   reasoning content and replays exact output items in declared `output_index` order across stateless
+   tool loops. JSON and SSE bodies are bounded; malformed/nonterminal streams, contradictory state,
+   and completed calls with unfinished arguments fail closed before the executor boundary. Incomplete
+   responses retain only display/reissue state, never opaque replay or a stateful cursor. Compatible
+   gateways that omit `output_item.done` remain usable only when an explicit terminal event carries a
+   complete object-shaped call. Provider-private items are stripped on any Chat Completions fallback.
 3. Stored response continuation is an explicit `provider_state: server` choice. It sends only new
    function outputs/user items with `previous_response_id`, repeats instructions on every request,
    validates the transcript prefix, and falls back once to stateless full replay if state is stale or
@@ -1187,8 +1191,8 @@ The provider-runtime slice is also implemented and contract-tested:
 10. Chat Completions, Responses, native Anthropic Messages, and native Ollama now share bounded
    retry-delay parsing (numeric or HTTP-date), cancellation-aware waits for both event and
    deadline-only cancellation views, and
-   deterministic response ownership. Error bodies and native Anthropic SSE are bounded before line
-   or whole-body materialization. Error, capability-negotiation, retry, transport-fallback,
+   deterministic response ownership. Error bodies, native Anthropic SSE, and Responses JSON/SSE are
+   bounded before line or whole-body materialization. Error, capability-negotiation, retry, transport-fallback,
    successful-consumption, and parser-failure paths release streamed responses before control moves
    on. Adversarial tests prove a five-second `Retry-After` is interrupted without a second request on
    all four transports.
