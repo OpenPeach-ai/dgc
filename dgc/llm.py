@@ -29,6 +29,8 @@ _MAX_MODEL_INFO_FIELDS = 4_096
 _MAX_MODEL_METADATA_CACHE_ENTRIES = 256
 _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
+_MAX_RESPONSES_COMPACTION_BYTES = 8 * 1024 * 1024
+_MAX_RESPONSES_COMPACTION_ITEMS = 4_096
 _MODEL_CAPABILITY_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _ANTHROPIC_VERSION = "2023-06-01"
 _MAX_ANTHROPIC_JSON_BYTES = 8 * 1024 * 1024
@@ -469,6 +471,7 @@ class ProviderCapabilities:
     reasoning: bool = True
     responses: bool = False
     stateful_responses: bool = False
+    response_compaction: bool = False
     native_chat: bool = False
     anthropic_messages: bool = False
     prompt_cache_key: bool = False
@@ -498,7 +501,8 @@ class ProviderAdapter:
 
 _PROVIDER_ADAPTERS = {
     "openai": ProviderAdapter("openai", ProviderCapabilities(
-        responses=True, stateful_responses=True, prompt_cache_key=True, encrypted_reasoning=True)),
+        responses=True, stateful_responses=True, response_compaction=True,
+        prompt_cache_key=True, encrypted_reasoning=True)),
     "ollama": ProviderAdapter("ollama", ProviderCapabilities(native_chat=True)),
     "vllm": ProviderAdapter("vllm", ProviderCapabilities()),
     "deepseek": ProviderAdapter("deepseek", ProviderCapabilities(reasoning=False)),
@@ -1170,12 +1174,13 @@ class LLMClient:
         the model's context window.
         """
         image_tokens = 0
+        compaction_tokens = 0
         if self.api_mode == "ollama":
             wire = self._ollama_messages(messages)
             wire, image_tokens = _scrub_ollama_images(wire)
             wire_tools = tools
         elif self.api_mode == "responses":
-            instructions, items = self._responses_input(messages)
+            instructions, items, compaction_tokens = self._responses_estimate_input(messages)
             wire = {"instructions": instructions, "input": items}
             wire, image_tokens = _scrub_multimodal_images(wire)
             wire_tools = self._responses_tools(tools)
@@ -1192,7 +1197,7 @@ class LLMClient:
         chars = len(json.dumps(wire, default=str))
         if wire_tools and self.tools_supported:
             chars += len(json.dumps(wire_tools, default=str))
-        return chars // 4 + image_tokens
+        return chars // 4 + image_tokens + compaction_tokens
 
     def _reset_response_state(self) -> None:
         self._response_id = ""
@@ -2517,6 +2522,11 @@ class LLMClient:
             if role == "system":
                 instructions.append(str(content or ""))
                 continue
+            if message.get("_responses_compaction_display") is True:
+                # The adjacent assistant item contains the provider's opaque compacted state. This
+                # mechanical summary exists only so resume/history UIs remain intelligible; replaying
+                # it as additional provider input would duplicate the compacted prefix.
+                continue
             if role == "tool":
                 items.append({"type": "function_call_output",
                               "call_id": str(message.get("tool_call_id") or ""),
@@ -2553,6 +2563,141 @@ class LLMClient:
                                   "name": str(fn.get("name") or ""),
                                   "arguments": str(fn.get("arguments") or "{}")})
         return "\n\n".join(instructions), items
+
+    @staticmethod
+    def _responses_estimate_input(messages: list[dict]) -> tuple[str, list[dict], int]:
+        """Return Responses wire input with opaque compaction blobs token-estimated safely.
+
+        A compaction item's encrypted bytes are transport state, not a useful character proxy for
+        its effective model-context footprint. When Agent persisted a sane provider-reported output
+        token count, remove only that item's ciphertext from the JSON estimate and add the token
+        count directly. Missing/tampered hints deliberately retain the full ciphertext estimate.
+        """
+        instructions, items = LLMClient._responses_input(messages)
+        hints: list[int] = []
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            provider_output = message.get("_responses_output")
+            if not isinstance(provider_output, list):
+                continue
+            hint = _bounded_model_tokens(message.get("_responses_compaction_tokens"))
+            valid_envelope = bool(
+                provider_output
+                and isinstance(provider_output[-1], dict)
+                and provider_output[-1].get("type") == "compaction"
+                and isinstance(provider_output[-1].get("encrypted_content"), str)
+                and bool(provider_output[-1].get("encrypted_content"))
+                and all(isinstance(item, dict)
+                        and item.get("type") == "message" and item.get("role") == "user"
+                        for item in provider_output[:-1]))
+            for item in provider_output:
+                if isinstance(item, dict) and item.get("type") == "compaction":
+                    hints.append(hint if valid_envelope else 0)
+
+        estimated: list[dict] = []
+        compaction_tokens = 0
+        hint_index = 0
+        for item in items:
+            if isinstance(item, dict) and item.get("type") == "compaction":
+                hint = hints[hint_index] if hint_index < len(hints) else 0
+                hint_index += 1
+                if hint:
+                    item = copy.deepcopy(item)
+                    item["encrypted_content"] = ""
+                    compaction_tokens += hint
+            estimated.append(item)
+        return instructions, estimated, compaction_tokens
+
+    def compact_responses(self, messages: list[dict], *, cancel=None,
+                          deadline: float | None = None) -> tuple[list[dict], dict] | None:
+        """Loss-aware native compaction for a group-aligned Responses transcript prefix.
+
+        The returned items are opaque continuation state. They are shape/size checked but never
+        interpreted or rewritten. Unsupported, transient, malformed, cancelled, or late responses
+        return ``None`` so the Agent can use its deterministic local compaction path instead.
+        """
+        if (self.api_mode != "responses"
+                or not self._feature_supported("response_compaction")
+                or not messages or (cancel is not None and cancel.is_set())):
+            return None
+        now = time.monotonic()
+        if deadline is not None and deadline <= now:
+            return None
+        instructions, items = self._responses_input(messages)
+        if not items:
+            return None
+        payload: dict = {"model": self.model, "input": items}
+        if instructions:
+            payload["instructions"] = instructions
+        if self.prompt_cache and self._feature_supported("prompt_cache_key"):
+            payload["prompt_cache_key"] = self._effective_prompt_cache_key(instructions)
+        remaining = self.read_timeout
+        if deadline is not None:
+            remaining = max(1, min(remaining, int(max(1.0, deadline - now))))
+        response = None
+        stop_watch = threading.Event()
+        try:
+            response = requests.post(
+                f"{self.base_url}/responses/compact", headers=self._headers(), json=payload,
+                stream=True, timeout=(min(15, remaining), remaining))
+            if cancel is not None:
+                def _watch(resp=response, ev=stop_watch, cx=cancel) -> None:
+                    while not ev.wait(0.15):
+                        if getattr(resp, "_dgc_closed", False):
+                            return
+                        if cx.is_set():
+                            sock = _raw_socket(resp)
+                            if sock is not None:
+                                try:
+                                    import socket as _socket
+                                    sock.shutdown(_socket.SHUT_RDWR)
+                                except Exception:
+                                    pass
+                            _close_response(resp)
+                            return
+                threading.Thread(target=_watch, daemon=True).start()
+            if response.status_code != 200:
+                status = response.status_code
+                _error_body(response, 400)
+                response = None  # _error_body owns and closes it
+                if status in (400, 404, 405, 422):
+                    self._mark_rejected("response_compaction")
+                return None
+            value = _bounded_json_response(
+                response, _MAX_RESPONSES_COMPACTION_BYTES, "Responses compaction",
+                deadline=deadline)
+            response = None  # bounded decoder owns and closes it
+        except (LLMError, requests.RequestException, ValueError, TypeError):
+            return None
+        finally:
+            stop_watch.set()
+            if response is not None:
+                _close_response(response)
+        if cancel is not None and cancel.is_set():
+            return None
+        if (deadline is not None and time.monotonic() >= deadline) or not isinstance(value, dict):
+            return None
+        output = value.get("output")
+        if (value.get("object") != "response.compaction" or not isinstance(output, list)
+                or not 1 <= len(output) <= _MAX_RESPONSES_COMPACTION_ITEMS
+                or not all(isinstance(item, dict) for item in output)):
+            return None
+        try:
+            compacted = copy.deepcopy(output)
+        except Exception:
+            return None
+        # The documented response is zero or more retained user messages followed by exactly one
+        # opaque compaction item. Validate only that public envelope and never interpret the blob.
+        opaque = compacted[-1]
+        if (opaque.get("type") != "compaction"
+                or not isinstance(opaque.get("encrypted_content"), str)
+                or not opaque["encrypted_content"]
+                or any(item.get("type") != "message" or item.get("role") != "user"
+                       for item in compacted[:-1])):
+            return None
+        self._reset_response_state()
+        return compacted, (value.get("usage") if isinstance(value.get("usage"), dict) else {})
 
     @staticmethod
     def _responses_tools(tools: list[dict] | None) -> list[dict]:

@@ -5,6 +5,7 @@ Run:  .venv/bin/python tests/run_tests.py
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import stat
@@ -4538,7 +4539,8 @@ def test_context_prune():
     # Model-assisted compaction is an optimization, never a single point of context loss. Its
     # prompt/output/time are bounded and a deterministic head+tail brief survives any model failure.
     from dgc.config import Config as _CompactConfig
-    from dgc.llm import ChatResult as _CompactResult, LLMError as _CompactError
+    from dgc.llm import (ChatResult as _CompactResult, LLMClient as _NativeCompactClient,
+                         LLMError as _CompactError)
     import time as _compact_time
     class _CompactUI:
         def __init__(self): self.infos = []
@@ -4609,6 +4611,101 @@ def test_context_prune():
           and hasattr(compact_kwargs.get("cancel"), "deadline")
           and bounded_agent.timing_totals["by_request_reason"] == {"compaction": 1},
           detail=repr((aux_options, len(compact_prompt[0]["content"]), compact_kwargs)))
+
+    # An official Responses endpoint compacts only the old group-aligned prefix. DGC keeps a
+    # mechanical display brief locally, replays the opaque item exactly once, and never spends the
+    # auxiliary summary request when native compaction succeeds. The opaque item and its bounded
+    # token hint must also survive the actual session save/resume boundary unchanged.
+    from dgc import sessions as _native_sessions
+    native_ui = _CompactUI()
+    native_root = Path(tempfile.mkdtemp())
+    old_sessions_dir = _native_sessions.SESSIONS_DIR
+    _native_sessions.SESSIONS_DIR = Path(tempfile.mkdtemp()) / "sessions"
+    try:
+        native_agent = Agent(_CompactConfig(native_root), native_ui)
+        native_agent.session_file = _native_sessions.new_path(native_root)
+        native_agent.messages = [dict(message) for message in history]
+        native_client = _NativeCompactClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-agent-compact", api_mode="responses")
+        native_prefixes = []
+        native_ciphertext = "opaque-native-" + ("x" * 100_000)
+        native_items = [
+            {"id": "native-old", "type": "message", "role": "user", "status": "completed",
+             "content": [{"type": "input_text", "text": "old request"}]},
+            {"id": "native-cmp", "type": "compaction",
+             "encrypted_content": native_ciphertext},
+        ]
+
+        def _native_compact(messages, **_kwargs):
+            native_prefixes.append(messages)
+            return native_items, {"input_tokens": 20, "output_tokens": 5}
+
+        native_client.compact_responses = _native_compact
+        native_agent.client = native_client
+        native_agent._aux_client = lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("native compaction must not allocate the auxiliary summarizer"))
+        native_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() + 5)
+        native_instructions, native_wire = native_client._responses_input(native_agent.messages)
+        native_display = str(native_agent.messages[1].get("content", ""))
+        estimated_items = copy.deepcopy(native_wire)
+        estimated_items[1]["encrypted_content"] = ""
+        native_estimate = native_client.estimate_input_tokens(native_agent.messages, [])
+        expected_estimate = len(json.dumps({
+            "instructions": native_instructions, "input": estimated_items,
+        })) // 4 + 5
+        native_record = _native_sessions.load_record(native_agent.session_file, native_root)
+        resumed_native = Agent(_CompactConfig(native_root), _CompactUI())
+        resumed_native.load_session(native_agent.session_file)
+        _, resumed_native_wire = native_client._responses_input(resumed_native.messages)
+    finally:
+        _native_sessions.SESSIONS_DIR = old_sessions_dir
+    check("provider-native compaction preserves a readable resume brief and exact recent suffix",
+          len(native_prefixes) == 1
+          and native_prefixes[0][0].get("role") == "system"
+          and [message.get("content") for message in native_agent.messages[-2:]] ==
+              ["RECENT-USER-CONTEXT", "RECENT-ASSISTANT-CONTEXT"]
+          and native_agent.messages[2].get("_responses_output") == native_items
+          and native_agent.messages[2].get("_responses_compaction_tokens") == 5
+          and native_agent.messages[1].get("_responses_compaction_display") is True
+          and "ORIGINAL-COMPACTION-GOAL" in native_display
+          and "LOCAL DISPLAY SUMMARY" not in json.dumps(native_wire)
+          and sum(item.get("type") == "compaction" for item in native_wire) == 1
+          and native_estimate == expected_estimate
+          and native_record["messages"][2].get("_responses_output") == native_items
+          and native_record["messages"][2].get("_responses_compaction_tokens") == 5
+          and resumed_native_wire[1].get("encrypted_content") == native_ciphertext
+          and sum(item.get("type") == "compaction" for item in resumed_native_wire) == 1
+          and native_agent.timing_totals["by_request_reason"] == {"compaction": 1}
+          and "context compacted (provider-native)" in native_ui.infos
+          and not _tool_transcript_errors(native_agent.messages),
+          detail=repr((native_agent.messages, native_wire, native_ui.infos)))
+
+    unsafe_config = _CompactConfig(Path(tempfile.mkdtemp()))
+    unsafe_secret = "sk-proj-nativeCompactionCredential123456"
+    unsafe_config.data["api_key"] = unsafe_secret
+    unsafe_ui = _CompactUI()
+    unsafe_agent = Agent(unsafe_config, unsafe_ui)
+    unsafe_agent.messages = [dict(message) for message in history]
+    unsafe_client = _NativeCompactClient(
+        "https://api.openai.com/v1", unsafe_secret, "gpt-5.4-unsafe-compact",
+        api_mode="responses")
+    unsafe_client.compact_responses = lambda *_args, **_kwargs: ([
+        {"id": "unsafe-old", "type": "message", "role": "user",
+         "content": [{"type": "input_text", "text": "old request"}]},
+        {"id": "unsafe-cmp", "type": "compaction", "encrypted_content": unsafe_secret},
+    ], {"input_tokens": 10, "output_tokens": 4})
+    unsafe_agent.client = unsafe_client
+    unsafe_agent._aux_client = lambda **_kwargs: _FailingCompactor()
+    unsafe_agent.maybe_compact(force=True, deadline=_compact_time.monotonic() + 5)
+    check("provider-native compaction containing a configured credential fails to local state",
+          unsafe_secret not in json.dumps(unsafe_agent.messages)
+          and not any("_responses_output" in message for message in unsafe_agent.messages)
+          and unsafe_agent.messages[1].get("_responses_compaction_display") is None
+          and unsafe_agent.timing_totals["by_request_reason"] == {"compaction": 1}
+          and any("provider-native compaction was unusable" in message
+                  for message in unsafe_ui.infos)
+          and "context compacted (mechanical fallback)" in unsafe_ui.infos,
+          detail=repr((unsafe_agent.messages, unsafe_ui.infos)))
 
     bounded_agent.messages.extend([
         {"role": "user", "content": "new work one"},
@@ -10530,9 +10627,11 @@ def test_provider_capabilities():
     from dgc.llm import LLMClient, normalize_usage, provider_adapter
 
     openai = provider_adapter("https://api.openai.com/v1")
-    check("OpenAI profile advertises Responses state and cache routing",
+    check("OpenAI profile advertises Responses state, compaction, and cache routing",
           openai.family == "openai" and openai.capabilities.responses
-          and openai.capabilities.stateful_responses and openai.capabilities.prompt_cache_key)
+          and openai.capabilities.stateful_responses
+          and openai.capabilities.response_compaction
+          and openai.capabilities.prompt_cache_key)
     anthropic = provider_adapter("https://api.anthropic.com/v1")
     check("Anthropic profile and connection preset select the native Messages contract",
           anthropic.capabilities.anthropic_messages and not anthropic.capabilities.sampling
@@ -11983,6 +12082,55 @@ def test_responses_adapter():
           and sum(item.get("type") == "function_call" for item in replay) == 1
           and replay[-1].get("type") == "function_call_output")
 
+    compacted_items = [
+        {"id": "msg-old", "type": "message", "status": "completed", "role": "user",
+         "content": [{"type": "input_text", "text": "old request"}]},
+        {"id": "cmp-1", "type": "compaction", "encrypted_content": "opaque-compaction"},
+    ]
+    _, compacted_replay = client._responses_input([
+        {"role": "system", "content": "be precise"},
+        {"role": "user", "content": "LOCAL DISPLAY SUMMARY",
+         "_responses_compaction_display": True},
+        {"role": "assistant", "content": "local acknowledgement",
+         "_responses_output": compacted_items},
+        {"role": "user", "content": "recent request"},
+    ])
+    check("Responses continuation replays opaque compaction without its local display summary",
+          compacted_replay[:2] == compacted_items
+          and compacted_replay[-1] == {"role": "user", "content": "recent request"}
+          and "LOCAL DISPLAY SUMMARY" not in json.dumps(compacted_replay))
+
+    large_compaction_items = copy.deepcopy(compacted_items)
+    large_compaction_items[-1]["encrypted_content"] = "opaque-" + ("z" * 100_000)
+    estimated_messages = [
+        {"role": "system", "content": "be precise"},
+        {"role": "user", "content": "LOCAL DISPLAY SUMMARY",
+         "_responses_compaction_display": True},
+        {"role": "assistant", "content": "local acknowledgement",
+         "_responses_output": large_compaction_items,
+         "_responses_compaction_tokens": 73},
+        {"role": "user", "content": "recent request"},
+    ]
+    _, exact_compaction_wire = client._responses_input(estimated_messages)
+    estimated_compaction_wire = copy.deepcopy(exact_compaction_wire)
+    estimated_compaction_wire[1]["encrypted_content"] = ""
+    expected_compaction_estimate = len(json.dumps({
+        "instructions": "be precise", "input": estimated_compaction_wire,
+    })) // 4 + 73
+    hinted_compaction_estimate = client.estimate_input_tokens(estimated_messages, [])
+    unhinted_compaction_estimate = client.estimate_input_tokens([
+        {key: value for key, value in message.items()
+         if key != "_responses_compaction_tokens"}
+        for message in estimated_messages
+    ], [])
+    check("Responses context estimation counts opaque compaction by bounded usage, not ciphertext",
+          exact_compaction_wire[1]["encrypted_content"] ==
+              large_compaction_items[1]["encrypted_content"]
+          and hinted_compaction_estimate == expected_compaction_estimate
+          and unhinted_compaction_estimate > hinted_compaction_estimate + 20_000,
+          detail=repr((hinted_compaction_estimate, expected_compaction_estimate,
+                       unhinted_compaction_estimate)))
+
     class _Resp:
         headers = {"Content-Type": "text/event-stream"}
         encoding = ""
@@ -12018,14 +12166,156 @@ def test_responses_adapter():
 
         def __init__(self, response_id):
             self.response_id = response_id
+            self.closed = False
 
         def json(self):
             return {"id": self.response_id, "status": "completed", "output": [],
                     "usage": {"input_tokens": 5, "output_tokens": 2}}
 
+        def close(self):
+            self.closed = True
+
     import dgc.llm as _llm
     original_post = _llm.requests.post
     captured = []
+
+    compact_calls = []
+    compact_response = _JSONResp("compact-id")
+    compact_response.json = lambda: {
+        "id": "compact-id", "object": "response.compaction", "output": compacted_items,
+        "usage": {"input_tokens": 41, "output_tokens": 7,
+                  "output_tokens_details": {"reasoning_tokens": 3}},
+    }
+
+    def _compact_post(url, **kwargs):
+        compact_calls.append((url, kwargs))
+        return compact_response
+
+    try:
+        _llm.requests.post = _compact_post
+        compact_client = LLMClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-native-compact",
+            api_mode="responses", prompt_cache=True)
+        compact_client._response_id = "stale-server-response"
+        compact_result = compact_client.compact_responses([
+            {"role": "system", "content": "stable instructions"},
+            {"role": "user", "content": "old request"},
+            {"role": "assistant", "content": "old answer"},
+        ], deadline=_llm.time.monotonic() + 5)
+    finally:
+        _llm.requests.post = original_post
+    compact_url, compact_options = compact_calls[0]
+    check("Responses native compaction is bounded, cache-routed, opaque, and resets stale state",
+          compact_result == (compacted_items, {
+              "input_tokens": 41, "output_tokens": 7,
+              "output_tokens_details": {"reasoning_tokens": 3}})
+          and compact_url == "https://api.openai.com/v1/responses/compact"
+          and compact_options.get("stream") is True
+          and compact_options["json"]["model"] == "gpt-5.4-native-compact"
+          and compact_options["json"]["instructions"] == "stable instructions"
+          and compact_options["json"]["input"][-1] == {
+              "role": "assistant", "content": "old answer"}
+          and len(compact_options["json"].get("prompt_cache_key", "")) <= 64
+          and compact_response.closed is True
+          and compact_client._response_id == "",
+          detail=repr((compact_result, compact_calls)))
+
+    class _NoCompact(_JSONResp):
+        status_code = 404
+        text = "not found"
+
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: _NoCompact("missing")
+        unsupported_compact = LLMClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-no-compact", api_mode="responses")
+        unsupported_result = unsupported_compact.compact_responses([
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old"},
+        ], deadline=_llm.time.monotonic() + 5)
+    finally:
+        _llm.requests.post = original_post
+    check("unsupported Responses compaction is capability-cached for local fallback",
+          unsupported_result is None
+          and unsupported_compact.capability_snapshot()["response_compaction"] is False)
+
+    malformed_response = _JSONResp("malformed")
+    malformed_response.json = lambda: {
+        "object": "response.compaction",
+        "output": [compacted_items[-1], compacted_items[0]],
+        "usage": {"output_tokens": 7},
+    }
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: malformed_response
+        malformed_client = LLMClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-malformed-compact",
+            api_mode="responses")
+        malformed_client._response_id = "preserve-on-fallback"
+        malformed_result = malformed_client.compact_responses([
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old"},
+        ], deadline=_llm.time.monotonic() + 5)
+    finally:
+        _llm.requests.post = original_post
+
+    oversized_response = _JSONResp("oversized")
+    oversized_response.headers = {
+        "Content-Type": "application/json",
+        "Content-Length": str(_llm._MAX_RESPONSES_COMPACTION_BYTES + 1),
+    }
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: oversized_response
+        oversized_client = LLMClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-oversized-compact",
+            api_mode="responses")
+        oversized_result = oversized_client.compact_responses([
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old"},
+        ], deadline=_llm.time.monotonic() + 5)
+    finally:
+        _llm.requests.post = original_post
+
+    class _BlockingCompact(_JSONResp):
+        headers = {"Content-Type": "application/json"}
+        def __init__(self):
+            super().__init__("blocked")
+            self.released = threading.Event()
+        def iter_content(self, chunk_size=65_536):
+            while not self.released.wait(0.01):
+                pass
+            if False:
+                yield b""
+        def close(self):
+            super().close()
+            self.released.set()
+
+    blocking_response = _BlockingCompact()
+    compact_cancel = threading.Event()
+    cancel_timer = threading.Timer(0.02, compact_cancel.set)
+    try:
+        _llm.requests.post = lambda *_args, **_kwargs: blocking_response
+        cancel_client = LLMClient(
+            "https://api.openai.com/v1", "k", "gpt-5.4-cancel-compact",
+            api_mode="responses")
+        cancel_timer.start()
+        cancel_started = _llm.time.monotonic()
+        cancelled_result = cancel_client.compact_responses([
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old"},
+        ], cancel=compact_cancel, deadline=_llm.time.monotonic() + 5)
+        cancel_elapsed = _llm.time.monotonic() - cancel_started
+    finally:
+        cancel_timer.cancel()
+        _llm.requests.post = original_post
+    check("Responses compaction rejects malformed/oversized output and cancels blocked reads",
+          malformed_result is None and malformed_response.closed
+          and malformed_client._response_id == "preserve-on-fallback"
+          and malformed_client.capability_snapshot()["response_compaction"] is True
+          and oversized_result is None and oversized_response.closed
+          and oversized_client.capability_snapshot()["response_compaction"] is True
+          and cancelled_result is None and blocking_response.closed
+          and compact_cancel.is_set() and cancel_elapsed < 2
+          and cancel_client.capability_snapshot()["response_compaction"] is True,
+          detail=repr((malformed_result, oversized_result, cancelled_result, cancel_elapsed)))
 
     def _state_post(_url, **kwargs):
         captured.append(kwargs["json"])

@@ -3868,6 +3868,39 @@ class Agent:
             else now + _COMPACT_TIMEOUT_S
         summary = ""
         used_model = False
+        # Official Responses endpoints can loss-aware compact the old, group-aligned prefix into
+        # opaque continuation state. Keep the deterministic local brief for human resume/history
+        # views, but do not send that display-only wrapper back alongside the compacted provider
+        # state. Any unsupported/malformed/late result falls through to the existing local path.
+        native_compaction = None
+        if (isinstance(self.client, LLMClient)
+                and not self.cancelled.is_set() and compact_deadline - now >= 1):
+            native_compaction = self.client.compact_responses(
+                self.messages[:split], cancel=_DeadlineCancel(self.cancelled, compact_deadline),
+                deadline=compact_deadline)
+        if native_compaction is not None:
+            provider_items, usage = native_compaction
+            self._record_usage(usage, "compaction")
+            if provider_continuation_has_secret(provider_items, self._secret_values()):
+                self.ui.info(
+                    "provider-native compaction was unusable; continuing with the local fallback")
+            else:
+                compacted_assistant = {
+                    "role": "assistant", "content": _COMPACT_ACK,
+                    "_responses_output": provider_items,
+                }
+                output_tokens = normalize_usage(usage)["output_tokens"]
+                if 0 < output_tokens <= 10_000_000:
+                    compacted_assistant["_responses_compaction_tokens"] = output_tokens
+                self.messages = (
+                    [self.messages[0],
+                     {"role": "user", "content": f"{_COMPACT_PREFIX}\n{fallback}",
+                      "_responses_compaction_display": True},
+                     compacted_assistant]
+                    + self.messages[split:])
+                self.messages, _ = _repair_tool_transcript(self.messages)
+                self.ui.info("context compacted (provider-native)")
+                return
         if not self.cancelled.is_set() and compact_deadline - now >= 1:
             compact_cancel = _DeadlineCancel(self.cancelled, compact_deadline)
             read_timeout = max(1, min(_COMPACT_TIMEOUT_S, int(compact_deadline - now)))
