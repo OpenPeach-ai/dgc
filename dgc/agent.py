@@ -44,7 +44,8 @@ _VERIFY_INFO_FLAGS = {
     "--fixtures-per-test", "--markers", "--trace-config", "--setup-plan", "--showconfig",
     "--listenvs", "--list-tests", "--listtests",
 }
-_MAX_CONTINUE = 3       # length-truncation auto-continues per turn
+_MAX_CONTINUE = 3       # bounded output-limit/transport-interruption recovery per turn
+_INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
@@ -2508,7 +2509,7 @@ class Agent:
                 return True
             # Some local models emit valid tool calls but no user-facing text. Preserve genuine model
             # commentary; otherwise add a deterministic, non-speculative preamble BEFORE tool cards.
-            if (result.tool_calls and result.finish_reason != "length"
+            if (result.tool_calls and result.finish_reason not in _INCOMPLETE_FINISH_REASONS
                     and not (result.content or "").strip()):
                 result.content = _tool_batch_preamble(
                     result.tool_calls, did_tools=did_tools, edited_before=edited_total > 0)
@@ -2574,21 +2575,30 @@ class Agent:
                         "completion withheld — deferred response exceeded the 512,000-character limit")
                     return self._fail_turn(
                         "stopped — the response awaiting verification exceeded the bounded display limit")
-                if result.finish_reason == "length":
+                if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
                     if continues < _MAX_CONTINUE:
-                        continues += 1          # reply cut off at the token limit — continue it
-                        self.messages.append({"role": "user", "content":
+                        continues += 1
+                        interrupted = result.finish_reason == "incomplete"
+                        self.messages.append({"role": "user", "content": (
+                            "Your previous response was interrupted before its terminal provider "
+                            "event. Continue exactly where you left off — do not repeat what you "
+                            "already wrote."
+                            if interrupted else
                             "Your previous response was cut off at the length limit. Continue exactly "
-                            "where you left off — do not repeat what you already wrote."})
+                            "where you left off — do not repeat what you already wrote.")})
                         next_request_reason = "output_continue"
                         continue
                     if defer_completion:
                         withhold_final(
-                            "[Completion withheld by DGC: the model repeatedly hit its output limit.]",
+                            ("[Completion withheld by DGC: the provider stream repeatedly ended "
+                             "before completion.]" if result.finish_reason == "incomplete" else
+                             "[Completion withheld by DGC: the model repeatedly hit its output limit.]"),
                             "completion withheld — the model never produced a complete response")
                     return self._fail_turn(
-                        "stopped — the model repeatedly hit the output-token limit before finishing; "
-                        "raise max_tokens or ask for a smaller response")
+                        ("stopped — the provider stream repeatedly ended before a terminal event"
+                         if result.finish_reason == "incomplete" else
+                         "stopped — the model repeatedly hit the output-token limit before finishing; "
+                         "raise max_tokens or ask for a smaller response"))
                 pending = [t for t in self.ctx.todos if t.get("status") != "done"]
                 if pending and todo_gate < _MAX_TODO_GATE:     # TodoGate: don't stop mid-plan
                     todo_gate += 1
@@ -2689,21 +2699,31 @@ class Agent:
                     publish_final()
                 return True
 
-            if result.finish_reason == "length" and result.tool_calls:
-                # the message hit the OUTPUT-token cap while emitting tool calls → their arguments may be
-                # silently truncated (a partial write_file/edit_file corrupts a file, or dies as opaque
-                # JSON). NEVER run them — including the special-cased tools that skip the JSON-parse net.
-                if continues >= _MAX_CONTINUE:      # kept hitting the cap → stop rather than run garbage
+            if result.finish_reason in _INCOMPLETE_FINISH_REASONS and result.tool_calls:
+                # The generation ended at its output cap or before a terminal provider event while
+                # emitting calls. Arguments may be partial; never run them, including special tools
+                # that bypass the ordinary JSON-parse net.
+                if continues >= _MAX_CONTINUE:
                     return self._fail_turn(
-                        "stopped — the model keeps hitting the output-token limit mid tool call; "
-                        "raise max_tokens or ask for a smaller change")
+                        ("stopped — the provider stream repeatedly ended before terminal tool-call "
+                         "completion" if result.finish_reason == "incomplete" else
+                         "stopped — the model keeps hitting the output-token limit mid tool call; "
+                         "raise max_tokens or ask for a smaller change"))
                 # answer each open call so the transcript stays valid + ask for a complete re-issue
                 # (a large file → one full write_file).
                 continues += 1
-                self.ui.info("↳ response truncated at the token limit — asked the model to re-issue")
-                reissue = ("error: your response was cut off at the output-token limit, so this tool "
-                           "call's arguments are incomplete and were NOT run. Re-issue it with complete "
-                           "arguments — for a large file, write the whole thing in one write_file call.")
+                interrupted = result.finish_reason == "incomplete"
+                self.ui.info(
+                    "↳ provider stream ended before completion — asked the model to re-issue"
+                    if interrupted else
+                    "↳ response truncated at the token limit — asked the model to re-issue")
+                reissue = (
+                    "error: the provider stream ended before its terminal event, so this tool call "
+                    "may be incomplete and was NOT run. Re-issue it with complete arguments."
+                    if interrupted else
+                    "error: your response was cut off at the output-token limit, so this tool call's "
+                    "arguments are incomplete and were NOT run. Re-issue it with complete arguments "
+                    "— for a large file, write the whole thing in one write_file call.")
                 if native:
                     for call in result.tool_calls:      # every tool_call needs a matching result
                         self.messages.append({"role": "tool", "tool_call_id": call.id, "content": reissue})

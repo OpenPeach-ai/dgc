@@ -233,6 +233,20 @@ def _close_response(response) -> None:
         pass
 
 
+def _is_transport_interruption(exc: BaseException) -> bool:
+    """True only for socket/HTTP read failures that may safely enter bounded reissue."""
+    # RequestException is intentionally too broad here: requests.JSONDecodeError and several
+    # caller/protocol failures inherit from it. Only failures meaning response bytes may have
+    # stopped in transit belong on the recoverable, non-executable continuation path.
+    return isinstance(exc, (
+        ConnectionError, TimeoutError,
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.ChunkedEncodingError,
+        requests.exceptions.ContentDecodingError,
+    ))
+
+
 def _error_body(response, limit: int = 600) -> str:
     """Read a bounded error body and always release its streamed response."""
     try:
@@ -289,7 +303,10 @@ def _bounded_json_response(response, maximum: int, label: str,
             except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise LLMError(f"{label} returned malformed JSON") from exc
         # Lightweight injected/test responses may expose only json(). Bound their normalized shape.
-        value = response.json()
+        try:
+            value = response.json()
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+            raise LLMError(f"{label} returned malformed JSON") from exc
         check_deadline()
         try:
             encoded = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
@@ -300,6 +317,40 @@ def _bounded_json_response(response, maximum: int, label: str,
         return value
     finally:
         _close_response(response)
+
+
+def _bounded_json_lifecycle(response, maximum: int, label: str, cancel=None):
+    """Read one bounded JSON body and distinguish cancellation from transport interruption."""
+    stop_watch = threading.Event()
+    if cancel is not None:
+        def _watch(resp=response, ev=stop_watch, cx=cancel):
+            while not ev.wait(0.15):
+                if getattr(resp, "_dgc_closed", False):
+                    return
+                if cx.is_set():
+                    sock = _raw_socket(resp)
+                    if sock is not None:
+                        try:
+                            import socket as _socket
+                            sock.shutdown(_socket.SHUT_RDWR)
+                        except Exception:
+                            pass
+                    _close_response(resp)
+                    return
+        threading.Thread(target=_watch, daemon=True).start()
+    try:
+        value = _bounded_json_response(response, maximum, label)
+    except Exception as exc:
+        if cancel is not None and cancel.is_set():
+            return None, "cancelled"
+        if _is_transport_interruption(exc):
+            return None, "incomplete"
+        raise
+    finally:
+        stop_watch.set()
+    if cancel is not None and cancel.is_set():
+        return None, "cancelled"
+    return value, ""
 
 
 def _bounded_stream_lines(response, maximum: int, label: str):
@@ -1511,7 +1562,8 @@ class LLMClient:
     @staticmethod
     def _anthropic_result_from_blocks(blocks: dict[int, dict], result: ChatResult,
                                       on_text=None, on_thinking=None,
-                                      *, emit_complete: bool = False) -> ChatResult:
+                                      *, emit_complete: bool = False,
+                                      retain_provider_state: bool = True) -> ChatResult:
         provider_content: list[dict] = []
         for index in sorted(blocks):
             source = blocks[index]
@@ -1521,27 +1573,30 @@ class LLMClient:
                 block = {k: copy.deepcopy(v) for k, v in source.items()
                          if not str(k).startswith("_")}
                 block["type"], block["text"] = "text", text
-                provider_content.append(block)
+                if retain_provider_state:
+                    provider_content.append(block)
                 if emit_complete and text:
                     result.content += text
                     if on_text:
                         on_text(text)
             elif kind == "thinking":
                 thinking = str(source.get("thinking") or "")
-                if not source.get("signature"):
+                if retain_provider_state and not source.get("signature"):
                     raise LLMError("Anthropic thinking block omitted its continuation signature")
-                if len(str(source["signature"])) > 128_000:
+                if retain_provider_state and len(str(source["signature"])) > 128_000:
                     raise LLMError("Anthropic thinking signature exceeded its safety bound")
                 block = {"type": "thinking", "thinking": thinking}
-                block["signature"] = str(source["signature"])
-                provider_content.append(block)
+                if retain_provider_state:
+                    block["signature"] = str(source["signature"])
+                    provider_content.append(block)
                 if emit_complete and thinking:
                     result.thinking += thinking
                     if on_thinking:
                         on_thinking(thinking)
             elif kind == "redacted_thinking":
-                provider_content.append({k: copy.deepcopy(v) for k, v in source.items()
-                                         if not str(k).startswith("_")})
+                if retain_provider_state:
+                    provider_content.append({k: copy.deepcopy(v) for k, v in source.items()
+                                             if not str(k).startswith("_")})
             elif kind in ("tool_use", "server_tool_use"):
                 raw = source.get("_input_json", "")
                 if (not raw and source.get("input") is not None
@@ -1569,8 +1624,9 @@ class LLMClient:
                     raise LLMError(f"Anthropic {kind} block emitted invalid input") from exc
                 if input_size > 512_000:
                     raise LLMError("Anthropic tool input exceeded its safety bound")
-                provider_content.append({"type": kind, "id": call_id,
-                                         "name": name, "input": arguments})
+                if retain_provider_state:
+                    provider_content.append({"type": kind, "id": call_id,
+                                             "name": name, "input": arguments})
                 if kind == "tool_use":
                     result.tool_calls.append(
                         ToolCall(id=call_id, name=name, arguments=arguments))
@@ -1578,11 +1634,13 @@ class LLMClient:
                 # Server-tool results, fallbacks, and newly added complete block types are
                 # provider-owned continuation state. Preserve them byte-for-byte at the JSON-value
                 # level, but never promote them into executable DGC tool calls.
-                provider_content.append({
-                    k: copy.deepcopy(v) for k, v in source.items()
-                    if not str(k).startswith("_")
-                })
-        result.provider_message = {"provider": "anthropic", "content": provider_content}
+                if retain_provider_state:
+                    provider_content.append({
+                        k: copy.deepcopy(v) for k, v in source.items()
+                        if not str(k).startswith("_")
+                    })
+        if retain_provider_state:
+            result.provider_message = {"provider": "anthropic", "content": provider_content}
         result.usage = LLMClient._anthropic_usage(result.usage)
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
@@ -1613,20 +1671,26 @@ class LLMClient:
                       if isinstance(block, dict)}
         except RecursionError as exc:
             raise LLMError("Anthropic Messages emitted excessively nested content") from exc
+        stop_reason = obj.get("stop_reason")
+        terminal = stop_reason not in (None, "")
         result = ChatResult(
             response_id=str(obj.get("id") or "")[:512],
-            finish_reason=self._anthropic_finish_reason(obj.get("stop_reason")),
+            finish_reason=(self._anthropic_finish_reason(stop_reason)
+                           if terminal else "incomplete"),
             usage=obj.get("usage") or {},
         )
         return self._anthropic_result_from_blocks(
-            blocks, result, on_text, on_thinking, emit_complete=True)
+            blocks, result, on_text, on_thinking, emit_complete=True,
+            retain_provider_state=terminal)
 
     def _consume_anthropic(self, response: requests.Response, on_text, on_thinking,
                            cancel=None, think_budget: int = 0) -> ChatResult:
         if ("application/json" in response.headers.get("Content-Type", "").lower()
                 and "text/event-stream" not in response.headers.get("Content-Type", "").lower()):
-            value = _bounded_json_response(
-                response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response")
+            value, finish = _bounded_json_lifecycle(
+                response, _MAX_ANTHROPIC_JSON_BYTES, "Anthropic Messages response", cancel)
+            if finish:
+                return ChatResult(finish_reason=finish)
             return self._consume_anthropic_json(value, on_text, on_thinking)
         result = ChatResult()
         blocks: dict[int, dict] = {}
@@ -1805,22 +1869,28 @@ class LLMClient:
                     result.finish_reason = "overthink"
                     response.close()
                     break
-        except Exception:
-            if cancel is None or not cancel.is_set():
+        except Exception as exc:
+            if cancel is not None and cancel.is_set():
+                result.finish_reason = "cancelled"
+            elif _is_transport_interruption(exc):
+                if not (message_started and message_stopped
+                        and not active_blocks and stop_reason_seen):
+                    result.finish_reason = "incomplete"
+            else:
                 raise
-            result.finish_reason = "cancelled"
         finally:
             stop_watch.set()
-        if (result.finish_reason not in ("cancelled", "overthink")
-                and (not message_started or not message_stopped or active_blocks
-                     or not stop_reason_seen)):
-            raise LLMError("Anthropic Messages stream ended without a complete message lifecycle")
         if result.finish_reason in ("cancelled", "overthink"):
             # Never turn a partially received tool block into an executable call. A watchdog retry
             # also must not retain an unsigned partial thinking block as continuation state.
             result.usage = self._anthropic_usage(result.usage)
             return result
-        return self._anthropic_result_from_blocks(blocks, result)
+        terminal = (message_started and message_stopped
+                    and not active_blocks and stop_reason_seen)
+        if not terminal:
+            result.finish_reason = "incomplete"
+        return self._anthropic_result_from_blocks(
+            blocks, result, retain_provider_state=terminal)
 
     def _anthropic_payload(self, messages, tools, reasoning_effort,
                            disabled: set[str], max_tokens_limit: int | None = None) -> dict:
@@ -2192,6 +2262,14 @@ class LLMClient:
                         except Exception:
                             pass
                         break
+        except Exception as exc:
+            if cancel is not None and cancel.is_set():
+                result.finish_reason = "cancelled"
+            elif _is_transport_interruption(exc):
+                if not terminal_done:
+                    result.finish_reason = "incomplete"
+            else:
+                raise
         finally:
             stop_watch.set()
 
@@ -2200,7 +2278,7 @@ class LLMClient:
             result.finish_reason = "cancelled"
         aborted = result.finish_reason in ("cancelled", "overthink")
         if not aborted and not terminal_done:
-            raise LLMError("Ollama response ended before the terminal done event")
+            result.finish_reason = "incomplete"
         for kind, chunk in filt.flush():
             if kind == "think":
                 result.thinking += chunk
@@ -2226,11 +2304,12 @@ class LLMClient:
             clean, text_calls = parse_text_tool_calls(result.content)
             if text_calls:
                 result.content, result.tool_calls = clean, text_calls
-        result.provider_message = {
-            "provider": "ollama", "content": native_content, "thinking": native_thinking,
-        }
-        if native_calls:
-            result.provider_message["tool_calls"] = native_calls
+        if terminal_done:
+            result.provider_message = {
+                "provider": "ollama", "content": native_content, "thinking": native_thinking,
+            }
+            if native_calls:
+                result.provider_message["tool_calls"] = native_calls
         return result
 
     def _chat_ollama(
@@ -2937,8 +3016,10 @@ class LLMClient:
     def _consume_responses(self, response: requests.Response, on_text, on_thinking,
                            cancel=None) -> ChatResult:
         if "application/json" in response.headers.get("Content-Type", ""):
-            value = _bounded_json_response(
-                response, _MAX_RESPONSES_JSON_BYTES, "Responses API response")
+            value, finish = _bounded_json_lifecycle(
+                response, _MAX_RESPONSES_JSON_BYTES, "Responses API response", cancel)
+            if finish:
+                return ChatResult(finish_reason=finish)
             return self._consume_responses_json(value, on_text, on_thinking)
         result = ChatResult()
         calls: dict[str, dict] = {}
@@ -3071,16 +3152,23 @@ class LLMClient:
                 elif typ in ("error", "response.failed"):
                     err = event.get("error") or (event.get("response") or {}).get("error") or {}
                     raise LLMError(str(err.get("message") or err or "Responses API stream failed"))
-        except Exception:
-            if cancel is None or not cancel.is_set():
+        except Exception as exc:
+            if cancel is not None and cancel.is_set():
+                result.finish_reason = "cancelled"
+            elif _is_transport_interruption(exc):
+                if not terminal:
+                    incomplete_reason = "stream_interrupted"
+            else:
                 raise
-            result.finish_reason = "cancelled"
         finally:
             stop_watch.set()
         if result.finish_reason == "cancelled":
             return result
         if not terminal:
-            raise LLMError("Responses API stream ended before a terminal response event")
+            # Clean EOF is recoverable but never replayable provider state. Normalize it through
+            # the same non-executable path as an explicit token-incomplete response.
+            terminal = "incomplete"
+            incomplete_reason = "stream_interrupted"
 
         completed_items = (terminal_output if terminal_output is not None else [
             row[2] for row in sorted(
@@ -3122,16 +3210,23 @@ class LLMClient:
             if invalid_call:
                 raise LLMError("Responses API completed with an unfinished function-call item")
         for slot in ordered_calls:
-            result.tool_calls.append(ToolCall(id=str(slot.get("call_id") or f"call_{len(result.tool_calls)}"),
-                                              name=str(slot.get("name") or ""),
-                                              arguments=_tool_arguments(slot.get("arguments"))))
+            name = str(slot.get("name") or "")
+            if not name:
+                # Nonterminal state is never replayed, and a nameless partial call cannot form a
+                # valid assistant/tool group for the fresh bounded continuation request.
+                continue
+            result.tool_calls.append(ToolCall(
+                id=str(slot.get("call_id") or f"call_{len(result.tool_calls)}"),
+                name=name, arguments=_tool_arguments(slot.get("arguments"))))
         # Incomplete provider state must never be replayed as though it were a completed response.
         # The Agent's existing length path records non-executable tool errors and requests one clean
         # re-issue; stateful continuation is reset by the caller.
         result.provider_items = completed_items if terminal == "completed" else []
         if terminal == "incomplete":
-            result.finish_reason = ("length" if result.tool_calls or "token" in incomplete_reason
-                                    else "max_turn_requests")
+            result.finish_reason = (
+                "incomplete" if incomplete_reason == "stream_interrupted" else
+                "length" if result.tool_calls or "token" in incomplete_reason else
+                "max_turn_requests")
         if result.tool_calls and result.finish_reason == "stop":
             result.finish_reason = "tool_calls"
         if not result.tool_calls:
@@ -3376,12 +3471,16 @@ class LLMClient:
                     except Exception:
                         pass
                     break
-        except Exception:
-            # Closing the socket mid-read (the watcher, on cancel) surfaces as several possible
-            # transport errors. Only a real cancellation may convert those into a clean stop.
-            if cancel is None or not cancel.is_set():
+        except Exception as exc:
+            # Socket errors caused by cancellation are terminal; other transport interruptions
+            # retain only non-executable partial state for the Agent's bounded recovery path.
+            if cancel is not None and cancel.is_set():
+                result.finish_reason = "cancelled"
+            elif _is_transport_interruption(exc):
+                if not saw_finish:
+                    result.finish_reason = "incomplete"
+            else:
                 raise
-            result.finish_reason = "cancelled"
         finally:
             stop_watch.set()
 
@@ -3391,12 +3490,18 @@ class LLMClient:
         # `[DONE]` is the canonical SSE terminator. Some local compatible gateways close the stream
         # after a non-null finish_reason instead; retain that safe, explicit-terminal variant.
         if not saw_done and not saw_finish:
-            raise LLMError("Chat Completions stream ended before a terminal event")
+            # A clean EOF is recoverable, but never terminal: the Agent's bounded incomplete path
+            # records non-executable call results or continues partial text on a fresh request.
+            result.finish_reason = "incomplete"
         emit(filt.flush())
 
         for idx in sorted(partial):
             slot = partial[idx]
-            if not slot["name"] and result.finish_reason != "length":
+            if not slot["name"]:
+                if result.finish_reason in ("length", "incomplete"):
+                    # A nameless unfinished call cannot form a valid assistant/tool transcript
+                    # group. Drop it and continue any partial prose on a fresh request.
+                    continue
                 raise LLMError("Chat Completions completed with an unfinished tool call")
             result.tool_calls.append(ToolCall(
                 id=slot["id"] or f"call_{idx}", name=slot["name"],
@@ -3411,7 +3516,8 @@ class LLMClient:
         if result.tool_calls:
             if result.finish_reason == "stop":
                 result.finish_reason = "tool_calls"
-            elif result.finish_reason not in ("tool_calls", "function_call", "length"):
+            elif result.finish_reason not in (
+                    "tool_calls", "function_call", "length", "incomplete"):
                 # Content filtering or an unknown stop cannot attest that call arguments finished.
                 result.finish_reason = "length"
         return result
@@ -3420,39 +3526,15 @@ class LLMClient:
                       cancel=None) -> ChatResult:
         """A non-streaming server (ignored stream:true) returns one JSON completion — parse it
         through the same think-splitter / lenient-args / text-fallback path as the SSE stream."""
-        stop_watch = threading.Event()
-        if cancel is not None:
-            def _watch(resp=r, ev=stop_watch, cx=cancel):
-                while not ev.wait(0.15):
-                    if getattr(resp, "_dgc_closed", False):
-                        return
-                    if cx.is_set():
-                        sock = _raw_socket(resp)
-                        if sock is not None:
-                            try:
-                                import socket as _socket
-                                sock.shutdown(_socket.SHUT_RDWR)
-                            except Exception:
-                                pass
-                        try:
-                            resp.close()
-                        except Exception:
-                            pass
-                        return
-            threading.Thread(target=_watch, daemon=True).start()
         try:
-            obj = _bounded_json_response(
-                r, _MAX_CHAT_JSON_BYTES, "Chat Completions response")
+            obj, finish = _bounded_json_lifecycle(
+                r, _MAX_CHAT_JSON_BYTES, "Chat Completions response", cancel)
         except Exception as exc:
-            if cancel is not None and cancel.is_set():
-                return ChatResult(finish_reason="cancelled")
             if isinstance(exc, (ValueError, RecursionError)) and not isinstance(exc, LLMError):
                 raise LLMError("Chat Completions response returned malformed JSON") from exc
             raise
-        finally:
-            stop_watch.set()
-        if cancel is not None and cancel.is_set():
-            return ChatResult(finish_reason="cancelled")
+        if finish:
+            return ChatResult(finish_reason=finish)
         if not isinstance(obj, dict):
             raise LLMError("Chat Completions emitted a non-object JSON response")
         choices = obj.get("choices")
@@ -3484,15 +3566,14 @@ class LLMClient:
             if raw_calls or not isinstance(legacy_call, dict):
                 raise LLMError("Chat Completions emitted a malformed legacy function call")
             raw_calls = [{"function": legacy_call}]
-        if raw_calls and not finish_reason:
-            raise LLMError("Chat Completions JSON ended without a tool-call finish reason")
-
         result = ChatResult()
         usage = obj.get("usage")
         if usage is not None and not isinstance(usage, dict):
             raise LLMError("Chat Completions emitted malformed usage")
         result.usage = normalize_usage(usage)
-        result.finish_reason = finish_reason or "stop"
+        # A whole, valid JSON body can still omit the required finish reason on a compatible
+        # gateway. Preserve its partial display/calls only for bounded non-executable reissue.
+        result.finish_reason = finish_reason or "incomplete"
         if reasoning:
             result.thinking += reasoning
             if on_thinking:
@@ -3514,7 +3595,11 @@ class LLMClient:
             if not isinstance(fn, dict):
                 raise LLMError("Chat Completions emitted a malformed function call")
             name = fn.get("name")
-            if not isinstance(name, str) or (not name and result.finish_reason != "length"):
+            if not isinstance(name, str):
+                raise LLMError("Chat Completions completed with an unfinished tool call")
+            if not name:
+                if result.finish_reason in ("length", "incomplete"):
+                    continue
                 raise LLMError("Chat Completions completed with an unfinished tool call")
             call_id = tc.get("id")
             if call_id is not None and not isinstance(call_id, str):
@@ -3529,6 +3614,7 @@ class LLMClient:
         if result.tool_calls:
             if result.finish_reason == "stop":
                 result.finish_reason = "tool_calls"
-            elif result.finish_reason not in ("tool_calls", "function_call", "length"):
+            elif result.finish_reason not in (
+                    "tool_calls", "function_call", "length", "incomplete"):
                 result.finish_reason = "length"
         return result

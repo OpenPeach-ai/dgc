@@ -2978,6 +2978,21 @@ def unit_tests(tmp: Path):
           and _length_turn.timing_totals["by_request_reason"] == {
               "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
 
+    class _IncompleteOnlyClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return _ChatResult(content=f"interrupted {self.calls}", finish_reason="incomplete")
+    _incomplete_turn = _Ag(_Cfg(tmp), _AgUI()); _incomplete_turn.client = _IncompleteOnlyClient()
+    _incomplete_outcome = _incomplete_turn.run_turn("recover bounded provider disconnects")
+    check("repeated clean stream EOF is bounded and never published as a complete final",
+          _incomplete_outcome is False
+          and _incomplete_turn.client.calls == _AGENT_MAX_CONTINUE + 1
+          and "terminal event" in _incomplete_turn._last_turn_error
+          and _incomplete_turn.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
+
     _truncated_tool_root = Path(tempfile.mkdtemp())
     _truncated_tool_cfg = _Cfg(_truncated_tool_root)
     _truncated_tool_cfg.data["mode"] = "auto"
@@ -3003,6 +3018,54 @@ def unit_tests(tmp: Path):
           and _truncated_tool_turn.client.calls == 2
           and _truncated_tool_turn.client.saw_rejection
           and not (_truncated_tool_root / "must-not-exist.py").exists())
+
+    _interrupted_tool_root = Path(tempfile.mkdtemp())
+    _interrupted_tool_cfg = _Cfg(_interrupted_tool_root)
+    _interrupted_tool_cfg.data["mode"] = "auto"
+    class _InterruptedToolClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0; self.saw_rejection = False
+        def chat(self, messages, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _ChatResult(
+                    finish_reason="incomplete",
+                    tool_calls=[_ToolCall("interrupted-write", "write_file", {
+                        "path": "must-not-exist.py", "content": "unsafe partial",
+                    })])
+            self.saw_rejection = any(
+                m.get("role") == "tool" and m.get("tool_call_id") == "interrupted-write"
+                and "was NOT run" in str(m.get("content") or "")
+                and "terminal event" in str(m.get("content") or "") for m in messages)
+            return _ChatResult(content="Recovered safely after the interrupted stream.")
+    _interrupted_tool_turn = _Ag(_interrupted_tool_cfg, _AgUI())
+    _interrupted_tool_turn.client = _InterruptedToolClient()
+    check("transport-interrupted tool calls reissue without crossing the executor boundary",
+          _interrupted_tool_turn.run_turn("recover without executing a partial tool call") is True
+          and _interrupted_tool_turn.client.calls == 2
+          and _interrupted_tool_turn.client.saw_rejection
+          and not (_interrupted_tool_root / "must-not-exist.py").exists())
+
+    _repeated_interrupted_root = Path(tempfile.mkdtemp())
+    _repeated_interrupted_cfg = _Cfg(_repeated_interrupted_root)
+    _repeated_interrupted_cfg.data["mode"] = "auto"
+    class _RepeatedInterruptedToolClient:
+        tools_supported = True
+        def __init__(self): self.calls = 0
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return _ChatResult(
+                finish_reason="incomplete",
+                tool_calls=[_ToolCall(f"partial-{self.calls}", "write_file", {
+                    "path": "must-not-exist.py", "content": "unsafe partial",
+                })])
+    _repeated_interrupted_turn = _Ag(_repeated_interrupted_cfg, _AgUI())
+    _repeated_interrupted_turn.client = _RepeatedInterruptedToolClient()
+    check("repeated transport-interrupted tool calls stop at the shared recovery bound",
+          _repeated_interrupted_turn.run_turn("keep recovering partial tool calls") is False
+          and _repeated_interrupted_turn.client.calls == _AGENT_MAX_CONTINUE + 1
+          and "terminal tool-call completion" in _repeated_interrupted_turn._last_turn_error
+          and not (_repeated_interrupted_root / "must-not-exist.py").exists())
 
     _agent_copy = __import__("copy")
     _paused_state = {"provider": "anthropic", "content": [
@@ -10848,7 +10911,7 @@ def test_provider_retry_lifecycle():
         parser = LLMClient(
             "https://api.openai.com/v1", "k", "close-parser-failure", api_mode="responses")
         parser.chat([{"role": "user", "content": "hello"}])
-    except ValueError:
+    except _llm.LLMError:
         parser_failed = True
     finally:
         _llm.requests.post = original_post
@@ -11006,12 +11069,39 @@ def test_compatible_tool_deltas():
                 "arguments": '{"path":"unsafe.py","content":"valid but unterminated"}',
             }}]}, "finish_reason": None}]})
     ])
-    try:
-        client._consume(truncated_tool, None, None)
-        truncated_failed = False
-    except _llm.LLMError:
-        truncated_failed = True
-    check("truncated Chat tool streams cannot become executable calls", truncated_failed)
+    truncated_result = client._consume(truncated_tool, None, None)
+    check("truncated Chat tool streams enter non-executable reissue state",
+          truncated_result.finish_reason == "incomplete"
+          and len(truncated_result.tool_calls) == 1
+          and truncated_result.tool_calls[0].id == "unsafe")
+
+    interrupted_text = client._consume(_RawChatStream([
+        'data: {"choices":[{"delta":{"content":"partial answer"},'
+        '"finish_reason":null}]}',
+    ]), None, None)
+    check("truncated Chat text enters bounded continuation state",
+          interrupted_text.content == "partial answer"
+          and interrupted_text.finish_reason == "incomplete")
+
+    class _DroppedChatStream(_RawChatStream):
+        def iter_lines(self, decode_unicode=True):
+            yield ('data: {"choices":[{"delta":{"content":"before drop"},'
+                   '"finish_reason":null}]}')
+            raise ConnectionResetError("connection reset")
+    dropped_chat = client._consume(_DroppedChatStream([]), None, None)
+    check("Chat transport resets retain partial text only for bounded continuation",
+          dropped_chat.content == "before drop"
+          and dropped_chat.finish_reason == "incomplete")
+
+    class _FinishedDroppedChat(_RawChatStream):
+        def iter_lines(self, decode_unicode=True):
+            yield ('data: {"choices":[{"delta":{"content":"finished"},'
+                   '"finish_reason":"stop"}]}')
+            raise ConnectionResetError("reset after finish")
+    finished_dropped_chat = client._consume(_FinishedDroppedChat([]), None, None)
+    check("Chat transport reset after finish_reason preserves terminal completion",
+          finished_dropped_chat.content == "finished"
+          and finished_dropped_chat.finish_reason == "stop")
 
     try:
         client._consume(_RawChatStream(["data: {not-json"]), None, None)
@@ -11119,6 +11209,21 @@ def test_compatible_tool_deltas():
     check("malformed Chat JSON fails closed and releases the response",
           malformed_json_failed and malformed_json.closed)
 
+    requests_malformed_json = _ChatJSON(error=_llm.requests.exceptions.JSONDecodeError(
+        "broken", "{", 1))
+    try:
+        client._consume(requests_malformed_json, None, None)
+        requests_malformed_failed = False
+    except _llm.LLMError:
+        requests_malformed_failed = True
+    check("requests JSON decode errors remain protocol failures, not recoverable disconnects",
+          requests_malformed_failed and requests_malformed_json.closed)
+
+    dropped_json = _ChatJSON(error=ConnectionResetError("connection reset"))
+    dropped_json_result = client._consume(dropped_json, None, None)
+    check("Chat JSON transport resets enter bounded continuation state",
+          dropped_json_result.finish_reason == "incomplete" and dropped_json.closed)
+
     class _StalledChatJSON(_ChatJSON):
         def __init__(self):
             super().__init__()
@@ -11147,12 +11252,19 @@ def test_compatible_tool_deltas():
         "id": "unsafe-json", "function": {
             "name": "write_file", "arguments": {"path": "unsafe.py", "content": "x"},
         }}]}}]})
-    try:
-        client._consume(missing_finish_json, None, None)
-        missing_finish_failed = False
-    except _llm.LLMError:
-        missing_finish_failed = True
-    check("Chat JSON tool calls require an explicit finish reason", missing_finish_failed)
+    missing_finish_result = client._consume(missing_finish_json, None, None)
+    check("Chat JSON without a finish reason enters non-executable reissue state",
+          missing_finish_result.finish_reason == "incomplete"
+          and missing_finish_result.tool_calls[0].id == "unsafe-json")
+
+    nameless_incomplete = client._consume(_RawChatStream([
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"partial",'
+        '"function":{"arguments":"{\\"path\\":\\"unsafe.py\\""}}]},'
+        '"finish_reason":null}]}',
+    ]), None, None)
+    check("nameless interrupted Chat calls do not create invalid native transcript groups",
+          nameless_incomplete.finish_reason == "incomplete"
+          and not nameless_incomplete.tool_calls)
 
     original_json_bound = _llm._MAX_CHAT_JSON_BYTES
     try:
@@ -11649,16 +11761,25 @@ def test_ollama_adapter():
             yield json.dumps({"message": {"role": "assistant", "tool_calls": [{
                 "function": {"name": "write_file", "arguments": {
                     "path": "must-not-run.txt", "content": "partial"}}}]}, "done": False})
+            raise ConnectionResetError("connection reset")
 
     call_sequence_before_truncation = native._native_call_seq
-    try:
-        native._consume_ollama(_TruncatedToolResponse(), None, None)
-        truncated_tool_error = ""
-    except _llm.LLMError as exc:
-        truncated_tool_error = str(exc)
-    check("native Ollama requires terminal done before exposing streamed tool calls",
-          "terminal done" in truncated_tool_error
-          and native._native_call_seq == call_sequence_before_truncation)
+    truncated_ollama = native._consume_ollama(_TruncatedToolResponse(), None, None)
+    check("native Ollama missing done enters non-executable reissue state",
+          truncated_ollama.finish_reason == "incomplete"
+          and len(truncated_ollama.tool_calls) == 1
+          and not truncated_ollama.provider_message
+          and native._native_call_seq == call_sequence_before_truncation + 1)
+
+    class _TerminalDropResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "content": "finished"},
+                              "done": True, "done_reason": "stop"})
+            raise ConnectionResetError("reset after done")
+    terminal_drop = native._consume_ollama(_TerminalDropResponse(), None, None)
+    check("native Ollama reset after done preserves terminal continuation state",
+          terminal_drop.content == "finished" and terminal_drop.finish_reason == "stop"
+          and terminal_drop.provider_message.get("provider") == "ollama")
 
     class _PostTerminalResponse(_NativeResponse):
         def iter_lines(self, decode_unicode=True):
@@ -11764,7 +11885,7 @@ def test_ollama_adapter():
         _llm._MAX_OLLAMA_TOOL_CALLS = saved_ollama_call_limit
     check("native Ollama bounds accumulated tool calls before constructing executable calls",
           "too many tool calls" in too_many_calls_error
-          and native._native_call_seq == call_sequence_before_truncation)
+          and native._native_call_seq == call_sequence_before_truncation + 1)
 
     class _CancelledPartialCall(_NativeResponse):
         def __init__(self, cancellation): self.cancellation = cancellation
@@ -11780,7 +11901,7 @@ def test_ollama_adapter():
     check("native Ollama cancellation discards partial native continuation state",
           cancelled_partial.finish_reason == "cancelled"
           and not cancelled_partial.tool_calls and not cancelled_partial.provider_message
-          and native._native_call_seq == call_sequence_before_truncation)
+          and native._native_call_seq == call_sequence_before_truncation + 1)
 
     class _ThinkRejected:
         status_code = 400
@@ -12074,6 +12195,16 @@ def test_anthropic_adapter():
           and result.provider_message["content"][0] == {
               "type": "thinking", "thinking": "checking ", "signature": "signed-value"})
 
+    class _AnthropicTerminalDrop(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            yield from super().iter_lines(decode_unicode=decode_unicode)
+            raise ConnectionResetError("reset after message_stop")
+    terminal_drop = client._consume_anthropic(_AnthropicTerminalDrop(), None, None)
+    check("Anthropic reset after message_stop preserves terminal signed state",
+          terminal_drop.finish_reason == "tool_calls"
+          and terminal_drop.tool_calls[0].id == "toolu_9"
+          and terminal_drop.provider_message.get("provider") == "anthropic")
+
     check("Anthropic stop reasons distinguish exact pause replay from truncation",
           client._anthropic_finish_reason("pause_turn") == "pause_turn"
           and client._anthropic_finish_reason("model_context_window_exceeded") == "length")
@@ -12233,6 +12364,23 @@ def test_anthropic_adapter():
                 {"type": "text", "text": "ok"}], "stop_reason": "end_turn",
                 "usage": {"input_tokens": 2, "output_tokens": 1}}
         def close(self): pass
+    class _DroppedAnthropicJSON(_AnthropicJSON):
+        def __init__(self): self.closed = False
+        def json(self): raise ConnectionResetError("connection reset")
+        def close(self): self.closed = True
+    dropped_anthropic_json = _DroppedAnthropicJSON()
+    dropped_anthropic_result = client._consume_anthropic(
+        dropped_anthropic_json, None, None)
+    partial_anthropic_json = client._consume_anthropic_json({
+        "id": "msg_partial", "type": "message",
+        "content": [{"type": "text", "text": "partial"}], "usage": {},
+    }, None, None)
+    check("Anthropic JSON interruption and missing stop reason retain no replay state",
+          dropped_anthropic_result.finish_reason == "incomplete"
+          and dropped_anthropic_json.closed
+          and partial_anthropic_json.finish_reason == "incomplete"
+          and partial_anthropic_json.content == "partial"
+          and not partial_anthropic_json.provider_message)
     negotiation = []
     negotiated = LLMClient(
         "https://api.anthropic.com/v1", "k", "claude-sonnet-4-6-negotiation")
@@ -12349,12 +12497,13 @@ def test_anthropic_adapter():
             yield "data: " + json.dumps({
                 "type": "content_block_delta", "index": 0,
                 "delta": {"type": "input_json_delta", "partial_json": "{}"}})
-    try:
-        client._consume_anthropic(_Truncated(), None, None)
-        truncated_failed = False
-    except _llm.LLMError:
-        truncated_failed = True
-    check("Anthropic truncated tool streams cannot become executable calls", truncated_failed)
+            raise ConnectionResetError("connection reset")
+    truncated_anthropic = client._consume_anthropic(_Truncated(), None, None)
+    check("Anthropic truncated tool streams enter non-executable reissue state",
+          truncated_anthropic.finish_reason == "incomplete"
+          and len(truncated_anthropic.tool_calls) == 1
+          and truncated_anthropic.tool_calls[0].id == "unsafe"
+          and not truncated_anthropic.provider_message)
 
     class _Models:
         status_code = 200
@@ -12555,12 +12704,30 @@ def test_responses_adapter():
           and result.tool_calls[0].arguments == {"path": "main.py"}
           and result.usage.get("input_tokens") == 12)
 
+    class _ResponsesTerminalDrop(_Resp):
+        def iter_lines(self, decode_unicode=True):
+            for line in super().iter_lines(decode_unicode=decode_unicode):
+                if line == "data: [DONE]":
+                    raise ConnectionResetError("reset after response.completed")
+                yield line
+    terminal_drop = client._consume_responses(_ResponsesTerminalDrop(), None, None)
+    check("Responses reset after response.completed preserves terminal replay state",
+          terminal_drop.finish_reason == "tool_calls"
+          and terminal_drop.response_id == "resp-1"
+          and bool(terminal_drop.provider_items))
+
     class _ResponsesEvents(_Resp):
         def __init__(self, events): self.events = events
         def iter_lines(self, decode_unicode=True):
             for event in self.events:
                 yield "data: " + (event if isinstance(event, str) else json.dumps(event))
             yield "data: [DONE]"
+
+    class _DroppedResponses(_ResponsesEvents):
+        def iter_lines(self, decode_unicode=True):
+            for event in self.events:
+                yield "data: " + (event if isinstance(event, str) else json.dumps(event))
+            raise ConnectionResetError("connection reset")
 
     partial_call_events = [
         {"type": "response.output_item.added", "output_index": 0,
@@ -12569,11 +12736,8 @@ def test_responses_adapter():
         {"type": "response.function_call_arguments.delta", "output_index": 0,
          "item_id": "partial-item", "delta": '{"path":"unsafe.py","content":"partial"}'},
     ]
-    try:
-        client._consume_responses(_ResponsesEvents(partial_call_events), None, None)
-        truncated_responses_failed = False
-    except LLMError:
-        truncated_responses_failed = True
+    truncated_responses = client._consume_responses(
+        _DroppedResponses(partial_call_events), None, None)
     try:
         client._consume_responses(_ResponsesEvents([
             partial_call_events[0],
@@ -12586,8 +12750,11 @@ def test_responses_adapter():
         unfinished_responses_failed = False
     except LLMError:
         unfinished_responses_failed = True
-    check("Responses truncated and unfinished streams cannot become executable tool calls",
-          truncated_responses_failed and unfinished_responses_failed)
+    check("Responses truncated streams reissue while contradictory completion fails closed",
+          truncated_responses.finish_reason == "incomplete"
+          and len(truncated_responses.tool_calls) == 1
+          and not truncated_responses.provider_items
+          and unfinished_responses_failed)
 
     incomplete_call = {
         "id": "incomplete-item", "type": "function_call", "status": "in_progress",
@@ -12672,6 +12839,18 @@ def test_responses_adapter():
         oversized_json_failed = False
     except LLMError:
         oversized_json_failed = True
+    class _DroppedResponsesJSON:
+        headers = {"Content-Type": "application/json"}
+        def __init__(self): self.closed = False
+        def json(self): raise ConnectionResetError("connection reset")
+        def close(self): self.closed = True
+    dropped_responses_json = _DroppedResponsesJSON()
+    dropped_responses_result = client._consume_responses(
+        dropped_responses_json, None, None)
+    check("Responses JSON transport resets enter stateless bounded continuation",
+          dropped_responses_result.finish_reason == "incomplete"
+          and not dropped_responses_result.provider_items
+          and dropped_responses_json.closed)
     try:
         client._consume_responses_json({"status": "in_progress", "output": []}, None, None)
         nonterminal_json_failed = False
