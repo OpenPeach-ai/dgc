@@ -35,7 +35,8 @@ npm run compile          # TypeScript + development bundle
 npm run test:host        # installed VS Code: activate, handshake, roots/secrets, permission + plan
 ```
 
-`test:host` never downloads or installs VS Code. Set `DGC_VSCODE_EXECUTABLE` to the editor's real
-Electron executable when it is not available at `/usr/share/code/code`.
+`test:host` never downloads or installs VS Code and opens only disposable test workspaces. Set
+`DGC_VSCODE_EXECUTABLE` to the editor's real Electron executable when it is not available at
+`/usr/share/code/code`.
 
 Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · PolyForm Noncommercial.

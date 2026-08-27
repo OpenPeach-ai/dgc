@@ -8,11 +8,11 @@ import { randomUUID } from "node:crypto";
 const here = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = resolve(here, "..");
 const testsPath = join(here, "extension-host", "index.cjs");
-const workspacePath = resolve(extensionRoot, "..", "..");
 const scratch = mkdtempSync(join(tmpdir(), "dgc-vscode-host-"));
 const resultPath = join(scratch, "result.json");
 const backendPath = join(scratch, "dgc-fixture");
 const backendLogPath = join(scratch, "backend.ndjson");
+const workspacePath = join(scratch, "primary-workspace");
 const secondaryWorkspace = join(scratch, "secondary-workspace");
 const workspaceFile = join(scratch, "multi-root.code-workspace");
 const userDataDir = join(scratch, "user-data");
@@ -22,6 +22,7 @@ const initialEndpoint = "https://provider-a.invalid/v1";
 const changedEndpoint = "https://provider-b.invalid/v1";
 const testToken = randomUUID();
 
+mkdirSync(workspacePath);
 mkdirSync(secondaryWorkspace);
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
   { path: workspacePath },

@@ -363,4 +363,5 @@ DGC_VSCODE_EXECUTABLE=/absolute/path/to/code-or-cursor npm run test:host
 
 It verifies activation, registered commands, an exact request-correlated webview/backend workspace
 handshake, concurrent state/query request IDs, live multi-root state, SecretStorage
-migration/invalidation, and permission/plan decision lifecycles in disposable editor state.
+migration/invalidation, and permission/plan decision lifecycles in disposable editor and workspace
+state; it does not open or watch the source repository as the test workspace.

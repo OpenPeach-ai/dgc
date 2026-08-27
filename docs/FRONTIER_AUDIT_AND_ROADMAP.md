@@ -887,8 +887,9 @@ writer fixtures cover this seam. External publication/versioning and clients for
 ecosystems remain open; the local package capability does not claim those delivery milestones.
 
 Implementation note for step 6: the local `test:host` gate launches the already-installed VS Code
-Electron executable with isolated user/extension directories, updates/telemetry/background networking
-disabled, and no editor download. It proves that the development extension is discovered, activates,
+Electron executable with isolated disposable user, extension, and two-folder workspace directories,
+updates/telemetry/background networking disabled, and no editor download. It proves that the
+development extension is discovered, activates,
 registers every command declared by its manifest, resolves the real webview, launches a networkless
 local protocol fixture, completes a two-folder workspace-root handshake, and propagates live removal
 and restoration of the secondary root. The extension coalesces root revisions, waits for backend
