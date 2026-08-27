@@ -11412,6 +11412,144 @@ def test_ollama_adapter():
         malformed_failed_closed = True
     check("native Ollama malformed streams fail closed", malformed_failed_closed)
 
+    class _TruncatedToolResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": {
+                    "path": "must-not-run.txt", "content": "partial"}}}]}, "done": False})
+
+    call_sequence_before_truncation = native._native_call_seq
+    try:
+        native._consume_ollama(_TruncatedToolResponse(), None, None)
+        truncated_tool_error = ""
+    except _llm.LLMError as exc:
+        truncated_tool_error = str(exc)
+    check("native Ollama requires terminal done before exposing streamed tool calls",
+          "terminal done" in truncated_tool_error
+          and native._native_call_seq == call_sequence_before_truncation)
+
+    class _PostTerminalResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "content": "complete"},
+                              "done": True, "done_reason": "stop"})
+            yield json.dumps({"message": {"role": "assistant", "content": "late"},
+                              "done": False})
+
+    try:
+        native._consume_ollama(_PostTerminalResponse(), None, None)
+        post_terminal_error = ""
+    except _llm.LLMError as exc:
+        post_terminal_error = str(exc)
+    check("native Ollama rejects stream data after its terminal event",
+          "after the terminal" in post_terminal_error)
+
+    class _InvalidDoneResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "content": "unsafe"},
+                              "done": "true"})
+
+    try:
+        native._consume_ollama(_InvalidDoneResponse(), None, None)
+        invalid_done_error = ""
+    except _llm.LLMError as exc:
+        invalid_done_error = str(exc)
+    check("native Ollama accepts only a boolean terminal marker",
+          "non-boolean done" in invalid_done_error)
+
+    class _BoundedJSONResponse:
+        status_code = 200
+        headers = {"Content-Type": "application/json"}
+        closed = False
+        def json(self):
+            return {"message": {"role": "assistant", "content": "json result"},
+                    "done": True, "done_reason": "stop", "prompt_eval_count": float("inf")}
+        def close(self): self.closed = True
+
+    bounded_json_response = _BoundedJSONResponse()
+    bounded_json_result = native._consume_ollama(bounded_json_response, None, None)
+    check("native Ollama bounds JSON fallback and normalizes malformed usage counters",
+          bounded_json_response.closed and bounded_json_result.content == "json result"
+          and bounded_json_result.usage == {
+              "input_tokens": 0, "output_tokens": 0,
+              "cached_input_tokens": 0, "reasoning_tokens": 0})
+
+    class _MalformedNativeJSON(_BoundedJSONResponse):
+        def json(self): raise ValueError("malformed")
+
+    malformed_native_json = _MalformedNativeJSON()
+    try:
+        native._consume_ollama(malformed_native_json, None, None)
+        malformed_json_error = ""
+    except _llm.LLMError as exc:
+        malformed_json_error = str(exc)
+    check("native Ollama wraps malformed JSON fallback failures and releases the response",
+          malformed_native_json.closed and "malformed JSON" in malformed_json_error)
+
+    class _OversizedNativeJSON(_BoundedJSONResponse):
+        headers = {"Content-Type": "application/json",
+                   "Content-Length": str(_llm._MAX_OLLAMA_JSON_BYTES + 1)}
+        def json(self): raise AssertionError("oversized JSON must not be decoded")
+
+    oversized_native_json = _OversizedNativeJSON()
+    try:
+        native._consume_ollama(oversized_native_json, None, None)
+        oversized_json_error = ""
+    except _llm.LLMError as exc:
+        oversized_json_error = str(exc)
+
+    class _OversizedNativeStream(_NativeResponse):
+        def iter_content(self, chunk_size=65536):
+            yield b"x" * 17
+
+    saved_ollama_stream_limit = _llm._MAX_OLLAMA_STREAM_BYTES
+    try:
+        _llm._MAX_OLLAMA_STREAM_BYTES = 16
+        native._consume_ollama(_OversizedNativeStream(), None, None)
+        oversized_stream_error = ""
+    except _llm.LLMError as exc:
+        oversized_stream_error = str(exc)
+    finally:
+        _llm._MAX_OLLAMA_STREAM_BYTES = saved_ollama_stream_limit
+    check("native Ollama JSON and NDJSON bodies have hard byte ceilings",
+          oversized_native_json.closed and "exceeded" in oversized_json_error
+          and "safety bound" in oversized_stream_error)
+
+    class _TooManyNativeCalls(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            calls = [{"function": {"name": "read_file", "arguments": {"path": path}}}
+                     for path in ("one.py", "two.py")]
+            yield json.dumps({"message": {"role": "assistant", "tool_calls": calls},
+                              "done": True, "done_reason": "stop"})
+
+    saved_ollama_call_limit = _llm._MAX_OLLAMA_TOOL_CALLS
+    try:
+        _llm._MAX_OLLAMA_TOOL_CALLS = 1
+        native._consume_ollama(_TooManyNativeCalls(), None, None)
+        too_many_calls_error = ""
+    except _llm.LLMError as exc:
+        too_many_calls_error = str(exc)
+    finally:
+        _llm._MAX_OLLAMA_TOOL_CALLS = saved_ollama_call_limit
+    check("native Ollama bounds accumulated tool calls before constructing executable calls",
+          "too many tool calls" in too_many_calls_error
+          and native._native_call_seq == call_sequence_before_truncation)
+
+    class _CancelledPartialCall(_NativeResponse):
+        def __init__(self, cancellation): self.cancellation = cancellation
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "tool_calls": [{
+                "function": {"name": "write_file", "arguments": {
+                    "path": "cancelled.txt", "content": "partial"}}}]}, "done": False})
+            self.cancellation.set()
+
+    partial_cancel = threading.Event()
+    cancelled_partial = native._consume_ollama(
+        _CancelledPartialCall(partial_cancel), None, None, cancel=partial_cancel)
+    check("native Ollama cancellation discards partial native continuation state",
+          cancelled_partial.finish_reason == "cancelled"
+          and not cancelled_partial.tool_calls and not cancelled_partial.provider_message
+          and native._native_call_seq == call_sequence_before_truncation)
+
     class _ThinkRejected:
         status_code = 400
         text = 'unknown field "think"'

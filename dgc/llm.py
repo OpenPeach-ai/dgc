@@ -29,6 +29,9 @@ _MAX_MODEL_INFO_FIELDS = 4_096
 _MAX_MODEL_METADATA_CACHE_ENTRIES = 256
 _MODEL_METADATA_FAILURE_TTL_S = 30
 _MODEL_METADATA_TOTAL_S = 4.0
+_MAX_OLLAMA_JSON_BYTES = 8 * 1024 * 1024
+_MAX_OLLAMA_STREAM_BYTES = 8 * 1024 * 1024
+_MAX_OLLAMA_TOOL_CALLS = 4_096
 _MAX_RESPONSES_JSON_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSES_STREAM_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSES_OUTPUT_ITEMS = 4_096
@@ -448,7 +451,7 @@ def normalize_usage(usage: dict | None) -> dict[str, int]:
     def count(value) -> int:
         try:
             return max(0, int(value or 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 0
 
     return {
@@ -2043,9 +2046,15 @@ class LLMClient:
         native_content = ""
         native_thinking = ""
         native_calls: list[dict] = []
+        terminal_done = False
 
         def consume(obj: dict) -> None:
-            nonlocal produced, native_content, native_thinking
+            nonlocal produced, native_content, native_thinking, terminal_done
+            if terminal_done:
+                raise LLMError("Ollama emitted data after the terminal done event")
+            done = obj.get("done")
+            if done is not None and not isinstance(done, bool):
+                raise LLMError("Ollama emitted a non-boolean done field")
             if obj.get("error"):
                 raise LLMError(f"Ollama stream error: {str(obj['error'])[:400]}")
             message = obj.get("message") or {}
@@ -2074,6 +2083,8 @@ class LLMClient:
             if not isinstance(calls, list):
                 raise LLMError("Ollama emitted non-list tool_calls")
             for call in calls:
+                if len(native_calls) >= _MAX_OLLAMA_TOOL_CALLS:
+                    raise LLMError("Ollama emitted too many tool calls")
                 if not isinstance(call, dict):
                     raise LLMError("Ollama emitted a non-object tool call")
                 fn = call.get("function") or {}
@@ -2092,14 +2103,13 @@ class LLMClient:
                 native_call["function"] = native_fn
                 native_calls.append(native_call)
                 produced = True
-            if obj.get("done"):
+            if done is True:
+                terminal_done = True
                 result.finish_reason = str(obj.get("done_reason") or result.finish_reason)
-                result.usage = {
-                    "input_tokens": int(obj.get("prompt_eval_count", 0) or 0),
-                    "output_tokens": int(obj.get("eval_count", 0) or 0),
-                    "cached_input_tokens": 0,
-                    "reasoning_tokens": 0,
-                }
+                result.usage = normalize_usage({
+                    "prompt_tokens": obj.get("prompt_eval_count", 0),
+                    "completion_tokens": obj.get("eval_count", 0),
+                })
 
         stop_watch = threading.Event()
         if cancel is not None:
@@ -2126,15 +2136,17 @@ class LLMClient:
             ctype = r.headers.get("Content-Type", "").lower()
             if "application/json" in ctype and "ndjson" not in ctype:
                 try:
-                    obj = r.json()
-                except ValueError as exc:
+                    obj = _bounded_json_response(
+                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")
+                except (ValueError, RecursionError) as exc:
                     raise LLMError("Ollama emitted malformed JSON") from exc
                 if not isinstance(obj, dict):
                     raise LLMError("Ollama emitted a non-object JSON response")
                 consume(obj)
             else:
                 r.encoding = "utf-8"
-                lines = r.iter_lines(decode_unicode=True)
+                lines = iter(_bounded_stream_lines(
+                    r, _MAX_OLLAMA_STREAM_BYTES, "Ollama stream"))
                 while True:
                     try:
                         line = next(lines)
@@ -2155,7 +2167,7 @@ class LLMClient:
                         continue
                     try:
                         obj = json.loads(line)
-                    except json.JSONDecodeError as exc:
+                    except (json.JSONDecodeError, RecursionError) as exc:
                         raise LLMError("Ollama emitted malformed NDJSON") from exc
                     if not isinstance(obj, dict):
                         raise LLMError("Ollama emitted a non-object stream event")
@@ -2170,6 +2182,12 @@ class LLMClient:
         finally:
             stop_watch.set()
 
+        if (not terminal_done and cancel is not None and cancel.is_set()
+                and result.finish_reason != "overthink"):
+            result.finish_reason = "cancelled"
+        aborted = result.finish_reason in ("cancelled", "overthink")
+        if not aborted and not terminal_done:
+            raise LLMError("Ollama response ended before the terminal done event")
         for kind, chunk in filt.flush():
             if kind == "think":
                 result.thinking += chunk
@@ -2179,6 +2197,10 @@ class LLMClient:
                 result.content += chunk
                 if on_text:
                     on_text(chunk)
+        if aborted:
+            # Cancellation and the reasoning watchdog deliberately end before Ollama's terminal
+            # event. Partial native or text-shaped calls are never executable continuation state.
+            return result
         for call in native_calls:
             fn = call["function"]
             self._native_call_seq += 1
