@@ -2427,7 +2427,7 @@ def unit_tests(tmp: Path):
     _route_backend = object.__new__(Backend); _route_backend.em = _Capture()
     _route_backend._worker = None; _route_backend.config = _RouteCfg()
     _route_backend.agent = type("RouteAgent", (), {"refresh_client": lambda self: None})()
-    _route_backend._emit_config = lambda: None
+    _route_backend._emit_config = lambda request_id=None: None
     _route_backend.dispatch({"type": "set_config", "values": {
         "subagent_api_key": "replacement-secret",
         "subagent_base_url": "http://new.invalid/v1",
@@ -8993,12 +8993,40 @@ def test_protocol_client():
         _config = _real.request({"type": "get_config"}, "config")
         _skills = _real.request(
             {"type": "list_skills", "request_id": "client-skills"}, "skill_catalog")
+        _correlated_configs, _correlation_errors = {}, []
+        def _set_correlated_config(request_id, context_size):
+            try:
+                _correlated_configs[request_id] = _real.request(
+                    {"type": "set_config", "values": {"context_size": context_size},
+                     "request_id": request_id},
+                    "config", request_id=request_id)
+            except Exception as exc:
+                _correlation_errors.append(type(exc).__name__)
+        _correlation_threads = [
+            threading.Thread(target=_set_correlated_config,
+                             args=("config-a", 40_001)),
+            threading.Thread(target=_set_correlated_config,
+                             args=("config-b", 40_002)),
+        ]
+        for _thread in _correlation_threads:
+            _thread.start()
+        for _thread in _correlation_threads:
+            _thread.join(5)
         _retained_ready = _real.next_event()
         _retained_context = _real.next_event()
         check("protocol client launches the real backend and correlates side-effect-free requests",
               _ready.get("protocol_version") == _CLIENT_PROTOCOL_VERSION
+              and _ready.get("capabilities", {}).get("correlated_state_requests") is True
               and _config.get("project_root") == str(_real_project.resolve())
               and _skills.get("request_id") == "client-skills")
+        check("protocol client correlates concurrent state requests of the same response type",
+              not _correlation_errors
+              and all(not _thread.is_alive() for _thread in _correlation_threads)
+              and {key: (value.get("request_id"), value.get("context_size"))
+                   for key, value in _correlated_configs.items()} == {
+                       "config-a": ("config-a", 40_001),
+                       "config-b": ("config-b", 40_002),
+                   })
         check("protocol client confirms project skill discovery without exposing absolute paths",
               any(row == {"name": "matrix-client", "description": "Client fixture skill",
                           "source": "project"} for row in _skills.get("items", []))

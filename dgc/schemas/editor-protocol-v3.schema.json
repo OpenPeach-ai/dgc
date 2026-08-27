@@ -519,6 +519,9 @@
                 "completed",
                 "blocked"
               ]
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -563,6 +566,9 @@
               "maximum": 9007199254740991
             },
             "message": {
+              "type": "string"
+            },
+            "request_id": {
               "type": "string"
             }
           },
@@ -785,6 +791,9 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "request_id": {
+              "type": "string"
+            },
             "used": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -842,6 +851,9 @@
             },
             "items": {
               "type": "array"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -861,6 +873,9 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             },
             "model": {
               "type": "string"
@@ -972,6 +987,9 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "request_id": {
+              "type": "string"
+            },
             "model": {
               "type": "string"
             },
@@ -1039,6 +1057,9 @@
             },
             "base_url": {
               "type": "string"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1059,6 +1080,9 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             },
             "mode": {
               "type": "string",
@@ -1099,6 +1123,9 @@
                 "medium",
                 "high"
               ]
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1508,6 +1535,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1530,6 +1560,9 @@
             },
             "roots": {
               "type": "array"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1555,6 +1588,9 @@
             },
             "exists": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1593,6 +1629,9 @@
               "type": "string"
             },
             "path": {
+              "type": "string"
+            },
+            "request_id": {
               "type": "string"
             }
           },
@@ -1642,6 +1681,9 @@
             },
             "deleted": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1664,6 +1706,9 @@
             },
             "items": {
               "type": "array"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1691,6 +1736,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1722,6 +1770,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1795,6 +1846,9 @@
             },
             "roots": {
               "type": "array"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1959,6 +2013,9 @@
             },
             "acknowledge_workspace_trust": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -1984,6 +2041,9 @@
             },
             "clear_stored_api_key": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2124,6 +2184,9 @@
                 "medium",
                 "high"
               ]
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2149,6 +2212,9 @@
                 "completed",
                 "blocked"
               ]
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2161,6 +2227,9 @@
           "properties": {
             "type": {
               "const": "get_goal"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2173,6 +2242,9 @@
           "properties": {
             "type": {
               "const": "get_plan"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2185,6 +2257,9 @@
           "properties": {
             "type": {
               "const": "new_session"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2197,6 +2272,9 @@
           "properties": {
             "type": {
               "const": "clear_session"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2222,6 +2300,9 @@
             },
             "latest": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2234,6 +2315,9 @@
           "properties": {
             "type": {
               "const": "list_sessions"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2249,6 +2333,9 @@
             },
             "path": {
               "type": "string"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2262,6 +2349,9 @@
           "properties": {
             "type": {
               "const": "list_checkpoints"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2279,6 +2369,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2292,6 +2385,9 @@
           "properties": {
             "type": {
               "const": "list_retained_tasks"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2317,6 +2413,9 @@
             },
             "confirm": {
               "type": "boolean"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2331,6 +2430,9 @@
           "properties": {
             "type": {
               "const": "compact"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2343,6 +2445,9 @@
           "properties": {
             "type": {
               "const": "list_artifacts"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2357,6 +2462,9 @@
               "const": "stop_artifact"
             },
             "id": {
+              "type": "string"
+            },
+            "request_id": {
               "type": "string"
             }
           },
@@ -2374,6 +2482,9 @@
             },
             "values": {
               "type": "object"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2387,6 +2498,9 @@
           "properties": {
             "type": {
               "const": "get_config"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2399,6 +2513,9 @@
           "properties": {
             "type": {
               "const": "status"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [

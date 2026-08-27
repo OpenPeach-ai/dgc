@@ -42,6 +42,13 @@ _BUSY_MUTATIONS = {
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
     "resolve_retained_task", "list_skills", "generate_handoff",
 }
+_OPTIONALLY_CORRELATED_COMMANDS = frozenset({
+    "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
+    "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
+    "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
+    "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
+    "get_config", "status",
+})
 _EDITOR_CONTEXT_LIMIT = 64_000
 
 
@@ -60,6 +67,11 @@ def _json_payload_bytes(value) -> int:
                               allow_nan=False).encode("utf-8"))
     except (RecursionError, TypeError, ValueError, UnicodeError):
         return _MAX_MCP_ARGUMENT_BYTES + 1
+
+
+def _request_fields(request_id: str | None) -> dict[str, str]:
+    """Attach a correlation ID only when the optional command field was present and valid."""
+    return {"request_id": request_id} if request_id else {}
 
 
 def _editor_context_json(value) -> str:
@@ -330,7 +342,7 @@ class Backend:
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
-                          "hook_activity": True},
+                          "hook_activity": True, "correlated_state_requests": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             subagent_base_url=self.config.get("subagent_base_url", ""),
@@ -588,7 +600,7 @@ class Backend:
         if manager is not None:
             manager.stop_all()
 
-    def _emit_context(self) -> None:
+    def _emit_context(self, request_id: str | None = None) -> None:
         try:
             used = self.agent.estimate_tokens()
         except Exception:
@@ -599,20 +611,21 @@ class Backend:
                      output_tokens=int(totals.get("output_tokens", 0)),
                      cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
                      reasoning_tokens=int(totals.get("reasoning_tokens", 0)),
-                     requests=int(totals.get("requests", 0)))
+                     requests=int(totals.get("requests", 0)), **_request_fields(request_id))
 
-    def _emit_artifacts(self) -> None:
+    def _emit_artifacts(self, request_id: str | None = None) -> None:
         from . import artifacts
         self.em.emit("artifacts", items=[{"id": a.id, "name": a.name, "url": a.url,
                                           "rel": a.rel, "uptime": a.uptime}
-                                         for a in artifacts.registry()])
+                                         for a in artifacts.registry()],
+                     **_request_fields(request_id))
 
-    def _emit_retained_tasks(self) -> None:
+    def _emit_retained_tasks(self, request_id: str | None = None) -> None:
         tasks, errors = self.agent.retained_tasks()
         self.em.emit("retained_tasks", items=[task.as_dict() for task in tasks[:100]],
-                     errors=errors, total=len(tasks))
+                     errors=errors, total=len(tasks), **_request_fields(request_id))
 
-    def _emit_config(self) -> None:
+    def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
         self.em.emit("config", model=c.model, mode=self.agent.mode,
                      think=c.get("thinking", "off"), base_url=c.base_url,
@@ -634,11 +647,13 @@ class Backend:
                      fallback_api_mode=c.get("fallback_api_mode", ""),
                      context_size=c.get("context_size", 32768),
                      goal={"text": getattr(self.agent, "goal", ""),
-                           "status": getattr(self.agent, "goal_status", "none")})
+                           "status": getattr(self.agent, "goal_status", "none")},
+                     **_request_fields(request_id))
 
-    def _emit_goal(self) -> None:
+    def _emit_goal(self, request_id: str | None = None) -> None:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
-                     status=getattr(self.agent, "goal_status", "none"))
+                     status=getattr(self.agent, "goal_status", "none"),
+                     **_request_fields(request_id))
 
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
@@ -671,10 +686,18 @@ class Backend:
                          reason="invalid_command", message=f"invalid command: {problem}")
             return
         t = cmd.get("type")
+        request_id = None
+        if t in _OPTIONALLY_CORRELATED_COMMANDS and "request_id" in cmd:
+            request_id = str(cmd.get("request_id") or "")
+            if not request_id or len(request_id) > 128:
+                self.em.emit("command_rejected", command=t, reason="invalid_request_id",
+                             message="request_id must contain 1-128 characters")
+                return
 
         if self._busy() and t in _BUSY_MUTATIONS:
             self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                         message=f"'{t}' is unavailable while a turn is running; cancel or wait")
+                         message=f"'{t}' is unavailable while a turn is running; cancel or wait",
+                         **_request_fields(request_id))
             return
 
         if t == "prompt":
@@ -824,7 +847,8 @@ class Backend:
                     roots.append(path)
             self.config.session_permissions = {
                 "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
-            self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])])
+            self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
+                         **_request_fields(request_id))
 
         elif t == "permission_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule")})
@@ -850,14 +874,16 @@ class Backend:
             if mode in ("acceptEdits", "auto") and not self.workspace_trusted:
                 if cmd.get("acknowledge_workspace_trust") is not True:
                     self.em.emit("command_rejected", command=t, reason="workspace_untrusted",
-                                 message="review this workspace and explicitly acknowledge trust before enabling mutations")
+                                 message="review this workspace and explicitly acknowledge trust before enabling mutations",
+                                 **_request_fields(request_id))
                     return
                 from .trust import mark_trusted
                 mark_trusted(self.config, self.config.project_root)
                 self.workspace_trusted = True
             self.agent.set_mode(mode)
             self.em.emit("mode_changed", mode=self.agent.mode,
-                         workspace_trusted=self.workspace_trusted)
+                         workspace_trusted=self.workspace_trusted,
+                         **_request_fields(request_id))
         elif t == "set_model":
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
@@ -884,7 +910,8 @@ class Backend:
             if ctx and ctx != int(self.config.get("context_size", 32768)):
                 self.config.set("context_size", ctx)
                 context_changed = True
-            self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url)
+            self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url,
+                         **_request_fields(request_id))
             if context_changed:
                 self._emit_context()
         elif t == "list_models":
@@ -917,7 +944,8 @@ class Backend:
             threading.Thread(target=discover_models, daemon=True).start()
         elif t == "set_think":
             self.config.set("thinking", cmd.get("level", "off"))   # persisted
-            self.em.emit("think_changed", think=self.config.get("thinking", "off"))
+            self.em.emit("think_changed", think=self.config.get("thinking", "off"),
+                         **_request_fields(request_id))
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
@@ -930,21 +958,23 @@ class Backend:
                 ok = self.agent.update_goal(status)
             if not ok:
                 message = getattr(self.agent, "_last_persist_error", "")
-                self.em.emit("error", message=message or "no standing goal to update")
+                self.em.emit("error", message=message or "no standing goal to update",
+                             **_request_fields(request_id))
                 return
-            self._emit_goal()
+            self._emit_goal(request_id)
         elif t == "get_goal":
-            self._emit_goal()
+            self._emit_goal(request_id)
         elif t == "get_plan":
             plan = (sessions_mod.load_plan(self.agent.session_file, self.config.project_root)
                     if self.agent.session_file else None)
-            self.em.emit("saved_plan", plan=plan or "", exists=bool(plan))
+            self.em.emit("saved_plan", plan=plan or "", exists=bool(plan),
+                         **_request_fields(request_id))
 
         elif t == "new_session":
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
-                         session_id=self.agent.session_file.stem)
+                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
             self._emit_goal()
         elif t == "clear_session":
             # Archive the prior persisted transcript and start an actually empty model context.
@@ -953,7 +983,7 @@ class Backend:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="cleared", message_count=0,
-                         session_id=self.agent.session_file.stem)
+                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
             self.em.emit("history", items=[])
             self._emit_context()
             self._emit_goal()
@@ -964,44 +994,48 @@ class Backend:
                 path = str(p) if p else None
             if path:
                 n = self.agent.load_session(path)
-                self.em.emit("session", kind="resumed", message_count=n, path=str(path))
+                self.em.emit("session", kind="resumed", message_count=n, path=str(path),
+                             **_request_fields(request_id))
                 self.em.emit("history", items=self._history())
                 self._emit_context()
                 self._emit_goal()
             else:
-                self.em.emit("error", message="no session to resume")
+                self.em.emit("error", message="no session to resume",
+                             **_request_fields(request_id))
         elif t == "list_sessions":
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}
                      for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
-            self.em.emit("sessions", items=items)
+            self.em.emit("sessions", items=items, **_request_fields(request_id))
         elif t == "delete_session":
             path = cmd.get("path")
             ok = bool(path) and sessions_mod.delete(path, self.config.project_root)
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}
                      for (p, ts, pv, c, nm) in sessions_mod.listing(self.config.project_root)]
-            self.em.emit("sessions", items=items, deleted=ok)
+            self.em.emit("sessions", items=items, deleted=ok, **_request_fields(request_id))
 
         elif t == "list_checkpoints":
             items = [{"index": i, "preview": p, "files": nf}
                      for (i, p, nf) in self.agent.checkpoints.listing()]
-            self.em.emit("checkpoints", items=items)
+            self.em.emit("checkpoints", items=items, **_request_fields(request_id))
         elif t == "rewind":
             msgs, nfiles = self.agent.rewind(int(cmd.get("index", -1)))
             ok = msgs >= 0
-            self.em.emit("rewound", ok=ok, files_restored=nfiles)
+            self.em.emit("rewound", ok=ok, files_restored=nfiles,
+                         **_request_fields(request_id))
             if ok:
                 self.em.emit("history", items=self._history())
                 self._emit_context()
         elif t == "list_retained_tasks":
-            self._emit_retained_tasks()
+            self._emit_retained_tasks(request_id)
         elif t == "resolve_retained_task":
             task_id = str(cmd.get("id", ""))
             action = str(cmd.get("action", ""))
             if action == "drop" and cmd.get("confirm") is not True:
-                self.em.emit("error", message="dropping retained work requires explicit confirmation")
-                self._emit_retained_tasks()
+                self.em.emit("error", message="dropping retained work requires explicit confirmation",
+                             **_request_fields(request_id))
+                self._emit_retained_tasks(request_id)
                 return
             result = self.agent.resolve_retained_task(task_id, action)
             if result.status == "applied":
@@ -1018,19 +1052,19 @@ class Backend:
                              if result.conflicts else "")
                 self.em.emit("error", message=f"Could not {action} retained task {task_id}: "
                              f"{result.error or result.status}.{conflicts}")
-            self._emit_retained_tasks()
+            self._emit_retained_tasks(request_id)
         elif t == "compact":
             if not self.agent.maybe_compact(force=True):
                 self.em.emit("error", message=self.agent._last_persist_error
-                             or "context compaction failed")
+                             or "context compaction failed", **_request_fields(request_id))
                 return
-            self._emit_context()
+            self._emit_context(request_id)
         elif t == "list_artifacts":
-            self._emit_artifacts()
+            self._emit_artifacts(request_id)
         elif t == "stop_artifact":
             from . import artifacts
             artifacts.stop(str(cmd.get("id", "")))
-            self._emit_artifacts()
+            self._emit_artifacts(request_id)
         elif t == "set_config":
             allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
                        "subagent_api_mode", "api_mode",
@@ -1056,16 +1090,16 @@ class Backend:
                     self.config._env_secret_keys.add(k)
             if refresh:
                 self.agent.refresh_client()
-            self._emit_config()
+            self._emit_config(request_id)
         elif t == "get_config":
-            self._emit_config()
+            self._emit_config(request_id)
         elif t == "status":
             self.em.emit("status", model=self.config.model, mode=self.agent.mode,
                          think=self.config.get("thinking", "off"), base_url=self.config.base_url,
                          goal={"text": getattr(self.agent, "goal", ""),
                                "status": getattr(self.agent, "goal_status", "none")},
                          context_used=self.agent.estimate_tokens(),
-                         context_size=self._context_window_size())
+                         context_size=self._context_window_size(), **_request_fields(request_id))
         elif t == "shutdown":
             raise _Shutdown()
         else:

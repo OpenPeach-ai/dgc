@@ -33,8 +33,9 @@ with DGCClient(cwd="/absolute/path/to/project") as dgc:
     status = dgc.request({"type": "status"}, "status")
 ```
 
-`request()` uses a wire-sequence barrier when a response type has no request ID. Supply and filter a
-`request_id` only for commands whose discovered schema declares it.
+`request()` uses a wire-sequence barrier for legacy commands without IDs. Query and state commands
+accept an optional bounded `request_id`; use one whenever more than one operation may be outstanding.
+The `ready.capabilities.correlated_state_requests` flag confirms this extension is active.
 
 ## Plan mode and plan artifact
 
@@ -43,15 +44,22 @@ decision. CI should use `dgc serve` through `DGCClient`:
 
 ```python
 with DGCClient(cwd=project) as dgc:
-    dgc.request({"type": "set_mode", "mode": "plan"}, "mode_changed")
+    dgc.request(
+        {"type": "set_mode", "mode": "plan", "request_id": "mode-1"},
+        "mode_changed",
+        request_id="mode-1",
+    )
     dgc.send({
         "type": "prompt",
         "text": "Inspect the repository and call present_plan with exactly two steps. Do not edit.",
     })
     proposal = dgc.wait_for("plan_proposal")
 
-    # get_plan has no request_id field in protocol v3.
-    saved = dgc.request({"type": "get_plan"}, "saved_plan")
+    saved = dgc.request(
+        {"type": "get_plan", "request_id": "plan-read-1"},
+        "saved_plan",
+        request_id="plan-read-1",
+    )
     assert saved["exists"] and saved["plan"] == proposal["plan"]
 
     # plan_artifact defaults on; unrelated events remain queued by DGCClient.
@@ -106,10 +114,16 @@ activation remains prompt/intent driven.
 
 ```python
 changed = dgc.request(
-    {"type": "set_goal", "text": "finish matrix", "status": "active"},
+    {"type": "set_goal", "text": "finish matrix", "status": "active",
+     "request_id": "goal-set-1"},
     "goal_changed",
+    request_id="goal-set-1",
 )
-goal = dgc.request({"type": "get_goal"}, "goal_changed")
+goal = dgc.request(
+    {"type": "get_goal", "request_id": "goal-read-1"},
+    "goal_changed",
+    request_id="goal-read-1",
+)
 assert (goal["goal"], goal["status"]) == ("finish matrix", "active")
 
 handoff = dgc.request(
@@ -120,10 +134,16 @@ handoff = dgc.request(
 assert handoff["status"] == "completed" and handoff["path"] is None
 
 config = dgc.request(
-    {"type": "set_config", "values": {"context_size": 40960}},
+    {"type": "set_config", "values": {"context_size": 40960},
+     "request_id": "config-set-1"},
     "config",
+    request_id="config-set-1",
 )
-readback = dgc.request({"type": "get_config"}, "config")
+readback = dgc.request(
+    {"type": "get_config", "request_id": "config-read-1"},
+    "config",
+    request_id="config-read-1",
+)
 assert readback["context_size"] == 40960
 ```
 
@@ -158,10 +178,22 @@ dgc --resume SESSION_ID -p "Continue and report current state."
 `dgc --resume` without an ID opens an interactive picker and is not a headless test. Typed forms:
 
 ```python
-sessions = dgc.request({"type": "list_sessions"}, "sessions")
-resumed = dgc.request({"type": "resume_session", "latest": True}, "session")
+sessions = dgc.request(
+    {"type": "list_sessions", "request_id": "sessions-1"},
+    "sessions",
+    request_id="sessions-1",
+)
+resumed = dgc.request(
+    {"type": "resume_session", "latest": True, "request_id": "resume-1"},
+    "session",
+    request_id="resume-1",
+)
 # Or use the exact project-scoped path returned by list_sessions:
-resumed = dgc.request({"type": "resume_session", "path": session_path}, "session")
+resumed = dgc.request(
+    {"type": "resume_session", "path": session_path, "request_id": "resume-2"},
+    "session",
+    request_id="resume-2",
+)
 ```
 
 ## MCP

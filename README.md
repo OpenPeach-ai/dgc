@@ -182,7 +182,11 @@ and NDJSON handling:
 from dgc.client import DGCClient
 
 with DGCClient(cwd=".") as client:
-    config = client.request({"type": "get_config"}, "config")
+    config = client.request(
+        {"type": "get_config", "request_id": "config-1"},
+        "config",
+        request_id="config-1",
+    )
     skills = client.request(
         {"type": "list_skills", "request_id": "skills-1"},
         "skill_catalog",

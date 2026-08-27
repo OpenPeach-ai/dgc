@@ -405,6 +405,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "completed",
         "blocked"
       ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "info": {
@@ -421,6 +427,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "request_expired": {
@@ -557,6 +569,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     }
   },
   "context": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "used": {
       "types": [
         "integer"
@@ -606,9 +624,21 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "config": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "model": {
       "types": [
         "string"
@@ -750,6 +780,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     }
   },
   "status": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "model": {
       "types": [
         "string"
@@ -817,9 +853,21 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "mode_changed": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
     "mode": {
       "types": [
         "string"
@@ -851,6 +899,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "medium",
         "high"
       ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "models": {
@@ -1147,6 +1201,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "workspace_roots": {
@@ -1155,6 +1215,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "saved_plan": {
@@ -1169,6 +1235,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "session": {
@@ -1200,6 +1272,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "history": {
@@ -1222,6 +1300,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "checkpoints": {
@@ -1230,6 +1314,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "rewound": {
@@ -1244,6 +1334,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "retained_tasks": {
@@ -1262,6 +1358,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "total": {
       "types": [
         "integer"
+      ],
+      "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
       ],
       "required": false
     }
@@ -1304,6 +1406,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "permission_response": {
@@ -1418,6 +1526,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "set_model": {
@@ -1442,6 +1556,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "clear_stored_api_key": {
       "types": [
         "boolean"
+      ],
+      "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
       ],
       "required": false
     }
@@ -1542,6 +1662,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "medium",
         "high"
       ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "set_goal": {
@@ -1562,12 +1688,46 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "completed",
         "blocked"
       ]
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "get_goal": {},
-  "get_plan": {},
-  "new_session": {},
-  "clear_session": {},
+  "get_goal": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "get_plan": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "new_session": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "clear_session": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "resume_session": {
     "path": {
       "types": [
@@ -1581,27 +1741,66 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "list_sessions": {},
+  "list_sessions": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "delete_session": {
     "path": {
       "types": [
         "string"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "list_checkpoints": {},
+  "list_checkpoints": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "rewind": {
     "index": {
       "types": [
         "integer"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "list_retained_tasks": {},
+  "list_retained_tasks": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "resolve_retained_task": {
     "id": {
       "types": [
@@ -1624,16 +1823,42 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "boolean"
       ],
       "required": false
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "compact": {},
-  "list_artifacts": {},
+  "compact": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "list_artifacts": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "stop_artifact": {
     "id": {
       "types": [
         "string"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "set_config": {
@@ -1642,10 +1867,30 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "object"
       ],
       "required": true
+    },
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
-  "get_config": {},
-  "status": {},
+  "get_config": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "status": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
   "shutdown": {}
 };
 
