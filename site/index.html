@@ -142,8 +142,8 @@
   .term .del{color:var(--faint);background:rgba(255,255,255,.03);border-left:2px solid var(--border-strong);padding-left:8px;margin-left:-10px}
   .cursor{display:inline-block;width:8px;height:15px;background:var(--accent);vertical-align:-2px;animation:blink 1.1s step-end infinite}
   .dots{display:flex;gap:8px;margin-top:16px;justify-content:center}
-  .dots b{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:.2s;border:none;padding:0}
-  .dots b.on{background:var(--accent)}
+  .dots button{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:.2s;border:none;padding:0}
+  .dots button.on{background:var(--accent)}
 
   /* ---- sections ---- */
   section{padding:clamp(56px,8vw,104px) 0;border-top:1px solid var(--border)}
@@ -382,9 +382,9 @@
   </div>
   <p class="subhead">The toolbox</p>
   <div class="chips">
-    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
+    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">apply_patch</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">repo_map</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span><span class="chip">propose_options</span>
   </div>
-  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 11 bundled skills, and MCP servers.</p>
+  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 16 bundled skills, and MCP servers.</p>
 </div></section>
 
 <section id="terminal"><div class="wrap">
@@ -555,7 +555,7 @@
   <div class="scroll"><table>
     <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
     <tbody>
-      <tr><td><code>default</code></td><td>reads & known-safe commands auto-run; <b>writes and other commands ask first</b></td></tr>
+      <tr><td><code>default</code></td><td>read-only built-in tools auto-run; <b>every shell command and write asks first</b></td></tr>
       <tr><td><code>acceptEdits</code></td><td><b>file edits auto-approved</b>; shell commands still ask</td></tr>
       <tr><td><code>plan</code></td><td><b>read-only</b> — research and propose a plan you approve</td></tr>
       <tr><td><code>auto</code></td><td><b>full-auto</b> — everything approved; deny-rules still apply</td></tr>
@@ -632,8 +632,8 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
     ]}
   ];
   var s=0;
-  SCENES.forEach(function(_,i){var b=document.createElement('button');b.type='button';if(i===0)b.className='on';b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
-  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';});}
+  SCENES.forEach(function(_,i){var b=document.createElement('button');b.type='button';b.setAttribute('aria-label','Show demo '+(i+1)+' of '+SCENES.length);if(i===0){b.className='on';b.setAttribute('aria-current','true');}b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
+  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';if(j===i)d.setAttribute('aria-current','true');else d.removeAttribute('aria-current');});}
   var timers=[];
   function clearT(){timers.forEach(clearTimeout);timers=[];}
   function line(kind,text){var d=document.createElement('div');if(kind)d.className=kind;d.textContent=text;scene.appendChild(d);return d;}

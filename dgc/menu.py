@@ -11,7 +11,7 @@ import select as _select
 import shutil
 import sys
 
-from .style import ANSI_BRAND, ANSI_DIM, ANSI_BOLD, ANSI_RESET
+from .style import ANSI_BRAND, ANSI_DIM, ANSI_BOLD, ANSI_RESET, terminal_safe_text
 
 CYAN = ANSI_BRAND    # brand cyan — the ❯ marker + selected label (was generic \x1b[96m)
 DIM = ANSI_DIM       # explicit grey 245 — the muted secondary (was \x1b[2m, which washes out)
@@ -58,6 +58,12 @@ def select(title: str, labels: list[str], hints: list[str] | None = None) -> int
     """Pick one of `labels` with the arrow keys. Returns its index, or None if cancelled."""
     if not labels:
         return None
+    # The selected index maps back to the caller's original value; only the terminal-facing labels
+    # are normalized. Provider model IDs and MCP/model-generated choices are untrusted display data.
+    title = terminal_safe_text(title).replace("\n", " ")
+    labels = [terminal_safe_text(label).replace("\n", " ") for label in labels]
+    hints = ([terminal_safe_text(hint).replace("\n", " ") for hint in hints]
+             if hints is not None else None)
     if not _tty():
         return _numbered(title, labels)
 

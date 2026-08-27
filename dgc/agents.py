@@ -8,7 +8,8 @@ A sub-agent is a Markdown file with frontmatter:
     description: Careful code reviewer
     model: qwen3:14b                 # optional — else subagent_model, else the main model
     base_url: http://gpu-box:11434/v1  # optional — run this agent on a DIFFERENT host
-    api_key: ollama                  # optional — key for that host
+    api_mode: ollama                 # optional — auto | ollama | anthropic | chat_completions | responses
+    api_key_env: REVIEWER_API_KEY    # optional — key from an environment variable
     effort: high                     # optional — off | low | medium | high
     ---
 
@@ -35,7 +36,8 @@ class AgentDef:
     body: str
     model: str = ""
     base_url: str = ""
-    api_key: str = ""
+    api_mode: str = ""
+    api_key_env: str = ""
     effort: str = ""
 
 
@@ -45,7 +47,7 @@ def _parse_agent(path: Path) -> AgentDef | None:
     except OSError:
         return None
     fields = {"name": path.stem, "description": "", "model": "",
-              "base_url": "", "api_key": "", "effort": ""}
+              "base_url": "", "api_mode": "", "api_key_env": "", "effort": ""}
     body = text
     if text.startswith("---"):
         end = text.find("\n---", 3)

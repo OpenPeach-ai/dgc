@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): void | object {
   const provider = new DgcViewProvider(context);
 
   context.subscriptions.push(
@@ -33,9 +33,18 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
     }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
   );
 
   checkForUpdates(context).catch(() => { /* never raise into activate */ });
+  const testToken = process.env.DGC_EXTENSION_TEST_TOKEN;
+  if (testToken) {
+    return Object.freeze({
+      testOnlyWebviewMessage: (token: string, message: any) =>
+        provider.testOnlyWebviewMessage(token, message),
+      testOnlyPostedMessages: (token: string) => provider.testOnlyPostedMessages(token),
+    });
+  }
 }
 
 export function deactivate(): void { /* provider disposal handled by subscriptions */ }

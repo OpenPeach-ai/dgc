@@ -35,6 +35,14 @@ install_extension() {
   done
   [ -z "$editor" ] && return 0
   if fetch "$BASE/vscode/dgc.vsix" "$TMP/dgc.vsix" 2>/dev/null; then
+    if ! fetch "$BASE/vscode/dgc.vsix.sha256" "$TMP/dgc.vsix.sha256" 2>/dev/null; then
+      printf '  note: extension checksum is unavailable — skipping automatic extension install\n'
+      return 0
+    fi
+    local want got
+    want=$(awk '{print $1}' "$TMP/dgc.vsix.sha256")
+    got=$( { sha256sum "$TMP/dgc.vsix" 2>/dev/null || shasum -a 256 "$TMP/dgc.vsix"; } | awk '{print $1}')
+    [ "${#want}" -eq 64 ] && [ "$want" = "$got" ] || die "extension checksum mismatch"
     if "$editor" --install-extension "$TMP/dgc.vsix" --force >/dev/null 2>&1; then
       say "editor extension installed/updated in $editor (reload the window to see the DGC panel)"
     else
@@ -48,12 +56,17 @@ trap 'rm -rf "$TMP"' EXIT
 say "downloading DGC from $BASE"
 fetch "$BASE/dgc.tar.gz" "$TMP/dgc.tar.gz" || die "download failed from $BASE/dgc.tar.gz"
 
-# integrity check: verify against the published SHA-256 (best-effort — skipped if not published)
-if fetch "$BASE/dgc.tar.gz.sha256" "$TMP/sum" 2>/dev/null && [ -s "$TMP/sum" ]; then
+# Integrity is mandatory for the production installer. A custom/private mirror can opt out
+# explicitly with DGC_ALLOW_UNVERIFIED=1, but a missing checksum never downgrades silently.
+if ! fetch "$BASE/dgc.tar.gz.sha256" "$TMP/sum" 2>/dev/null || [ ! -s "$TMP/sum" ]; then
+  [ "${DGC_ALLOW_UNVERIFIED:-0}" = 1 ] || die "release checksum is unavailable — refusing an unverified install"
+  printf '  warning: DGC_ALLOW_UNVERIFIED=1 — installing without an integrity check\n' >&2
+else
   want=$(awk '{print $1}' "$TMP/sum")
   got=$( { sha256sum "$TMP/dgc.tar.gz" 2>/dev/null || shasum -a 256 "$TMP/dgc.tar.gz"; } | awk '{print $1}')
-  [ -n "$want" ] && [ "$want" != "$got" ] && die "checksum mismatch — refusing to install (want $want, got $got)"
-  [ -n "$want" ] && say "checksum verified"
+  [ "${#want}" -eq 64 ] || die "published checksum is malformed"
+  [ "$want" = "$got" ] || die "checksum mismatch — refusing to install (want $want, got $got)"
+  say "checksum verified"
 fi
 
 mkdir -p "$DEST"
@@ -61,8 +74,9 @@ tar -xzf "$TMP/dgc.tar.gz" -C "$DEST" --strip-components=1
 
 say "creating virtualenv + installing (this is self-contained, no system changes)"
 python3 -m venv "$DEST/.venv"
-"$DEST/.venv/bin/pip" install -q --upgrade pip >/dev/null
-"$DEST/.venv/bin/pip" install -q -e "$DEST" >/dev/null
+[ -f "$DEST/requirements.lock" ] || die "release is missing requirements.lock"
+"$DEST/.venv/bin/pip" install -q -r "$DEST/requirements.lock" >/dev/null
+"$DEST/.venv/bin/pip" install -q --no-deps -e "$DEST" >/dev/null
 
 mkdir -p "$BIN"
 ln -sf "$DEST/.venv/bin/dgc" "$BIN/dgc"

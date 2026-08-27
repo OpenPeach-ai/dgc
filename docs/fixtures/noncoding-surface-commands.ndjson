@@ -1,0 +1,19 @@
+{"type":"set_mode","mode":"plan","request_id":"mode-1"}
+{"type":"prompt","text":"Inspect the repository and call present_plan with exactly two steps. Do not edit."}
+{"type":"plan_response","id":"plan-1","decision":"reject","feedback":"matrix probe complete"}
+{"type":"get_plan","request_id":"plan-read-1"}
+{"type":"list_skills","request_id":"skills-1"}
+{"type":"set_goal","text":"finish matrix","status":"active","request_id":"goal-set-1"}
+{"type":"get_goal","request_id":"goal-read-1"}
+{"type":"generate_handoff","request_id":"handoff-1","save":false}
+{"type":"set_config","values":{"context_size":40960},"request_id":"config-set-1"}
+{"type":"get_config","request_id":"config-read-1"}
+{"type":"list_sessions","request_id":"sessions-1"}
+{"type":"resume_session","latest":true,"request_id":"resume-1"}
+{"type":"list_mcp_tools","request_id":"mcp-list","offset":0,"limit":50}
+{"type":"call_mcp_tool","request_id":"mcp-call","call_id":"call-1","name":"mcp__fixture__echo","arguments":{"text":"ping"}}
+{"type":"permission_response","id":"permission-1","decision":"once"}
+{"type":"list_hooks","request_id":"hooks-1"}
+{"type":"compact","request_id":"compact-1"}
+{"type":"status","request_id":"status-1"}
+{"type":"shutdown"}

@@ -56,7 +56,7 @@ def _duckduckgo(query: str, n: int) -> list[tuple[str, str, str]]:
 
 def _brave(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
     if not key:
-        raise SearchError("Brave needs an API key — set it with `/search brave <key>` or `dgc setup`.")
+        raise SearchError("Brave needs an API key — use `/search brave` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
     r = requests.get(
         "https://api.search.brave.com/res/v1/web/search",
         params={"q": query, "count": n},
@@ -69,7 +69,7 @@ def _brave(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
 
 def _tavily(query: str, n: int, key: str) -> list[tuple[str, str, str]]:
     if not key:
-        raise SearchError("Tavily needs an API key — set it with `/search tavily <key>` or `dgc setup`.")
+        raise SearchError("Tavily needs an API key — use `/search tavily` (masked prompt), `DGC_SEARCH_API_KEY`, or `dgc setup`.")
     r = requests.post("https://api.tavily.com/search",
                       json={"api_key": key, "query": query, "max_results": n}, timeout=25)
     r.raise_for_status()

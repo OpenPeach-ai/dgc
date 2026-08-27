@@ -1,7 +1,7 @@
 {
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
-  "description": "Run the DGC coding agent against your own local or OpenAI-compatible model, inside VS Code and Cursor.",
+  "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
   "version": "0.8.1",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -191,12 +191,7 @@
         "dgc.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Main model host \u2014 any OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
-        },
-        "dgc.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key / bearer token for the main host. Blank = unchanged. For local endpoints a dummy value like \"ollama\" is fine."
+          "description": "Main model host \u2014 a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
         "dgc.model": {
           "type": "string",
@@ -213,10 +208,11 @@
           "default": "",
           "description": "Host for `task` sub-agents \u2014 run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
         },
-        "dgc.subagentApiKey": {
+        "dgc.subagentApiMode": {
           "type": "string",
           "default": "",
-          "description": "API key for the sub-agent host. Blank = inherit the main key."
+          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
+          "description": "Transport for task sub-agents. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.fallbackModel": {
           "type": "string",
@@ -227,6 +223,12 @@
           "type": "string",
           "default": "",
           "description": "Optional host for the fallback model. Blank = same host as the main model."
+        },
+        "dgc.fallbackApiMode": {
+          "type": "string",
+          "default": "",
+          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
+          "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.contextSize": {
           "type": "number",
@@ -277,13 +279,16 @@
     "compile": "npm run check-types && node esbuild.js",
     "check-types": "tsc --noEmit",
     "package": "npm run check-types && node esbuild.js --production",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "test:host": "node test/run-extension-host.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.84.0",
-    "esbuild": "^0.23.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
+    "ovsx": "1.1.1",
     "typescript": "^5.4.0"
   }
 }

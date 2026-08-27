@@ -9,7 +9,10 @@ degrade to plain text.
 from __future__ import annotations
 
 import os
+import unicodedata
 from dataclasses import dataclass
+
+from rich.text import Text
 
 NO_COLOR = bool(os.environ.get("NO_COLOR"))
 
@@ -166,15 +169,41 @@ def rich_color_system() -> str:
     return "256"
 
 
+def terminal_safe_text(value) -> str:
+    """Return literal terminal data without executable control or format characters.
+
+    Newlines, tabs, and the Unicode joiners needed for ordinary scripts/emoji retain useful layout.
+    Other C0/C1 controls and format characters are made visible, so model, tool, provider,
+    repository, and hook data cannot inject ANSI/OSC sequences, carriage-return rewrites, bidi
+    overrides, or invisible labels into a terminal renderer. This is a display-only boundary;
+    stored/model-visible source stays exact.
+    """
+    text = str(value if value is not None else "")
+    out: list[str] = []
+    for char in text:
+        if char in ("\n", "\t"):
+            out.append(char)
+        elif (unicodedata.category(char) == "Cc"
+              or (unicodedata.category(char) == "Cf" and char not in ("\u200c", "\u200d"))):
+            code = ord(char)
+            out.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def section(console, title: str, note: str | None = None) -> None:
     """A list header: blank line, bold-white title, optional dim '— note'."""
-    console.print(f"\n  [bold]{title}[/bold]" + (f"  [{theme().faint}]— {note}[/]" if note else ""),
-                  highlight=False)
+    line = Text("\n  ")
+    line.append(terminal_safe_text(title), style="bold")
+    if note:
+        line.append("  — " + terminal_safe_text(note), style=theme().faint)
+    console.print(line, highlight=False)
 
 
 def list_none(console, s: str = "none yet") -> None:
-    console.print(f"  [{theme().faint}]{s}[/]", highlight=False)
+    console.print(Text("  " + terminal_safe_text(s), style=theme().faint), highlight=False)
 
 
 def next_step(console, s: str) -> None:
-    console.print(f"\n  [{theme().faint}]{s}[/]", highlight=False)
+    console.print(Text("\n  " + terminal_safe_text(s), style=theme().faint), highlight=False)

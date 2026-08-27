@@ -7,7 +7,14 @@ name = "dgc"
 dynamic = ["version"]                       # single-sourced from dgc/__init__.py __version__
 description = "Interactive coding-agent CLI harness for local LLMs (Ollama, LM Studio, vLLM, llama.cpp)"
 requires-python = ">=3.10"
-dependencies = ["rich>=13", "prompt_toolkit>=3", "requests>=2.31"]
+license = { file = "LICENSE" }
+authors = [{ name = "Mohit Kalra" }]
+dependencies = ["rich==15.0.0", "prompt_toolkit==3.0.53", "requests==2.34.2"]
+
+[project.urls]
+Homepage = "https://vibedgc.com"
+Repository = "https://github.com/OpenPeach-ai/dgc"
+Issues = "https://github.com/OpenPeach-ai/dgc/issues"
 
 [tool.setuptools.dynamic]
 version = { attr = "dgc.__version__" }
@@ -19,4 +26,4 @@ dgc = "dgc.cli:main"
 include = ["dgc*"]
 
 [tool.setuptools.package-data]
-dgc = ["skills_builtin/*/SKILL.md"]
+dgc = ["skills_builtin/*/SKILL.md", "schemas/*.json"]
