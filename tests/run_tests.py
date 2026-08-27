@@ -1921,6 +1921,18 @@ def unit_tests(tmp: Path):
               {"error": "frame was not valid JSON", "kind": "command",
                "line": 3, "valid": False},
           ])
+    _surface_fixture = PROJECT / "docs" / "fixtures" / "noncoding-surface-commands.ndjson"
+    _surface_validated = subprocess.run(
+        [sys.executable, "-m", "dgc", "protocol", "validate", "command",
+         str(_surface_fixture)],
+        cwd=tmp, env=_protocol_env, capture_output=True, text=True, timeout=10)
+    _surface_rows = [_json2.loads(line) for line in _surface_validated.stdout.splitlines()]
+    _surface_lines = [line for line in _surface_fixture.read_text().splitlines() if line.strip()]
+    check("non-coding surface reference commands stay valid against the installed protocol",
+          _surface_validated.returncode == 0
+          and len(_surface_rows) == len(_surface_lines)
+          and all(row.get("valid") is True for row in _surface_rows)
+          and any(row.get("type") == "get_plan" for row in _surface_rows))
     _secret_type = "secret-frame-type-DoNotReflect123"
     _safe_invalid = subprocess.run(
         [sys.executable, "-m", "dgc", "protocol", "validate", "event", "-"],
