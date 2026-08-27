@@ -53,7 +53,7 @@ _MAX_TRANSITIONAL_FOLLOWUP_CHARS = 128_000  # queued + one older accepted steer 
 
 def _cell_len(value: str) -> int:
     """Terminal cells occupied by plain Unicode text (wide/combining/emoji aware)."""
-    return Text(str(value)).cell_len
+    return Text(style_mod.terminal_safe_text(value)).cell_len
 
 
 def _ansi_cell_len(value: str) -> int:
@@ -665,7 +665,7 @@ class TUI:
 
         def emit(line):                                 # append, clamped to one screen row
             if not isinstance(line, Text):
-                line = Text(str(line))
+                line = Text(style_mod.terminal_safe_text(line))
             line.truncate(inner, overflow="ellipsis")
             lines.append(line)
 
@@ -674,7 +674,7 @@ class TUI:
             ov["_tab_y"] = 1 + len(lines)
             cx = XOFF
             for i, t in enumerate(ov["tabs"]):
-                seg = f" {t} "
+                seg = f" {style_mod.terminal_safe_text(t).replace(chr(10), ' ')} "
                 segw = _cell_len(seg)
                 if i == ov["tab"]:
                     stl = f"bold {th.bg} on {th.accent}"
@@ -689,7 +689,7 @@ class TUI:
             lines.append(strip)                          # (2 short tabs never wrap)
             emit(Text("─" * inner, style=th.border))
         elif ov.get("title"):
-            emit(Text(ov["title"], style="bold"))
+            emit(Text(style_mod.terminal_safe_text(ov["title"]), style="bold"))
         if ov.get("header"):                            # a rich block (e.g. the command being approved)
             for h in ov["header"]:
                 emit(h if isinstance(h, Text) else Text(str(h)))
@@ -699,7 +699,8 @@ class TUI:
         for i, r in enumerate(visible):
             if ov.get("reader"):                        # a doc line — render pre-styled, no cursor/bar
                 t = r.get("text")
-                line = t.copy() if isinstance(t, Text) else Text(r.get("label", ""))
+                line = (t.copy() if isinstance(t, Text)
+                        else Text(style_mod.terminal_safe_text(r.get("label", ""))))
                 line.truncate(inner, overflow="ellipsis")
                 ov["_rowmap"][1 + len(lines)] = scroll + i
                 lines.append(line)
@@ -707,13 +708,15 @@ class TUI:
             hot = (scroll + i == sel)
             line = Text()
             line.append("❯ " if hot else "  ", style=f"bold {th.accent}" if hot else th.faint)
-            label = Text(str(r.get("label", "")), style="bold" if hot else th.text)
+            label = Text(style_mod.terminal_safe_text(r.get("label", "")),
+                         style="bold" if hot else th.text)
             label.truncate(labw, overflow="ellipsis")   # keep Unicode labels in their cell column
             if label.cell_len < labw:                    # (e.g. an artifact or Unicode session name)
                 label.append(" " * (labw - label.cell_len))
             line.append_text(label)
             if r.get("desc"):
-                line.append("  " + r["desc"], style=th.muted)   # readable (not dim faint) either way
+                line.append("  " + style_mod.terminal_safe_text(r["desc"]),
+                            style=th.muted)   # readable (not dim faint) either way
             line.truncate(inner, overflow="ellipsis")   # one screen row → hit-map stays exact
             pad = inner - line.cell_len
             if pad > 0:
@@ -726,7 +729,7 @@ class TUI:
             emit(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
         if ov.get("footer"):
             lines.append(Text(""))
-            emit(Text(ov["footer"], style=th.faint))
+            emit(Text(style_mod.terminal_safe_text(ov["footer"]), style=th.faint))
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
                       border_style=(th.accent if ov.get("accent") else th.border_strong),
                       padding=(0, 1), width=W)
@@ -1034,7 +1037,7 @@ class TUI:
 
     @staticmethod
     def _md(text: str):
-        return render_mod.render_markdown(text)
+        return render_mod.render_markdown(style_mod.terminal_safe_text(text))
 
     # ---- header (welcome card when empty, slim line when busy) ----
     def _header(self):
@@ -1255,7 +1258,7 @@ class TUI:
         w = min(max(46, self._width - 6), 108) - 6           # ~= the panel's inner text width
         c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                     width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
-        c.print(render_mod.render_markdown(md))
+        c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md)))
         ansi = c.file.getvalue().rstrip("\n")
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
         self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
@@ -1306,8 +1309,11 @@ class TUI:
         running = sum(1 for s in self._sessions if s.state == "running")
         needs = sum(1 for s in self._sessions if s.state == "needs_input")
 
-        h1 = Text("  "); h1.append(self.config.model, style=f"bold {th.text_strong}")
-        h1.append(f"   {self.agent.mode} · think {self.config.get('thinking', 'off')}", style=th.muted)
+        h1 = Text("  "); h1.append(style_mod.terminal_safe_text(self.config.model),
+                                    style=f"bold {th.text_strong}")
+        h1.append("   " + style_mod.terminal_safe_text(self.agent.mode)
+                  + " · think " + style_mod.terminal_safe_text(
+                      self.config.get("thinking", "off")), style=th.muted)
         h2 = Text("  "); h2.append(f"{render_mod.fmt_tokens(used)} / {render_mod.fmt_tokens(size)}  ", style=th.faint)
         h2.append("█" * full + part, style=col); h2.append("░" * empty, style=th.border_strong)
         h2.append(f"  {pct:.0f}%", style=col)
@@ -1440,7 +1446,9 @@ class TUI:
             t.append(f" v{__version__}", style=th.faint)
             t.append(f"  {glyphs.MIDDOT} /help", style=th.faint)
             if upd:
-                t.append(f"  {glyphs.MIDDOT} ⬆ v{upd} /update", style=f"bold {self._GOLD}")
+                t.append(f"  {glyphs.MIDDOT} ⬆ v"
+                         + style_mod.terminal_safe_text(upd) + " /update",
+                         style=f"bold {self._GOLD}")
             return self._rich(Padding(t, (0, 0, 0, 1)))
 
         # centre the fixed-size card on screen (like ): top-pad within the filled header height,
@@ -1492,11 +1500,13 @@ class TUI:
         title = Text(); title.append("Vibe DGC", style="bold #FFFFFF")
         title.append(f"  v{__version__}", style=th.faint)
         if self.agent.session_name:
-            title.append(f"  {glyphs.MIDDOT}  {self.agent.session_name}", style=th.accent)
+            title.append(f"  {glyphs.MIDDOT}  "
+                         + style_mod.terminal_safe_text(self.agent.session_name), style=th.accent)
         add(title)
         add(Text(""))
         if upd:                                            # ── update available: message + clickable CTA ──
-            msg = Text(f"v{upd} is out", style=f"bold {self._GOLD}")
+            msg = Text("v" + style_mod.terminal_safe_text(upd) + " is out",
+                       style=f"bold {self._GOLD}")
             msg.append(" — update for the latest.", style=th.muted)
             add(msg)
             ci = len(content); h = hot(ci)
@@ -1553,7 +1563,7 @@ class TUI:
         if self._req:
             return ANSI(self._rich(f"[bold {th.accent}]{glyphs.DIAMOND}[/] "
                                    f"[{th.text}]waiting for your answer[/] "
-                                   f"[{th.faint}]· {self._req.get('hint', '')}[/]"))
+                                   f"[{th.faint}]· {_esc(self._req.get('hint', ''))}[/]"))
         if self._turn.is_set():
             el = time.monotonic() - self._turn_t0
             fr = glyphs.THINK_FRAMES[int(time.monotonic() * 6) % len(glyphs.THINK_FRAMES)]
@@ -1591,8 +1601,9 @@ class TUI:
         th = style_mod.theme()
         mode = self.agent.mode
         mc = {"default": th.muted, "acceptEdits": th.accent, "plan": th.accent_bright, "auto": th.err}
-        return ANSI(self._rich(f"[{th.faint}]{self.config.model}[/]  "
-                               f"[{th.faint}]{glyphs.MIDDOT}[/]  [{mc.get(mode, th.muted)}]{mode}[/]",
+        return ANSI(self._rich(f"[{th.faint}]{_esc(self.config.model)}[/]  "
+                               f"[{th.faint}]{glyphs.MIDDOT}[/]  "
+                               f"[{mc.get(mode, th.muted)}]{_esc(mode)}[/]",
                                end=""))
 
     # ---- the rounded composer box ----
@@ -1610,7 +1621,8 @@ class TUI:
         w = max(10, self._width)
         th = style_mod.theme()
         c, dim, rst = style_mod.ansi_fg(self._border_color()), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
-        info = f" {self.config.model} {glyphs.MIDDOT} {self.agent.mode} "
+        info = (f" {style_mod.terminal_safe_text(self.config.model)} {glyphs.MIDDOT} "
+                f"{style_mod.terminal_safe_text(self.agent.mode)} ")
         n = w - 3 - _cell_len(info)
         if n < 2:
             return ANSI(f"{c}╰{'─' * (w - 2)}╯{rst}")
@@ -1622,7 +1634,7 @@ class TUI:
             self._thinking = False
         self._cur_tool = None
         self._flush_think()                 # finalize any reasoning above the answer
-        self._buf += chunk
+        self._buf += style_mod.terminal_safe_text(chunk)
         self._streaming = True
         self._invalidate()
 
@@ -1631,7 +1643,7 @@ class TUI:
         if self._think_t0 is None:
             self._think_t0 = time.monotonic()   # start timing this reasoning block
         if self.config.get("show_reasoning", True):
-            self._think += chunk            # shown live + muted in the transcript
+            self._think += style_mod.terminal_safe_text(chunk)  # shown live + muted in transcript
         self._invalidate()
 
     def _flush_think(self) -> None:
@@ -1682,11 +1694,14 @@ class TUI:
         self._flush_text()
         self._tool_count += 1
         summary = _arg_summary(args)
+        safe_name = style_mod.terminal_safe_text(name)
         verb = self._TOOL_VERB.get(name, name)          # bottom status reads "Run npm test", "Read x.py"
+        verb = style_mod.terminal_safe_text(verb)
         self._cur_tool = f"{verb} {summary}".strip()[:48] if summary else verb
         # ONE stateful block for the whole step: header + result together, live accent rail while
         # it runs. tool_result fills it in. `running` drives the wave; `out`/`diff` are attached on finish.
-        self.blocks.append({"kind": "tool", "name": name, "call_id": call_id,
+        self.blocks.append({"kind": "tool", "name": safe_name, "route_name": name,
+                            "call_id": call_id,
                             "summary": summary, "running": True,
                             "error": False, "out": None, "diff": None, "exp": False})
         if self._follow:
@@ -1698,7 +1713,8 @@ class TUI:
         blk = self._live_tool_block(name, call_id)
         if blk is None:
             return
-        blk["progress"] = {"message": str(message)[:500], "value": progress,
+        blk["progress"] = {"message": style_mod.terminal_safe_text(message)[:500],
+                           "value": progress,
                            "total": total, "level": str(level)[:20]}
         self._invalidate()
 
@@ -1706,7 +1722,8 @@ class TUI:
         """The most recent still-running tool block for `name` (this session's transcript)."""
         for blk in reversed(self.blocks):
             if (isinstance(blk, dict) and blk.get("kind") == "tool" and blk.get("running")
-                    and blk.get("name") == name and (call_id is None or blk.get("call_id") == call_id)):
+                    and blk.get("route_name", blk.get("name")) == name
+                    and (call_id is None or blk.get("call_id") == call_id)):
                 return blk
         return None
 
@@ -1714,11 +1731,13 @@ class TUI:
         self._cur_tool = None
         blk = self._live_tool_block(name, call_id)
         if blk is None:                                 # defensive: no matching open block → start one
-            blk = {"kind": "tool", "name": name, "call_id": call_id, "summary": "", "exp": False}
+            blk = {"kind": "tool", "name": style_mod.terminal_safe_text(name),
+                   "route_name": name, "call_id": call_id, "summary": "", "exp": False}
             self.blocks.append(blk)
         blk["running"] = False
         from .ui import tool_output_is_error
         blk["error"] = tool_output_is_error(out)
+        out = style_mod.terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -1741,7 +1760,8 @@ class TUI:
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         th = style_mod.theme()
-        self._append(self._rich(f"[{th.err}]{glyphs.CROSS} {name} denied[/] [{th.faint}]{reason}[/]"))
+        self._append(self._rich(
+            f"[{th.err}]{glyphs.CROSS} {_esc(name)} denied[/] [{th.faint}]{_esc(reason)}[/]"))
 
     # task list: icon glyph + icon colour + text style, per status.
     _TODO_STYLE = {
@@ -1798,9 +1818,9 @@ class TUI:
         t = Text()
         t.append("  ▶ ", style=f"bold {th.accent}")
         t.append("Artifact ready", style=f"bold {th.text_strong}")
-        t.append(f"   {art.name}", style=th.muted)
+        t.append(f"   {style_mod.terminal_safe_text(art.name)}", style=th.muted)
         t.append("\n     ")
-        t.append(art.url, style=f"bold {th.accent_bright}")
+        t.append(style_mod.terminal_safe_text(art.url), style=f"bold {th.accent_bright}")
         t.append("   ← open in your browser", style=th.faint)
         t.append("\n     ", style=th.faint)
         t.append("/artifact", style=th.muted)
@@ -1993,10 +2013,11 @@ class TUI:
         from rich.text import Text
         self._flush_text()
         th = style_mod.theme()
-        header = [Text(f"{glyphs.RAIL} Allow ", style="bold").append(name, style=f"bold {th.accent}")
+        header = [Text(f"{glyphs.RAIL} Allow ", style="bold").append(
+                  style_mod.terminal_safe_text(name), style=f"bold {th.accent}")
                   .append(" to run?", style="bold")]
         if name == "bash" and args.get("command"):      # show the shell command itself
-            for ln in str(args["command"]).splitlines()[:6]:
+            for ln in style_mod.terminal_safe_text(args["command"]).splitlines()[:6]:
                 header.append(Text("  $ ", style=th.faint).append(ln, style=th.text))
         else:
             detail = _arg_summary(args)
@@ -2058,7 +2079,7 @@ class TUI:
         from rich.text import Text
         self._flush_text()
         ans = self._ask({"kind": "options", "options": list(options),
-                         "header": [Text(question, style="bold")]})
+                         "header": [Text(style_mod.terminal_safe_text(question), style="bold")]})
         return options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else options[0]
 
     def mcp_capabilities(self) -> dict:
@@ -2076,7 +2097,8 @@ class TUI:
         if kind in ("sampling_request", "sampling_response"):
             title = ("Allow this server to ask your model?" if kind == "sampling_request"
                      else "Share this generated response with the server?")
-            preview = json.dumps(payload, ensure_ascii=False, indent=2)[:12_000]
+            preview = style_mod.terminal_safe_text(
+                json.dumps(payload, ensure_ascii=False, indent=2))[:12_000]
             self._append(self._rich(f"[bold]{_esc(title)}[/]\n[{th.muted}]{_esc(preview)}[/]"))
             ans = self._ask({"kind": kind,
                              "header": [Text(title, style="bold")],
@@ -2086,7 +2108,7 @@ class TUI:
         if kind != "elicitation":
             return {"action": "cancel"}
 
-        message = str(payload.get("message") or "")
+        message = style_mod.terminal_safe_text(payload.get("message") or "")
         self._append(self._rich(_esc(message)))
         if payload.get("mode") == "url":
             url, host = str(payload.get("url") or ""), str(payload.get("host") or "")
@@ -2119,12 +2141,12 @@ class TUI:
             content: dict = {}
             try:
                 for key, field in properties.items():
-                    label = str(field.get("title") or key)
+                    label = style_mod.terminal_safe_text(field.get("title") or key)
                     optional = key not in required
                     options = _form_options(field)
                     field_kind = field.get("type")
                     if field_kind == "array":
-                        titles = [str(item.get("title")) for item in
+                        titles = [style_mod.terminal_safe_text(item.get("title")) for item in
                                   (field.get("items") or {}).get("anyOf", [])] or options
                         self._append(self._rich(_esc(
                             f"{label}: " + ", ".join(f"{i + 1}={v}" for i, v in enumerate(titles)))))
@@ -2138,10 +2160,14 @@ class TUI:
                         picks = [] if not raw else [int(part.strip()) - 1 for part in raw.split(",")]
                         content[key] = [options[i] for i in picks if 0 <= i < len(options)]
                     elif options:
-                        labels = ([str(item.get("title")) for item in field.get("oneOf", [])]
-                                  or list(field.get("enumNames") or []) or options)
+                        labels = ([style_mod.terminal_safe_text(item.get("title"))
+                                   for item in field.get("oneOf", [])]
+                                  or [style_mod.terminal_safe_text(item)
+                                      for item in (field.get("enumNames") or [])]
+                                  or [style_mod.terminal_safe_text(item) for item in options])
                         rows = list(labels) + (["Skip this field"] if optional else [])
-                        ans = self._ask({"kind": "mcp-form-field", "header": [Text(label, style="bold")],
+                        ans = self._ask({"kind": "mcp-form-field",
+                                         "header": [Text(label, style="bold")],
                                          "options": rows}, cancel=cancel)
                         if ans is None:
                             return {"action": "cancel"}
@@ -3493,7 +3519,8 @@ class TUI:
         sh = cfg.get("subagent_base_url") or "(inherit main host)"
         st = cfg.get("subagent_api_mode") or "inherit/infer"
         self._append(self._rich(
-            f"[{style_mod.theme().faint}]sub-agent model {sm} · host {sh} · transport {st}[/]"))
+            f"[{style_mod.theme().faint}]sub-agent model {_esc(sm)} · host {_esc(sh)} · "
+            f"transport {_esc(st)}[/]"))
         self._show_picker("Sub-agents", labels, pick)
 
     def _tui_worktree(self, rest: str) -> None:
@@ -3913,6 +3940,8 @@ class TUI:
 
     def _user_band_layout(self, text: str, tag: str = ""):
         """Return the cell-aware row plan shared by rendering and jump geometry."""
+        text = style_mod.terminal_safe_text(text)
+        tag = style_mod.terminal_safe_text(tag).replace("\n", " ")
         W = max(8, self._width - 2)
         compact = 0 < getattr(self, "_height", 0) <= self._AUTO_COMPACT_ROWS
         arrow = "" if compact else f"{glyphs.ARROW} "
@@ -4160,7 +4189,8 @@ class TUI:
                 succeeded = not result.startswith("error:")
                 th = style_mod.theme()
                 self._append(self._rich(Text(
-                    result, style=th.faint if succeeded else th.err)))
+                    style_mod.terminal_safe_text(result),
+                    style=th.faint if succeeded else th.err)))
             except Exception as exc:
                 self.error(f"{type(exc).__name__}: {exc}")
             finally:
@@ -4308,10 +4338,10 @@ class _ClickControl(FormattedTextControl):
 def _arg_summary(args: dict) -> str:
     for k in ("path", "command", "pattern", "url", "name", "description", "symbol", "operation"):
         if k in args:
-            v = str(args[k]).replace("\n", " ")
+            v = style_mod.terminal_safe_text(args[k]).replace("\n", " ")
             return v[:100] + ("…" if len(v) > 100 else "")
     return ""
 
 
 def _esc(s: str) -> str:
-    return str(s).replace("[", r"\[")
+    return style_mod.terminal_safe_text(s).replace("[", r"\[")

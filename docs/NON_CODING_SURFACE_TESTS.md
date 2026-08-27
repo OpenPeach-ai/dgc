@@ -329,6 +329,7 @@ These inputs exercise the current rendering seams without assuming model quality
 | Table | `Return a two-column Markdown table with one data row.` In TUI/editor, expect a rendered table rather than visible delimiter pipes. |
 | Fenced code | Stream `` ```html\n<img src=x onerror=bad()>\n**literal** `` before its closing fence; expect an inert code block immediately, then exact raw-source copy after closure. |
 | Unicode cell layout | Enter `界界界界界 é 👩🏽‍💻 → ° —` in a 12–14-column TUI, stream the same characters in reasoning, and use long CJK model/session/worktree labels; prompt, reasoning, and the slim header/context hitbox must remain within the terminal. |
+| Terminal literal data | In TUI and `dgc --classic`, make model/tool/status data contain `[bold red]literal[/]`, `\x1b]8;;https://example.invalid`, a carriage return, and U+202E; tags and escapes must remain visible and cannot create styling, links, line rewrites, or bidi labels. |
 | Prompt ownership | During a tool call, enter `Also check tests`; expect exactly one follow-up/steering band. |
 | Tool lifecycle | `Run printf 'one\ntwo\n' and report its result.` |
 | Cadence | `Read pyproject.toml, run the smallest relevant verification, then report the result.` |
@@ -340,7 +341,8 @@ Mojibake decoding and terminal Markdown styling were not changed by the frontier
 editor now renders aligned Markdown tables, treats closed and still-streaming fenced code as opaque
 inert source, and copies the model's exact code rather than escaped HTML entities. Unicode
 terminal-cell layout, prompt ownership, correlated tool settlement, semantic response cadence,
-bare-tool narration, and editor accessibility also changed and require regression coverage.
+bare-tool narration, terminal dynamic-data rendering, and editor accessibility also changed and
+require regression coverage.
 Streaming has no artificial timer: provider chunks are forwarded as they arrive.
 
 ## VS Code and Cursor

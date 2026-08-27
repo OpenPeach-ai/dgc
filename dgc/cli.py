@@ -17,6 +17,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
+from rich.markup import escape as escape_markup
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -32,11 +33,22 @@ from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
 from .redaction import redact_text, secret_values
-from .style import ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section
+from .style import (ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section,
+                    terminal_safe_text)
 from .tools import TOOL_SCHEMAS
 
 from .update import (  # update-check lives in its own module so the TUI can share it
     UPDATE_CACHE, VERSION_URL, cached_update, refresh_update_async, run_update)
+
+
+def _markup_literal(value) -> str:
+    """Dynamic terminal data safe for insertion inside DGC-owned Rich markup."""
+    return escape_markup(terminal_safe_text(value))
+
+
+def _literal_cell(value, *, style: str | None = None) -> Text:
+    """Literal terminal-safe cell for Rich tables and panels."""
+    return Text(terminal_safe_text(value), style=style)
 
 
 def auto_warning(console: Console) -> None:
@@ -72,6 +84,7 @@ class UI:
         knows the model is loading/generating, not that the CLI hung."""
         if not sys.stdout.isatty():
             return
+        label = terminal_safe_text(label).replace("\n", " ")
         self.stop_working()
         stop = threading.Event()
         self._work_stop = stop
@@ -128,7 +141,8 @@ class UI:
         if self._thinking:
             self.console.print()
             self._thinking = False
-        self.console.print(chunk, end="", markup=False, highlight=False, soft_wrap=True)
+        self.console.print(terminal_safe_text(chunk), end="", markup=False, highlight=False,
+                           soft_wrap=True)
         self.console.file.flush()  # stream live — rich/stdout otherwise buffers until a newline
         self._streamed = True
 
@@ -137,7 +151,8 @@ class UI:
         if not self._thinking:
             self.console.print("\n[dim italic]· thinking…[/] ", end="")
             self._thinking = True
-        self.console.print(chunk, end="", markup=False, highlight=False, style="dim italic")
+        self.console.print(terminal_safe_text(chunk), end="", markup=False, highlight=False,
+                           style="dim italic")
         self.console.file.flush()
         self._streamed = True
 
@@ -152,8 +167,8 @@ class UI:
         self.stop_working()
         self._tool_count += 1
         summary = self._arg_summary(name, args)
-        self.console.print(f"\n[bold {BRAND}]{glyphs.tool_icon(name)} {name}[/] "
-                           f"[{DIM}]{summary}[/]", highlight=False)
+        self.console.print(f"\n[bold {BRAND}]{glyphs.tool_icon(name)} {_markup_literal(name)}[/] "
+                           f"[{DIM}]{_markup_literal(summary)}[/]", highlight=False)
 
     def tool_progress(self, name: str, message: str, *, progress=None, total=None,
                       level: str = "", call_id: str | None = None) -> None:
@@ -166,11 +181,12 @@ class UI:
                 amount = f" · {progress:g}"
         color = "red" if level in ("error", "critical", "alert", "emergency") else DIM
         # MCP text is untrusted server output, not Rich markup.
-        self.console.print(f"  · {message[:500]}{amount}", style=color, markup=False,
+        self.console.print(f"  · {terminal_safe_text(message)[:500]}{amount}", style=color, markup=False,
                            highlight=False)
         self.start_working(name)
 
     def tool_result(self, name: str, out: str, call_id: str | None = None) -> None:
+        out = terminal_safe_text(out)
         if "\n--- " in out or out.startswith("---"):
             diff = out[out.find("---"):]
             if len(diff) < 8000:
@@ -188,15 +204,18 @@ class UI:
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         self.stop_working()
-        self.console.print(f"[bold red]✗ {name} denied[/bold red] [{DIM}]{reason}[/]", highlight=False)
+        self.console.print(
+            f"[bold red]✗ {_markup_literal(name)} denied[/bold red] "
+            f"[{DIM}]{_markup_literal(reason)}[/]", highlight=False)
 
     def hook_activity(self, event: str, status: str, *, configured: int = 0,
                       duration_ms: int = 0, message: str = "") -> None:
         if status == "started":
             return
-        detail = f" · {message}" if message else ""
+        detail = f" · {terminal_safe_text(message)}" if message else ""
         self.console.print(
-            f"  · hook {event} {status} · {configured} configured · {duration_ms}ms{detail}",
+            f"  · hook {terminal_safe_text(event)} {terminal_safe_text(status)} · "
+            f"{configured} configured · {duration_ms}ms{detail}",
             style="red" if status not in ("completed",) else DIM,
             markup=False, highlight=False)
 
@@ -204,7 +223,7 @@ class UI:
     def _arg_summary(name: str, args: dict) -> str:
         for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
             if key in args:
-                value = str(args[key]).replace("\n", " ")
+                value = terminal_safe_text(args[key]).replace("\n", " ")
                 return value[:120] + ("…" if len(value) > 120 else "")
         return ""
 
@@ -214,15 +233,16 @@ class UI:
         self._yield_stdin()
         section(self.console, "permission requested", name)
         if name == "bash":
-            self.console.print(render.mono_syntax(str(args.get("command", "")), "bash"))
+            self.console.print(render.mono_syntax(
+                terminal_safe_text(args.get("command", "")), "bash"))
         else:
             summary = self._arg_summary(name, args)
             if summary:
-                self.console.print(f"  [{DIM}]{summary}[/]", highlight=False)
+                self.console.print(f"  [{DIM}]{_markup_literal(summary)}[/]", highlight=False)
         rule = rule_for(name, args)
         idx = menu_select("Allow this?",
                           ["allow once", "always allow", "deny"],
-                          ["just this time", f"add rule {rule}", "block it"])
+                          ["just this time", f"add rule {terminal_safe_text(rule)}", "block it"])
         if idx in (0, 1):
             return {0: "once", 1: "always"}[idx]
         # denied (or esc) — capture optional feedback so the model can adjust in one step
@@ -236,7 +256,7 @@ class UI:
         """Return target mode string on approval, or None to keep planning."""
         self._yield_stdin()
         section(self.console, "📋 proposed plan")
-        self.console.print(render.render_markdown(plan or "(empty plan)"))
+        self.console.print(render.render_markdown(terminal_safe_text(plan or "(empty plan)")))
         idx = menu_select("Approve this plan?",
                           ["build with acceptEdits", "build in default", "build in full-auto",
                            "keep planning"],
@@ -267,8 +287,8 @@ class UI:
     def propose_options(self, question: str, options: list[str]) -> str:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
         self._yield_stdin()
-        idx = menu_select(question or "Choose one",
-                          list(options) + ["something else…"],
+        idx = menu_select(terminal_safe_text(question or "Choose one"),
+                          [terminal_safe_text(option) for option in options] + ["something else…"],
                           [""] * len(options) + ["type your own answer"])
         if idx is None:
             return options[0]
@@ -294,7 +314,8 @@ class UI:
             title = ("Let this server ask your model?" if kind == "sampling_request"
                      else "Share this sampled response with the server?")
             self.console.print(title, style="bold", markup=False)
-            self.console.print(json.dumps(payload, ensure_ascii=False, indent=2)[:12_000],
+            self.console.print(terminal_safe_text(
+                json.dumps(payload, ensure_ascii=False, indent=2))[:12_000],
                                style=DIM, markup=False, highlight=False, soft_wrap=True)
             idx = menu_select("MCP sampling consent", ["approve once", "decline", "cancel"],
                               ["continue this request", "tell the server no", "dismiss"])
@@ -304,12 +325,14 @@ class UI:
         if kind != "elicitation":
             return {"action": "cancel"}
 
-        message = str(payload.get("message") or "")
+        message = terminal_safe_text(payload.get("message") or "")
         self.console.print(message, markup=False, highlight=False, soft_wrap=True)
         if payload.get("mode") == "url":
-            url, host = str(payload.get("url") or ""), str(payload.get("host") or "")
+            url = str(payload.get("url") or "")
+            host = terminal_safe_text(payload.get("host") or "")
             self.console.print(f"Host: {host}", style="bold", markup=False)
-            self.console.print(url, style=DIM, markup=False, highlight=False, soft_wrap=True)
+            self.console.print(terminal_safe_text(url), style=DIM, markup=False, highlight=False,
+                               soft_wrap=True)
             if payload.get("suspicious_host"):
                 self.console.print("Warning: this host contains Punycode; inspect it carefully.",
                                    style="bold red", markup=False)
@@ -337,12 +360,12 @@ class UI:
             content: dict = {}
             try:
                 for key, field in properties.items():
-                    label = str(field.get("title") or key)
+                    label = terminal_safe_text(field.get("title") or key)
                     optional = key not in required
                     options = _form_options(field)
                     kind_name = field.get("type")
                     if kind_name == "array":
-                        shown = [str(item.get("title")) for item in
+                        shown = [terminal_safe_text(item.get("title")) for item in
                                  (field.get("items") or {}).get("anyOf", [])] or options
                         self.console.print(f"  {label}: " + ", ".join(
                             f"{i + 1}={name}" for i, name in enumerate(shown)), markup=False)
@@ -353,8 +376,11 @@ class UI:
                         picks = [] if not raw else [int(part.strip()) - 1 for part in raw.split(",")]
                         content[key] = [options[i] for i in picks if 0 <= i < len(options)]
                     elif options:
-                        labels = ([str(item.get("title")) for item in field.get("oneOf", [])]
-                                  or list(field.get("enumNames") or []) or options)
+                        labels = ([terminal_safe_text(item.get("title"))
+                                   for item in field.get("oneOf", [])]
+                                  or [terminal_safe_text(item)
+                                      for item in (field.get("enumNames") or [])]
+                                  or [terminal_safe_text(item) for item in options])
                         rows = list(labels) + (["skip"] if optional else [])
                         idx = menu_select(label, rows, [""] * len(rows))
                         if idx is None or (optional and idx == len(labels)):
@@ -389,7 +415,8 @@ class UI:
                 self.error(f"invalid form response: {exc}")
                 continue
             self.console.print("Review before sharing:", style="bold", markup=False)
-            self.console.print(json.dumps(candidate["content"], ensure_ascii=False, indent=2),
+            self.console.print(terminal_safe_text(
+                json.dumps(candidate["content"], ensure_ascii=False, indent=2)),
                                style=DIM, markup=False, highlight=False)
             idx = menu_select("Send this form to the MCP server?",
                               ["submit", "edit", "decline", "cancel"],
@@ -411,7 +438,9 @@ class UI:
         marks = {"done": "[green]☑[/green]", "in_progress": f"[{BRAND}]◐[/]", "pending": f"[{DIM}]☐[/]"}
         section(self.console, "todos")
         for t in todos:
-            self.console.print(f"  {marks.get(t['status'], '☐')} {t['content']}", highlight=False)
+            self.console.print(
+                f"  {marks.get(t['status'], '☐')} {_markup_literal(t['content'])}",
+                highlight=False)
 
     def artifact_ready(self, art) -> None:
         self.info(f"artifact ready: {art.name} · {art.url}")
@@ -421,11 +450,13 @@ class UI:
 
     def info(self, msg: str) -> None:
         self.stop_working()
-        self.console.print(f"  [{DIM}]· {msg}[/]", highlight=False)
+        self.console.print(
+            f"  [{DIM}]· {_markup_literal(msg)}[/]", highlight=False)
 
     def error(self, msg: str) -> None:
         self.stop_working()
-        self.console.print(f"[bold red]error:[/bold red] {msg}")
+        self.console.print(
+            f"[bold red]error:[/bold red] {_markup_literal(msg)}")
 
     def add_permission_rule(self, name: str, args: dict) -> None:
         """Persist an allow-rule for this tool call — the 'always allow' path."""
@@ -438,7 +469,9 @@ class UI:
 def _help_table(console, rows) -> None:
     """Render literal command syntax in a responsive two-column grid."""
     from rich.text import Text
-    values = list(rows)
+    values = [(terminal_safe_text(token).replace("\n", " "),
+               terminal_safe_text(description).replace("\n", " "))
+              for token, description in rows]
     if not values:
         return
     terminal_width = max(32, int(console.size.width or 80))
@@ -450,7 +483,7 @@ def _help_table(console, rows) -> None:
     for token, description in values:
         command = Text("  ")
         command.append(token, style=BRAND)
-        table.add_row(command, Text(description, style=DIM))
+        table.add_row(command, _literal_cell(description, style=DIM))
     console.print(table)
 
 
@@ -531,8 +564,9 @@ class CLI:
         c.print()
         if (c.size.width or 80) < 34:                        # minimal: no art, one dim brand line
             cfg = self.config
-            c.print(f"  [bold {BRAND_MAGENTA}]dgc[/] [{DIM}]v{__version__} · {cfg.model} · "
-                    f"{cfg.data.get('mode', 'default')}[/]", highlight=False)
+            c.print(f"  [bold {BRAND_MAGENTA}]dgc[/] [{DIM}]v{__version__} · "
+                    f"{_markup_literal(cfg.model)} · "
+                    f"{_markup_literal(cfg.data.get('mode', 'default'))}[/]", highlight=False)
             return
         logo_mod.show(c, animate=bool(self.config.get("logo_animation", True)))   # animated shimmer wordmark
         c.print(f"  [{DIM}]v{__version__} · a coding agent for the models you run[/]", highlight=False)
@@ -546,11 +580,14 @@ class CLI:
         if (c.size.width or 80) < 34:                        # minimal: skip the config block
             return
         def row(label, value):                               # dim padded label + value (peachd statusLine)
-            c.print(f"  [{DIM}]{label:<8}[/]  {value}", highlight=False)
+            safe_label = _markup_literal(label)
+            c.print(f"  [{DIM}]{safe_label:<8}[/]  {_markup_literal(value)}", highlight=False)
         row("endpoint", cfg.base_url)
         row("model", cfg.model)
-        c.print(f"  [{DIM}]{'mode':<8}[/]  [{MODE_COLOR.get(mode, 'white')}]{mode}[/]  "
-                f"[{DIM}]· {MODE_DESCRIPTIONS.get(mode, '')}[/]", highlight=False)
+        c.print(f"  [{DIM}]{'mode':<8}[/]  "
+                f"[{MODE_COLOR.get(mode, 'white')}]{_markup_literal(mode)}[/]  "
+                f"[{DIM}]· {_markup_literal(MODE_DESCRIPTIONS.get(mode, ''))}[/]",
+                highlight=False)
         row("thinking", think)
         row("project", cfg.project_root)
         if self.agent.skills:
@@ -564,7 +601,8 @@ class CLI:
                 self._context_window_size()), highlight=False)
         upd = cached_update()
         if upd:
-            c.print(f"  [bold {BRAND_MAGENTA}]⬆ update available: v{upd}[/]  "
+            c.print(f"  [bold {BRAND_MAGENTA}]⬆ update available: "
+                    f"v{_markup_literal(upd)}[/]  "
                     f"[{DIM}]— run [bold]dgc update[/bold][/]", highlight=False)
         if mode == "auto":
             auto_warning(c)
@@ -658,21 +696,21 @@ class CLI:
                 auto_warning(self.console)
                 if input("  enable full-auto? [y/N] › ").strip().lower() in ("y", "yes"):
                     self.agent.set_mode("auto")
-                    self.ui.info(f"mode → [{MODE_COLOR['auto']}]auto[/] ({MODE_DESCRIPTIONS['auto']})")
+                    self.ui.info(f"mode → auto ({MODE_DESCRIPTIONS['auto']})")
                 else:
                     self.ui.info(f"kept {self.agent.mode}")
             else:
                 self.agent.set_mode(rest)
-                self.ui.info(f"mode → [{MODE_COLOR[rest]}]{rest}[/] ({MODE_DESCRIPTIONS[rest]})")
+                self.ui.info(f"mode → {rest} ({MODE_DESCRIPTIONS[rest]})")
         elif cmd == "plan":
             target = "default" if self.agent.mode == "plan" else "plan"
             self.agent.set_mode(target)
-            self.ui.info(f"mode → [{MODE_COLOR[target]}]{target}[/] ({MODE_DESCRIPTIONS[target]})")
+            self.ui.info(f"mode → {target} ({MODE_DESCRIPTIONS[target]})")
         elif cmd in ("view-plan", "plan-view", "viewplan"):
             plan = (sessions_mod.load_plan(self.agent.session_file, cfg.project_root)
                     if self.agent.session_file else None)
             if plan:
-                self.console.print(render.render_markdown(plan))
+                self.console.print(render.render_markdown(terminal_safe_text(plan)))
             else:
                 self.ui.info("no saved plan yet — /mode plan, then ask for one")
         elif cmd == "goal":
@@ -707,8 +745,8 @@ class CLI:
                 else:
                     self.ui.error(self.agent._last_persist_error or "goal update was not saved")
             elif self.agent.goal:
-                self.console.print(render.render_markdown(
-                    f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}"))
+                self.console.print(render.render_markdown(terminal_safe_text(
+                    f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}")))
             else:
                 self.ui.info("no standing goal — /goal <objective> to set one")
         elif cmd == "think":
@@ -733,18 +771,20 @@ class CLI:
                 self.ui.info("no skills found — add dirs with SKILL.md under .dgc/skills/ or ~/.dgc/skills/")
             table = Table("skill", "description", "location")
             for s in self.agent.skills.values():
-                table.add_row(s.name, s.description, str(s.path))
+                table.add_row(_literal_cell(s.name), _literal_cell(s.description),
+                              _literal_cell(s.path))
             self.console.print(table)
         elif cmd == "mcp":
             self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
-            self.console.print(self.agent.mcp.summary())
+            self.console.print(terminal_safe_text(self.agent.mcp.summary()), markup=False,
+                               highlight=False)
         elif cmd == "hooks":
             from .hooks import hook_catalog
             catalog = hook_catalog(cfg)
             table = Table("event", "configured", "matchers", "state")
             for item in catalog["items"]:
                 table.add_row(item["event"], str(item["configured"]),
-                              Text(", ".join(item["matchers"]) or "—"),
+                              _literal_cell(", ".join(item["matchers"]) or "—"),
                               "ready" if item["valid"] else "invalid")
             self.console.print(table)
             if catalog["invalid"]:
@@ -814,7 +854,8 @@ class CLI:
                 else:
                     table = Table("id", "name", "URL", "age")
                     for art in arts:
-                        table.add_row(art.id, art.name, art.url, art.uptime)
+                        table.add_row(*(_literal_cell(value) for value in
+                                        (art.id, art.name, art.url, art.uptime)))
                     self.console.print(table)
         elif cmd in ("handoff", "handover"):
             md = self.agent.generate_handoff(save=True)
@@ -823,7 +864,7 @@ class CLI:
                 self.ui.info(f"handoff saved → {path}")
             elif self.agent._last_handoff_error:
                 self.ui.error(self.agent._last_handoff_error)
-            self.console.print(render.render_markdown(md))
+            self.console.print(render.render_markdown(terminal_safe_text(md)))
         elif cmd == "name":
             if rest.strip():
                 if self.agent.name_session(rest.strip()):
@@ -843,8 +884,10 @@ class CLI:
             sm = cfg.get("subagent_model") or f"(inherit main: {cfg.model})"
             sh = cfg.get("subagent_base_url") or f"(inherit main: {cfg.base_url})"
             st = cfg.get("subagent_api_mode") or "(inherit/infer)"
-            self.console.print(f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{sm}[/]  ·  "
-                               f"host [{BRAND}]{sh}[/]  ·  transport [{BRAND}]{st}[/]")
+            self.console.print(
+                f"[bold]Sub-agent defaults[/bold]  model [{BRAND}]{_markup_literal(sm)}[/]  ·  "
+                f"host [{BRAND}]{_markup_literal(sh)}[/]  ·  "
+                f"transport [{BRAND}]{_markup_literal(st)}[/]")
             self.console.print("[dim]/subagent model NAME  ·  /subagent host URL  ·  "
                                "/subagent transport MODE  ·  /subagent clear[/dim]")
             if not defs:
@@ -853,8 +896,9 @@ class CLI:
             else:
                 table = Table("agent", "description", "model", "host", "transport")
                 for a in defs.values():
-                    table.add_row(a.name, a.description, a.model or "(default)",
-                                  a.base_url or "(default)", a.api_mode or "(inherit/infer)")
+                    table.add_row(*(_literal_cell(value) for value in (
+                        a.name, a.description, a.model or "(default)",
+                        a.base_url or "(default)", a.api_mode or "(inherit/infer)")))
                 self.console.print(table)
         elif cmd == "subagent":
             args = rest.split()
@@ -894,7 +938,8 @@ class CLI:
                 if rendered:
                     self.agent.run_turn(rendered)
             else:
-                self.console.print(f"[dim]unknown command /{cmd} — try /help[/dim]")
+                self.console.print(
+                    f"[dim]unknown command /{_markup_literal(cmd)} — try /help[/dim]")
         return True
 
     def _search_cmd(self, rest: str) -> None:
@@ -959,8 +1004,9 @@ class CLI:
                 return
             style_mod.section(self.console, "git worktrees")
             for w in wts:
-                self.console.print(f"  [{BRAND}]{w.get('branch', '(detached)')}[/]  [{DIM}]{w['path']}[/]",
-                                   highlight=False)
+                self.console.print(
+                    f"  [{BRAND}]{_markup_literal(w.get('branch', '(detached)'))}[/]  "
+                    f"[{DIM}]{_markup_literal(w['path'])}[/]", highlight=False)
             return
         if parts[0] == "remove" and len(parts) > 1:
             err = wt.remove(root, " ".join(parts[1:]))
@@ -1001,7 +1047,8 @@ class CLI:
                     paths = ", ".join(task.display_paths[:5]) or "(none)"
                     if len(task.display_paths) > 5:
                         paths += f" (+{len(task.display_paths) - 5})"
-                    table.add_row(task.id, state, paths, task.reason or "(unspecified)", str(task.path))
+                    table.add_row(*(_literal_cell(value) for value in (
+                        task.id, state, paths, task.reason or "(unspecified)", task.path)))
                 self.console.print(table)
                 if len(selected) > 100:
                     self.ui.info(f"showing 100 of {len(selected)} records — /tasks show ID for one record")
@@ -1052,7 +1099,7 @@ class CLI:
                 rules = self.config.permissions[action]
                 self.console.print(f"[bold]{action}[/bold] ({len(rules)})")
                 for r in rules:
-                    self.console.print(f"  {r}")
+                    self.console.print(f"  {terminal_safe_text(r)}", markup=False, highlight=False)
             return
         m = re.match(r"(allow|ask|deny)\s+(.+)", rest, re.S)
         if not m:
@@ -1074,10 +1121,10 @@ class CLI:
                 self.config.project_root,
                 sanitizer=lambda value: redact_text(value, secret_values(self.config)))
             self.console.print(Panel(
-                Text(memory_mod.bounded_memory_view(proj or "(none)", 8000)),
+                _literal_cell(memory_mod.bounded_memory_view(proj or "(none)", 8000)),
                 title="project DGC.md", expand=False))
             self.console.print(Panel(
-                Text(memory_mod.bounded_memory_view(user or "(none)", 8000)),
+                _literal_cell(memory_mod.bounded_memory_view(user or "(none)", 8000)),
                 title="~/.dgc/DGC.md", expand=False))
             return
         m = re.match(r"add\s+(user\s+)?(.+)", rest, re.S)
@@ -1109,7 +1156,7 @@ class CLI:
         out = direct_bash(command, self.agent.ctx)
         # Shell output is data, never Rich markup. This also keeps terminal control text from being
         # interpreted as a DGC status/card even when a build dependency prints hostile diagnostics.
-        self.console.print(out, markup=False, highlight=False, soft_wrap=True)
+        self.console.print(terminal_safe_text(out), markup=False, highlight=False, soft_wrap=True)
 
     # ---------------------------------------------------------------- loop ---
     def repl(self) -> None:
@@ -1127,10 +1174,12 @@ class CLI:
             acc, dim, rst = style_mod.ansi_fg(th.accent), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
             if queue:                                   # run a follow-up queued during the last turn
                 line = queue.pop(0)
-                self.console.print(f"  [{DIM}]{glyphs.ARROW} {line}[/]", highlight=False)
+                self.console.print(
+                    f"  [{DIM}]{glyphs.ARROW} {_markup_literal(line)}[/]", highlight=False)
             else:
                 try:                                    # ❯ prefix + right-aligned `model · mode`
-                    rp = ANSI(f"{dim}{self.config.model}  {glyphs.MIDDOT}  {mode}{rst}")
+                    rp = ANSI(f"{dim}{terminal_safe_text(self.config.model)}  {glyphs.MIDDOT}  "
+                              f"{terminal_safe_text(mode)}{rst}")
                     line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp).strip()
                 except KeyboardInterrupt:
                     continue
@@ -1220,7 +1269,9 @@ class CLI:
                 elif ch in ("\r", "\n"):         # Enter — queue what was typed so far
                     if buf.strip():
                         queue.append(buf.strip())
-                        self.console.print(f"[dim]↵ queued: {buf.strip()[:70]}[/dim]", highlight=False)
+                        self.console.print(
+                            f"[dim]↵ queued: {_markup_literal(buf.strip()[:70])}[/dim]",
+                            highlight=False)
                     buf = ""
                 elif ch == "\x7f":               # backspace
                     buf = buf[:-1]
@@ -1246,18 +1297,26 @@ def run_doctor(config: Config) -> None:
     sandbox_report = sandbox.capabilities(config)
     sandbox_requested = sandbox.requested(config)
     c.print("[bold]DGC doctor[/bold] — checking your setup\n")
-    c.print(f"  endpoint      {config.base_url}")
-    c.print(f"  model         {config.model}")
-    c.print(f"  mode          {config.data.get('mode', 'default')}")
-    c.print(f"  context_size  {config.get('context_size')}")
-    c.print(f"  config file   {USER_CONFIG}")
-    c.print(f"  sandbox       {'on' if sandbox_requested else 'off'} — {sandbox.describe(config)}\n")
+    c.print(f"  endpoint      {terminal_safe_text(config.base_url)}", markup=False,
+            highlight=False)
+    c.print(f"  model         {terminal_safe_text(config.model)}", markup=False, highlight=False)
+    c.print(f"  mode          {terminal_safe_text(config.data.get('mode', 'default'))}", markup=False,
+            highlight=False)
+    c.print(f"  context_size  {config.get('context_size')}", markup=False, highlight=False)
+    c.print(f"  config file   {terminal_safe_text(USER_CONFIG)}", markup=False, highlight=False)
+    c.print(f"  sandbox       {'on' if sandbox_requested else 'off'} — "
+            f"{terminal_safe_text(sandbox.describe(config))}\n", markup=False, highlight=False)
     if sandbox_requested and sandbox_report.available:
-        c.print(f"  sandbox fs    {sandbox_report.filesystem}")
-        c.print(f"  sandbox home  {sandbox_report.home}")
-        c.print(f"  sandbox temp  {sandbox_report.temporary}")
-        c.print(f"  sandbox proc  {sandbox_report.process}")
-        c.print(f"  sandbox net   {sandbox_report.network}\n")
+        c.print(f"  sandbox fs    {terminal_safe_text(sandbox_report.filesystem)}", markup=False,
+                highlight=False)
+        c.print(f"  sandbox home  {terminal_safe_text(sandbox_report.home)}", markup=False,
+                highlight=False)
+        c.print(f"  sandbox temp  {terminal_safe_text(sandbox_report.temporary)}", markup=False,
+                highlight=False)
+        c.print(f"  sandbox proc  {terminal_safe_text(sandbox_report.process)}", markup=False,
+                highlight=False)
+        c.print(f"  sandbox net   {terminal_safe_text(sandbox_report.network)}\n", markup=False,
+                highlight=False)
     if sandbox_requested and not sandbox_report.available:
         c.print("  [bold red]✗[/bold red] sandbox is enabled but this platform has no supported backend")
         c.print("    → install bubblewrap on Linux, use sandbox-exec on macOS, or run [bold]/sandbox off[/bold]")
@@ -1266,18 +1325,19 @@ def run_doctor(config: Config) -> None:
     try:
         models = client.list_models()
     except Exception as e:
-        c.print(f"  [bold red]✗[/bold red] cannot reach {config.base_url} — {type(e).__name__}: {e}")
+        c.print(f"  [bold red]✗[/bold red] cannot reach {_markup_literal(config.base_url)} — "
+                f"{_markup_literal(type(e).__name__)}: {_markup_literal(e)}")
         c.print("    → start your server (ollama serve / llama-server / LM Studio) or fix the URL & key")
         c.print("    → run [bold]dgc setup[/bold] to reconfigure")
         return
     c.print(f"  [green]✓[/green] endpoint reachable — {len(models)} model(s) offered")
     if config.model in models:
-        c.print(f"  [green]✓[/green] model '{config.model}' is available")
+        c.print(f"  [green]✓[/green] model '{_markup_literal(config.model)}' is available")
     else:
-        c.print(f"  [yellow]![/yellow] model '{config.model}' not offered by this server")
+        c.print(f"  [yellow]![/yellow] model '{_markup_literal(config.model)}' not offered by this server")
         if models:
             shown = ", ".join(models[:12]) + ("…" if len(models) > 12 else "")
-            c.print(f"    available: {shown}")
+            c.print(f"    available: {terminal_safe_text(shown)}", markup=False, highlight=False)
         c.print("    → set one: [bold]dgc --model <name>[/bold]  or  [bold]dgc setup[/bold]")
     if sandbox_requested and not sandbox_report.available:
         c.print("\n  [bold red]not ready[/bold red] — sandboxed shell commands will fail closed.\n")
@@ -1355,8 +1415,11 @@ def run_setup(config: Config) -> None:
         config.set("search_api_key", getpass(f"  API key for {meta['label']} › ").strip())
     if meta["needs_url"]:
         config.set("search_url", input(f"  base URL for {meta['label']} › ").strip())
-    c.print(f"\n  [bold green]saved[/bold green] → {USER_CONFIG}")
-    c.print(f"  endpoint {config.base_url}  ·  model {config.model}  ·  context {config.get('context_size')}  ·  search {config.get('search_provider')}")
+    c.print(f"\n  [bold green]saved[/bold green] → {_markup_literal(USER_CONFIG)}")
+    c.print(f"  endpoint {terminal_safe_text(config.base_url)}  ·  "
+            f"model {terminal_safe_text(config.model)}  ·  "
+            f"context {config.get('context_size')}  ·  search {config.get('search_provider')}",
+            markup=False, highlight=False)
     c.print("  run [bold]dgc[/bold] to start  ·  [bold]dgc doctor[/bold] to verify\n")
 
 
@@ -1541,9 +1604,11 @@ def _print_resume_hint(agent, config) -> None:
         pass
     tty = sys.stdout.isatty()
     dim, bold, rst = ("\x1b[2m", "\x1b[1m", "\x1b[0m") if tty else ("", "", "")
-    cont, res = "dgc --continue", f"dgc --resume {sf.stem}"
+    cont = "dgc --continue"
+    res = f"dgc --resume {terminal_safe_text(sf.stem)}"
     w = max(len(cont), len(res)) + 4                       # align the descriptions past the longer command
-    nm = f" {dim}({name}){rst}" if name else ""
+    safe_name = terminal_safe_text(name).replace("\n", " ") if name else ""
+    nm = f" {dim}({safe_name}){rst}" if safe_name else ""
     sys.stdout.write(f"\n  Resume this session{nm}:\n")
     sys.stdout.write(f"    {bold}{cont}{rst}{' ' * (w - len(cont))}{dim}the most recent in this folder{rst}\n")
     sys.stdout.write(f"    {bold}{res}{rst}{' ' * (w - len(res))}{dim}this exact session{rst}\n\n")

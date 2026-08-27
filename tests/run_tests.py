@@ -1444,6 +1444,70 @@ def unit_tests(tmp: Path):
     check("skill catalogs enforce a deterministic no-follow root-entry bound",
           {"alpha", "beta"} <= set(_bounded_catalog) and "gamma" not in _bounded_catalog)
 
+    # Classic terminal callbacks combine styled DGC chrome with model/tool/provider-controlled
+    # values. Dynamic Rich tags must remain literal text rather than synthesizing status styling or
+    # terminal hyperlinks.
+    from dgc.cli import UI as _ClassicUI
+    from dgc import style as _classic_style
+    from rich.console import Console as _LiteralConsole
+    _literal_buffer = StringIO()
+    _classic_ui = _ClassicUI()
+    _classic_ui.console = _LiteralConsole(
+        file=_literal_buffer, force_terminal=False, width=100, highlight=False)
+    _markup_sentinel = "[bold red]CLASSIC_MARKUP_SENTINEL[/]"
+    _classic_ui.tool_call("read_file", {"path": _markup_sentinel})
+    _classic_ui.tool_denied("read_file", {}, _markup_sentinel)
+    _classic_ui.info(_markup_sentinel)
+    _classic_ui.error(_markup_sentinel)
+    _classic_ui.on_todo([{"status": "pending", "content": _markup_sentinel}])
+    _classic_style.section(_classic_ui.console, "section", _markup_sentinel)
+    _control_sentinel = ("CTRL\x1b]8;;https://evil.invalid\x07CLICK\x1b]8;;\x07"
+                         "\x1b[31mRED\x1b[0m\rOVER\u202eEND")
+    _classic_ui.info(_control_sentinel)
+    _literal_output = _literal_buffer.getvalue()
+    check("classic UI renders dynamic Rich markup as literal text",
+          _literal_output.count(_markup_sentinel) == 6
+          and "\x1b" not in _literal_output and "\u202e" not in _literal_output
+          and "\\u001b]8" in _literal_output and "\\u202e" in _literal_output)
+
+    from dgc.tui import TUI as _LiteralTUI
+    _tui_literal_buffer = StringIO()
+    _LiteralConsole(file=_tui_literal_buffer, force_terminal=True, width=100,
+                    highlight=False).print(_LiteralTUI._md(_control_sentinel))
+    _tui_literal_output = _tui_literal_buffer.getvalue()
+    check("TUI Markdown makes terminal controls visible before ANSI rendering",
+          "\x1b]8" not in _tui_literal_output and "\u202e" not in _tui_literal_output
+          and "\\u001b]8" in _tui_literal_output and "\\u202e" in _tui_literal_output)
+
+    _reader_tui = object.__new__(_LiteralTUI)
+    _reader_tui._width = 100
+    _reader_view = {}
+    _reader_tui._open_overlay = lambda rows, on_pick, **kwargs: _reader_view.update(
+        rows=rows, kwargs=kwargs)
+    _reader_tui._open_reader(_control_sentinel, footer="close")
+    _reader_output = "\n".join(row["text"].plain for row in _reader_view["rows"])
+    check("TUI plan and documentation readers sanitize Markdown terminal controls",
+          "\x1b" not in _reader_output and "\u202e" not in _reader_output
+          and "\\u001b]8" in _reader_output and "\\u202e" in _reader_output)
+
+    _joined_text = "line\ncol\t👩🏽‍💻"
+    check("terminal display sanitization preserves useful layout and Unicode joiners",
+          _classic_style.terminal_safe_text(_joined_text) == _joined_text)
+
+    import dgc.menu as _literal_menu
+    _menu_view = {}
+    _old_tty, _old_numbered = _literal_menu._tty, _literal_menu._numbered
+    _literal_menu._tty = lambda: False
+    _literal_menu._numbered = lambda title, labels: _menu_view.update(
+        title=title, labels=labels) or 0
+    try:
+        _literal_menu.select(_control_sentinel, [_control_sentinel], [_control_sentinel])
+    finally:
+        _literal_menu._tty, _literal_menu._numbered = _old_tty, _old_numbered
+    check("classic pickers render provider and model labels as terminal-safe data",
+          "\x1b" not in _menu_view["title"] and "\u202e" not in _menu_view["labels"][0]
+          and "\\u001b]8" in _menu_view["title"] and "\\u202e" in _menu_view["labels"][0])
+
     # --- overlay hit-map: tabs are mouse-clickable and rows hover-map exactly 
     from dgc.tui import TUI
     import dgc.style as _sty

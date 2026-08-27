@@ -63,7 +63,7 @@ publish, release, public-version bump, model-endpoint benchmark, or release scri
 |---|---|---|
 | Audit the complete harness, coding loop, tools, CLI/TUI, editor, MCP/ACP, evaluation, and delivery paths | This roadmap records source-level findings, competitor gaps, ordered P0/P1 work, implementation notes, and release gates across every named surface | Locally complete |
 | Implement the P0/P1 frontier-hardening plan | Current source and regression corpus cover permissions/filesystem, transcript/session recovery, process ownership, concurrency, providers, editing/navigation, plan/goal/cadence, slash commands, skills/hooks/MCP, protocol clients, and editor parity | Locally complete |
-| Prove current Python/runtime behavior | `tests/run_tests.py`: **1069/1069**; focused provider/lifecycle matrix: **132/132**; `compileall` and source `git diff --check` pass | Proven locally |
+| Prove current Python/runtime behavior | `tests/run_tests.py`: **1074/1074**; focused provider/lifecycle matrix: **132/132**; `compileall` and source `git diff --check` pass | Proven locally |
 | Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies**; post-provider-hardening endpoint-free prompt surface remains exactly **2,197** estimated input tokens, and all seven default-sample fixed runtime medians are flat or lower than the recorded boundary baseline | Proven for deterministic edit/request/fixed-boundary costs; model-level trajectory remains unproven |
 | Prove VS Code/Cursor implementation | Editor tests: **22/22**; TypeScript check and development bundle pass; the installed VS Code host smoke passes activation plus 13 commands, an exact correlated handshake barrier, live multi-root, SecretStorage, permission, and plan lifecycles | Automated local evidence complete; manual/cross-platform evidence remains |
 | Prove package consistency | `pip check`: no broken requirements | Proven locally |
@@ -148,7 +148,7 @@ until competitive, cross-platform/manual, and release-governance evidence clears
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 1069 / 1069 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 1074 / 1074 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -1308,6 +1308,13 @@ The provider-runtime slice is also implemented and contract-tested:
     event output now reject non-standard `NaN`/`Infinity`, while Python, TypeScript, and all integer
     branches in the JSON Schema share finite JavaScript-safe numeric semantics. Source/resource
     drift, installed discovery, valid/invalid frames, and non-reflection are offline regression-gated.
+23. Both terminal renderers now treat dynamic model, tool, provider, workspace, permission, todo,
+    status/error, queued-prompt, setup, doctor, overlay, picker, and Markdown values as literal
+    display data while retaining DGC's own styling. Rich tags cannot synthesize status roles, and
+    ANSI/OSC, carriage-return, bidi, or other control/format characters render as visible escapes
+    instead of executing in the terminal. The boundary is display-only, so source and transcripts
+    supplied back to the model stay exact; saved-plan readers, custom-command help, the trust gate,
+    direct-shell output, resume hints, and shared section/list helpers enforce the same rule.
 
 Interaction exit gate: plan feedback survives a full reject/revise/approve cycle; automatic plan
 artifacts make no network request and are loopback-only; every advertised command has a tested route;

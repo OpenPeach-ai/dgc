@@ -84,7 +84,10 @@ def confirm_trust(config, project_root) -> bool:
             out.append(_center(ln, cols))
         out.append(Text(""))
         out.append(_center(Text("Do you trust the contents of this directory?", style=th.muted), cols))
-        out.append(_center(Text(str(project_root), style=f"bold {th.text_strong}"), cols))
+        safe_root = (style_mod.terminal_safe_text(project_root)
+                     .replace("\n", r"\n").replace("\t", r"\t"))
+        out.append(_center(Text(safe_root,
+                                style=f"bold {th.text_strong}"), cols))
         out.append(Text(""))
         out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
         out.append(_center(Text("posing security risks.", style=th.faint), cols))
