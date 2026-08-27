@@ -64,7 +64,7 @@ publish, release, public-version bump, model-endpoint benchmark, or release scri
 | Audit the complete harness, coding loop, tools, CLI/TUI, editor, MCP/ACP, evaluation, and delivery paths | This roadmap records source-level findings, competitor gaps, ordered P0/P1 work, implementation notes, and release gates across every named surface | Locally complete |
 | Implement the P0/P1 frontier-hardening plan | Current source and regression corpus cover permissions/filesystem, transcript/session recovery, process ownership, concurrency, providers, editing/navigation, plan/goal/cadence, slash commands, skills/hooks/MCP, protocol clients, and editor parity | Locally complete |
 | Prove current Python/runtime behavior | `tests/run_tests.py`: **1067/1067**; focused provider/lifecycle matrix: **132/132**; `compileall` and source `git diff --check` pass | Proven locally |
-| Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies** | Proven for the deterministic edit primitive; model-level performance remains unproven |
+| Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies**; post-provider-hardening endpoint-free prompt surface remains exactly **2,197** estimated input tokens, and all seven default-sample fixed runtime medians are flat or lower than the recorded boundary baseline | Proven for deterministic edit/request/fixed-boundary costs; model-level trajectory remains unproven |
 | Prove VS Code/Cursor implementation | Editor tests: **22/22**; TypeScript check and development bundle pass; the installed VS Code host smoke passes activation plus 13 commands, an exact correlated handshake barrier, live multi-root, SecretStorage, permission, and plan lifecycles | Automated local evidence complete; manual/cross-platform evidence remains |
 | Prove package consistency | `pip check`: no broken requirements | Proven locally |
 | Demonstrate DGC is equal to or better than Codex/OpenCode/Goose/Pi/Aider | Requires the complete controlled 225-task same-model six-harness league and attributed comparison; preserved partial/stratified runs are diagnostic only | **Not proven; external league evidence required** |
@@ -725,6 +725,15 @@ launch: real and worth attributing, but even ten launches add roughly 0.3 second
 of seconds seen in failed `python/connect` trajectories. Existing evidence continues to point at
 solution trajectory and excess provider generations; the fresh controlled league must test that
 conclusion before any P0 boundary is relaxed.
+After the four-provider interrupted-stream recovery landed in local commit `b35d6b3`, both probes
+were rerun without contacting a model. The benchmark-shaped request surface was byte-for-byte
+unchanged at 3,299 system characters, 4,251 schema characters across 9 tools, and 2,197 estimated
+wire tokens. Default-sample medians were 0.028 ms lease, 1.385 ms read, 8.561 ms atomic write,
+3.335 ms journal update, 3.862 ms ordinary no-op shell, 0.511 ms sandbox-policy construction, and
+32.900 ms confined no-op shell. Every fixed median was flat or lower than the earlier values above;
+the differences are small enough to treat as run variance rather than a speedup claim. This rules
+out a local fixed-boundary regression from that hardening but does not substitute for task-level
+same-model league evidence.
 The controlled DGC profile now explicitly selects native Ollama behind the accounting proxy; the
 proxy URL previously obscured the upstream family and made `api_mode: auto` measure generic Chat
 Completions instead. Every provider request is now labeled as native Ollama, Chat Completions, or
