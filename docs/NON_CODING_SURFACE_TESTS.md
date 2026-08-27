@@ -326,8 +326,8 @@ These inputs exercise the current rendering seams without assuming model quality
 | Seam | Probe |
 |---|---|
 | Markdown | `Reply in Markdown with one heading, one list, bold text, and inline code.` |
-| Table | `Return a two-column Markdown table with one data row.` |
-| Fenced code | `Return one fenced Python block containing x = 1.` |
+| Table | `Return a two-column Markdown table with one data row.` In TUI/editor, expect a rendered table rather than visible delimiter pipes. |
+| Fenced code | Stream `` ```html\n<img src=x onerror=bad()>\n**literal** `` before its closing fence; expect an inert code block immediately, then exact raw-source copy after closure. |
 | Unicode cell layout | Enter `界界界界界 é 👩🏽‍💻 → ° —` in a 12–14-column TUI. |
 | Prompt ownership | During a tool call, enter `Also check tests`; expect exactly one follow-up/steering band. |
 | Tool lifecycle | `Run printf 'one\ntwo\n' and report its result.` |
@@ -336,10 +336,12 @@ These inputs exercise the current rendering seams without assuming model quality
 | Reasoning | Start `dgc --think high`; request a short calculation and confirm live reasoning collapses to `Thought for Ns`. |
 | Collapse | Produce at least 12 lines of tool output, then exercise `/expand` and `/expandall`. |
 
-Markdown tables, fenced-block styling, and mojibake decoding were not changed by the frontier
-hardening. Unicode terminal-cell layout, prompt ownership, correlated tool settlement, semantic
-response cadence, bare-tool narration, and editor accessibility were changed and require regression
-coverage. Streaming has no artificial timer: provider chunks are forwarded as they arrive.
+Mojibake decoding and terminal Markdown styling were not changed by the frontier hardening. The
+editor now renders aligned Markdown tables, treats closed and still-streaming fenced code as opaque
+inert source, and copies the model's exact code rather than escaped HTML entities. Unicode
+terminal-cell layout, prompt ownership, correlated tool settlement, semantic response cadence,
+bare-tool narration, and editor accessibility also changed and require regression coverage.
+Streaming has no artificial timer: provider chunks are forwarded as they arrive.
 
 ## VS Code and Cursor
 

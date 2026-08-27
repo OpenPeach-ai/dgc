@@ -54,6 +54,15 @@ body {
 .text { white-space: pre-wrap; word-break: break-word; line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text b { font-weight: 700; color: var(--text-strong); } .text i { font-style: italic; }
 .text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: 5px; }
+.text .md-heading { display: inline-block; margin-top: 5px; }
+.text .md-h1, .text .md-h2 { font-size: 1.08em; }
+.md-table-wrap { max-width: 100%; overflow-x: auto; margin: 8px 0; }
+.md-table { width: 100%; border-collapse: collapse; color: var(--text); font: 400 12.5px/1.45 var(--sans); white-space: normal; }
+.md-table th, .md-table td { padding: 6px 9px; border: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.md-table th { background: var(--surface2); color: var(--text-strong); font-weight: 700; }
+.md-table .align-left { text-align: left; }
+.md-table .align-center { text-align: center; }
+.md-table .align-right { text-align: right; }
 
 /* thinking / reasoning */
 .thinking { font: 400 12px/1.5 var(--mono); color: var(--muted); display: flex; align-items: center; gap: 7px; }
@@ -274,7 +283,8 @@ pre.code .copy:focus-visible { opacity: 1; }
   :where(button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid Highlight !important; outline-offset: 2px;
   }
-  .tool, .diff, .card, .todos, .artifact, #cbox, .cmenu, .pop,
+  .tool, .diff, .card, .todos, .artifact, .md-table, .md-table th, .md-table td,
+  #cbox, .cmenu, .pop,
   #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
     border-color: CanvasText;
   }

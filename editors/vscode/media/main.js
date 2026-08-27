@@ -117,17 +117,102 @@
   }[c]));
   function speak(message) { announcer.textContent = String(message || ""); }
 
-  // minimal, streaming-safe markdown
-  function md(s) {
-    s = esc(s);
-    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (m, l, code) =>
-      `<pre class="code"><button class="copy" data-c="${encodeURIComponent(code)}">copy</button><code>${code}</code></pre>`);
-    s = s.replace(/^#{1,6}\s+(.*)$/gm, "<b>$1</b>");
-    s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
-    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
-    s = s.replace(/^[-*]\s+(.*)$/gm, "• $1");
-    return s;
+  // Small dependency-free Markdown renderer. Every model byte is escaped before becoming markup;
+  // fenced/inline code is parsed as an opaque block so Markdown-looking source code cannot be
+  // reinterpreted. An unterminated final fence is rendered immediately while it is still streaming.
+  function inlineMd(source) {
+    return String(source).split(/(`[^`\n]*`)/g).map((part) => {
+      if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
+        return `<code>${esc(part.slice(1, -1))}</code>`;
+      }
+      let safe = esc(part);
+      // Links remain inert inside the webview: show their label but never synthesize navigation.
+      safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+      safe = safe.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+      safe = safe.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
+      return safe;
+    }).join("");
+  }
+
+  function tableCells(line) {
+    let source = String(line).trim();
+    if (source.startsWith("|")) source = source.slice(1);
+    if (source.endsWith("|") && !source.endsWith("\\|")) source = source.slice(0, -1);
+    const cells = [];
+    let cell = "", inCode = false;
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      if (ch === "\\" && source[i + 1] === "|") { cell += "|"; i++; continue; }
+      if (ch === "`") { inCode = !inCode; cell += ch; continue; }
+      if (ch === "|" && !inCode) { cells.push(cell.trim()); cell = ""; continue; }
+      cell += ch;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
+  function tableAlignment(cell) {
+    const marker = String(cell).replace(/\s/g, "");
+    if (!/^:?-{3,}:?$/.test(marker)) return null;
+    if (marker.startsWith(":") && marker.endsWith(":")) return "center";
+    return marker.endsWith(":") ? "right" : "left";
+  }
+
+  function textMd(source) {
+    const lines = String(source).split("\n"), rendered = [];
+    for (let i = 0; i < lines.length;) {
+      const headers = lines[i].includes("|") ? tableCells(lines[i]) : [];
+      const dividers = i + 1 < lines.length && lines[i + 1].includes("|")
+        ? tableCells(lines[i + 1]) : [];
+      const alignment = dividers.map(tableAlignment);
+      if (headers.length && headers.length === dividers.length
+          && alignment.every((value) => value !== null)) {
+        const rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+          const cells = tableCells(lines[i]);
+          if (cells.length !== headers.length) break;
+          rows.push(cells); i++;
+        }
+        const head = headers.map((cell, index) =>
+          `<th class="align-${alignment[index]}">${inlineMd(cell)}</th>`).join("");
+        const body = rows.map((row) => `<tr>${row.map((cell, index) =>
+          `<td class="align-${alignment[index]}">${inlineMd(cell)}</td>`).join("")}</tr>`).join("");
+        rendered.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
+        continue;
+      }
+      const heading = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
+      const bullet = /^(\s*)[-*]\s+(.*)$/.exec(lines[i]);
+      if (heading) rendered.push(`<b class="md-heading md-h${heading[1].length}">${inlineMd(heading[2])}</b>`);
+      else if (bullet) rendered.push(`${bullet[1]}• ${inlineMd(bullet[2])}`);
+      else rendered.push(inlineMd(lines[i]));
+      i++;
+    }
+    return rendered.join("\n");
+  }
+
+  function codeBlock(code, language) {
+    const lang = language ? ` data-language="${language}"` : "";
+    return `<pre class="code"${lang}><button type="button" class="copy" data-c="${encodeURIComponent(code)}" aria-label="Copy code">copy</button><code>${esc(code)}</code></pre>`;
+  }
+
+  function md(source) {
+    const lines = String(source).replace(/\r\n?/g, "\n").split("\n");
+    const rendered = [], text = [];
+    const flushText = () => {
+      if (text.length) { rendered.push(textMd(text.join("\n"))); text.length = 0; }
+    };
+    for (let i = 0; i < lines.length;) {
+      const opening = /^\s*```([A-Za-z0-9_+.-]*)\s*$/.exec(lines[i]);
+      if (!opening) { text.push(lines[i]); i++; continue; }
+      flushText(); i++;
+      const code = [];
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
+      if (i < lines.length) i++; // closing fence; absence means this is the live partial block
+      rendered.push(codeBlock(code.join("\n"), opening[1]));
+    }
+    flushText();
+    return rendered.join("\n");
   }
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }

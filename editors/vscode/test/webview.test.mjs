@@ -169,6 +169,42 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   dom.window.close();
 });
 
+test("streaming Markdown renders tables and keeps fenced code literal, safe, and exactly copyable", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  const partial = "# Result\n\n| Name | Value |\n| :--- | ---: |\n"
+    + "| **alpha** | `1|2` |\n\n```html\n"
+    + "<img src=x onerror=bad()>\n**literal stars**";
+  send({ type: "event", event: { type: "text_delta", text: partial } });
+
+  const table = doc.querySelector(".md-table");
+  assert.ok(table, "a complete Markdown table should render before the response ends");
+  assert.deepEqual([...table.querySelectorAll("th")].map((cell) => cell.textContent),
+    ["Name", "Value"]);
+  assert.equal(table.querySelector("tbody td:first-child b").textContent, "alpha");
+  assert.equal(table.querySelector("tbody td:last-child code").textContent, "1|2",
+    "an inline-code pipe must not split a table cell");
+  assert.ok(table.querySelector("th:last-child").classList.contains("align-right"));
+
+  let block = doc.querySelector("pre.code");
+  assert.ok(block, "an unterminated streaming fence should already render as code");
+  assert.equal(block.querySelector("code").textContent,
+    "<img src=x onerror=bad()>\n**literal stars**");
+  assert.equal(block.querySelector("code b"), null,
+    "Markdown-looking source inside a fence must remain literal");
+  assert.equal(block.querySelector("img"), null, "fenced HTML must remain inert text");
+
+  send({ type: "event", event: { type: "text_delta", text: "\n```" } });
+  block = doc.querySelector("pre.code");
+  block.querySelector("button.copy").click();
+  const copied = posted.find((message) => message.type === "copy");
+  assert.equal(copied?.text, "<img src=x onerror=bad()>\n**literal stars**",
+    "copy must return the model's source, not HTML entities");
+  assert.equal(doc.querySelectorAll("pre.code").length, 1);
+  assert.deepEqual(errors, [], "Markdown rendering raised JS errors");
+  dom.window.close();
+});
+
 test("composer submit posts a prompt, echoes it, and clears rejected sending state", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   const input = doc.getElementById("input");
