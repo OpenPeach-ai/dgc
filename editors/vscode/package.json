@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -211,7 +211,14 @@
         "dgc.subagentApiMode": {
           "type": "string",
           "default": "",
-          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
+          "enum": [
+            "",
+            "auto",
+            "ollama",
+            "anthropic",
+            "chat_completions",
+            "responses"
+          ],
           "description": "Transport for task sub-agents. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.fallbackModel": {
@@ -227,7 +234,14 @@
         "dgc.fallbackApiMode": {
           "type": "string",
           "default": "",
-          "enum": ["", "auto", "ollama", "anthropic", "chat_completions", "responses"],
+          "enum": [
+            "",
+            "auto",
+            "ollama",
+            "anthropic",
+            "chat_completions",
+            "responses"
+          ],
           "description": "Transport for the fallback model. Blank inherits the main transport on the same host and auto-detects a different host."
         },
         "dgc.contextSize": {
