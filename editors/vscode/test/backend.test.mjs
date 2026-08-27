@@ -163,6 +163,77 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   active.dispose();
 });
 
+test("backend query requests ignore crossed replies and release listeners on every terminal path", async () => {
+  const command = executable("correlated-query-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+ready.capabilities.correlated_state_requests = true;
+send(ready);
+const goals = [];
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  if (cmd.type === "get_goal") {
+    goals.push(cmd);
+    if (goals.length === 2) {
+      send({ type: "goal_changed", request_id: "forged-request", goal: "forged", status: "active" });
+      send({ type: "goal_changed", request_id: goals[1].request_id, goal: "second", status: "active" });
+      setTimeout(() => send({ type: "goal_changed", request_id: goals[0].request_id,
+        goal: "first", status: "blocked" }), 20);
+    }
+    return;
+  }
+  if (cmd.type === "compact") {
+    send({ type: "command_rejected", request_id: "another-request", command: "compact",
+      reason: "turn_in_progress", message: "unrelated rejection" });
+    send({ type: "command_rejected", request_id: cmd.request_id, command: "compact",
+      reason: "turn_in_progress", message: "synthetic busy" });
+  }
+  // status deliberately receives no response so the caller exercises timeout cleanup.
+});`);
+  const backend = new DgcBackend(scratch, command);
+  backend.on("ready", () => backend.completeHandshake());
+  backend.start();
+  await waitFor(backend, "ready");
+
+  const first = backend.request(
+    { type: "get_goal", request_id: "goal-first" }, "goal_changed", 1000);
+  const second = backend.request(
+    { type: "get_goal", request_id: "goal-second" }, "goal_changed", 1000);
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.deepEqual(
+    [firstResult.request_id, firstResult.goal, firstResult.status],
+    ["goal-first", "first", "blocked"],
+  );
+  assert.deepEqual(
+    [secondResult.request_id, secondResult.goal, secondResult.status],
+    ["goal-second", "second", "active"],
+  );
+
+  await assert.rejects(
+    backend.request({ type: "compact", request_id: "compact-exact" }, "context", 1000),
+    /synthetic busy/,
+    "only the rejection carrying the exact request ID may settle the command",
+  );
+  const eventListeners = backend.listenerCount("event");
+  const exitListeners = backend.listenerCount("exit");
+  const fatal = backend.request(
+    { type: "status", request_id: "status-fatal" }, "status", 1000);
+  backend.emit("event", {
+    type: "error", message: "synthetic fatal transport failure", fatal: true,
+  });
+  await assert.rejects(fatal, /synthetic fatal transport failure/);
+  assert.equal(backend.listenerCount("event"), eventListeners);
+  assert.equal(backend.listenerCount("exit"), exitListeners);
+  await assert.rejects(
+    backend.request({ type: "status", request_id: "status-timeout" }, "status", 40),
+    /timed out waiting for status/,
+  );
+  assert.equal(backend.listenerCount("event"), eventListeners);
+  assert.equal(backend.listenerCount("exit"), exitListeners);
+  backend.dispose();
+});
+
 test("backend prioritizes correlated decisions over queued prompts under stdin backpressure", async () => {
   const delayed = executable("decision-backpressure-backend", `
 const readline = require("node:readline");

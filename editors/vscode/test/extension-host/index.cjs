@@ -90,6 +90,26 @@ async function run() {
   await waitFor(() => rootsCommands().some((command) =>
     sameRoots(command.roots, [primaryRoot, secondaryRoot])));
   await waitFor(() => modelCommands().length > 0);
+  assert.ok(rootsCommands().every((command) =>
+    typeof command.request_id === "string" && command.request_id.length > 0
+      && command.request_id.length <= 128),
+  "every negotiated workspace-root update must carry a bounded request ID");
+  assert.ok(modelCommands().every((command) =>
+    typeof command.request_id === "string" && command.request_id.length > 0
+      && command.request_id.length <= 128),
+  "every negotiated editor model update must carry a bounded request ID");
+
+  // The fixture emits a forged workspace_roots event before the exact correlated reply. A prompt
+  // submitted in that window must remain behind the handshake until the matching acknowledgement.
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "prompt", text: "correlated handshake probe" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "prompt" && command.text === "correlated handshake probe"));
+  await waitFor(() => testApi.testOnlyPostedMessages(testToken).some((item) =>
+    item.type === "event" && item.eventType === "turn_end"));
+  assert.equal(testApi.testOnlyPostedMessages(testToken).some((item) =>
+    item.type === "event" && item.eventType === "error"), false,
+  "a mismatched workspace-root acknowledgement must not release queued user commands");
   const migratedCommand = modelCommands().find((command) => command.base_url === initialEndpoint);
   assert.ok(migratedCommand, "native settings must send the configured initial endpoint");
   assert.equal(migratedCommand.api_key === fixtureSecret, true,
@@ -181,6 +201,28 @@ async function run() {
   assert.equal(decisionCommands.filter((command) =>
     command.type === "plan_response" && command.id === "host-plan").length, 1,
   "one installed-host plan request must reach the backend at most once");
+
+  // Exercise both awaited and fire-and-forget editor state routes. The installed backend advertises
+  // correlation, so every optional query/mutation must carry a unique bounded request ID.
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setMode", mode: "plan" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/goal host matrix" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/view-plan" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" });
+  const correlatedTypes = new Set(["set_mode", "set_think", "set_goal", "get_plan", "status"]);
+  await waitFor(() => {
+    const seen = new Set(backendCommands(backendLogPath)
+      .filter((command) => correlatedTypes.has(command.type)).map((command) => command.type));
+    return [...correlatedTypes].every((type) => seen.has(type));
+  });
+  const correlated = backendCommands(backendLogPath)
+    .filter((command) => correlatedTypes.has(command.type));
+  assert.ok(correlated.every((command) =>
+    typeof command.request_id === "string" && command.request_id.length > 0
+      && command.request_id.length <= 128),
+  "negotiated editor state/query commands must carry bounded request IDs");
+  assert.equal(new Set(correlated.map((command) => command.request_id)).size, correlated.length,
+    "editor state/query request IDs must remain unique across concurrent UI paths");
 
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");

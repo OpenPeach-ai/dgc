@@ -41,15 +41,43 @@ writeFileSync(backendPath, `#!/usr/bin/env node
 const fs = require("node:fs");
 const readline = require("node:readline");
 let seq = 0;
+let rootsAcknowledged = false;
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
-send({ type: "ready", version: "fixture", protocol_version: 3, capabilities: {},
+send({ type: "ready", version: "fixture", protocol_version: 3,
+  capabilities: { correlated_state_requests: true },
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
-  if (cmd.type === "set_workspace_roots") send({ type: "workspace_roots", roots: cmd.roots });
+  if (cmd.type === "set_workspace_roots") {
+    rootsAcknowledged = false;
+    send({ type: "workspace_roots", request_id: "stale-workspace-request", roots: [] });
+    setTimeout(() => {
+      rootsAcknowledged = true;
+      send({ type: "workspace_roots", request_id: cmd.request_id, roots: cmd.roots });
+    }, 1000);
+  }
+  if (cmd.type === "set_mode") send({ type: "mode_changed", request_id: cmd.request_id,
+    mode: cmd.mode, workspace_trusted: true });
+  if (cmd.type === "set_think") send({ type: "think_changed", request_id: cmd.request_id,
+    think: cmd.level });
+  if (cmd.type === "set_goal") send({ type: "goal_changed", request_id: cmd.request_id,
+    goal: cmd.text || "installed-host goal", status: cmd.status || "active" });
+  if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
+    plan: "1. Inspect\\n2. Verify", exists: true });
+  if (cmd.type === "status") send({ type: "status", request_id: cmd.request_id,
+    model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
+    context_used: 0, context_size: 32768, goal: { text: "", status: "none" } });
+  if (cmd.type === "prompt" && cmd.text === "correlated handshake probe") {
+    if (!rootsAcknowledged) send({ type: "error",
+      message: "prompt released before exact workspace-root acknowledgement", fatal: true });
+    else {
+      send({ type: "turn_start", turn_id: "handshake-turn", prompt: cmd.text });
+      send({ type: "turn_end", turn_id: "handshake-turn", reason: "completed", token_estimate: 0 });
+    }
+  }
   if (cmd.type === "prompt" && cmd.text === "installed-host decision lifecycle") {
     send({ type: "turn_start", turn_id: "decision-turn", prompt: cmd.text });
     send({ type: "permission_request", id: "host-permission", call_id: "host-call",

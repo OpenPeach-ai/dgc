@@ -2,6 +2,7 @@ import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
 import {
   DgcEvent,
+  DgcEventType,
   DgcCommand,
   DGC_PROTOCOL_VERSION,
   MAX_COMMAND_BYTES,
@@ -473,6 +474,68 @@ export class DgcBackend extends EventEmitter {
       this.respondedRequests.add(item.requestId);
     }
     return true;
+  }
+
+  /** Send a query/state command and settle only from the response belonging to this request.
+   * Current protocol-v3 backends echo `request_id`; callers may omit it only for a negotiated
+   * legacy backend, where installing the listener before `send` still provides a post-send
+   * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
+   * every listener. */
+  request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000): Promise<DgcEvent> {
+    const rawRequestId = (cmd as any).request_id;
+    const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
+      return Promise.reject(new Error("DGC request timeout must be between 1 and 60000ms"));
+    }
+    return new Promise<DgcEvent>((resolve, reject) => {
+      let settled = false;
+      let timer: NodeJS.Timeout | undefined;
+      const cleanup = () => {
+        if (timer) { clearTimeout(timer); }
+        this.off("event", onEvent);
+        this.off("exit", onExit);
+      };
+      const finish = (event: DgcEvent) => {
+        if (settled) { return; }
+        settled = true;
+        cleanup();
+        resolve(event);
+      };
+      const fail = (message: string) => {
+        if (settled) { return; }
+        settled = true;
+        cleanup();
+        reject(new Error(message));
+      };
+      const belongsToRequest = (event: DgcEvent): boolean => {
+        if (requestId !== undefined) {
+          return event.request_id === requestId;
+        }
+        // Older protocol-v3 implementations did not echo optional state request IDs. Preserve
+        // their best-effort post-send barrier by matching only the expected command route.
+        return event.type !== "command_rejected" || event.command === cmd.type;
+      };
+      const onEvent = (event: DgcEvent) => {
+        if (event.type === "error" && (event as any).fatal === true) {
+          fail(String(event.message || `DGC failed while running ${cmd.type}`));
+          return;
+        }
+        if (!belongsToRequest(event)) { return; }
+        if (event.type === responseType) {
+          finish(event);
+        } else if (event.type === "command_rejected" || event.type === "error") {
+          fail(String(event.message || `DGC rejected ${cmd.type}`));
+        }
+      };
+      const onExit = () => fail(`DGC backend exited while waiting for ${responseType}`);
+      this.on("event", onEvent);
+      this.on("exit", onExit);
+      timer = setTimeout(
+        () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
+      if (!this.send(cmd)) {
+        fail(`DGC rejected ${cmd.type} before it could run`);
+      }
+    });
   }
 
   /** Send handshake configuration ahead of user commands queued during backend startup. */

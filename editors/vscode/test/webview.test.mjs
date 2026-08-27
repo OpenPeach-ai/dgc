@@ -413,7 +413,9 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
 
   // Clear is acknowledged only after the backend resets model state; the old implementation
   // removed DOM nodes while silently retaining every prior turn in the model context.
-  assert.match(panelSrc, /case "clear": this\.ensureBackend\(\)\.send\(\{ type: "clear_session" \}\)/);
+  assert.match(panelSrc,
+    /case "clear":\s*this\.ensureBackend\(\)\.send\(\s*this\.stateCommand\("session-clear", \{ type: "clear_session" \}\)\)/,
+    "clear-session must use the negotiated state-correlation path");
   send({ type: "event", event: { type: "session", kind: "cleared" } });
   assert.equal(doc.getElementById("log").children.length, 0);
 
