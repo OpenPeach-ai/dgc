@@ -397,7 +397,7 @@ THINK_KEYWORDS = [
 
 COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
-_COMPACT_MAX_TOKENS = 1024
+_COMPACT_MAX_TOKENS = 3500   # room for the Goal/Progress/Critical schema (exact signatures, paths, failing-test names)
 _COMPACT_TIMEOUT_S = 120
 _COMPACT_SUMMARY_CHARS = 12_000
 _COMPACT_PREFIX = "[Earlier conversation compacted to this summary]"
@@ -1102,6 +1102,11 @@ class Agent:
             configured = max(2_048, int(self.config.get("context_size", 32_768)))
         except (TypeError, ValueError):
             configured = 32_768
+        if configured == 32_768:                       # user left the default → use the model's recommended window
+            from .config import context_for_model      # (qwen3.8 → 65536); early compaction otherwise drops the failing test
+            rec = context_for_model(str(self.config.model))
+            if rec and rec > configured:
+                configured = rec
         effective = getattr(self.client, "effective_context_size", None)
         if callable(effective):
             try:
@@ -1473,8 +1478,10 @@ class Agent:
             "abstractions, or defensive scaffolding; the simplest change that satisfies the request wins.",
             "- Implementing a stub or writing a new/near-empty file? Write the whole file with "
             "write_file in one call — don't edit_file into an almost-empty file (that fails to match). "
-            "Reserve edit_file for changing content that's already there. Prefer apply_patch for exact "
-            "multi-hunk edits; it rejects stale context atomically.",
+            "Reserve edit_file for changing content that's already there. For several changes to one "
+            "file, make them in ONE multi_edit call. Keep each old_string as SMALL as possible while "
+            "still matching uniquely — don't pad it with unchanged surrounding context (padding is the "
+            "#1 cause of edit-not-found). If an edit still won't match, rewrite the whole file with write_file.",
             "- For multi-step work, keep a todo list with the todo tool.",
             "- Verify changes: run tests/builds when they exist. Don't claim done what you didn't verify.",
             "",
@@ -2924,7 +2931,8 @@ class Agent:
                 else:
                     good_snapshot = None
                     self.ui.info("last test-passing state could not be captured safely; auto-restore disabled")
-            if same_fail >= _FAIL_HARD:         # grind guard: the SAME failure keeps repeating
+            if (same_fail >= _FAIL_HARD and (deadline is None
+                    or (deadline - time.monotonic()) <= 0.15 * budget)):  # budgeted: only near the deadline — else keep retrying (pi-style)
                 restore_failed = (good_snapshot is not None
                                   and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(
@@ -2941,7 +2949,8 @@ class Agent:
                     f"stopped — {fail_streak} commands failed in a row with no progress (time budget)"
                     + ("; the last test-passing state could not be restored safely"
                        if restore_failed else ""))
-            if edit_fail_streak >= _EDIT_FAIL_HARD:     # F3: an edit grind that never lands → abort
+            if (edit_fail_streak >= _EDIT_FAIL_HARD and (deadline is None
+                    or (deadline - time.monotonic()) <= 0.15 * budget)):     # F3: budgeted → abort only near the deadline
                 restore_failed = (good_snapshot is not None
                                   and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(

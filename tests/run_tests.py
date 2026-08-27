@@ -4797,7 +4797,7 @@ def test_context_prune():
     aux_options = compact_calls[0][1]
     compact_prompt, compact_kwargs = compact_calls[1]
     check("compaction generation has bounded input, output, time, and reasoning",
-          aux_options.get("max_tokens") == 1024
+          aux_options.get("max_tokens") == 3500
           and 1 <= aux_options.get("read_timeout", 0) <= 5
           and len(compact_prompt[0]["content"]) < 6000
           and compact_kwargs.get("tools") is None
