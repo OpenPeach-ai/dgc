@@ -807,10 +807,14 @@ class TUI:
     def _wrap_tail(self, text: str, width: int, n: int) -> list[str]:
         """The last `n` display lines of `text` wrapped to `width` — so LIVE reasoning shows a calm
         rolling tail instead of one ever-growing line (a rolling truncated view)."""
-        import textwrap
+        width, n = max(1, int(width)), max(0, int(n))
+        if n == 0:
+            return []
+        console = self._console()
         out: list[str] = []
         for para in text.split("\n"):
-            out.extend(textwrap.wrap(para, width) if para.strip() else [""])
+            wrapped = Text(para).wrap(console, width, overflow="fold") if para.strip() else []
+            out.extend(row.plain for row in (wrapped or [Text("")]))
         return out[-n:] if out else []
 
     # ---- the transcript control ----
@@ -843,7 +847,7 @@ class TUI:
         if self._think:                     # in-flight reasoning: a header + a rolling last-N tail,
             m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
             frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
-            for i, ln in enumerate(self._wrap_tail(self._think, max(20, self._width - 4), 5)):
+            for i, ln in enumerate(self._wrap_tail(self._think, max(1, self._width - 4), 5)):
                 frags.append(("", "\n"))
                 frags.append(self._rail_frag(True, i))
                 frags.append((f"fg:{th.faint} italic", ln))

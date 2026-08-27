@@ -1494,6 +1494,22 @@ def unit_tests(tmp: Path):
           and "e\u0301" in _wide_band.plain and "👩🏽‍💻" in _wide_band.plain)
     check("TUI jump geometry reuses the exact Unicode prompt-band row plan",
           ui._block_lines({"kind": "user", "text": _wide_prompt}) == len(_wide_rows))
+    _wide_reasoning = "界" * 8 + " e\u0301 👩🏽‍💻"
+    _reasoning_rows = ui._wrap_tail(_wide_reasoning, 8, 20)
+    from prompt_toolkit.formatted_text import fragment_list_to_text as _fragment_text
+    from dgc import glyphs as _wide_glyphs
+    ui._width, ui._scroll_off, ui.blocks = 12, 0, []
+    ui._think, ui._buf = _wide_reasoning, ""
+    _live_reasoning = _fragment_text(ui._transcript())
+    _live_reasoning_rows = [row for row in _live_reasoning.splitlines()
+                            if _wide_glyphs.RAIL in row]
+    check("TUI live reasoning wraps Unicode by available terminal cells",
+          all(_CellText(row).cell_len <= ui._width for row in _live_reasoning_rows)
+          and all(_CellText(row).cell_len <= 8 for row in _reasoning_rows)
+          and "".join(_reasoning_rows).count("界") == 8
+          and "e\u0301" in "".join(_reasoning_rows)
+          and "👩🏽‍💻" in "".join(_reasoning_rows))
+    ui._think = ""
     ui.input_buf = type("B", (), {"text": "界" * 8})()
     ui._width, ui._height = 12, 30
     check("TUI composer height counts wide Unicode cells", ui._composer_height() == 2)
