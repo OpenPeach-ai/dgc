@@ -63,7 +63,7 @@ publish, release, public-version bump, model-endpoint benchmark, or release scri
 |---|---|---|
 | Audit the complete harness, coding loop, tools, CLI/TUI, editor, MCP/ACP, evaluation, and delivery paths | This roadmap records source-level findings, competitor gaps, ordered P0/P1 work, implementation notes, and release gates across every named surface | Locally complete |
 | Implement the P0/P1 frontier-hardening plan | Current source and regression corpus cover permissions/filesystem, transcript/session recovery, process ownership, concurrency, providers, editing/navigation, plan/goal/cadence, slash commands, skills/hooks/MCP, protocol clients, and editor parity | Locally complete |
-| Prove current Python/runtime behavior | `tests/run_tests.py`: **1068/1068**; focused provider/lifecycle matrix: **132/132**; `compileall` and source `git diff --check` pass | Proven locally |
+| Prove current Python/runtime behavior | `tests/run_tests.py`: **1069/1069**; focused provider/lifecycle matrix: **132/132**; `compileall` and source `git diff --check` pass | Proven locally |
 | Preserve coding/edit performance safely | Frozen edit corpus: **19,560/19,591** accepted, **0 wrong applies**; duplicate-target metamorphic gate: **0/14,197 dangerous applies**; post-provider-hardening endpoint-free prompt surface remains exactly **2,197** estimated input tokens, and all seven default-sample fixed runtime medians are flat or lower than the recorded boundary baseline | Proven for deterministic edit/request/fixed-boundary costs; model-level trajectory remains unproven |
 | Prove VS Code/Cursor implementation | Editor tests: **22/22**; TypeScript check and development bundle pass; the installed VS Code host smoke passes activation plus 13 commands, an exact correlated handshake barrier, live multi-root, SecretStorage, permission, and plan lifecycles | Automated local evidence complete; manual/cross-platform evidence remains |
 | Prove package consistency | `pip check`: no broken requirements | Proven locally |
@@ -148,7 +148,7 @@ until competitive, cross-platform/manual, and release-governance evidence clears
 
 | Gate | Audit baseline | Current local candidate | Meaning |
 |---|---:|---:|---|
-| Python test harness | 225 / 226 | 1068 / 1068 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
+| Python test harness | 225 / 226 | 1069 / 1069 | Environment-independent unit, adversarial, interaction-contract, provider, protocol, benchmark-control and mock-model E2E coverage. |
 | Python compile/import | Pass | Pass | `compileall` succeeds. |
 | Python dependency/package | Pass | Pass | Locked runtime set, `pip check`, wheel build and dry-run install succeed. |
 | Extension typecheck | Pass | Pass | TypeScript compiles. |
@@ -1286,7 +1286,9 @@ The provider-runtime slice is also implemented and contract-tested:
     boundaries. Wide CJK, combining characters, and joined emoji wrap and pad inside the exact prompt
     band; jump-to-turn geometry reuses that same row plan; composer growth, overlay columns/tab hit
     maps, headers, status alignment, model/mode borders, and the live reasoning tail use the same
-    cell-aware measurement.
+    cell-aware measurement. The slim header reserves and bounds its right-aligned context chip before
+    rendering dynamic model, session, and worktree labels, so neither hidden Rich wrapping nor an
+    off-screen click target survives a narrow or hostile label.
 21. The editor webview now has an explicit high-contrast contract instead of relying on its dark
     brand palette surviving forced-color remapping. Normal small-text roles and solid action labels
     are regression-gated at 4.5:1 across every panel surface; a separate near-brand fill fixes the

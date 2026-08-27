@@ -1041,20 +1041,29 @@ class TUI:
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
         if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
-            import re
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             branch = getattr(self.active, "workspace_branch", "")
-            if len(branch) > 34:
-                branch = "…" + branch[-33:]
             ws = f" · {branch}" if branch else ""
-            left = self._rich(f" [bold {th.accent}]Vibe DGC[/] "
-                              f"[{th.faint}]· {self.config.model} · {self.agent.mode}"
-                              f"{_esc(nm)}{_esc(ws)}[/]")
-            chip, cw = self._context_chip(self._ctx_hover)      # top-right token counter 
-            right = self._rich(chip)
-            lw = _ansi_cell_len(left)
-            gap = max(2, self._width - lw - cw - 1)
-            self._ctx_x0, self._ctx_x1 = lw + gap, lw + gap + cw   # record for hover/click
+            left_text = Text.from_markup(
+                f" [bold {th.accent}]Vibe DGC[/] "
+                f"[{th.faint}]· {_esc(self.config.model)} · {_esc(self.agent.mode)}"
+                f"{_esc(nm)}{_esc(ws)}[/]")
+            chip, _ = self._context_chip(self._ctx_hover)      # top-right token counter
+            right_text = Text.from_markup(chip)
+            usable = max(1, self._width - 1)
+            # Preserve a useful right-aligned context chip and at least one cell of the identity
+            # header. Both sides are truncated before ANSI rendering so Rich cannot insert hidden
+            # newlines when model/session/worktree labels contain wide or very long text.
+            right_text.truncate(min(right_text.cell_len, max(1, usable - 3)),
+                                overflow="ellipsis")
+            rw = right_text.cell_len
+            remaining = max(0, usable - rw)
+            left_text.truncate(max(0, remaining - 2), overflow="ellipsis")
+            lw = left_text.cell_len
+            gap = max(0, usable - lw - rw)
+            left = self._rich(left_text, soft_wrap=True, end="") if lw else ""
+            right = self._rich(right_text, soft_wrap=True, end="")
+            self._ctx_x0, self._ctx_x1 = lw + gap, lw + gap + rw   # record for hover/click
             return ANSI(left + " " * gap + right)
         self._ctx_x0 = self._ctx_x1 = -1
         return ANSI(self._welcome_card())

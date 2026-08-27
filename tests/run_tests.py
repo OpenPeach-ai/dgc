@@ -1516,6 +1516,31 @@ def unit_tests(tmp: Path):
     ui._rich, ui._width = _saved_rich, _saved_width
     ui._height = 30
 
+    # The slim conversation header must reserve its right-aligned context chip before rendering
+    # untrusted/dynamic model, session, and worktree labels. Otherwise Rich wraps the oversized left
+    # side into hidden extra rows and the chip's click target lands outside the terminal.
+    _header_ui = object.__new__(TUI)
+    _header_ui._sync_width = lambda: None
+    _header_ui._width, _header_ui._overlay, _header_ui._ctx_hover = 40, None, False
+    _header_ui._active_idx = 0
+    _header_cfg = type("HeaderConfig", (), {
+        "model": "模型" * 20,
+        "get": lambda self, key, default=None: 32768 if key == "context_size" else default,
+    })()
+    _header_agent = type("HeaderAgent", (), {
+        "session_name": "会話" * 20,
+        "mode": "default",
+        "estimate_tokens": lambda self: 1234,
+    })()
+    _header_ui._sessions = [type("HeaderSession", (), {
+        "config": _header_cfg, "agent": _header_agent, "blocks": ["turn"], "_buf": "",
+        "workspace_branch": "機能/" + "界" * 40,
+    })()]
+    _header = _header_ui._header().value
+    check("TUI slim header bounds Unicode labels and keeps the context hitbox on-screen",
+          "\n" not in _header and _CellText.from_ansi(_header).cell_len <= _header_ui._width
+          and 0 <= _header_ui._ctx_x0 < _header_ui._ctx_x1 <= _header_ui._width)
+
     # --- /docs: in-app library loads + a reader paginates into styled lines and scrolls 
     import dgc.docs as _docs
     check("docs library", len(_docs.DOCS) >= 8 and _docs.find("Plan mode") is not None)

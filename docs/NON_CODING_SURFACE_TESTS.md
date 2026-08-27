@@ -328,7 +328,7 @@ These inputs exercise the current rendering seams without assuming model quality
 | Markdown | `Reply in Markdown with one heading, one list, bold text, and inline code.` |
 | Table | `Return a two-column Markdown table with one data row.` In TUI/editor, expect a rendered table rather than visible delimiter pipes. |
 | Fenced code | Stream `` ```html\n<img src=x onerror=bad()>\n**literal** `` before its closing fence; expect an inert code block immediately, then exact raw-source copy after closure. |
-| Unicode cell layout | Enter `界界界界界 é 👩🏽‍💻 → ° —` in a 12–14-column TUI, then stream the same characters in reasoning; neither prompt nor live reasoning rows may overflow. |
+| Unicode cell layout | Enter `界界界界界 é 👩🏽‍💻 → ° —` in a 12–14-column TUI, stream the same characters in reasoning, and use long CJK model/session/worktree labels; prompt, reasoning, and the slim header/context hitbox must remain within the terminal. |
 | Prompt ownership | During a tool call, enter `Also check tests`; expect exactly one follow-up/steering band. |
 | Tool lifecycle | `Run printf 'one\ntwo\n' and report its result.` |
 | Cadence | `Read pyproject.toml, run the smallest relevant verification, then report the result.` |
