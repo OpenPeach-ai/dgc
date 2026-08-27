@@ -10858,6 +10858,7 @@ def test_provider_retry_lifecycle():
 
 def test_compatible_tool_deltas():
     """Compatible-provider tool variants normalize without corrupting executable calls."""
+    import dgc.llm as _llm
     from dgc.llm import LLMClient
 
     client = LLMClient("http://localhost:1234/v1", "k", "tool-wire-compat")
@@ -10929,12 +10930,243 @@ def test_compatible_tool_deltas():
               ("call_b", "grep", {"pattern": "needle"}),
           ])
 
+    huge_index = consume([{"tool_calls": [{
+        "index": "9" * 5000, "id": "bounded-index", "function": {
+            "name": "read_file", "arguments": {"path": "bounded.py"}}}]}])
+    check("pathological Chat call indices degrade to compatible arrival order",
+          len(huge_index.tool_calls) == 1
+          and huge_index.tool_calls[0].arguments == {"path": "bounded.py"})
+
     invalid = consume([{"tool_calls": [{
         "index": 0, "id": "call_invalid", "function": {
             "name": "read_file", "arguments": ["not", "an", "object"]}}]}])
     check("non-object tool arguments fail into the normal repair path without a decoder crash",
           isinstance(invalid.tool_calls[0].arguments, dict)
           and "_unparsed" in invalid.tool_calls[0].arguments)
+
+    class _RawChatStream:
+        headers = {"Content-Type": "text/event-stream"}
+        encoding = ""
+
+        def __init__(self, lines):
+            self.lines = lines
+            self.closed = False
+
+        def iter_lines(self, decode_unicode=True):
+            yield from self.lines
+
+        def close(self):
+            self.closed = True
+
+    compatible_terminal = client._consume(_RawChatStream([
+        'data: {"choices":[{"delta":{"content":"local ok"},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1}}',
+    ]), None, None)
+    check("Chat gateways may terminate at explicit finish_reason without a DONE sentinel",
+          compatible_terminal.content == "local ok"
+          and compatible_terminal.finish_reason == "stop"
+          and compatible_terminal.usage["input_tokens"] == 2)
+
+    legacy = client._consume(_RawChatStream([
+        'data: {"choices":[{"delta":{"function_call":{"name":"read_file",'
+        '"arguments":"{\\"pa"}},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{"function_call":{"arguments":'
+        '"th\\":\\"legacy.py\\"}"}},"finish_reason":"function_call"}]}',
+        "data: [DONE]",
+    ]), None, None)
+    check("deprecated Chat function_call deltas remain usable for older local gateways",
+          len(legacy.tool_calls) == 1 and legacy.tool_calls[0].name == "read_file"
+          and legacy.tool_calls[0].arguments == {"path": "legacy.py"})
+
+    filtered_call = client._consume(_RawChatStream([
+        "data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "filtered", "function": {
+                "name": "write_file", "arguments": {"path": "blocked.py", "content": "x"},
+            }}]}, "finish_reason": "content_filter"}]}),
+        "data: [DONE]",
+    ]), None, None)
+    check("non-success Chat stop reasons keep otherwise-valid calls non-executable",
+          filtered_call.finish_reason == "length" and len(filtered_call.tool_calls) == 1)
+
+    try:
+        client._consume(_RawChatStream([
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            'data: {"choices":[{"delta":{"content":"late"},"finish_reason":null}]}',
+        ]), None, None)
+        post_finish_failed = False
+    except _llm.LLMError:
+        post_finish_failed = True
+    check("Chat choice data after finish_reason fails closed", post_finish_failed)
+
+    truncated_tool = _RawChatStream([
+        "data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{
+            "index": 0, "id": "unsafe", "function": {
+                "name": "write_file",
+                "arguments": '{"path":"unsafe.py","content":"valid but unterminated"}',
+            }}]}, "finish_reason": None}]})
+    ])
+    try:
+        client._consume(truncated_tool, None, None)
+        truncated_failed = False
+    except _llm.LLMError:
+        truncated_failed = True
+    check("truncated Chat tool streams cannot become executable calls", truncated_failed)
+
+    try:
+        client._consume(_RawChatStream(["data: {not-json"]), None, None)
+        malformed_failed = False
+    except _llm.LLMError:
+        malformed_failed = True
+    check("malformed Chat SSE fails closed", malformed_failed)
+
+    original_stream_bound = _llm._MAX_CHAT_STREAM_BYTES
+    try:
+        _llm._MAX_CHAT_STREAM_BYTES = 64
+        try:
+            client._consume(_RawChatStream([
+                "data: " + json.dumps({"choices": [{"delta": {
+                    "content": "x" * 100}, "finish_reason": "stop"}]})
+            ]), None, None)
+            oversized_stream_failed = False
+        except _llm.LLMError as exc:
+            oversized_stream_failed = "safety bound" in str(exc)
+    finally:
+        _llm._MAX_CHAT_STREAM_BYTES = original_stream_bound
+    check("Chat SSE bodies have a total safety bound", oversized_stream_failed)
+
+    original_call_bound = _llm._MAX_CHAT_TOOL_CALLS
+    try:
+        _llm._MAX_CHAT_TOOL_CALLS = 1
+        excessive_calls = {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "one", "function": {
+                "name": "read_file", "arguments": "{}"}},
+            {"index": 1, "id": "two", "function": {
+                "name": "read_file", "arguments": "{}"}},
+        ]}, "finish_reason": None}]}
+        try:
+            client._consume(_RawChatStream([
+                "data: " + json.dumps(excessive_calls), "data: [DONE]",
+            ]), None, None)
+            excessive_calls_failed = False
+        except _llm.LLMError as exc:
+            excessive_calls_failed = "too many tool calls" in str(exc)
+    finally:
+        _llm._MAX_CHAT_TOOL_CALLS = original_call_bound
+    check("Chat tool-call accumulation has a total bound", excessive_calls_failed)
+
+    class _StalledChatStream(_RawChatStream):
+        def __init__(self):
+            super().__init__([])
+            self.released = threading.Event()
+
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "partial", "function": {
+                    "name": "write_file", "arguments": '{"path":"unsafe.py"',
+                }}]}, "finish_reason": None}]})
+            self.released.wait(5)
+            raise OSError("closed")
+
+        def close(self):
+            self.closed = True
+            self.released.set()
+
+    stalled = _StalledChatStream()
+    cancelled = threading.Event()
+    threading.Timer(0.1, cancelled.set).start()
+    started = __import__("time").monotonic()
+    cancelled_result = client._consume(stalled, None, None, cancel=cancelled)
+    check("Chat cancellation interrupts a stalled stream and discards partial calls",
+          cancelled_result.finish_reason == "cancelled"
+          and not cancelled_result.tool_calls and stalled.released.is_set()
+          and __import__("time").monotonic() - started < 1)
+
+    class _ChatJSON:
+        headers = {"Content-Type": "application/json"}
+
+        def __init__(self, value=None, error=None):
+            self.value = value
+            self.error = error
+            self.closed = False
+
+        def json(self):
+            if self.error is not None:
+                raise self.error
+            return self.value
+
+        def close(self):
+            self.closed = True
+
+    valid_json = _ChatJSON({"choices": [{"finish_reason": "tool_calls", "message": {
+        "content": None, "tool_calls": [{"id": "json-call", "function": {
+            "name": "read_file", "arguments": {"path": "json.py"}}}],
+    }}], "usage": {"prompt_tokens": "7", "completion_tokens": float("inf"),
+                     "prompt_tokens_details": ["malformed"], "reasoning_tokens": True}})
+    json_result = client._consume(valid_json, None, None)
+    check("bounded Chat JSON preserves complete calls and normalizes hostile usage",
+          valid_json.closed and json_result.tool_calls[0].arguments == {"path": "json.py"}
+          and json_result.usage["input_tokens"] == 7
+          and json_result.usage["output_tokens"] == 0
+          and json_result.usage["reasoning_tokens"] == 0)
+
+    malformed_json = _ChatJSON(error=ValueError("broken"))
+    try:
+        client._consume(malformed_json, None, None)
+        malformed_json_failed = False
+    except _llm.LLMError:
+        malformed_json_failed = True
+    check("malformed Chat JSON fails closed and releases the response",
+          malformed_json_failed and malformed_json.closed)
+
+    class _StalledChatJSON(_ChatJSON):
+        def __init__(self):
+            super().__init__()
+            self.released = threading.Event()
+
+        def json(self):
+            self.released.wait(5)
+            raise OSError("closed")
+
+        def close(self):
+            self.closed = True
+            self.released.set()
+
+    stalled_json = _StalledChatJSON()
+    json_cancelled = threading.Event()
+    threading.Timer(0.1, json_cancelled.set).start()
+    started = __import__("time").monotonic()
+    cancelled_json_result = client._consume(
+        stalled_json, None, None, cancel=json_cancelled)
+    check("Chat cancellation interrupts a stalled JSON fallback",
+          cancelled_json_result.finish_reason == "cancelled" and stalled_json.closed
+          and stalled_json.released.is_set()
+          and __import__("time").monotonic() - started < 1)
+
+    missing_finish_json = _ChatJSON({"choices": [{"message": {"tool_calls": [{
+        "id": "unsafe-json", "function": {
+            "name": "write_file", "arguments": {"path": "unsafe.py", "content": "x"},
+        }}]}}]})
+    try:
+        client._consume(missing_finish_json, None, None)
+        missing_finish_failed = False
+    except _llm.LLMError:
+        missing_finish_failed = True
+    check("Chat JSON tool calls require an explicit finish reason", missing_finish_failed)
+
+    original_json_bound = _llm._MAX_CHAT_JSON_BYTES
+    try:
+        _llm._MAX_CHAT_JSON_BYTES = 64
+        try:
+            client._consume(_ChatJSON({"choices": [{"finish_reason": "stop", "message": {
+                "content": "x" * 100,
+            }}]}), None, None)
+            oversized_json_failed = False
+        except _llm.LLMError as exc:
+            oversized_json_failed = "exceeded" in str(exc)
+    finally:
+        _llm._MAX_CHAT_JSON_BYTES = original_json_bound
+    check("Chat JSON bodies have a total safety bound", oversized_json_failed)
 
     class _ResponsesStream:
         headers = {"Content-Type": "text/event-stream"}

@@ -32,6 +32,9 @@ _MODEL_METADATA_TOTAL_S = 4.0
 _MAX_OLLAMA_JSON_BYTES = 8 * 1024 * 1024
 _MAX_OLLAMA_STREAM_BYTES = 8 * 1024 * 1024
 _MAX_OLLAMA_TOOL_CALLS = 4_096
+_MAX_CHAT_JSON_BYTES = 8 * 1024 * 1024
+_MAX_CHAT_STREAM_BYTES = 8 * 1024 * 1024
+_MAX_CHAT_TOOL_CALLS = 4_096
 _MAX_RESPONSES_JSON_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSES_STREAM_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSES_OUTPUT_ITEMS = 4_096
@@ -444,15 +447,22 @@ class ChatResult:
 
 def normalize_usage(usage: dict | None) -> dict[str, int]:
     """Normalize Chat, Responses, and common compatible-provider usage shapes."""
-    raw = usage or {}
+    raw = usage if isinstance(usage, dict) else {}
     input_details = raw.get("input_tokens_details") or raw.get("prompt_tokens_details") or {}
     output_details = raw.get("output_tokens_details") or raw.get("completion_tokens_details") or {}
+    if not isinstance(input_details, dict):
+        input_details = {}
+    if not isinstance(output_details, dict):
+        output_details = {}
 
     def count(value) -> int:
+        if isinstance(value, bool):
+            return 0
         try:
-            return max(0, int(value or 0))
+            parsed = int(value or 0)
         except (TypeError, ValueError, OverflowError):
             return 0
+        return parsed if 0 <= parsed <= 1_000_000_000 else 0
 
     return {
         "input_tokens": count(raw.get("input_tokens", raw.get("prompt_tokens", 0))),
@@ -676,7 +686,10 @@ def _tool_call_index(raw) -> int | None:
     if isinstance(raw, int):
         return raw if raw >= 0 else None
     if isinstance(raw, str) and re.fullmatch(r"\d+", raw.strip()):
-        return int(raw.strip())
+        try:
+            return int(raw.strip())
+        except (ValueError, OverflowError):
+            return None
     return None
 
 
@@ -3187,7 +3200,8 @@ class LLMClient:
                  think_budget: int = 0) -> ChatResult:
         ctype = r.headers.get("Content-Type", "")
         if "application/json" in ctype and "text/event-stream" not in ctype:
-            return self._consume_json(r, on_text, on_thinking)   # server ignored stream:true
+            return self._consume_json(
+                r, on_text, on_thinking, cancel=cancel)   # server ignored stream:true
         result = ChatResult()
         filt = _ThinkFilter()
         produced = False               # F4: has any content/tool-call appeared yet? (disarms the watchdog)
@@ -3239,95 +3253,151 @@ class LLMClient:
         # SSE streams are UTF-8, but requests defaults to latin-1 when the Content-Type carries no
         # charset — which mangles every multibyte char (→ becomes "â\x86\x92", ° becomes "Â°"). Pin it.
         r.encoding = "utf-8"
-        _lines = r.iter_lines(decode_unicode=True)
-        while True:
-            try:
-                line = next(_lines)
-            except StopIteration:
-                break
-            except Exception:
-                # Closing the socket mid-read (the watcher, on cancel) surfaces as any of
-                # several low-level errors depending on timing — swallow them ONLY when the
-                # user actually cancelled; otherwise it's a real stream error, re-raise.
+        saw_done = False
+        saw_finish = False
+        try:
+            for line in _bounded_stream_lines(
+                    r, _MAX_CHAT_STREAM_BYTES, "Chat Completions stream"):
                 if cancel is not None and cancel.is_set():
                     result.finish_reason = "cancelled"
                     break
-                stop_watch.set()
-                raise
-            if cancel is not None and cancel.is_set():
-                result.finish_reason = "cancelled"
-                break
-            if not line or not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
-            try:
-                obj = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            if obj.get("usage"):
-                result.usage = obj["usage"]
-            choice = (obj.get("choices") or [{}])[0]
-            if choice.get("finish_reason"):
-                result.finish_reason = choice["finish_reason"]
-            delta = choice.get("delta") or {}
-            # reasoning is streamed in a separate field: ollama uses `reasoning`, others `reasoning_content`
-            reasoning = delta.get("reasoning") or delta.get("reasoning_content")
-            if reasoning:
-                result.thinking += reasoning
-                if on_thinking:
-                    on_thinking(reasoning)
-            if delta.get("content"):
-                emit(filt.feed(delta["content"]))
-                produced = True
-            for tc in delta.get("tool_calls") or []:
-                produced = True
-                if not isinstance(tc, dict):
+                if not line or not line.startswith("data:"):
                     continue
-                tcid = str(tc.get("id") or "")
-                idx = _tool_call_index(tc.get("index"))
-                if idx is None and tcid and tcid in idmap:
-                    idx = idmap[tcid]
-                elif idx is None and tcid:
-                    noidx += 1
-                    while noidx in partial:
-                        noidx += 1
-                    idx = noidx
-                elif idx is None and last_idx is not None:
-                    idx = last_idx
-                elif idx is None:
-                    noidx += 1
-                    while noidx in partial:
-                        noidx += 1
-                    idx = noidx
-                if tcid:
-                    idmap[tcid] = idx
-                last_idx = idx
-                slot = partial.setdefault(idx, {"id": "", "name": "", "args": ""})
-                if tcid:
-                    slot["id"] = _merge_stream_token(slot["id"], tcid)
-                fn = tc.get("function") or {}
-                if not isinstance(fn, dict):
-                    continue
-                if fn.get("name"):
-                    slot["name"] = _merge_stream_token(slot["name"], fn["name"])
-                if fn.get("arguments") is not None:
-                    slot["args"] = _merge_stream_arguments(slot["args"], fn["arguments"])
-
-            if think_budget and not produced and len(result.thinking) > think_budget:
-                result.finish_reason = "overthink"     # F4: reasoning ran away before any output
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    saw_done = True
+                    break
                 try:
-                    r.close()
-                except Exception:
-                    pass
-                break
+                    obj = json.loads(data)
+                except (ValueError, RecursionError) as exc:
+                    raise LLMError(
+                        "Chat Completions emitted malformed streaming JSON") from exc
+                if not isinstance(obj, dict):
+                    raise LLMError("Chat Completions emitted a non-object streaming event")
+                if obj.get("error"):
+                    error = obj.get("error")
+                    message = error.get("message") if isinstance(error, dict) else error
+                    raise LLMError(str(message or "Chat Completions stream failed"))
+                if obj.get("usage") is not None:
+                    if not isinstance(obj.get("usage"), dict):
+                        raise LLMError("Chat Completions emitted malformed usage")
+                    result.usage = normalize_usage(obj.get("usage"))
+                choices = obj.get("choices")
+                if not isinstance(choices, list):
+                    raise LLMError("Chat Completions emitted a malformed choices array")
+                # OpenAI documents an empty final choices array when include_usage is enabled.
+                if not choices:
+                    continue
+                if saw_finish:
+                    raise LLMError(
+                        "Chat Completions emitted choice data after its finish reason")
+                if not isinstance(choices[0], dict):
+                    raise LLMError("Chat Completions emitted a malformed choice")
+                choice = choices[0]
+                finish_reason = choice.get("finish_reason")
+                if finish_reason not in (None, ""):
+                    if not isinstance(finish_reason, str):
+                        raise LLMError("Chat Completions emitted an invalid finish reason")
+                    result.finish_reason = finish_reason
+                    saw_finish = True
+                delta = choice.get("delta")
+                if delta is None:
+                    delta = {}
+                elif not isinstance(delta, dict):
+                    raise LLMError("Chat Completions emitted a malformed delta")
+                # reasoning is streamed in a separate field: Ollama-compatible gateways use
+                # `reasoning`; others commonly use `reasoning_content`.
+                reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+                if reasoning is not None and not isinstance(reasoning, str):
+                    raise LLMError("Chat Completions emitted malformed reasoning text")
+                if reasoning:
+                    result.thinking += reasoning
+                    if on_thinking:
+                        on_thinking(reasoning)
+                content = delta.get("content")
+                if content is not None and not isinstance(content, str):
+                    raise LLMError("Chat Completions emitted malformed content text")
+                if content:
+                    emit(filt.feed(content))
+                    produced = True
+                raw_calls = delta.get("tool_calls")
+                if raw_calls is None:
+                    raw_calls = []
+                if not isinstance(raw_calls, list):
+                    raise LLMError("Chat Completions emitted malformed tool calls")
+                legacy_call = delta.get("function_call")
+                if legacy_call is not None:
+                    if raw_calls or not isinstance(legacy_call, dict):
+                        raise LLMError("Chat Completions emitted a malformed legacy function call")
+                    # Older compatible gateways still use the deprecated single-call field.
+                    raw_calls = [{"index": 0, "function": legacy_call}]
+                for tc in raw_calls:
+                    produced = True
+                    if not isinstance(tc, dict):
+                        raise LLMError("Chat Completions emitted a malformed tool call")
+                    tcid = str(tc.get("id") or "")
+                    idx = _tool_call_index(tc.get("index"))
+                    if idx is None and tcid and tcid in idmap:
+                        idx = idmap[tcid]
+                    elif idx is None and tcid:
+                        noidx += 1
+                        while noidx in partial:
+                            noidx += 1
+                        idx = noidx
+                    elif idx is None and last_idx is not None:
+                        idx = last_idx
+                    elif idx is None:
+                        noidx += 1
+                        while noidx in partial:
+                            noidx += 1
+                        idx = noidx
+                    if idx not in partial and len(partial) >= _MAX_CHAT_TOOL_CALLS:
+                        raise LLMError("Chat Completions emitted too many tool calls")
+                    if tcid:
+                        idmap[tcid] = idx
+                    last_idx = idx
+                    slot = partial.setdefault(idx, {"id": "", "name": "", "args": ""})
+                    if tcid:
+                        slot["id"] = _merge_stream_token(slot["id"], tcid)
+                    fn = tc.get("function") or {}
+                    if not isinstance(fn, dict):
+                        raise LLMError("Chat Completions emitted a malformed function call")
+                    if fn.get("name") is not None and not isinstance(fn.get("name"), str):
+                        raise LLMError("Chat Completions emitted a malformed function name")
+                    if fn.get("name"):
+                        slot["name"] = _merge_stream_token(slot["name"], fn["name"])
+                    if fn.get("arguments") is not None:
+                        slot["args"] = _merge_stream_arguments(slot["args"], fn["arguments"])
 
-        stop_watch.set()               # stop the cancel watcher (all loop-exit paths pass here)
+                if think_budget and not produced and len(result.thinking) > think_budget:
+                    result.finish_reason = "overthink"     # F4: reasoning ran away before any output
+                    try:
+                        r.close()
+                    except Exception:
+                        pass
+                    break
+        except Exception:
+            # Closing the socket mid-read (the watcher, on cancel) surfaces as several possible
+            # transport errors. Only a real cancellation may convert those into a clean stop.
+            if cancel is None or not cancel.is_set():
+                raise
+            result.finish_reason = "cancelled"
+        finally:
+            stop_watch.set()
+
+        if result.finish_reason in ("cancelled", "overthink"):
+            # Neither partial native calls nor text-shaped calls may survive an aborted generation.
+            return result
+        # `[DONE]` is the canonical SSE terminator. Some local compatible gateways close the stream
+        # after a non-null finish_reason instead; retain that safe, explicit-terminal variant.
+        if not saw_done and not saw_finish:
+            raise LLMError("Chat Completions stream ended before a terminal event")
         emit(filt.flush())
 
         for idx in sorted(partial):
             slot = partial[idx]
+            if not slot["name"] and result.finish_reason != "length":
+                raise LLMError("Chat Completions completed with an unfinished tool call")
             result.tool_calls.append(ToolCall(
                 id=slot["id"] or f"call_{idx}", name=slot["name"],
                 arguments=_tool_arguments(slot["args"])))
@@ -3338,27 +3408,97 @@ class LLMClient:
             if text_calls:
                 result.content = clean
                 result.tool_calls = text_calls
+        if result.tool_calls:
+            if result.finish_reason == "stop":
+                result.finish_reason = "tool_calls"
+            elif result.finish_reason not in ("tool_calls", "function_call", "length"):
+                # Content filtering or an unknown stop cannot attest that call arguments finished.
+                result.finish_reason = "length"
         return result
 
-    def _consume_json(self, r: requests.Response, on_text, on_thinking) -> ChatResult:
+    def _consume_json(self, r: requests.Response, on_text, on_thinking,
+                      cancel=None) -> ChatResult:
         """A non-streaming server (ignored stream:true) returns one JSON completion — parse it
         through the same think-splitter / lenient-args / text-fallback path as the SSE stream."""
-        result = ChatResult()
+        stop_watch = threading.Event()
+        if cancel is not None:
+            def _watch(resp=r, ev=stop_watch, cx=cancel):
+                while not ev.wait(0.15):
+                    if getattr(resp, "_dgc_closed", False):
+                        return
+                    if cx.is_set():
+                        sock = _raw_socket(resp)
+                        if sock is not None:
+                            try:
+                                import socket as _socket
+                                sock.shutdown(_socket.SHUT_RDWR)
+                            except Exception:
+                                pass
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+                        return
+            threading.Thread(target=_watch, daemon=True).start()
         try:
-            obj = r.json()
-        except ValueError:
-            return result
-        choice = (obj.get("choices") or [{}])[0]
-        result.usage = obj.get("usage") or {}
-        result.finish_reason = choice.get("finish_reason") or "stop"
-        msg = choice.get("message") or {}
+            obj = _bounded_json_response(
+                r, _MAX_CHAT_JSON_BYTES, "Chat Completions response")
+        except Exception as exc:
+            if cancel is not None and cancel.is_set():
+                return ChatResult(finish_reason="cancelled")
+            if isinstance(exc, (ValueError, RecursionError)) and not isinstance(exc, LLMError):
+                raise LLMError("Chat Completions response returned malformed JSON") from exc
+            raise
+        finally:
+            stop_watch.set()
+        if cancel is not None and cancel.is_set():
+            return ChatResult(finish_reason="cancelled")
+        if not isinstance(obj, dict):
+            raise LLMError("Chat Completions emitted a non-object JSON response")
+        choices = obj.get("choices")
+        if (not isinstance(choices, list) or not choices
+                or not isinstance(choices[0], dict)):
+            raise LLMError("Chat Completions emitted a malformed choices array")
+        choice = choices[0]
+        msg = choice.get("message")
+        if msg is None:
+            msg = {}
+        elif not isinstance(msg, dict):
+            raise LLMError("Chat Completions emitted a malformed assistant message")
+        finish_reason = choice.get("finish_reason")
+        if finish_reason not in (None, "") and not isinstance(finish_reason, str):
+            raise LLMError("Chat Completions emitted an invalid finish reason")
         reasoning = msg.get("reasoning") or msg.get("reasoning_content")
+        if reasoning is not None and not isinstance(reasoning, str):
+            raise LLMError("Chat Completions emitted malformed reasoning text")
+        content = msg.get("content")
+        if content is not None and not isinstance(content, str):
+            raise LLMError("Chat Completions emitted malformed content text")
+        raw_calls = msg.get("tool_calls")
+        if raw_calls is None:
+            raw_calls = []
+        if not isinstance(raw_calls, list) or len(raw_calls) > _MAX_CHAT_TOOL_CALLS:
+            raise LLMError("Chat Completions emitted malformed or excessive tool calls")
+        legacy_call = msg.get("function_call")
+        if legacy_call is not None:
+            if raw_calls or not isinstance(legacy_call, dict):
+                raise LLMError("Chat Completions emitted a malformed legacy function call")
+            raw_calls = [{"function": legacy_call}]
+        if raw_calls and not finish_reason:
+            raise LLMError("Chat Completions JSON ended without a tool-call finish reason")
+
+        result = ChatResult()
+        usage = obj.get("usage")
+        if usage is not None and not isinstance(usage, dict):
+            raise LLMError("Chat Completions emitted malformed usage")
+        result.usage = normalize_usage(usage)
+        result.finish_reason = finish_reason or "stop"
         if reasoning:
             result.thinking += reasoning
             if on_thinking:
                 on_thinking(reasoning)
         filt = _ThinkFilter()
-        for kind, chunk in filt.feed(msg.get("content") or "") + filt.flush():
+        for kind, chunk in filt.feed(content or "") + filt.flush():
             if kind == "think":
                 result.thinking += chunk
                 if on_thinking:
@@ -3367,13 +3507,28 @@ class LLMClient:
                 result.content += chunk
                 if on_text:
                     on_text(chunk)
-        for tc in msg.get("tool_calls") or []:
+        for tc in raw_calls:
+            if not isinstance(tc, dict):
+                raise LLMError("Chat Completions emitted a malformed tool call")
             fn = tc.get("function") or {}
-            result.tool_calls.append(ToolCall(id=tc.get("id") or f"call_{len(result.tool_calls)}",
-                                              name=fn.get("name", ""),
+            if not isinstance(fn, dict):
+                raise LLMError("Chat Completions emitted a malformed function call")
+            name = fn.get("name")
+            if not isinstance(name, str) or (not name and result.finish_reason != "length"):
+                raise LLMError("Chat Completions completed with an unfinished tool call")
+            call_id = tc.get("id")
+            if call_id is not None and not isinstance(call_id, str):
+                raise LLMError("Chat Completions emitted a malformed tool-call ID")
+            result.tool_calls.append(ToolCall(id=call_id or f"call_{len(result.tool_calls)}",
+                                              name=name,
                                               arguments=_tool_arguments(fn.get("arguments"))))
         if not result.tool_calls:
             clean, text_calls = parse_text_tool_calls(result.content)
             if text_calls:
                 result.content, result.tool_calls = clean, text_calls
+        if result.tool_calls:
+            if result.finish_reason == "stop":
+                result.finish_reason = "tool_calls"
+            elif result.finish_reason not in ("tool_calls", "function_call", "length"):
+                result.finish_reason = "length"
         return result
