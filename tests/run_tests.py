@@ -4173,6 +4173,22 @@ def unit_tests(tmp: Path):
     check("coerce edits: pi oldText/newText keys", _coerce_edits({"edits":[{"oldText":"p","newText":"q"}]}) == [{"old_string":"p","new_string":"q"}])
     check("coerce edits: legacy top-level old/new", _coerce_edits({"old_string":"t","new_string":"u"}) == [{"old_string":"t","new_string":"u"}])
 
+    # --- #7: verify/test output is tail-weighted + larger so the failing assertion (printed at the END)
+    #     survives the inline window instead of being elided by the default head bias
+    from dgc.tools import _looks_like_test_command as _isv, _long_output_preview as _lop
+    check("verify-cmd detect: test runners yes, plain no",
+          _isv("cargo test -- --include-ignored") and _isv("python -m pytest -q")
+          and _isv("go test ./...") and _isv("./gradlew test") and not _isv("ls -la") and not _isv("cat x.rs"))
+    class _NoCfg:
+        config = None
+    _noise = "noise line ok\n" * 5000                    # ~65 KB of passing chatter
+    _marker = "PANIC assertion failed: decimal carry logic wrong"
+    _txt = _noise[:47000] + _marker + "\n" + _noise[47000:60000] + "\ntest result: FAILED\n"
+    _plain = _lop("run", _txt, 1, _NoCfg(), source_chars=len(_txt), is_verify=False)
+    _ver = _lop("cargo test", _txt, 1, _NoCfg(), source_chars=len(_txt), is_verify=True)
+    check("#7 verify output keeps the failing assertion the plain head-biased view elides",
+          (_marker in _ver) and (_marker not in _plain))
+
     # --- sampling params: unset → nothing sent (respect server default); set → parsed (top_k int)
     check("sampling unset sends nothing", _samp(_Cfg()) == {})
     class _SCfg(_Cfg):
