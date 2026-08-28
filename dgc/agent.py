@@ -231,11 +231,16 @@ def _file_edit_landed(name: str, output: str) -> bool:
 
 
 def _sampling(cfg) -> dict:
-    """Optional sampling knobs from config — only the ones the user actually set (else respect the
-    server default). Lets a user tame a local model that loops/repeats. top_k is an int; the rest float."""
+    """Sampling knobs: an explicit config value always wins; a key the user left unset falls back to
+    the model family's own recommendation (Qwen etc. loop/repeat at the raw temperature=1 default, which
+    also adds run-to-run variance); if neither applies, respect the server default. top_k int; rest float."""
+    from .config import sampling_for_model
+    rec = sampling_for_model(str(cfg.get("model", "") or ""))
     out: dict = {}
     for k in ("temperature", "top_p", "top_k", "min_p"):
         v = cfg.get(k, "")
+        if v == "" or v is None:
+            v = rec.get(k, "")                     # unset → model-family recommendation (if any)
         if v == "" or v is None:
             continue
         try:

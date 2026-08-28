@@ -4173,13 +4173,21 @@ def unit_tests(tmp: Path):
     check("coerce edits: pi oldText/newText keys", _coerce_edits({"edits":[{"oldText":"p","newText":"q"}]}) == [{"old_string":"p","new_string":"q"}])
     check("coerce edits: legacy top-level old/new", _coerce_edits({"old_string":"t","new_string":"u"}) == [{"old_string":"t","new_string":"u"}])
 
-    # --- sampling params: unset → nothing sent (respect server default); set → parsed (top_k int)
-    check("sampling unset sends nothing", _samp(_Cfg()) == {})
-    class _SCfg(_Cfg):
-        def get(self, k, d=None): return {"temperature":"0.7","top_k":"20"}.get(k, super().get(k, d))
-    _sv = _samp(_SCfg())
-    check("sampling set is parsed (top_k int, temp float)",
-          _sv.get("temperature") == 0.7 and _sv.get("top_k") == 20 and isinstance(_sv["top_k"], int))
+    # --- sampling params: unset + qwen model → Qwen family recommendation; unset + other → server
+    #     default; explicit config always wins; top_k parsed int, rest float
+    class _MockCfg:
+        def __init__(self, d): self._d = d
+        def get(self, k, dflt=None): return self._d.get(k, dflt)
+    _qs = _samp(_MockCfg({"model": "qwen3.8:27b-bf16"}))
+    check("sampling unset + qwen model → Qwen rec",
+          _qs.get("temperature") == 0.7 and _qs.get("top_p") == 0.8
+          and _qs.get("top_k") == 20 and isinstance(_qs["top_k"], int))
+    check("sampling unset + non-qwen model sends nothing",
+          _samp(_MockCfg({"model": "llama3.1:8b"})) == {})
+    _sv = _samp(_MockCfg({"model": "qwen3:8b", "temperature": "0.9", "top_k": "40"}))
+    check("sampling explicit config overrides model rec (top_k int, temp float)",
+          _sv.get("temperature") == 0.9 and _sv.get("top_k") == 40 and isinstance(_sv["top_k"], int)
+          and _sv.get("top_p") == 0.8)          # unset top_p still filled from the rec
 
     # --- /jump: scrolls the transcript to a chosen turn
     jt = object.__new__(TUI); jt._width = 80; jt._scroll_off = 0; jt._invalidate = lambda: None
