@@ -2253,6 +2253,9 @@ class Agent:
         except (TypeError, ValueError):
             budget = 0.0
         deadline = (time.monotonic() + budget) if budget > 0 else None
+        if deadline is not None:
+            max_turns = max(max_turns, 200)   # budgeted: let the DEADLINE govern turns, not a hard 40-cap (pi has none) —
+                                              # hard problems (rust/forth, rust/decimal) exhaust 40 iterations mid-debug with budget to spare
         # Exact ephemeral bytes/modes/symlinks for checkpoint-known project mutations at the last
         # verified state. It never serializes external-path authority and is restored transactionally.
         good_snapshot: WorkspaceSnapshot | None = None
