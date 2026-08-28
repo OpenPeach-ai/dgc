@@ -178,24 +178,6 @@ def context_for_model(model: str) -> int | None:
     return None
 
 
-# Recommended sampling per model family, for the knobs the user left unset. Raw Ollama/llama.cpp
-# defaults (temperature 1) make local models loop/repeat and add run-to-run variance; a family's
-# own guidance is a far better default. Explicit config values always win over these. First match.
-MODEL_SAMPLING: list[tuple[str, dict]] = [
-    # Qwen team's published inference guidance (temperature 0.7 / top_p 0.8 / top_k 20).
-    ("qwen", {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}),
-]
-
-
-def sampling_for_model(model: str) -> dict:
-    """Recommended sampling knobs for `model`'s family (used only for keys left unset), or {}."""
-    m = (model or "").lower()
-    for pat, s in MODEL_SAMPLING:
-        if pat in m:
-            return dict(s)
-    return {}
-
-
 def find_project_root(start: Path | None = None) -> Path:
     """Walk up from `start` looking for a project marker (.git, DGC.md, .dgc)."""
     p = Path(start or os.getcwd()).resolve()
