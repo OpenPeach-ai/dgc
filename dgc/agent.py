@@ -44,7 +44,9 @@ _VERIFY_INFO_FLAGS = {
     "--fixtures-per-test", "--markers", "--trace-config", "--setup-plan", "--showconfig",
     "--listenvs", "--list-tests", "--listtests",
 }
-_MAX_CONTINUE = 3       # bounded output-limit/transport-interruption recovery per turn
+_MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery per turn (a weak local
+                        #   model debugging a hard problem legitimately hits its output cap several
+                        #   times across a long turn; 3 cut it off mid-convergence — pi never caps)
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
