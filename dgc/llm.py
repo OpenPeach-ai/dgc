@@ -649,6 +649,32 @@ class _ThinkFilter:
         return ev
 
 
+def _repair_json_control_chars(s):
+    """Escape raw control chars and invalid backslashes INSIDE JSON string literals so a local
+    model's tool arguments (go/rust source with unescaped newlines/tabs) parse instead of being
+    dropped as {"_unparsed"}. Repairs raw control chars in JSON string literals before giving up."""
+    out = []
+    in_str = False
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if in_str:
+            if c == "\\":
+                nxt = s[i + 1] if i + 1 < n else ""
+                if nxt in '"\\/bfnrtu':
+                    out.append(c); out.append(nxt); i += 2; continue
+                out.append("\\\\"); i += 1; continue        # double an invalid/trailing backslash
+            if c == '"':
+                in_str = False; out.append(c); i += 1; continue
+            if ord(c) < 0x20:                               # raw control char in a string -> escape
+                out.append("\\u%04x" % ord(c)); i += 1; continue
+            out.append(c); i += 1; continue
+        if c == '"':
+            in_str = True
+        out.append(c); i += 1
+    return "".join(out)
+
+
 def _loads_lenient(s):
     """Parse JSON a local model probably meant: tolerate trailing commas, single quotes,
     unquoted keys, and Python literals (True/False/None). Returns a dict or None."""
@@ -663,6 +689,14 @@ def _loads_lenient(s):
             return v if isinstance(v, dict) else None
         except json.JSONDecodeError:
             pass
+    repaired = _repair_json_control_chars(s)                    # unescaped control chars / backslashes
+    if repaired != s:
+        for candidate in (repaired, re.sub(r",\s*([}\]])", r"\1", repaired)):
+            try:
+                v = json.loads(candidate)
+                return v if isinstance(v, dict) else None
+            except json.JSONDecodeError:
+                pass
     try:
         import ast
         v = ast.literal_eval(s)                                  # single quotes / True/False/None

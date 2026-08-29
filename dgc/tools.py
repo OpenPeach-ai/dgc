@@ -43,8 +43,20 @@ from .workspace import (
 MAX_READ_LINES = 2000
 MAX_LINE_LEN = 2000
 MAX_BASH_OUT = 30000
+MAX_BASH_OUT_VERIFY = 50000      # verify/test runs keep more, tail-weighted — runners print the failing
+                                 # assertions + pass/fail summary at the END, which a head-biased window elides (#7)
 MAX_BASH_RETAIN_CHARS = 2_000_000
 MAX_BASH_RETAINED_RESULTS = 16
+
+_TEST_CMD_RE = re.compile(
+    r"\b(pytest|py\.test|unittest|nose2?|tox|cargo\s+test|go\s+test|jest|vitest|mocha|ctest|"
+    r"gradlew?\b[^\n]*\btest|\bmake\s+(?:test|check)|npm\s+(?:test|run\s+test)|"
+    r"python[0-9.]*\s+-m\s+(?:pytest|unittest))\b", re.I)
+
+
+def _looks_like_test_command(command: str) -> bool:
+    """A test/verify runner whose actionable failure summary prints at the END of its output (#7)."""
+    return bool(_TEST_CMD_RE.search(command or ""))
 MAX_BASH_PAGE_LINES = 1000
 MAX_BASH_QUERY_CHARS = 256
 MAX_BASH_COMMAND_LABEL = 1000
@@ -1192,17 +1204,25 @@ def _store_output(command: str, text: str, returncode: int | None, ctx, *,
 
 
 def _long_output_preview(command: str, text: str, returncode: int | None, ctx, *,
-                         source_chars: int | None = None, already_omitted: int = 0) -> str:
-    """Return an inline head/tail while retaining a bounded, searchable continuation."""
+                         source_chars: int | None = None, already_omitted: int = 0,
+                         is_verify: bool = False) -> str:
+    """Return an inline head/tail while retaining a bounded, searchable continuation.
+
+    For a verify/test run keep more of the output and weight it toward the TAIL: runners print the
+    actionable failing assertions and pass/fail summary at the end, which the default head bias elides,
+    leaving a weak local model to re-derive wrong code because it never saw what actually failed (#7)."""
     total = max(len(text), int(source_chars) if source_chars is not None else len(text))
     oid = _store_output(command, text, returncode, ctx, source_chars=total,
                         already_omitted=already_omitted)
+    limit = MAX_BASH_OUT_VERIFY if is_verify else MAX_BASH_OUT
+    if len(text) <= limit and not already_omitted:
+        return text                                  # fits within the (possibly raised) budget — show whole
     note = (f"\n… {total} chars total — middle elided from this response …\n"
             f"[bounded output retained as {oid} for 30 minutes; use "
             f"bash_output(id=\"{oid}\", query=\"<literal>\") or offset/limit. "
             "No host file was created.]\n")
-    budget = max(0, MAX_BASH_OUT - len(note) - 64)
-    head = budget * 2 // 3
+    budget = max(0, limit - len(note) - 64)
+    head = (budget * 3 // 10) if is_verify else (budget * 2 // 3)  # verify: 30% head (compile errors) / 70% tail
     tail = budget - head
     return (_prefix_without_split_marker(text, head) + note
             + (_suffix_without_split_marker(text, tail) if tail else ""))
@@ -1424,9 +1444,11 @@ def bash(args: dict, ctx) -> str:
         return hint + (f"\n--- last output before it was killed ---\n{partial}" if partial.strip() else "")
     # The reader redacts each chunk before the bounded collector sees it, so neither its head/tail
     # ceiling nor the inline preview can split a known credential into exposed fragments.
-    if source_chars > MAX_BASH_OUT:
+    verify = _looks_like_test_command(command)
+    if source_chars > (MAX_BASH_OUT_VERIFY if verify else MAX_BASH_OUT):
         out = _long_output_preview(_safe_command_label(command, ctx), out, proc.returncode, ctx,
-                                   source_chars=source_chars, already_omitted=omitted_chars)
+                                   source_chars=source_chars, already_omitted=omitted_chars,
+                                   is_verify=verify)
     return f"exit code: {proc.returncode}\n{out.strip() or '(no output)'}"
 
 
