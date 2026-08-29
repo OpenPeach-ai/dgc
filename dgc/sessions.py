@@ -8,6 +8,7 @@ This is transcript resume, NOT semantic/episodic memory — durable facts still 
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import stat
@@ -21,7 +22,7 @@ from .config import USER_HOME
 from .scheduler import named_process_lock
 
 SESSIONS_DIR = USER_HOME / "sessions"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 METRICS_SCHEMA_VERSION = 3
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
@@ -348,7 +349,8 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          timing: dict | None = None,
-         checkpoints: dict | None = None, *, expected_revision: int | None = None,
+         checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
+         goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
     saved = False
@@ -368,8 +370,21 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["name"] = name
         if goal:
             data["goal"] = goal          # the standing /goal objective, restored on resume
-            data["goal_status"] = (goal_status if goal_status in ("active", "completed", "blocked")
-                                   else "active")
+            status = (goal_status if goal_status in ("active", "completed", "blocked")
+                      else "active")
+            data["goal_status"] = status
+            try:
+                elapsed = float(goal_elapsed_seconds or 0)
+            except (TypeError, ValueError, OverflowError):
+                elapsed = 0.0
+            data["goal_elapsed_seconds"] = elapsed if math.isfinite(elapsed) and elapsed >= 0 else 0.0
+            if status == "active":
+                try:
+                    active_since = float(goal_active_since or 0)
+                except (TypeError, ValueError, OverflowError):
+                    active_since = 0.0
+                if math.isfinite(active_since) and active_since > 0:
+                    data["goal_active_since"] = active_since
         if usage:
             data["usage"] = {key: max(0, int(usage.get(key, 0) or 0)) for key in USAGE_KEYS}
         if activity is not None:

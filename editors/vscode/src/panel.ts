@@ -44,7 +44,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", baseUrl: "", workspaceTrusted: false,
-                    goal: { text: "", status: "none" } };
+                    goal: { text: "", status: "none", elapsed_seconds: 0 } };
   private _installPrompted = false;
   private featureRequest = 0;
   private correlatedStateRequests = false;
@@ -254,7 +254,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
         this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
                        workspaceTrusted: ev.workspace_trusted === true,
-                       goal: ev.goal || { text: "", status: "none" } };
+                       goal: ev.goal || { text: "", status: "none", elapsed_seconds: 0 } };
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.slashAliases.clear();
@@ -304,7 +304,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         break;
       case "goal_changed":
-        this.state.goal = { text: String(ev.goal || ""), status: String(ev.status || "none") };
+        this.state.goal = {
+          text: String(ev.goal || ""), status: String(ev.status || "none"),
+          elapsed_seconds: Number.isFinite(ev.elapsed_seconds)
+            ? Math.max(0, Number(ev.elapsed_seconds)) : this.state.goal.elapsed_seconds,
+        };
         this.postState();
         break;
       case "config":
@@ -985,7 +989,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           "goal", { type: "set_goal", text: "", status: "none" }));
       } else if (["complete", "completed", "done"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "completed" }));
-      } else if (["blocked", "block"].includes(low)) {
+      } else if (["blocked", "block", "pause", "paused"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "blocked" }));
       } else if (["resume", "active", "reactivate"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "active" }));
@@ -1803,6 +1807,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
+  <section id="goalbar" aria-label="Standing goal" hidden>
+    <span class="goal-icon codicon codicon-target" aria-hidden="true"></span>
+    <div class="goal-copy">
+      <div class="goal-label"><span id="goal-status">Active goal</span><span aria-hidden="true">·</span><time id="goal-time">0:00</time></div>
+      <div id="goal-text"></div>
+    </div>
+    <div class="goal-actions">
+      <button type="button" id="goal-edit" class="fbtn" title="Edit goal" aria-label="Edit standing goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
+      <button type="button" id="goal-toggle" class="fbtn" title="Pause goal" aria-label="Pause standing goal"><span class="codicon codicon-debug-pause" aria-hidden="true"></span></button>
+      <button type="button" id="goal-clear" class="fbtn" title="Clear goal" aria-label="Clear standing goal"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    </div>
+  </section>
   <div id="attachments" aria-label="Attached context"></div>
   <div id="cbox" data-mode="default">
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>

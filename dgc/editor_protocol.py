@@ -78,6 +78,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "goal_changed": {
         "goal": _S(),
         "status": _f("string", enum=("none", "active", "completed", "blocked")),
+        "elapsed_seconds": _I(False),
         "request_id": _S(False),
     },
     "info": {"message": _S()},

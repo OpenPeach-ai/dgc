@@ -2873,10 +2873,10 @@ class TUI:
                 self._flash("standing goal → completed" if self.agent.update_goal("completed")
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to complete"))
-            elif rest.lower() in ("blocked", "block"):
-                self._flash("standing goal → blocked" if self.agent.update_goal("blocked")
+            elif rest.lower() in ("blocked", "block", "pause", "paused"):
+                self._flash("standing goal → paused" if self.agent.update_goal("blocked")
                             else (getattr(self.agent, "_last_persist_error", "")
-                                  or "no standing goal to block"))
+                                  or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
                 self._flash("standing goal → active" if self.agent.update_goal("active")
                             else (getattr(self.agent, "_last_persist_error", "")
@@ -2891,7 +2891,7 @@ class TUI:
                 if g:
                     self._open_reader(
                         f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{g}\n\n"
-                        "`/goal complete` · `/goal blocked` · `/goal resume` · `/goal clear`",
+                        "`/goal complete` · `/goal pause` · `/goal resume` · `/goal clear`",
                         footer="the standing objective · ↑↓ scroll · Esc close")
                 else:
                     self._flash("no goal set — /goal <objective> to set one")

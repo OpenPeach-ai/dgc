@@ -90,7 +90,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 aliases=("dash", "home")),
     CommandSpec("name", "name this session", frozenset({"tui", "classic", "editor"}),
                 "nameSession", True, usage="name [NAME]"),
-    CommandSpec("goal", "inspect, set, complete, block, resume, or clear the objective", _TCE,
+    CommandSpec("goal", "inspect, set, complete, pause, resume, or clear the objective", _TCE,
                 "goal", True, usage="goal [TEXT|STATE]"),
     CommandSpec("set", "tune a scalar setting live", _T, usage="set [KEY [VALUE]]"),
     CommandSpec("settings", "browse & edit all settings", frozenset({"tui", "editor"}),

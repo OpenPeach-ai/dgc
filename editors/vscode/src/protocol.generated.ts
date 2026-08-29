@@ -406,6 +406,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "blocked"
       ]
     },
+    "elapsed_seconds": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
     "request_id": {
       "types": [
         "string"

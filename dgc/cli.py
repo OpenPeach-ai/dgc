@@ -727,12 +727,12 @@ class CLI:
                         self.ui.error(self.agent._last_persist_error)
                     else:
                         self.ui.info("no standing goal to complete")
-            elif low in ("blocked", "block"):
+            elif low in ("blocked", "block", "pause", "paused"):
                 if not self.agent.update_goal("blocked"):
                     if self.agent._last_persist_error:
                         self.ui.error(self.agent._last_persist_error)
                     else:
-                        self.ui.info("no standing goal to block")
+                        self.ui.info("no standing goal to pause")
             elif low in ("resume", "active", "reactivate"):
                 if not self.agent.update_goal("active"):
                     if self.agent._last_persist_error:

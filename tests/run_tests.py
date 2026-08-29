@@ -4201,20 +4201,27 @@ def unit_tests(tmp: Path):
 
     # --- /goal: set → # Standing goal in the prompt; persists to the session + restores on resume
     _goal_root = Path(tempfile.mkdtemp())
+    import time as _goal_time
     _g1 = _Ag(_Cfg(_goal_root), _AgUI())
     check("no goal → no goal section", "# Standing goal" not in _g1.system_prompt())
     _g1.set_goal("ship the release")
     check("goal set → in the system prompt", "# Standing goal" in _g1.system_prompt() and "ship the release" in _g1.system_prompt())
     import dgc.sessions as _Sg
-    _gp = _Sg.new_path(_goal_root); _g1.session_file = _gp; _g1.messages = [{"role":"user","content":"x"}]; _g1._persist()
+    _gp = _Sg.new_path(_goal_root); _g1.session_file = _gp; _g1.messages = [{"role":"user","content":"x"}]
+    _g1._goal_active_since -= 5; _g1._persist()
+    _goal_record = _Sg.load_record(_gp, _g1.config.project_root)
     check("goal persisted to the session file", _Sg.goal_of(_gp, _g1.config.project_root) == "ship the release"
-          and _Sg.goal_status_of(_gp, _g1.config.project_root) == "active")
+          and _Sg.goal_status_of(_gp, _g1.config.project_root) == "active"
+          and _goal_record.get("goal_active_since", 0) > 0
+          and _goal_record.get("goal_elapsed_seconds") == 0)
     _g2 = _Ag(_Cfg(_goal_root), _AgUI()); _g2.load_session(_gp)
-    check("goal restored on resume", _g2.goal == "ship the release" and _g2.goal_status == "active")
+    check("goal restored on resume with its active-work clock", _g2.goal == "ship the release"
+          and _g2.goal_status == "active" and _g2.goal_elapsed_seconds() >= 4)
     check("goal lifecycle records completion without deleting the objective",
           _g2.update_goal("completed") and _g2.goal == "ship the release"
           and _g2.goal_status == "completed" and "# Standing goal" not in _g2.system_prompt()
-          and "# Goal record" in _g2.system_prompt())
+          and "# Goal record" in _g2.system_prompt() and _g2._goal_active_since == 0
+          and _g2.goal_elapsed_seconds(_goal_time.time() + 60) >= 4)
     _g3 = _Ag(_Cfg(_goal_root), _AgUI()); _g3.load_session(_gp)
     check("completed goal status survives resume", _g3.goal_status == "completed")
     _g3.set_goal("x" * 5000)
@@ -6949,7 +6956,8 @@ def test_sessions_and_worktree():
                 "by_request_reason": {"user_turn": 2, "tool_result": 3, "title": 1}},
         checkpoints=checkpoint_payload)
     check("session save reports durable transcript success",
-          session_saved and json.loads(sp.read_text()).get("schema_version") == 6)
+          session_saved and json.loads(sp.read_text()).get("schema_version")
+          == sessions.SCHEMA_VERSION)
     check("session persistence carries an opaque checkpoint payload",
           sessions.checkpoints_of(sp, d) == checkpoint_payload)
     if _os.name == "posix":

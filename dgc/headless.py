@@ -463,7 +463,8 @@ class Backend:
             skills=[s.name for s in self.agent.skills.values()],
             commands=editor_command_metadata(),
             custom_commands=custom_command_names(self.config.project_root),
-            goal={"text": self.agent.goal, "status": self.agent.goal_status},
+            goal={"text": self.agent.goal, "status": self.agent.goal_status,
+                  "elapsed_seconds": self._goal_elapsed_seconds()},
             context_size=self._context_window_size())
         self._emit_context()
 
@@ -910,12 +911,23 @@ class Backend:
                      tool_profile=str(c.get("tool_profile", "adaptive")),
                      max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
                      goal={"text": getattr(self.agent, "goal", ""),
-                           "status": getattr(self.agent, "goal_status", "none")},
+                           "status": getattr(self.agent, "goal_status", "none"),
+                           "elapsed_seconds": self._goal_elapsed_seconds()},
                      **_request_fields(request_id))
+
+    def _goal_elapsed_seconds(self) -> int:
+        clock = getattr(self.agent, "goal_elapsed_seconds", None)
+        if not callable(clock):
+            return 0
+        try:
+            return max(0, int(clock()))
+        except (TypeError, ValueError, OverflowError):
+            return 0
 
     def _emit_goal(self, request_id: str | None = None) -> None:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
                      status=getattr(self.agent, "goal_status", "none"),
+                     elapsed_seconds=self._goal_elapsed_seconds(),
                      **_request_fields(request_id))
 
     def _history(self) -> list:
@@ -1485,7 +1497,8 @@ class Backend:
             self.em.emit("status", model=self.config.model, mode=self.agent.mode,
                          think=self.config.get("thinking", "off"), base_url=self.config.base_url,
                          goal={"text": getattr(self.agent, "goal", ""),
-                               "status": getattr(self.agent, "goal_status", "none")},
+                               "status": getattr(self.agent, "goal_status", "none"),
+                               "elapsed_seconds": self._goal_elapsed_seconds()},
                          context_used=self.agent.estimate_tokens(),
                          context_size=self._context_window_size(), **_request_fields(request_id))
         elif t == "shutdown":

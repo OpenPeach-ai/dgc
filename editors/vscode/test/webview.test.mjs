@@ -104,6 +104,7 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   // tool card 1 — read_file (glyph →)
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/auth.ts", call_id: "c1" } });
   assert.equal(doc.querySelector(".tool .tool-status").textContent, "running");
+  assert.equal(doc.querySelector(".tool .verb").textContent, "Reading");
   assert.equal(doc.querySelector(".tool .dot").getAttribute("aria-hidden"), "true");
   send({ type: "event", event: { type: "tool_progress", name: "read_file", call_id: "c1",
     message: "Indexing symbols", progress: 1, total: 2 } });
@@ -134,7 +135,7 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   const tools = doc.querySelectorAll(".tool");
   assert.equal(tools.length, 3, "expected exactly 3 tool cards");
   assert.equal(tools[0].querySelector(".glyph").textContent, "→", "read_file glyph");
-  assert.equal(tools[0].querySelector(".verb").textContent, "read_file");
+  assert.equal(tools[0].querySelector(".verb").textContent, "Read");
   assert.equal(tools[2].querySelector(".glyph").textContent, "✎", "edit_file glyph");
 
   const diff = doc.querySelector(".diff");
@@ -142,6 +143,12 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.ok(diff.querySelector(".add"), "diff add line missing");
   assert.ok(diff.querySelector(".del"), "diff del line missing");
   assert.match(diff.querySelector(".add").textContent, /iat/, "diff add line content");
+  assert.equal(diff.querySelector(".add-stat").textContent, "+1");
+  assert.equal(diff.querySelector(".del-stat").textContent, "−1");
+  assert.equal(diff.querySelector(".add .new").textContent, "5", "new line gutter");
+  diff.querySelector(".diff-toggle").click();
+  assert.equal(diff.querySelector(".diff-toggle").getAttribute("aria-expanded"), "false");
+  assert.equal(diff.querySelector(".diff-action").textContent, "Review");
   // mono+purple diff: added lines carry .add (styled purple), never a green class
   assert.equal(diff.querySelectorAll(".green, .add-green").length, 0);
 
@@ -164,6 +171,8 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   send({ type: "event", event: { type: "turn_end" } });
   assert.ok(doc.querySelector(".thinking.done"), "turn footer did not settle");
+  assert.ok([...doc.querySelectorAll(".text")].at(-1).classList.contains("final"),
+    "the last assistant segment should be marked as the final answer");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
   dom.window.close();
@@ -481,7 +490,25 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("pop").textContent, /standing objective/);
   assert.match(doc.getElementById("pop").textContent, /review-api/);
 
-  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active" } });
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active",
+    elapsed_seconds: 65 } });
+  const goalBar = doc.getElementById("goalbar");
+  assert.equal(goalBar.hidden, false);
+  assert.equal(doc.getElementById("goal-status").textContent, "Active goal");
+  assert.equal(doc.getElementById("goal-time").textContent, "1:05");
+  doc.getElementById("goal-toggle").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal pause");
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
+    elapsed_seconds: 67 } });
+  assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
+  assert.equal(doc.getElementById("goal-time").textContent, "1:07");
+  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume standing goal");
+  doc.getElementById("goal-toggle").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal resume");
+  doc.getElementById("goal-edit").click();
+  assert.equal(input.value, "/goal ship the release");
+  doc.getElementById("goal-clear").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal clear");
   send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },

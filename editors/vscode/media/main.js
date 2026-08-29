@@ -2,6 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const goalBar = $("goalbar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -97,12 +98,28 @@
     present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
   };
   const glyphFor = (name) => GLYPH[name] || "▸";
+  const TOOL_COPY = {
+    read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
+    write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
+    bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
+    grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
+    present_plan: ["Preparing plan", "Prepared plan"], task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
+  };
+  function toolCopy(name) {
+    const known = TOOL_COPY[name];
+    if (known) return { present: known[0], past: known[1], target: "" };
+    if (String(name).startsWith("mcp__")) {
+      return { present: "Calling MCP tool", past: "Called MCP tool",
+        target: String(name).slice(5).replaceAll("__", " · ").replaceAll("_", " ") };
+    }
+    return { present: "Using tool", past: "Used tool", target: String(name || "tool").replaceAll("_", " ") };
+  }
   let builtinCommands = [
     { name: "model", description: "pick the model", action: "pickModel" },
     { name: "connect", description: "provider or a custom LAN host", action: "connect" },
     { name: "mode", description: "permission mode", action: "pickMode" },
     { name: "think", description: "how hard the model reasons", action: "pickThink" },
-    { name: "goal", description: "inspect/set/complete/block the standing objective", action: "goal", accepts_args: true },
+    { name: "goal", description: "inspect, set, pause, resume, or clear the standing objective", action: "goal", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
@@ -241,12 +258,17 @@
       if (dot) dot.className = "dot deny";
     });
     clearInterval(turn.timer);
+    const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
+    if (lastText) { lastText.classList.remove("commentary"); lastText.classList.add("final"); }
     turn.act.classList.add("done");
     turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
     turn = null;
   }
   function discardTurn() {
-    if (turn) clearInterval(turn.timer);
+    if (turn) {
+      clearInterval(turn.timer);
+      turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
+    }
     expireOpenRequests();
     turn = null;
   }
@@ -266,38 +288,75 @@
     card.dataset.status = value;
     const label = card.querySelector(".tool-status");
     if (label) label.textContent = value;
+    const copy = toolCopy(card.dataset.toolName || "");
+    const verb = card.querySelector(".verb");
+    if (verb) {
+      verb.textContent = value === "running" ? copy.present
+        : value === "completed" ? copy.past
+          : value === "failed" ? `${copy.past} · failed`
+            : value === "denied" ? `${copy.present} · denied`
+              : value === "stopped" ? `${copy.present} · stopped` : copy.past;
+    }
+    if (value !== "running") {
+      clearInterval(card._timer);
+      const elapsed = card.querySelector(".tool-time");
+      if (elapsed && card._startedAt) elapsed.textContent = `${((Date.now() - card._startedAt) / 1000).toFixed(1)}s`;
+    }
   }
 
   function toolCard(ev) {
     const c = el("div", "tool");
+    c.dataset.toolName = String(ev.name || "");
+    c._startedAt = Date.now();
+    const copy = toolCopy(ev.name);
+    const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
-    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
+    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
     const head = c.querySelector(".head");
     const toggle = c.querySelector(".tool-toggle");
     toggle.onclick = () => {
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
+    if (turn.textEl) turn.textEl.classList.add("commentary");
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
     const dot = el("span", "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
+    const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
+    c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
     setToolStatus(c, "running");
     turn.block.appendChild(c); breakText(); scroll(); return c;
   }
   function renderDiff(diff) {
-    const wrap = el("div", "diff");
-    const path = (diff.match(/\+\+\+ b\/(.+)/) || [, "changed file"])[1].replace(/^\/+/, "");
-    const body = diff.split("\n").map((l) => {
-      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add"
-        : l.startsWith("-") && !l.startsWith("---") ? "del"
-          : (l.startsWith("@@") || l.startsWith("---") || l.startsWith("+++")) ? "hh" : "ctx";
-      return `<span class="${cls}">${esc(l) || " "}</span>`;
+    const wrap = el("div", "diff open");
+    const newPath = (diff.match(/^\+\+\+\s+([^\n\t]+)/m) || [])[1];
+    const oldPath = (diff.match(/^---\s+([^\n\t]+)/m) || [])[1];
+    const rawPath = newPath && newPath !== "/dev/null" ? newPath : oldPath;
+    const path = String(rawPath || "changed file").replace(/^[ab]\//, "").replace(/^\/+/, "");
+    let additions = 0, deletions = 0, oldLine = null, newLine = null;
+    const body = diff.split("\n").map((line) => {
+      const hunk = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+      let cls = "ctx", oldNo = "", newNo = "";
+      if (hunk) { cls = "hh"; oldLine = Number(hunk[1]); newLine = Number(hunk[2]); }
+      else if (line.startsWith("---") || line.startsWith("+++")) cls = "hh";
+      else if (line.startsWith("+")) { cls = "add"; newNo = newLine ?? ""; if (newLine !== null) newLine++; additions++; }
+      else if (line.startsWith("-")) { cls = "del"; oldNo = oldLine ?? ""; if (oldLine !== null) oldLine++; deletions++; }
+      else { oldNo = oldLine ?? ""; newNo = newLine ?? ""; if (oldLine !== null) oldLine++; if (newLine !== null) newLine++; }
+      return `<span class="${cls}"><span class="ln old">${oldNo}</span><span class="ln new">${newNo}</span><span class="dc">${esc(line) || " "}</span></span>`;
     }).join("");
-    wrap.innerHTML = `<div class="dhead"><span class="dg">✎</span><span class="f">${esc(path)}</span></div><pre>${body}</pre>`;
-    wrap.querySelector(".dhead").appendChild(openFileBtn(path));
+    const bodyId = `diff-body-${++disclosureId}`;
+    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg">✎</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
+    const toggle = wrap.querySelector(".diff-toggle");
+    toggle.onclick = () => {
+      const open = wrap.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.querySelector(".chev").textContent = open ? "⌄" : "›";
+      toggle.querySelector(".diff-action").textContent = open ? "Hide diff" : "Review";
+    };
+    if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
@@ -313,6 +372,45 @@
     document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
+
+  // ---- standing goal — durable state above the composer, with an active-work clock ----
+  let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
+  function currentGoalElapsed() {
+    return goalState.elapsed + (goalState.status === "active"
+      ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
+  }
+  function formatDuration(seconds) {
+    const total = Math.max(0, Math.floor(seconds || 0));
+    const hours = Math.floor(total / 3600), minutes = Math.floor(total % 3600 / 60), secs = total % 60;
+    return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+      : `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+  function paintGoalClock() { if (!goalBar.hidden) $("goal-time").textContent = formatDuration(currentGoalElapsed()); }
+  function setGoalState(next) {
+    const text = String(next?.text ?? next?.goal ?? "");
+    const status = text ? String(next?.status || "active") : "none";
+    const priorElapsed = currentGoalElapsed();
+    const explicit = Number(next?.elapsed_seconds);
+    goalState = { text, status,
+      elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
+        : (text === goalState.text ? priorElapsed : 0) };
+    goalObservedAt = Date.now();
+    goalBar.hidden = !text;
+    if (!text) return;
+    $("goal-text").textContent = text;
+    const paused = status === "blocked", completed = status === "completed";
+    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Active goal";
+    goalBar.dataset.status = status;
+    const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
+    toggle.hidden = false;
+    const resume = paused || completed;
+    icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
+    toggle.title = resume ? "Resume goal" : "Pause goal";
+    toggle.setAttribute("aria-label", resume ? "Resume standing goal" : "Pause standing goal");
+    paintGoalClock();
+  }
+  const goalClockTimer = setInterval(paintGoalClock, 500);
+  if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
 
   // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
   const SURFACE_META = {
@@ -544,6 +642,9 @@
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
         setToolStatus(c, ev.is_error ? "failed" : "completed");
+        if (ev.is_error) {
+          c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
+        }
         if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
@@ -554,7 +655,9 @@
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny";
-        setToolStatus(c, "denied"); break;
+        setToolStatus(c, "denied");
+        c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
+        break;
       }
       case "permission_request": {
         ensureTurn();
@@ -780,6 +883,7 @@
       }
       case "goal_changed": {
         const text = String(ev.goal || "");
+        setGoalState({ text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
         sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");
         break;
       }
@@ -805,6 +909,14 @@
   // ---- composer ----
   function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  $("goal-toggle").onclick = () => vscode.postMessage({
+    type: "slashText", text: goalState.status === "active" ? "/goal pause" : "/goal resume",
+  });
+  $("goal-clear").onclick = () => vscode.postMessage({ type: "slashText", text: "/goal clear" });
+  $("goal-edit").onclick = () => {
+    input.value = `/goal ${goalState.text}`; input.selectionStart = input.selectionEnd = input.value.length;
+    input.focus(); onInput();
+  };
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
@@ -1066,7 +1178,7 @@
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
       } else {
         const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
-        if (it.text) m.appendChild(el("div", "text", md(it.text)));
+        if (it.text) m.appendChild(el("div", "text final", md(it.text)));
         if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
         frag.appendChild(m);
       }
@@ -1087,6 +1199,7 @@
       $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
       if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
+      setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
