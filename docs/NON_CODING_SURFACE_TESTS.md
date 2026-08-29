@@ -105,10 +105,19 @@ assert any(item == {
     "description": "Independent matrix fixture",
     "source": "project",
 } for item in catalog["items"])
+
+detail = dgc.request(
+    {"type": "get_skill", "name": "matrix-fixture", "request_id": "skill-1"},
+    "skill_detail",
+    request_id="skill-1",
+)
+assert detail["found"] and "MATRIX_SKILL_LOADED" in detail["markdown"]
 ```
 
-There is no typed headless equivalent of classic `/skill NAME ARGS`; listing is typed, while model
-activation remains prompt/intent driven.
+`list_skills` reads the catalog loaded at backend startup. Send `reload_skills` to explicitly
+rediscover files after changing a `SKILL.md`; it returns another `skill_catalog`. Model activation
+remains prompt/intent driven. In the editor, `/skill NAME ARGS` inserts `$NAME ARGS` into the
+composer so invocation stays visible and editable.
 
 ## Goal, handoff, and settings
 
@@ -158,7 +167,8 @@ subagent_model, subagent_base_url, subagent_api_key, subagent_api_mode,
 api_mode, provider_state, prompt_cache, prompt_cache_key,
 provider_capabilities, capability_cache_ttl_s,
 fallback_model, fallback_base_url, fallback_api_key, fallback_api_mode,
-context_size, search_provider
+context_size, search_provider, sandbox, sandbox_network, show_reasoning, suggest,
+plan_artifact, artifact_autostart, artifact_in_plan, tool_profile, max_parallel_tasks
 ```
 
 Use `set_model`, `set_mode`, and `set_think` for their respective state. Run persistence tests with a
@@ -198,8 +208,32 @@ resumed = dgc.request(
 
 ## MCP
 
-MCP server definitions are startup configuration; protocol v3 deliberately does not accept an
-arbitrary process command at runtime. In a disposable home, place this in `~/.dgc/config.json`:
+Protocol v4 supports typed live MCP management. The controller sends separate runtime and persisted
+specifications: persisted data may contain environment *names* but never environment values or
+authorization headers. For a disposable fixture without secrets:
+
+```python
+fixture = {
+    "transport": "stdio",
+    "command": "python3",
+    "args": ["-u", "/absolute/path/to/matrix_mcp.py"],
+    "env_names": [],
+    "url": "",
+    "log_level": "warning",
+}
+servers = dgc.request(
+    {"type": "upsert_mcp_server", "request_id": "mcp-add", "name": "fixture",
+     "runtime": fixture, "persisted": fixture},
+    "mcp_servers",
+    request_id="mcp-add",
+)
+assert any(item["name"] == "fixture" for item in servers["items"])
+```
+
+`list_mcp_servers`, `reload_mcp_servers`, and `remove_mcp_server` provide the remaining management
+paths. The extension stores local environment values and remote bearer tokens in SecretStorage,
+hydrates only the runtime frame, and persists only safe metadata. A static disposable-home fixture
+may still be placed directly in `~/.dgc/config.json`:
 
 ```json
 {
@@ -316,8 +350,10 @@ dgc.send({"type": "permission_response", "id": request["id"], "decision": "once"
 
 Valid decisions are `once`, `always`, `deny`, and `no`. `always` may include the exact displayed
 `rule`; credential-bearing approvals are downgraded to one-time execution. `cancel` expires every
-outstanding request and late decisions are ignored. Permission-rule browsing/editing itself remains
-terminal-only; headless exposes decisions, workspace-root grants, and trust acknowledgement.
+outstanding request and late decisions are ignored. Permission-rule browsing/editing is typed in
+protocol v4 through `list_permissions`, `add_permission_rule`, and `remove_permission_rule`; these
+are the same routes used by the editor's Permissions surface. Headless also exposes workspace-root
+grants and trust acknowledgement.
 
 ## Output and interaction probes
 
@@ -363,7 +399,9 @@ npm run test:host
 DGC_VSCODE_EXECUTABLE=/absolute/path/to/code-or-cursor npm run test:host
 ```
 
-It verifies activation, registered commands, an exact request-correlated webview/backend workspace
-handshake, concurrent state/query request IDs, live multi-root state, SecretStorage
+It verifies activation, every registered command, an exact request-correlated webview/backend
+workspace handshake, concurrent state/query request IDs, live multi-root state, SecretStorage
 migration/invalidation, and permission/plan decision lifecycles in disposable editor and workspace
-state; it does not open or watch the source repository as the test workspace.
+state; it does not open or watch the source repository as the test workspace. `npm test` additionally
+covers the dedicated Skills, Docs, MCP, Permissions, Memory, Hooks, and categorized Settings
+surfaces without requiring an editor installation.

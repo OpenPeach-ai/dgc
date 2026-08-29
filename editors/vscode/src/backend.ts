@@ -477,7 +477,7 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send a query/state command and settle only from the response belonging to this request.
-   * Current protocol-v3 backends echo `request_id`; callers may omit it only for a negotiated
+   * Current protocol-v4 backends echo `request_id`; callers may omit it only for a negotiated
    * legacy backend, where installing the listener before `send` still provides a post-send
    * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
    * every listener. */
@@ -511,7 +511,7 @@ export class DgcBackend extends EventEmitter {
         if (requestId !== undefined) {
           return event.request_id === requestId;
         }
-        // Older protocol-v3 implementations did not echo optional state request IDs. Preserve
+        // Older protocol implementations did not echo optional state request IDs. Preserve
         // their best-effort post-send barrier by matching only the expected command route.
         return event.type !== "command_rejected" || event.command === cmd.type;
       };

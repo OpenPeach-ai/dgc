@@ -486,11 +486,25 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
   ] } });
+  send({ type: "surface_open", surface: "skills" });
   send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
     items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
+  assert.match(doc.getElementById("surface").textContent, /\$matrix-fixture.*project.*Loaded/s,
+    "skills belong in the dedicated searchable browser, not the transcript");
+  assert.equal(doc.getElementById("log").textContent.includes("matrix-fixture"), false);
+  doc.querySelector("[data-skill-view]").click();
+  assert.equal(posted.filter((m) => m.type === "getSkill").pop().name, "matrix-fixture");
+  send({ type: "event", event: { type: "skill_detail", request_id: "skill-1", found: true,
+    name: "matrix-fixture", description: "Loaded safely", source: "project",
+    markdown: "# Fixture\n\nUse **carefully**. <script>bad()</script>" } });
+  assert.match(doc.getElementById("surface").textContent, /Fixture.*Use carefully/s);
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  send({ type: "surface_open", surface: "hooks" });
   send({ type: "event", event: { type: "hook_catalog", request_id: "hooks-1", total: 1, invalid: 0,
     items: [{ event: "PreToolUse", configured: 1,
       matchers: ["<img src=x onerror=hookBad()>"], valid: true, truncated: false }] } });
+  assert.match(doc.getElementById("surface").textContent, /Lifecycle hooks.*PreToolUse.*hookBad/s);
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
   send({ type: "event", event: { type: "hook_activity", event: "PreToolUse", status: "completed",
     configured: 1, duration_ms: 7, message: "<script>hookBad()</script>" } });
   send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
@@ -499,12 +513,10 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
-  assert.match(doc.getElementById("log").textContent, /matrix-fixture.*project.*Loaded/s);
-  assert.match(doc.getElementById("log").textContent, /Lifecycle hooks.*PreToolUse.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
   assert.equal(doc.getElementById("log").querySelector("img"), null,
-    "skill, hook, and handoff metadata must remain inert text");
+    "hook activity and handoff metadata must remain inert text");
   assert.equal(doc.getElementById("log").querySelector("script"), null,
     "handoff markdown must not synthesize executable elements");
   assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");
@@ -551,6 +563,72 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
   assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
   assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
+  dom.window.close();
+});
+
+test("feature browsers manage MCP, docs, permissions, memory, and settings without chat pollution", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "surface_open", surface: "mcp" });
+  send({ type: "event", event: { type: "mcp_servers", request_id: "servers-1", total: 1,
+    items: [{ name: "fixture", transport: "stdio", command: "node", args: ["server.js"],
+      env_names: ["FIXTURE_TOKEN"], url: "", log_level: "warning", state: "connected",
+      tool_count: 1, protocol_version: "2026", protocol_era: "modern", error: "" }] } });
+  send({ type: "event", event: { type: "mcp_tools", request_id: "tools-1", servers: [],
+    total: 1, offset: 0, next_offset: null,
+    tools: [{ name: "mcp__fixture__echo", description: "Echo text", parameters: {} }] } });
+  assert.match(doc.getElementById("surface").textContent, /fixture.*connected.*mcp__fixture__echo/s);
+  assert.equal(doc.getElementById("surface").textContent.includes("FIXTURE_TOKEN="), false,
+    "MCP catalogs must expose secret names, never values");
+  doc.getElementById("surface-primary").click();
+  doc.getElementById("mcp-name").value = "local-test";
+  doc.getElementById("mcp-target").value = "node";
+  doc.getElementById("mcp-args").value = "server.js\n--stdio";
+  doc.getElementById("mcp-env").value = "LOCAL_TEST_TOKEN=secret-value";
+  doc.getElementById("mcp-config-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const mcpSave = posted.filter((message) => message.type === "mcpSave").pop();
+  assert.equal(mcpSave.values.name, "local-test");
+  assert.equal(mcpSave.values.env, "LOCAL_TEST_TOKEN=secret-value");
+  assert.equal(mcpSave.values.clear_secrets, false);
+
+  send({ type: "surface_open", surface: "docs" });
+  send({ type: "event", event: { type: "docs_catalog", request_id: "docs-1", total: 1,
+    items: [{ id: "plan-mode", title: "Plan mode", description: "Read-only planning" }] } });
+  doc.querySelector("[data-doc]").click();
+  assert.equal(posted.filter((message) => message.type === "getDoc").pop().id, "plan-mode");
+  send({ type: "event", event: { type: "doc", request_id: "doc-1", found: true,
+    id: "plan-mode", title: "Plan mode", description: "Read-only planning",
+    markdown: "# Plan mode\n\nNo writes. <img src=x onerror=bad()>" } });
+  assert.match(doc.getElementById("surface").textContent, /Plan mode.*No writes/s);
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
+
+  send({ type: "surface_open", surface: "permissions" });
+  send({ type: "event", event: { type: "permissions", request_id: "permissions-1", total: 1,
+    items: [{ action: "deny", rule: "Bash(rm *)" }] } });
+  assert.match(doc.getElementById("surface").textContent, /deny.*Bash\(rm \*\)/s);
+  doc.getElementById("permission-action").value = "allow";
+  doc.getElementById("permission-rule").value = "Bash(npm test)";
+  doc.getElementById("permission-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const permissionAdd = posted.filter((message) => message.type === "permissionAdd").pop();
+  assert.equal(permissionAdd.type, "permissionAdd");
+  assert.equal(permissionAdd.action, "allow");
+  assert.equal(permissionAdd.rule, "Bash(npm test)");
+
+  send({ type: "surface_open", surface: "memory" });
+  send({ type: "event", event: { type: "memory", request_id: "memory-1",
+    project: "# DGC.md\n\nUse tabs", user: "", message: "Loaded" } });
+  assert.match(doc.getElementById("surface").textContent, /Project.*Use tabs.*Personal/s);
+  assert.equal(doc.getElementById("log").textContent.trim(), "",
+    "feature management must not synthesize conversation turns");
+  doc.getElementById("surface-close").click();
+  send({ type: "event", event: { type: "docs_catalog", request_id: "late-docs", total: 0,
+    items: [] } });
+  assert.equal(doc.getElementById("surface").hidden, true,
+    "a late feature response must not reopen a panel the user closed");
+
+  send({ type: "settings_open", providers: [], models: [], section: "security" });
+  assert.equal(doc.querySelector('.set-section[data-section="security"]').hidden, false);
+  assert.equal(doc.querySelector('.set-section[data-section="models"]').hidden, true);
+  assert.deepEqual(errors, [], "feature surfaces raised JS errors");
   dom.window.close();
 });
 
@@ -668,7 +746,7 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
   settingsButton.focus();
   send({ type: "settings_open", providers: [], models: [] });
   assert.equal(doc.getElementById("settings").getAttribute("aria-modal"), "true");
-  assert.equal(doc.activeElement, doc.getElementById("s-provider"));
+  assert.equal(doc.activeElement, doc.getElementById("s-mode"));
   key(doc.getElementById("settings"), "Escape");
   assert.equal(doc.getElementById("settings").hidden, true);
   assert.equal(doc.activeElement, settingsButton);

@@ -44,7 +44,7 @@ const readline = require("node:readline");
 let seq = 0;
 let rootsAcknowledged = false;
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
-send({ type: "ready", version: "fixture", protocol_version: 3,
+send({ type: "ready", version: "fixture", protocol_version: 4,
   capabilities: { correlated_state_requests: true },
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],

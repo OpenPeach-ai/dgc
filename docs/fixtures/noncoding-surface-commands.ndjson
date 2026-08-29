@@ -3,6 +3,10 @@
 {"type":"plan_response","id":"plan-1","decision":"reject","feedback":"matrix probe complete"}
 {"type":"get_plan","request_id":"plan-read-1"}
 {"type":"list_skills","request_id":"skills-1"}
+{"type":"reload_skills","request_id":"skills-reload-1"}
+{"type":"get_skill","request_id":"skill-1","name":"matrix-fixture"}
+{"type":"list_docs","request_id":"docs-1"}
+{"type":"get_doc","request_id":"doc-1","id":"slash-commands"}
 {"type":"set_goal","text":"finish matrix","status":"active","request_id":"goal-set-1"}
 {"type":"get_goal","request_id":"goal-read-1"}
 {"type":"generate_handoff","request_id":"handoff-1","save":false}
@@ -11,9 +15,12 @@
 {"type":"list_sessions","request_id":"sessions-1"}
 {"type":"resume_session","latest":true,"request_id":"resume-1"}
 {"type":"list_mcp_tools","request_id":"mcp-list","offset":0,"limit":50}
+{"type":"list_mcp_servers","request_id":"mcp-servers-1"}
 {"type":"call_mcp_tool","request_id":"mcp-call","call_id":"call-1","name":"mcp__fixture__echo","arguments":{"text":"ping"}}
 {"type":"permission_response","id":"permission-1","decision":"once"}
 {"type":"list_hooks","request_id":"hooks-1"}
+{"type":"list_permissions","request_id":"permissions-1"}
+{"type":"get_memory","request_id":"memory-1"}
 {"type":"compact","request_id":"compact-1"}
 {"type":"status","request_id":"status-1"}
 {"type":"shutdown"}

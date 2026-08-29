@@ -314,6 +314,157 @@
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
 
+  // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
+  const SURFACE_META = {
+    skills: ["Skills", "library"], mcp: ["MCP servers", "plug"],
+    docs: ["Documentation", "book"], permissions: ["Permission rules", "shield"],
+    memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
+  };
+  let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
+  const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
+  function openSurface(kind) {
+    if (!SURFACE_META[kind]) return;
+    surfaceKind = kind;
+    if ($("surface").hidden) surfaceReturnFocus = document.activeElement;
+    $("surface-title-text").textContent = SURFACE_META[kind][0];
+    $("surface-icon").className = "codicon codicon-" + SURFACE_META[kind][1];
+    $("surface").hidden = false; surfaceSearch.value = "";
+    surfaceBody.innerHTML = '<div class="surface-empty">Loading…</div>';
+    $("surface-primary").hidden = true; $("surface-secondary").hidden = true;
+    surfaceSearch.focus();
+  }
+  function closeSurface() {
+    $("surface").hidden = true; surfaceKind = "";
+    const target = surfaceReturnFocus && typeof surfaceReturnFocus.focus === "function"
+      ? surfaceReturnFocus : input;
+    surfaceReturnFocus = null; target.focus();
+  }
+  function surfaceButtons(primary, primaryAction, secondary, secondaryAction) {
+    const p = $("surface-primary"), s = $("surface-secondary");
+    p.hidden = !primary; p.textContent = primary || ""; p.onclick = primaryAction || null;
+    s.hidden = !secondary; s.textContent = secondary || ""; s.onclick = secondaryAction || null;
+  }
+  function filterSurface() {
+    const query = surfaceSearch.value.trim().toLowerCase();
+    surfaceBody.querySelectorAll("[data-filter]").forEach((node) => {
+      node.hidden = Boolean(query) && !String(node.dataset.filter || "").includes(query);
+    });
+  }
+  function useSkill(name) {
+    input.value = `$${name} `; input.selectionStart = input.selectionEnd = input.value.length;
+    closeSurface(); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function renderSkills(items) {
+    surfaceRows = Array.isArray(items) ? items : [];
+    openSurface("skills");
+    surfaceBody.innerHTML = surfaceRows.length ? surfaceRows.map((skill, i) =>
+      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">$${esc(skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}</span></div><p>${esc(skill.description || "Reusable agent instructions")}</p><div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}">Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button></div></article>`).join("")
+      : '<div class="surface-empty">No skills are installed. Add a project skill at <code>.dgc/skills/&lt;name&gt;/SKILL.md</code>.</div>';
+    surfaceBody.querySelectorAll("[data-skill-use]").forEach((button) => button.onclick = () => useSkill(surfaceRows[+button.dataset.skillUse].name));
+    surfaceBody.querySelectorAll("[data-skill-view]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getSkill", name: surfaceRows[+button.dataset.skillView].name }));
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }));
+    filterSurface();
+  }
+  function renderSkillDetail(ev) {
+    openSurface("skills");
+    if (!ev.found) { surfaceBody.innerHTML = '<div class="surface-empty">That skill is no longer installed.</div>'; return; }
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← All skills</button><div class="surface-detail-head"><h2>$${esc(ev.name)}</h2><span class="surface-badge">${esc(ev.source)}</span></div><p class="muted">${esc(ev.description || "")}</p><div class="surface-markdown">${md(ev.markdown || "")}</div>`;
+    surfaceBody.querySelector(".surface-back").onclick = () => renderSkills(surfaceRows);
+    surfaceButtons("Use skill", () => useSkill(ev.name));
+  }
+  function mcpStateClass(value) { return ["connected", "configured"].includes(value) ? "ok" : value === "failed" ? "err" : ""; }
+  function showMcpForm(item) {
+    const value = item || { name: "", transport: "stdio", command: "", args: [], env_names: [], url: "", log_level: "warning" };
+    const remote = value.transport === "remote";
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><form id="mcp-config-form" class="surface-form"><input id="mcp-original" type="hidden" value="${esc(value.name || "")}"><label>Server name<input id="mcp-name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(value.name || "")}" placeholder="github"></label><label>Transport<select id="mcp-transport"><option value="stdio"${remote ? "" : " selected"}>Local STDIO</option><option value="remote"${remote ? " selected" : ""}>Remote Streamable HTTP (via mcp-remote)</option></select></label><label id="mcp-target-label">${remote ? "Server URL" : "Command"}<input id="mcp-target" required value="${esc(remote ? value.url : value.command)}" placeholder="${remote ? "https://mcp.example.com/mcp" : "npx"}"></label><label id="mcp-args-label">Arguments <span class="set-hint">one argument per line; no shell parsing</span><textarea id="mcp-args" rows="4" spellcheck="false">${esc((value.args || []).join("\n"))}</textarea></label><label id="mcp-env-label">Environment <span class="set-hint">KEY=value → SecretStorage · KEY → ambient lookup</span><textarea id="mcp-env" rows="4" spellcheck="false" placeholder="${esc((value.env_names || []).map((name) => `${name}=…`).join("\n") || "GITHUB_TOKEN=…")}"></textarea></label><label id="mcp-token-label">Bearer token <span class="set-hint">blank preserves the saved token</span><input id="mcp-token" type="password" spellcheck="false" placeholder="optional"></label><label class="surface-check"><input id="mcp-clear-secrets" type="checkbox"> Clear stored credentials before saving</label><label>Log level<select id="mcp-log"><option>warning</option><option>info</option><option>debug</option><option>error</option><option>off</option></select></label><div class="surface-actions"><button type="submit" class="act primary">Save and connect</button><button type="button" class="act" id="mcp-cancel">Cancel</button></div></form>`;
+    $("mcp-log").value = value.log_level || "warning";
+    const updateTransport = () => {
+      const isRemote = $("mcp-transport").value === "remote";
+      $("mcp-target-label").firstChild.textContent = isRemote ? "Server URL" : "Command";
+      $("mcp-args-label").hidden = isRemote; $("mcp-env-label").hidden = isRemote;
+      $("mcp-token-label").hidden = !isRemote;
+    };
+    $("mcp-transport").onchange = updateTransport; updateTransport();
+    surfaceBody.querySelector(".surface-back").onclick = () => renderMcp();
+    $("mcp-cancel").onclick = () => renderMcp();
+    $("mcp-config-form").onsubmit = (event) => {
+      event.preventDefault();
+      if (!event.target.reportValidity()) return;
+      vscode.postMessage({ type: "mcpSave", values: {
+        original_name: $("mcp-original").value, name: $("mcp-name").value,
+        transport: $("mcp-transport").value, target: $("mcp-target").value,
+        args: $("mcp-args").value, env: $("mcp-env").value,
+        env_names: value.env_names || [], token: $("mcp-token").value,
+        clear_secrets: $("mcp-clear-secrets").checked,
+        log_level: $("mcp-log").value,
+      } });
+      surfaceBody.innerHTML = '<div class="surface-empty">Saving and connecting…</div>';
+    };
+    surfaceButtons(); $("mcp-name").focus();
+  }
+  function renderMcp() {
+    openSurface("mcp");
+    const servers = mcpRows.length ? mcpRows.map((item, i) =>
+      `<article class="surface-card" data-filter="${esc(`${item.name} ${item.state} ${item.command} ${item.url}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(item.name)}</strong><span class="surface-state ${mcpStateClass(item.state)}">${esc(item.state || "configured")}</span></div><div class="surface-meta">${esc(item.transport === "remote" ? item.url : [item.command, ...(item.args || [])].join(" "))}</div><p>${Number(item.tool_count || 0)} tool(s)${item.protocol_era ? ` · ${esc(item.protocol_era)}` : ""}</p>${item.error ? `<div class="err">${esc(item.error)}</div>` : ""}<div class="surface-actions"><button type="button" class="act" data-mcp-edit="${i}">Edit</button><button type="button" class="act danger" data-mcp-remove="${i}">Remove</button></div></article>`).join("")
+      : '<div class="surface-empty">No MCP servers configured.</div>';
+    const tools = mcpTools.length ? `<h2 class="surface-subtitle">Available tools · ${mcpTools.length}</h2>${mcpTools.map((tool) => `<article class="surface-card compact" data-filter="${esc(`${tool.name} ${tool.description}`.toLowerCase())}"><strong>${esc(tool.name)}</strong><p>${esc(tool.description || "")}</p></article>`).join("")}` : "";
+    surfaceBody.innerHTML = servers + tools;
+    surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => button.onclick = () => showMcpForm(mcpRows[+button.dataset.mcpEdit]));
+    surfaceBody.querySelectorAll("[data-mcp-remove]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "mcpRemove", name: mcpRows[+button.dataset.mcpRemove].name }));
+    surfaceButtons("Add server", () => showMcpForm(), "Reload", () => vscode.postMessage({ type: "mcpReload" }));
+    filterSurface();
+  }
+  function renderDocs(items) {
+    surfaceRows = Array.isArray(items) ? items : []; openSurface("docs");
+    surfaceBody.innerHTML = surfaceRows.map((doc, i) => `<button type="button" class="surface-card surface-list-button" data-doc="${i}" data-filter="${esc(`${doc.title} ${doc.description}`.toLowerCase())}"><strong>${esc(doc.title)}</strong><span>${esc(doc.description)}</span></button>`).join("") || '<div class="surface-empty">No documentation is bundled.</div>';
+    surfaceBody.querySelectorAll("[data-doc]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getDoc", id: surfaceRows[+button.dataset.doc].id }));
+    surfaceButtons(); filterSurface();
+  }
+  function renderDoc(ev) {
+    openSurface("docs");
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← Documentation</button><div class="surface-markdown">${ev.found ? md(ev.markdown || "") : "Page not found."}</div>`;
+    surfaceBody.querySelector(".surface-back").onclick = () => renderDocs(surfaceRows);
+    surfaceButtons();
+  }
+  function renderPermissions(items) {
+    surfaceRows = Array.isArray(items) ? items : []; openSurface("permissions");
+    surfaceBody.innerHTML = `<form id="permission-form" class="surface-inline-form"><select id="permission-action" aria-label="Rule action"><option>deny</option><option>ask</option><option>allow</option></select><input id="permission-rule" required aria-label="Permission rule" placeholder="Bash(npm test *)"><button class="act primary" type="submit">Add</button></form>` + (surfaceRows.map((rule, i) => `<article class="surface-card compact" data-filter="${esc(`${rule.action} ${rule.rule}`.toLowerCase())}"><div class="surface-card-head"><span class="surface-badge ${esc(rule.action)}">${esc(rule.action)}</span><code>${esc(rule.rule)}</code><button type="button" class="icon-action" aria-label="Remove rule" data-rule-remove="${i}">×</button></div></article>`).join("") || '<div class="surface-empty">No custom permission rules. Mode defaults still apply.</div>');
+    $("permission-form").onsubmit = (event) => { event.preventDefault(); vscode.postMessage({ type: "permissionAdd", action: $("permission-action").value, rule: $("permission-rule").value }); };
+    surfaceBody.querySelectorAll("[data-rule-remove]").forEach((button) => button.onclick = () => { const rule = surfaceRows[+button.dataset.ruleRemove]; vscode.postMessage({ type: "permissionRemove", action: rule.action, rule: rule.rule }); });
+    surfaceButtons(); filterSurface();
+  }
+  function renderMemory(ev) {
+    openSurface("memory");
+    const block = (title, value) => `<section><h2 class="surface-subtitle">${title}</h2><div class="surface-markdown">${value ? md(value) : '<p class="muted">No memory saved.</p>'}</div></section>`;
+    surfaceBody.innerHTML = (ev.message ? `<div class="surface-notice">${esc(ev.message)}</div>` : "") + block("Project · DGC.md", ev.project) + block("Personal · ~/.dgc/DGC.md", ev.user);
+    const add = (scope) => {
+      surfaceBody.innerHTML = `<button type="button" class="surface-back">← Memory</button><form id="memory-form" class="surface-form"><label>Add ${scope} memory<textarea id="memory-text" required rows="6" maxlength="8000" placeholder="A durable fact or preference DGC should remember"></textarea></label><button class="act primary" type="submit">Save memory</button></form>`;
+      surfaceBody.querySelector(".surface-back").onclick = () => renderMemory(ev);
+      $("memory-form").onsubmit = (event) => { event.preventDefault(); vscode.postMessage({ type: "memoryAdd", scope, text: $("memory-text").value }); };
+      surfaceButtons(); $("memory-text").focus();
+    };
+    surfaceButtons("Add project memory", () => add("project"), "Add personal memory", () => add("user"));
+  }
+  function renderHooks(ev) {
+    openSurface("hooks");
+    const items = Array.isArray(ev.items) ? ev.items : [];
+    surfaceBody.innerHTML = (Number(ev.invalid || 0) ? `<div class="err surface-notice">${Number(ev.invalid)} invalid or unsupported hook entries</div>` : "") + items.map((hook) => `<article class="surface-card compact" data-filter="${esc(`${hook.event} ${(hook.matchers || []).join(" ")}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(hook.event)}</strong><span class="surface-state ${hook.valid ? "ok" : "err"}">${hook.valid ? "ready" : "invalid"}</span></div><p>${Number(hook.configured || 0)} configured${hook.matchers?.length ? ` · ${esc(hook.matchers.join(", "))}` : ""}</p></article>`).join("");
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "slash", action: "hooks" })); filterSurface();
+  }
+  surfaceSearch.addEventListener("input", filterSurface);
+  $("surface-close").onclick = closeSurface;
+  $("surface").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeSurface(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = [...$("surface").querySelectorAll("button, input, select, textarea, [tabindex]")]
+      .filter((node) => !node.disabled && !node.hidden && !node.closest("[hidden]")
+        && node.getAttribute("aria-hidden") !== "true");
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+
   function onEvent(ev) {
     const stick = atBottom();
     switch (ev.type) {
@@ -349,7 +500,11 @@
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
         break;
-      case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
+      case "config":
+        lastConfig = ev;
+        document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
+        if (!$("settings").hidden) fillSettings(ev);
+        break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
@@ -582,25 +737,28 @@
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "skill_catalog": {
-        const items = Array.isArray(ev.items) ? ev.items : [];
-        if (!items.length) { sysLine("No skills are installed."); break; }
-        const rows = items.map((skill) => {
-          const description = String(skill.description || "skill");
-          return `${String(skill.name || "")}  [${String(skill.source || "unknown")}]  ${description}`;
-        }).join("\n");
-        decisionCard(`<div class="q"><span class="codicon codicon-library"></span> Installed skills · ${items.length}</div><pre>${esc(rows)}</pre>`, "Installed skills");
+        if (surfaceKind === "skills") renderSkills(ev.items);
         break;
       }
+      case "skill_detail": if (surfaceKind === "skills") renderSkillDetail(ev); break;
+      case "docs_catalog": if (surfaceKind === "docs") renderDocs(ev.items); break;
+      case "doc": if (surfaceKind === "docs") renderDoc(ev); break;
+      case "mcp_servers":
+        mcpRows = Array.isArray(ev.items) ? ev.items : [];
+        if (surfaceKind === "mcp") renderMcp();
+        if (ev.error && surfaceKind === "mcp") {
+          const warning = el("div", "err surface-notice", ev.error);
+          surfaceBody.insertBefore(warning, surfaceBody.firstChild);
+        }
+        break;
+      case "mcp_tools":
+        mcpTools = Array.isArray(ev.tools) ? ev.tools : [];
+        if (surfaceKind === "mcp") renderMcp();
+        break;
+      case "permissions": if (surfaceKind === "permissions") renderPermissions(ev.items); break;
+      case "memory": if (surfaceKind === "memory") renderMemory(ev); break;
       case "hook_catalog": {
-        const items = Array.isArray(ev.items) ? ev.items : [];
-        const rows = items.map((hook) => {
-          const matchers = Array.isArray(hook.matchers) && hook.matchers.length
-            ? hook.matchers.join(", ") : "—";
-          return `${String(hook.event || "")}  ${Number(hook.configured || 0)}  ${matchers}  ${hook.valid ? "ready" : "invalid"}`;
-        }).join("\n");
-        const warning = Number(ev.invalid || 0)
-          ? `<div class="err">${Number(ev.invalid)} invalid or unsupported hook entries</div>` : "";
-        decisionCard(`<div class="q"><span class="codicon codicon-run-all"></span> Lifecycle hooks · ${Number(ev.total || 0)}</div><pre>${esc(rows)}</pre>${warning}`, "Lifecycle hooks");
+        if (surfaceKind === "hooks") renderHooks(ev);
         break;
       }
       case "hook_activity":
@@ -809,7 +967,11 @@
   const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
-    "capability_cache_ttl_s", "mode", "think", "context_size"];
+    "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
+    "sandbox_network", "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+    "artifact_in_plan", "tool_profile", "max_parallel_tasks"];
+  const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
+    "show_reasoning", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
@@ -822,10 +984,28 @@
       api_mode: cfg.api_mode, provider_state: cfg.provider_state,
       prompt_cache: String(cfg.prompt_cache !== false),
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
+      sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
+      show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      plan_artifact: String(cfg.plan_artifact !== false),
+      artifact_autostart: String(cfg.artifact_autostart !== false),
+      artifact_in_plan: String(cfg.artifact_in_plan === true),
+      tool_profile: cfg.tool_profile || "adaptive",
+      max_parallel_tasks: cfg.max_parallel_tasks || 4,
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
   }
-  function openSettings(providers, models) {
+  function showSettingsSection(section) {
+    const wanted = ["general", "models", "agents", "security", "extensions"].includes(section)
+      ? section : "general";
+    document.querySelectorAll(".set-section").forEach((node) => { node.hidden = node.dataset.section !== wanted; });
+    document.querySelectorAll(".set-tab").forEach((button) => {
+      const active = button.dataset.section === wanted;
+      button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
+    });
+    const first = $(`settings`).querySelector(`.set-section[data-section="${wanted}"] input, .set-section[data-section="${wanted}"] select, .set-section[data-section="${wanted}"] button`);
+    if (first) first.focus();
+  }
+  function openSettings(providers, models, section) {
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
@@ -833,7 +1013,7 @@
     if (lastConfig) fillSettings(lastConfig);
     settingsReturnFocus = document.activeElement;
     $("settings").hidden = false;
-    $("s-provider").focus();
+    showSettingsSection(section || "general");
   }
   function closeSettings() {
     $("settings").hidden = true;
@@ -844,7 +1024,7 @@
   function collectSettings() {
     const v = {};
     SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
-    v.prompt_cache = v.prompt_cache !== "false";
+    SET_BOOLEAN_FIELDS.forEach((key) => { v[key] = v[key] !== "false"; });
     return v;
   }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
@@ -868,6 +1048,10 @@
       if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
     }
   };
+  document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
+  document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
+    closeSettings(); vscode.postMessage({ type: "slash", action: button.dataset.openSurface });
+  });
 
   function renderHistory(items) {
     // Non-destructive: replace only the history block, and place it ABOVE any live
@@ -905,7 +1089,15 @@
       applyMode(msg.state.mode || "default");
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
-    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
+    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
+    else if (msg.type === "surface_open") { openSurface(msg.surface); }
+    else if (msg.type === "command_menu") {
+      input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput();
+    }
+    else if (msg.type === "composer_text") {
+      input.value = String(msg.text || ""); input.selectionStart = input.selectionEnd = input.value.length;
+      input.focus(); onInput();
+    }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { setSending(false); }
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
@@ -920,4 +1112,5 @@
     }
     else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
+  vscode.postMessage({ type: "webviewReady" });
 })();

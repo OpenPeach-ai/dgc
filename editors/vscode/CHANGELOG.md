@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — local candidate
+
+- Added dedicated searchable Skills and Documentation browsers, including loaded source precedence,
+  instruction detail, explicit skill reload, and one-click `$skill` insertion without transcript
+  pollution.
+- Added a SecretStorage-backed MCP manager for local STDIO and remote bridge servers, with safe
+  metadata persistence, status/tool inspection, edit/remove/reload flows, and typed protocol-v4
+  management commands.
+- Expanded editor parity with dedicated Permissions, Memory, Hooks, Plan, Artifact, Goal, Handoff,
+  Retained Tasks, session naming, compaction, and command-menu palette entries.
+- Reorganized in-panel settings into General, Models, Agents, Security, and Extensions, adding
+  reasoning display, suggestions, sandbox/network, plan/artifact, tool-profile, and parallel-task
+  controls while retaining the existing DGC mono/black/purple design.
+- Added protocol, backend, webview, accessibility, and feature-manager regression coverage.
+
 ## 0.8.1 — 2026-08-21
 
 - Rides the **v0.20.0 harness**: far more robust editing (a tiered matcher that forgives a local model's near-misses, plus a `multi_edit` batch tool), a **universal thinking switch** that actually turns reasoning off on any provider, an over-thinking watchdog, and loop guards. Same panel — pointed at a smarter backend. Run `dgc update` (or reinstall) to get it.

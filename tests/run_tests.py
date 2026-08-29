@@ -2340,17 +2340,36 @@ def unit_tests(tmp: Path):
         "matrix-fixture", "Independent matrix fixture", "fixture", _surface_skill_path)
     class _SurfaceConfig:
         project_root = _surface_root
-        values = {"hooks": {"SessionStart": [{"command": "printf loaded"}]}}
+        values = {"hooks": {"SessionStart": [{"command": "printf loaded"}]},
+                  "mcp_servers": {}}
+        permissions = {"allow": [], "ask": [], "deny": []}
         def get(self, key, default=None): return self.values.get(key, default)
+        def set(self, key, value): self.values[key] = value
+        def save(self): pass
+    class _SurfaceMCP:
+        def __init__(self):
+            self.servers = {}; self.failures = {}; self.connected = []
+        def status(self):
+            return [{"name": name, "state": "connected", "tool_count": 1,
+                     "protocol_version": "fixture", "protocol_era": "modern"}
+                    for name in self.servers]
+        def connect_all(self, specs):
+            self.connected.append(specs)
+            for name in specs: self.servers[name] = type("Live", (), {"stop": lambda self: None})()
+        def _rebuild_routes(self): pass
+        def stop_all(self): self.servers.clear(); self.failures.clear()
     class _SurfaceAgent:
         def __init__(self):
             self.skills = {"matrix-fixture": _surface_skill}
             self.cancelled = _th.Event(); self.usage_totals = {}
             self._last_handoff_error = ""
+            self.ctx = type("Ctx", (), {"skills": self.skills})()
+            self.mcp = _SurfaceMCP(); self.session_name = None
         def generate_handoff(self, *, save=False):
             self._last_handoff_path = None
             return "# Handoff\n\n## Objective\n\nContinue safely."
         def estimate_tokens(self): return 0
+        def name_session(self, name): self.session_name = name; return True
     _surface_cap = _HeadlessMCPCapture(); _surface_backend = object.__new__(Backend)
     _surface_backend.em = _surface_cap; _surface_backend.config = _SurfaceConfig()
     _surface_backend.agent = _SurfaceAgent(); _surface_backend._worker = None
@@ -2363,6 +2382,110 @@ def unit_tests(tmp: Path):
                             "items": [{"name": "matrix-fixture",
                                        "description": "Independent matrix fixture",
                                        "source": "project"}]})
+    _surface_backend.dispatch({"type": "get_skill", "request_id": "skill-7",
+                               "name": "matrix-fixture"})
+    _skill_detail = _surface_cap.events[-1]
+    check("headless skill detail returns bounded loaded instructions without a host path",
+          _skill_detail.get("type") == "skill_detail" and _skill_detail.get("found") is True
+          and _skill_detail.get("markdown") == "fixture"
+          and str(_surface_root) not in _json2.dumps(_skill_detail))
+    _surface_backend.dispatch({"type": "list_docs", "request_id": "docs-7"})
+    _docs_event = _surface_cap.events[-1]
+    _surface_backend.dispatch({"type": "get_doc", "request_id": "doc-7", "id": "plan-mode"})
+    _doc_event = _surface_cap.events[-1]
+    check("headless bundled documentation has correlated catalogs and detail pages",
+          _docs_event.get("type") == "docs_catalog" and _docs_event.get("total", 0) > 5
+          and _doc_event.get("type") == "doc" and _doc_event.get("found") is True
+          and _doc_event.get("title") == "Plan mode")
+    _runtime_mcp = {"transport": "stdio", "command": "fixture-mcp", "args": ["--stdio"],
+                    "env_names": ["FIXTURE_TOKEN"], "env": {"FIXTURE_TOKEN": "secret-value-123"},
+                    "log_level": "warning"}
+    _persisted_mcp = {key: value for key, value in _runtime_mcp.items() if key != "env"}
+    _surface_backend.dispatch({"type": "upsert_mcp_server", "request_id": "mcp-config-7",
+                               "name": "fixture", "runtime": _runtime_mcp,
+                               "persisted": _persisted_mcp})
+    _mcp_servers_event = _surface_cap.events[-1]
+    check("headless MCP management persists only safe metadata and connects the runtime secret",
+          _mcp_servers_event.get("type") == "mcp_servers"
+          and _SurfaceConfig.values["mcp_servers"]["fixture"] == _persisted_mcp
+          and _surface_backend.agent.mcp.connected[-1]["fixture"]["env"]["FIXTURE_TOKEN"]
+              == "secret-value-123"
+          and "secret-value-123" not in _json2.dumps(_mcp_servers_event))
+    _remote_persisted = {
+        "transport": "remote", "command": "npx",
+        "args": ["-y", "mcp-remote", "https://example.com/mcp"],
+        "env_names": ["DGC_MCP_BEARER_TOKEN"], "url": "https://example.com/mcp",
+        "log_level": "warning",
+    }
+    _remote_runtime = {
+        **_remote_persisted,
+        "args": [*_remote_persisted["args"], "--header",
+                 "Authorization: Bearer ${DGC_MCP_BEARER_TOKEN}"],
+        "env": {"DGC_MCP_BEARER_TOKEN": "remote-secret-123"},
+    }
+    _surface_backend.dispatch({"type": "upsert_mcp_server", "request_id": "mcp-remote-7",
+                               "name": "remote-fixture", "runtime": _remote_runtime,
+                               "persisted": _remote_persisted})
+    _remote_event = _surface_cap.events[-1]
+    _surface_backend.dispatch({"type": "remove_mcp_server", "request_id": "mcp-remove-7",
+                               "name": "remote-fixture"})
+    check("headless remote MCP bearer credentials stay process-local through add and remove",
+          _remote_event.get("type") == "mcp_servers" and not _remote_event.get("error")
+          and _surface_backend.agent.mcp.connected[-1]["remote-fixture"]["env"]
+              ["DGC_MCP_BEARER_TOKEN"] == "remote-secret-123"
+          and "remote-secret-123" not in _json2.dumps(_remote_event)
+          and set(_SurfaceConfig.values["mcp_servers"]) == {"fixture"})
+    _credential_url = {
+        "transport": "remote", "command": "npx",
+        "args": ["-y", "mcp-remote", "https://user:pass@example.com/mcp"],
+        "env_names": [], "url": "https://user:pass@example.com/mcp",
+        "log_level": "warning",
+    }
+    _surface_backend.dispatch({"type": "upsert_mcp_server", "request_id": "mcp-bad-url",
+                               "name": "bad-url", "runtime": _credential_url,
+                               "persisted": _credential_url})
+    _bad_url_event = _surface_cap.events[-1]
+    _safe_remote = {
+        "transport": "remote", "command": "npx",
+        "args": ["-y", "mcp-remote", "https://example.com/mcp", "--header",
+                 "Authorization: Bearer must-not-persist"],
+        "env_names": [], "url": "https://example.com/mcp", "log_level": "warning",
+    }
+    _surface_backend.dispatch({"type": "upsert_mcp_server", "request_id": "mcp-bad-header",
+                               "name": "bad-header", "runtime": _safe_remote,
+                               "persisted": _safe_remote})
+    _bad_header_event = _surface_cap.events[-1]
+    _legacy_public = Backend._public_mcp_spec({
+        "command": "npx",
+        "args": ["-y", "mcp-remote", "https://user:pass@example.com/mcp?token=hidden",
+                 "--header", "Authorization: Bearer hidden"],
+        "env": {"FIXTURE_TOKEN": "hidden"},
+    })
+    check("headless MCP persistence and catalogs reject URL/header credential values",
+          "without URL credentials" in _bad_url_event.get("error", "")
+          and "cannot contain authorization values" in _bad_header_event.get("error", "")
+          and set(_SurfaceConfig.values["mcp_servers"]) == {"fixture"}
+          and "must-not-persist" not in _json2.dumps(_bad_header_event)
+          and "user:pass" not in _json2.dumps(_legacy_public)
+          and "Bearer hidden" not in _json2.dumps(_legacy_public)
+          and _legacy_public.get("env_names") == ["FIXTURE_TOKEN"])
+    _surface_backend.dispatch({"type": "list_permissions", "request_id": "permissions-7"})
+    _surface_backend.dispatch({"type": "add_permission_rule", "request_id": "permission-add-7",
+                               "action": "allow", "rule": "Bash(npm test)"})
+    _permission_event = _surface_cap.events[-1]
+    check("headless permission management validates and round-trips exact rules",
+          _permission_event.get("type") == "permissions"
+          and {"action": "allow", "rule": "Bash(npm test)"} in _permission_event.get("items", []))
+    _surface_backend.dispatch({"type": "add_memory", "request_id": "memory-add-7",
+                               "scope": "project", "text": "Prefer matrix fixtures"})
+    _memory_event = _surface_cap.events[-1]
+    check("headless memory management uses the durable bounded memory path",
+          _memory_event.get("type") == "memory" and "Prefer matrix fixtures" in _memory_event.get("project", ""))
+    _surface_backend.dispatch({"type": "name_session", "request_id": "name-7",
+                               "name": "surface matrix"})
+    check("headless session naming is typed and correlated",
+          _surface_cap.events[-1] == {"type": "session_named", "name": "surface matrix",
+                                      "request_id": "name-7"})
     _surface_backend.dispatch({"type": "list_hooks", "request_id": "hooks-7"})
     _hooks_event = _surface_cap.events[-1]
     check("headless hook catalog is correlated and never exposes configured commands",
@@ -5853,6 +5976,14 @@ def test_mcp_protocol():
               any(msg.get("id") == 699 and (msg.get("error") or {}).get("code") == -32600
                   for msg in legacy_messages), repr(legacy_messages))
 
+        deferred = MCPManager(root)
+        deferred.connect_all({"editor-secret": {
+            "command": str(root / "does-not-exist"), "defer_until_setup": True,
+        }}, startup=True)
+        check("editor-secret MCP processes wait for SecretStorage setup before startup",
+              not deferred.servers and not deferred.failures, deferred.summary())
+        deferred.stop_all()
+
         failed = MCPManager(root)
         failed.connect_all({"missing": {"command": str(root / "does-not-exist")}})
         check("MCP connection failures remain visible in process diagnostics",
@@ -9200,7 +9331,7 @@ def test_benchmark_integrity():
 
 
 def test_protocol_client():
-    """The stdlib client validates, correlates, bounds, and reaps protocol-v3 backends."""
+    """The stdlib client validates, correlates, bounds, and reaps versioned backends."""
     import textwrap as _textwrap
     import time as _time
     from dgc.client import (DGCClient as _DGCClient,
