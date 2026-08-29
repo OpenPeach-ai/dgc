@@ -142,8 +142,8 @@
   .term .del{color:var(--faint);background:rgba(255,255,255,.03);border-left:2px solid var(--border-strong);padding-left:8px;margin-left:-10px}
   .cursor{display:inline-block;width:8px;height:15px;background:var(--accent);vertical-align:-2px;animation:blink 1.1s step-end infinite}
   .dots{display:flex;gap:8px;margin-top:16px;justify-content:center}
-  .dots b{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:.2s;border:none;padding:0}
-  .dots b.on{background:var(--accent)}
+  .dots button{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:.2s;border:none;padding:0}
+  .dots button.on{background:var(--accent)}
 
   /* ---- sections ---- */
   section{padding:clamp(56px,8vw,104px) 0;border-top:1px solid var(--border)}
@@ -307,7 +307,7 @@
 </head>
 <body>
 
-<div class="topbar"><div class="wrap"><span><b>v0.20.0</b> — edits that land on any local model, <b>multi-edit</b>, and a thinking switch that works on every provider&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
+<div class="topbar"><div class="wrap"><span><b class="js-ver">v0.20.8</b> — <b>/goal</b> to set a finish line, a live <b>settings</b> menu with sampling controls, and a stronger default <b>skill</b> set&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
 
 <nav><div class="wrap">
   <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
@@ -316,6 +316,7 @@
     <a href="#terminal">Terminal</a>
     <a href="#extension">Extension</a>
     <a href="#providers">Providers</a>
+    <a href="#benchmark">Benchmark</a>
     <a href="https://github.com/OpenPeach-ai/dgc">GitHub</a>
     <a class="ext" href="/vscode/">VS&nbsp;Code / Cursor</a>
   </div>
@@ -344,7 +345,7 @@
       <div class="tui-card">
 <div class="tui-logo" role="img" aria-label="/// DGC"></div>
         <div class="tui-meta">
-          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span>v0.20.0</span></div>
+          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span class="js-ver">v0.20.8</span></div>
           <div class="tui-tag">a coding agent for the models you run</div>
           <div class="tui-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
           <div class="tui-menu">
@@ -382,9 +383,9 @@
   </div>
   <p class="subhead">The toolbox</p>
   <div class="chips">
-    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span>
+    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">apply_patch</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">repo_map</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span><span class="chip">propose_options</span>
   </div>
-  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 11 bundled skills, and MCP servers.</p>
+  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 16 bundled skills, and MCP servers.</p>
 </div></section>
 
 <section id="terminal"><div class="wrap">
@@ -555,13 +556,48 @@
   <div class="scroll"><table>
     <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
     <tbody>
-      <tr><td><code>default</code></td><td>reads & known-safe commands auto-run; <b>writes and other commands ask first</b></td></tr>
+      <tr><td><code>default</code></td><td>read-only built-in tools auto-run; <b>every shell command and write asks first</b></td></tr>
       <tr><td><code>acceptEdits</code></td><td><b>file edits auto-approved</b>; shell commands still ask</td></tr>
       <tr><td><code>plan</code></td><td><b>read-only</b> — research and propose a plan you approve</td></tr>
       <tr><td><code>auto</code></td><td><b>full-auto</b> — everything approved; deny-rules still apply</td></tr>
     </tbody>
   </table></div>
 </div></section>
+
+<section id="benchmark"><div class="wrap">
+  <div class="center">
+    <div class="subhead" style="margin:0 auto 16px">Benchmark · Aider polyglot</div>
+    <h2>Proven on a model you run yourself</h2>
+    <p class="lede">Same 27B for every agent, scored by the real test suites. DGC solves all but one of the
+      benchmark's 90 problems — the same one the field's best harness misses. No frontier model, no cloud, no time limit.</p>
+  </div>
+  <div class="bmgrid" style="display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);gap:clamp(26px,4vw,52px);align-items:center;margin-top:46px">
+    <div style="text-align:center;background:linear-gradient(158deg,var(--surface-2),var(--surface));border:1px solid var(--border-strong);border-radius:18px;padding:42px 28px;box-shadow:0 30px 70px -44px rgba(124,92,255,.42)">
+      <div id="bm-num" style="font:800 clamp(3.4rem,7vw,4.9rem)/.92 var(--mono);color:var(--lav);font-variant-numeric:tabular-nums;letter-spacing:-.03em">98.9%</div>
+      <div style="margin-top:12px;font:500 12px/1.5 var(--mono);color:var(--text);text-transform:uppercase;letter-spacing:.08em">89 / 90 solved</div>
+      <div style="margin-top:12px;font:400 12.5px/1.5 var(--sans);color:var(--faint)">qwen3.8:27b-bf16 · pass@2 · run locally</div>
+    </div>
+    <div id="bm-bars" style="display:flex;flex-direction:column;gap:12px"><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Python</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">JavaScript</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Java</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Go</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">C++</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Rust</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--lav);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="93%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">14/15</span></div></div>
+  </div>
+  <div class="center" style="margin-top:40px"><a class="btn primary" href="/benchmark">See the full benchmark
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+</div></section>
+
+<script>
+  (function(){
+    var rm = matchMedia('(prefers-reduced-motion:reduce)').matches;
+    var sec = document.getElementById('benchmark'); if(!sec) return;
+    function run(){
+      var num = document.getElementById('bm-num');
+      if(num && !rm){ var t=98.9,s=null; num.textContent='0.0%';
+        (function step(ts){ s=s||ts; var p=Math.min(1,(ts-s)/1100); num.textContent=(t*(1-Math.pow(1-p,3))).toFixed(1)+'%'; if(p<1) requestAnimationFrame(step); })(performance.now()); }
+      sec.querySelectorAll('#bm-bars span[data-w]').forEach(function(b){ b.style.width = rm ? b.getAttribute('data-w') : b.getAttribute('data-w'); });
+    }
+    if(rm){ run(); return; }
+    var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ run(); io.disconnect(); } }); }, {threshold:.3});
+    io.observe(sec);
+  })();
+</script>
 
 <footer><div class="wrap">
   <div class="cols">
@@ -632,8 +668,8 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
     ]}
   ];
   var s=0;
-  SCENES.forEach(function(_,i){var b=document.createElement('button');b.type='button';if(i===0)b.className='on';b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
-  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';});}
+  SCENES.forEach(function(_,i){var b=document.createElement('button');b.type='button';b.setAttribute('aria-label','Show demo '+(i+1)+' of '+SCENES.length);if(i===0){b.className='on';b.setAttribute('aria-current','true');}b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
+  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';if(j===i)d.setAttribute('aria-current','true');else d.removeAttribute('aria-current');});}
   var timers=[];
   function clearT(){timers.forEach(clearTimeout);timers=[];}
   function line(kind,text){var d=document.createElement('div');if(kind)d.className=kind;d.textContent=text;scene.appendChild(d);return d;}
@@ -726,6 +762,14 @@ function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.g
     io.observe(panel);
   } else { play(); }
 })();
+</script>
+<script>
+  /* Keep the displayed version in sync with the live release, so the banner/mockup number can't go
+     stale on a bump. (The feature blurb next to it is still edited by hand per release.) */
+  fetch('/version.json').then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.version) return;
+    document.querySelectorAll('.js-ver').forEach(function(e){ e.textContent='v'+d.version; });
+  }).catch(function(){});
 </script>
 </body>
 </html>

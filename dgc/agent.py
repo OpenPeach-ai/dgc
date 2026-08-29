@@ -46,7 +46,7 @@ _VERIFY_INFO_FLAGS = {
 }
 _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery per turn (a weak local
                         #   model debugging a hard problem legitimately hits its output cap several
-                        #   times across a long turn; 3 cut it off mid-convergence — pi never caps)
+                        #   times across a long turn; 3 cut it off mid-convergence)
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
@@ -2256,7 +2256,7 @@ class Agent:
             budget = 0.0
         deadline = (time.monotonic() + budget) if budget > 0 else None
         if deadline is not None:
-            max_turns = max(max_turns, 200)   # budgeted: let the DEADLINE govern turns, not a hard 40-cap (pi has none) —
+            max_turns = max(max_turns, 200)   # budgeted: let the DEADLINE govern turns, not a hard 40-cap —
                                               # hard problems (rust/forth, rust/decimal) exhaust 40 iterations mid-debug with budget to spare
         # Exact ephemeral bytes/modes/symlinks for checkpoint-known project mutations at the last
         # verified state. It never serializes external-path authority and is restored transactionally.
@@ -2937,7 +2937,7 @@ class Agent:
                     good_snapshot = None
                     self.ui.info("last test-passing state could not be captured safely; auto-restore disabled")
             if (same_fail >= _FAIL_HARD and (deadline is None
-                    or (deadline - time.monotonic()) <= 0.15 * budget)):  # budgeted: only near the deadline — else keep retrying (pi-style)
+                    or (deadline - time.monotonic()) <= 0.15 * budget)):  # budgeted: only near the deadline — else keep retrying
                 restore_failed = (good_snapshot is not None
                                   and not self._restore_snapshot(good_snapshot, deadline))
                 return self._fail_turn(

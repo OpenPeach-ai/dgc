@@ -652,7 +652,7 @@ class _ThinkFilter:
 def _repair_json_control_chars(s):
     """Escape raw control chars and invalid backslashes INSIDE JSON string literals so a local
     model's tool arguments (go/rust source with unescaped newlines/tabs) parse instead of being
-    dropped as {"_unparsed"}. Mirrors pi's repairJson (json-parse.ts)."""
+    dropped as {"_unparsed"}. Repairs raw control chars in JSON string literals before giving up."""
     out = []
     in_str = False
     i, n = 0, len(s)
