@@ -316,6 +316,7 @@
     <a href="#terminal">Terminal</a>
     <a href="#extension">Extension</a>
     <a href="#providers">Providers</a>
+    <a href="#benchmark">Benchmark</a>
     <a href="https://github.com/OpenPeach-ai/dgc">GitHub</a>
     <a class="ext" href="/vscode/">VS&nbsp;Code / Cursor</a>
   </div>
@@ -562,6 +563,41 @@
     </tbody>
   </table></div>
 </div></section>
+
+<section id="benchmark"><div class="wrap">
+  <div class="center">
+    <div class="subhead" style="margin:0 auto 16px">Benchmark · Aider polyglot</div>
+    <h2>Proven on a model you run yourself</h2>
+    <p class="lede">Same 27B for every agent, scored by the real test suites. DGC solves all but one of the
+      benchmark's 90 problems — the same one the field's best harness misses. No frontier model, no cloud, no time limit.</p>
+  </div>
+  <div class="bmgrid" style="display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);gap:clamp(26px,4vw,52px);align-items:center;margin-top:46px">
+    <div style="text-align:center;background:linear-gradient(158deg,var(--surface-2),var(--surface));border:1px solid var(--border-strong);border-radius:18px;padding:42px 28px;box-shadow:0 30px 70px -44px rgba(124,92,255,.42)">
+      <div id="bm-num" style="font:800 clamp(3.4rem,7vw,4.9rem)/.92 var(--mono);color:var(--lav);font-variant-numeric:tabular-nums;letter-spacing:-.03em">98.9%</div>
+      <div style="margin-top:12px;font:500 12px/1.5 var(--mono);color:var(--text);text-transform:uppercase;letter-spacing:.08em">89 / 90 solved</div>
+      <div style="margin-top:12px;font:400 12.5px/1.5 var(--sans);color:var(--faint)">qwen3.8:27b-bf16 · pass@2 · run locally</div>
+    </div>
+    <div id="bm-bars" style="display:flex;flex-direction:column;gap:12px"><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Python</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">JavaScript</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Java</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Go</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">C++</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Rust</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--lav);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="93%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">14/15</span></div></div>
+  </div>
+  <div class="center" style="margin-top:40px"><a class="btn primary" href="/benchmark">See the full benchmark
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+</div></section>
+
+<script>
+  (function(){
+    var rm = matchMedia('(prefers-reduced-motion:reduce)').matches;
+    var sec = document.getElementById('benchmark'); if(!sec) return;
+    function run(){
+      var num = document.getElementById('bm-num');
+      if(num && !rm){ var t=98.9,s=null; num.textContent='0.0%';
+        (function step(ts){ s=s||ts; var p=Math.min(1,(ts-s)/1100); num.textContent=(t*(1-Math.pow(1-p,3))).toFixed(1)+'%'; if(p<1) requestAnimationFrame(step); })(performance.now()); }
+      sec.querySelectorAll('#bm-bars span[data-w]').forEach(function(b){ b.style.width = rm ? b.getAttribute('data-w') : b.getAttribute('data-w'); });
+    }
+    if(rm){ run(); return; }
+    var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ run(); io.disconnect(); } }); }, {threshold:.3});
+    io.observe(sec);
+  })();
+</script>
 
 <footer><div class="wrap">
   <div class="cols">

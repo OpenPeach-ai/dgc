@@ -29,6 +29,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Layout, VSplit, Window
+from prompt_toolkit.layout import ScrollOffsets
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -777,6 +778,14 @@ class TUI:
                 self.app.invalidate()
             except Exception:
                 pass
+
+    def _scroll_top_offset(self):
+        """Keep the cursor pinned to the BOTTOM row of the transcript window (top-offset = height-1)
+        so a paged/wheeled scroll moves the view IMMEDIATELY at any terminal height — otherwise PT
+        (wrap_lines) leaves the cursor merely 'visible' and small scrolls on a tall window do nothing."""
+        ri = getattr(self, "_transcript_win", None)
+        ri = getattr(ri, "render_info", None) if ri else None
+        return max(0, ri.window_height - 1) if ri else 0
 
     def _wheel(self, delta: int) -> None:
         """Mouse-wheel scroll of the transcript. delta>0 scrolls up into history (drops follow so
@@ -2227,6 +2236,7 @@ class TUI:
         header = Window(_ClickControl(self._header, self._menu_click, self._menu_hover),
                         height=self._header_height, align="center")
         transcript = Window(_ClickControl(self._transcript, on_scroll=self._wheel), wrap_lines=True,
+                            scroll_offsets=ScrollOffsets(top=self._scroll_top_offset),
                             height=Dimension(weight=1))   # scroll is driven by the cursor marker (_cursor_ft)
         self._transcript_win = transcript
         status = Window(FormattedTextControl(self._status), height=1, style="class:status")
@@ -3900,6 +3910,24 @@ class TUI:
                 self._overlay_move(self._OVERLAY_CAP - 1); return
             self._scroll_off = max(0, self._scroll_off - 10)
             self._follow = self._scroll_off == 0   # re-follow the live bottom once we reach it
+            self._invalidate()
+
+        # Arrow Up/Down scroll the transcript while the input is empty (browsing the chat); once you
+        # start typing, arrows edit the prompt as usual. Overlay/completion nav is handled above.
+        scroll_idle = Condition(lambda: self._overlay is None
+                                and self.input_buf.complete_state is None
+                                and not self.input_buf.text)
+
+        @kb.add("up", filter=scroll_idle)
+        def _(ev):
+            self._scroll_off += 3
+            self._follow = False
+            self._invalidate()
+
+        @kb.add("down", filter=scroll_idle)
+        def _(ev):
+            self._scroll_off = max(0, self._scroll_off - 3)
+            self._follow = self._scroll_off == 0
             self._invalidate()
 
         @kb.add("end")
