@@ -161,53 +161,124 @@ class EngineNotAuthenticated(EngineError):
 
 
 # --- streaming normalizers --------------------------------------------------
-# Each vendor emits its own JSONL schema. We normalize to DGC-neutral events:
-#   {"kind": "text"|"tool"|"result"|"error"|"raw", "text": str, ...}
-# Tolerant by design: an unrecognized line becomes a {"kind": "raw"} event so
-# nothing is silently dropped and a schema change never breaks the run.
-def _normalize(stream: str, obj: dict) -> dict | None:
-    t = obj.get("type") or obj.get("event") or ""
-    if stream == "claude":
-        if t == "assistant":
-            msg = obj.get("message", {})
-            parts = msg.get("content", []) if isinstance(msg, dict) else []
-            text = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("type") == "text")
-            return {"kind": "text", "text": text} if text else {"kind": "raw", "text": ""}
-        if t == "result":
-            return {"kind": "result", "text": str(obj.get("result", "")),
-                    "is_error": bool(obj.get("is_error"))}
-    elif stream == "codex":
-        msg = obj.get("msg", obj)
-        mt = msg.get("type", t)
-        if mt in ("agent_message", "assistant_message"):
-            return {"kind": "text", "text": str(msg.get("message") or msg.get("text") or "")}
-        if mt == "task_complete" or mt == "turn_complete":
-            return {"kind": "result", "text": str(msg.get("last_agent_message") or "")}
-        if "command" in mt or mt.endswith("_call"):
-            return {"kind": "tool", "text": str(msg.get("command") or msg.get("name") or mt)}
-    elif stream in ("qwen", "kimi"):
-        if t in ("content", "assistant", "message"):
-            return {"kind": "text", "text": str(obj.get("content") or obj.get("text") or "")}
-        if t in ("result", "final", "done"):
-            return {"kind": "result", "text": str(obj.get("content") or obj.get("result") or "")}
-        if t in ("tool_call", "tool", "tool_use"):
-            return {"kind": "tool", "text": str(obj.get("name") or obj.get("tool") or "tool")}
-    return {"kind": "raw", "text": json.dumps(obj)[:2000]}
+# Each vendor emits its own JSONL schema. We normalize to a common, RICH set of
+# DGC-neutral events so a delegated turn can render exactly like a native one:
+#   {"kind":"text","text":..}  {"kind":"thinking","text":..}
+#   {"kind":"tool_call","name":..,"args":dict,"id":..}
+#   {"kind":"tool_result","output":..,"id":..}  {"kind":"result","text":..}
+# One raw line may carry several events (a Claude assistant message = text +
+# tool_use). Unrecognized lines yield [] — never a raw JSON dump on screen.
+def _flatten(content) -> str:
+    """A tool_result's content may be a string or a list of {type:text,text}."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(p.get("text", "") for p in content
+                       if isinstance(p, dict) and p.get("type") == "text")
+    return "" if content is None else str(content)
 
 
-def parse_stream_line(stream: str, line: str) -> dict | None:
+def _events_claude(obj: dict) -> list[dict]:
+    t = obj.get("type")
+    if t == "assistant":
+        out = []
+        for b in obj.get("message", {}).get("content", []):
+            if not isinstance(b, dict):
+                continue
+            bt = b.get("type")
+            if bt == "text" and b.get("text"):
+                out.append({"kind": "text", "text": b["text"]})
+            elif bt == "thinking" and b.get("thinking"):
+                out.append({"kind": "thinking", "text": b["thinking"]})
+            elif bt == "tool_use":
+                out.append({"kind": "tool_call", "name": str(b.get("name") or "tool"),
+                            "args": b.get("input") if isinstance(b.get("input"), dict) else {},
+                            "id": str(b.get("id") or "")})
+        return out
+    if t == "user":
+        return [{"kind": "tool_result", "output": _flatten(b.get("content")),
+                 "id": str(b.get("tool_use_id") or "")}
+                for b in obj.get("message", {}).get("content", [])
+                if isinstance(b, dict) and b.get("type") == "tool_result"]
+    if t == "result":
+        return [{"kind": "result", "text": str(obj.get("result") or "")}]
+    return []
+
+
+def _events_codex(obj: dict) -> list[dict]:      # codex `exec --json` (best-effort)
+    m = obj.get("msg", obj)
+    mt = str(m.get("type") or obj.get("type") or "")
+    if mt in ("agent_message", "assistant_message"):
+        return [{"kind": "text", "text": str(m.get("message") or m.get("text") or "")}]
+    if mt.startswith("agent_reasoning") or mt in ("reasoning",):
+        return [{"kind": "thinking", "text": str(m.get("text") or m.get("reasoning") or "")}]
+    if mt in ("exec_command_begin", "command_started") or mt.endswith("_call"):
+        cmd = m.get("command")
+        cmd = " ".join(cmd) if isinstance(cmd, list) else (cmd or m.get("name") or mt)
+        return [{"kind": "tool_call", "name": "shell", "args": {"command": str(cmd)},
+                 "id": str(m.get("call_id") or m.get("id") or "")}]
+    if mt in ("exec_command_end", "command_output", "tool_result"):
+        return [{"kind": "tool_result",
+                 "output": str(m.get("stdout") or m.get("aggregated_output") or m.get("output") or ""),
+                 "id": str(m.get("call_id") or m.get("id") or "")}]
+    if mt in ("task_complete", "turn_complete"):
+        return [{"kind": "result", "text": str(m.get("last_agent_message") or "")}]
+    return []
+
+
+def _events_generic(obj: dict) -> list[dict]:    # qwen / kimi stream-json (best-effort)
+    t = str(obj.get("type") or obj.get("event") or "")
+    if t in ("thinking", "reasoning", "thought"):
+        return [{"kind": "thinking", "text": str(obj.get("content") or obj.get("text") or "")}]
+    if t in ("content", "assistant", "message", "text", "assistant_message"):
+        return [{"kind": "text", "text": str(obj.get("content") or obj.get("text") or obj.get("delta") or "")}]
+    if t in ("tool_call", "tool", "tool_use", "function_call"):
+        args = obj.get("input") or obj.get("arguments") or {}
+        return [{"kind": "tool_call", "name": str(obj.get("name") or obj.get("tool") or "tool"),
+                 "args": args if isinstance(args, dict) else {"args": str(args)},
+                 "id": str(obj.get("id") or "")}]
+    if t in ("tool_result", "tool_output", "function_result"):
+        return [{"kind": "tool_result", "output": str(obj.get("output") or obj.get("content") or obj.get("result") or ""),
+                 "id": str(obj.get("id") or "")}]
+    if t in ("result", "final", "done", "completed"):
+        return [{"kind": "result", "text": str(obj.get("content") or obj.get("result") or "")}]
+    return []
+
+
+def parse_stream_events(stream: str, line: str) -> list[dict]:
+    """Normalize one raw JSONL line into a list of rich DGC-neutral events."""
     line = line.strip()
     if not line:
-        return None
+        return []
     if stream == "copilot":          # the Copilot CLI has no JSON stream mode — surface plain text
-        return {"kind": "text", "text": line}
+        return [{"kind": "text", "text": line}]
     try:
         obj = json.loads(line)
     except (json.JSONDecodeError, ValueError):
-        return {"kind": "raw", "text": line[:2000]}
+        return []
     if not isinstance(obj, dict):
-        return {"kind": "raw", "text": str(obj)[:2000]}
-    return _normalize(stream, obj)
+        return []
+    if stream == "claude":
+        return _events_claude(obj)
+    if stream == "codex":
+        return _events_codex(obj)
+    return _events_generic(obj)
+
+
+def edit_diff(name: str, args: dict) -> str | None:
+    """Build a unified diff for an edit-shaped tool call so a delegated edit renders
+    as a real diff (DGC's tool_result renders any `--- `/`+++ ` output as one)."""
+    import difflib
+    path = str(args.get("file_path") or args.get("path") or "file")
+    if "old_string" in args and "new_string" in args:
+        old = str(args["old_string"]).splitlines(keepends=True)
+        new = str(args["new_string"]).splitlines(keepends=True)
+    elif "content" in args and name.lower() in ("write", "writefile", "create_file", "create"):
+        old, new = [], str(args["content"]).splitlines(keepends=True)
+    else:
+        return None
+    text = "".join(difflib.unified_diff(old, new, fromfile=f"a/{path}", tofile=f"b/{path}"))
+    return text or None
 
 
 def preflight(engine: SubEngine) -> str:
@@ -269,17 +340,14 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     final, last_text, n, t0 = "", "", 0, time.time()
     try:
         for line in proc.stdout:                      # closes when the CLI (or the kill) ends it
-            ev = parse_stream_line(engine.stream, line)
-            if not ev:
-                continue
-            n += 1
-            if ev.get("text"):
-                if ev["kind"] == "result":
+            for ev in parse_stream_events(engine.stream, line):
+                n += 1
+                if ev["kind"] == "result" and ev.get("text"):
                     final = ev["text"]
-                elif ev["kind"] == "text":
+                elif ev["kind"] == "text" and ev.get("text"):
                     last_text = ev["text"]
-            if on_event:
-                on_event(ev)
+                if on_event:
+                    on_event(ev)
     finally:
         stop.set()
         rc = proc.wait()
