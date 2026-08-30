@@ -1672,17 +1672,22 @@ def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) 
     last = {"text": ""}
 
     def on_event(ev: dict) -> None:
-        text, kind = ev.get("text", ""), ev.get("kind")
-        if not text:
-            return
-        if kind == "tool":
-            c.print(f"[dim]· {terminal_safe_text(text[:200])}[/dim]", highlight=False)
-        elif kind == "text":
-            last["text"] = text
-            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        kind = ev.get("kind")
+        if kind == "tool_call":
+            name = terminal_safe_text(str(ev.get("name") or "tool"))
+            args = ev.get("args") or {}
+            summ = terminal_safe_text(str(args.get("command") or args.get("file_path")
+                                          or args.get("path") or ""))[:120]
+            c.print(f"[dim]· {name}{(' ' + summ) if summ else ''}[/dim]", highlight=False)
+        elif kind == "thinking" and ev.get("text"):
+            c.print(f"[dim]  {terminal_safe_text(ev['text'][:200])}[/dim]", highlight=False)
+        elif kind == "text" and ev.get("text"):
+            last["text"] = ev["text"]
+            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
             sys.stdout.flush()
-        elif kind == "result" and text.strip() and text.strip() != last["text"].strip():
-            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        elif kind == "result" and ev.get("text", "").strip() \
+                and ev["text"].strip() != last["text"].strip():
+            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
             sys.stdout.flush()
 
     budget = int(config.get("turn_budget_s") or 0) or 1800

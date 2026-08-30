@@ -843,6 +843,9 @@ class TUI:
                 # tool rows pack together. The band's own tinted vpad sits INSIDE this untinted gap.
                 spaced = kind in ("text", "think", "user") or prev in ("text", "think", "user")
                 ft.append(("", "\n\n" if spaced else "\n"))
+            elif kind == "user":
+                # first block: keep the tinted band from butting against the slim header
+                ft.append(("", "\n"))
             ft.extend(frags)
             prev = kind
         for blk in self.blocks:
@@ -4250,19 +4253,28 @@ class TUI:
         self.info(f"running this turn through {engine.label} (your subscription)…")
         turns = getattr(self, "_delegated_turns", 0)
         shown = {"text": False}
+        names, diffs = {}, {}                     # tool_use id → (display name, prebuilt edit diff)
 
         def on_event(ev: dict) -> None:
-            kind, text = ev.get("kind"), ev.get("text", "")
-            if not text:
-                return
-            if kind == "tool":
-                self.info(f"· {text[:200]}")
-            elif kind == "text":                 # the assistant's answer, streamed
+            kind = ev.get("kind")
+            if kind == "text" and ev.get("text"):            # the assistant's answer, streamed
                 shown["text"] = True
-                self.on_text(text if text.endswith("\n") else text + "\n")
-            elif kind == "result" and not shown["text"]:
-                self.on_text(text if text.endswith("\n") else text + "\n")
-            # "raw" (system/init/tool-result protocol frames) is never shown
+                self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+            elif kind == "thinking" and ev.get("text"):      # dimmed reasoning, like a native turn
+                self.on_thinking(ev["text"])
+            elif kind == "tool_call":                        # a real tool card (name + args)
+                nm, cid = ev.get("name", "tool"), ev.get("id") or None
+                if cid:
+                    names[cid] = nm
+                    d = subs.edit_diff(nm, ev.get("args") or {})
+                    if d:
+                        diffs[cid] = d
+                self.tool_call(nm, ev.get("args") or {}, cid)
+            elif kind == "tool_result":                      # fills the card; a diff renders as a diff
+                cid = ev.get("id") or None
+                self.tool_result(names.get(cid, ""), diffs.get(cid) or ev.get("output", ""), cid)
+            elif kind == "result" and not shown["text"] and ev.get("text"):
+                self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
 
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
         try:
