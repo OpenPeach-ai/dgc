@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.0 — 2026-08-30
+
+- **Bring your own subscription.** A new Subscription section in Settings → Models lets you run each
+  turn through your own Claude Code, Codex/ChatGPT, Qwen, Kimi, or GitHub Copilot plan via its
+  official CLI — with an optional model and reasoning-effort override, and a live sign-in status.
+  DGC never handles the vendor's tokens; it launches the official CLI, which owns auth and terms.
+- Added dedicated searchable Skills and Documentation browsers, including loaded source precedence,
+  instruction detail, explicit skill reload, and one-click `$skill` insertion without transcript
+  pollution.
+- Added a SecretStorage-backed MCP manager for local STDIO and remote bridge servers, with safe
+  metadata persistence, status/tool inspection, edit/remove/reload flows, and typed protocol-v4
+  management commands.
+- Expanded editor parity with dedicated Permissions, Memory, Hooks, Plan, Artifact, Goal, Handoff,
+  Retained Tasks, session naming, compaction, and command-menu palette entries.
+- Reorganized in-panel settings into General, Models, Agents, Security, and Extensions, adding
+  reasoning display, suggestions, sandbox/network, plan/artifact, tool-profile, and parallel-task
+  controls while retaining the existing DGC mono/black/purple design.
+- Added protocol, backend, webview, accessibility, and feature-manager regression coverage.
+- Hardening pass before ship: the MCP subsystem-error notice renders as inert text instead of
+  raw HTML; persisted MCP specs now reject inline-secret arguments (`--api-key`, `--token`,
+  `-H`/`--header`, …) as well as env/URL credentials; and pausing a standing goal interrupts any
+  in-flight turn rather than only relabeling it. Covered by new Python and webview tests.
+
 ## 0.8.1 — 2026-08-21
 
 - Rides the **v0.20.0 harness**: far more robust editing (a tiered matcher that forgives a local model's near-misses, plus a `multi_edit` batch tool), a **universal thinking switch** that actually turns reasoning off on any provider, an over-thinking watchdog, and loop guards. Same panel — pointed at a smarter backend. Run `dgc update` (or reinstall) to get it.

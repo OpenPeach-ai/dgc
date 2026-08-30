@@ -2,6 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
+  const goalBar = $("goalbar");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -97,12 +98,28 @@
     present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
   };
   const glyphFor = (name) => GLYPH[name] || "▸";
+  const TOOL_COPY = {
+    read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
+    write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
+    bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
+    grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
+    present_plan: ["Preparing plan", "Prepared plan"], task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
+  };
+  function toolCopy(name) {
+    const known = TOOL_COPY[name];
+    if (known) return { present: known[0], past: known[1], target: "" };
+    if (String(name).startsWith("mcp__")) {
+      return { present: "Calling MCP tool", past: "Called MCP tool",
+        target: String(name).slice(5).replaceAll("__", " · ").replaceAll("_", " ") };
+    }
+    return { present: "Using tool", past: "Used tool", target: String(name || "tool").replaceAll("_", " ") };
+  }
   let builtinCommands = [
     { name: "model", description: "pick the model", action: "pickModel" },
     { name: "connect", description: "provider or a custom LAN host", action: "connect" },
     { name: "mode", description: "permission mode", action: "pickMode" },
     { name: "think", description: "how hard the model reasons", action: "pickThink" },
-    { name: "goal", description: "inspect/set/complete/block the standing objective", action: "goal", accepts_args: true },
+    { name: "goal", description: "inspect, set, pause, resume, or clear the standing objective", action: "goal", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
@@ -241,12 +258,17 @@
       if (dot) dot.className = "dot deny";
     });
     clearInterval(turn.timer);
+    const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
+    if (lastText) { lastText.classList.remove("commentary"); lastText.classList.add("final"); }
     turn.act.classList.add("done");
     turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
     turn = null;
   }
   function discardTurn() {
-    if (turn) clearInterval(turn.timer);
+    if (turn) {
+      clearInterval(turn.timer);
+      turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
+    }
     expireOpenRequests();
     turn = null;
   }
@@ -266,38 +288,75 @@
     card.dataset.status = value;
     const label = card.querySelector(".tool-status");
     if (label) label.textContent = value;
+    const copy = toolCopy(card.dataset.toolName || "");
+    const verb = card.querySelector(".verb");
+    if (verb) {
+      verb.textContent = value === "running" ? copy.present
+        : value === "completed" ? copy.past
+          : value === "failed" ? `${copy.past} · failed`
+            : value === "denied" ? `${copy.present} · denied`
+              : value === "stopped" ? `${copy.present} · stopped` : copy.past;
+    }
+    if (value !== "running") {
+      clearInterval(card._timer);
+      const elapsed = card.querySelector(".tool-time");
+      if (elapsed && card._startedAt) elapsed.textContent = `${((Date.now() - card._startedAt) / 1000).toFixed(1)}s`;
+    }
   }
 
   function toolCard(ev) {
     const c = el("div", "tool");
+    c.dataset.toolName = String(ev.name || "");
+    c._startedAt = Date.now();
+    const copy = toolCopy(ev.name);
+    const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
     const bodyId = `tool-output-${++disclosureId}`;
-    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}"><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${esc(ev.name)}</span><span class="arg">${esc(ev.summary || "")}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
+    c.innerHTML = `<div class="head"><button type="button" class="tool-toggle" aria-expanded="false" aria-controls="${bodyId}" title="${esc(ev.name || "tool")}"><span class="chev" aria-hidden="true">›</span><span class="glyph" aria-hidden="true">${glyphFor(ev.name)}</span><span class="verb">${copy.present}</span><span class="arg">${esc(detail)}</span></button></div><div class="body" id="${bodyId}"><pre></pre></div>`;
     const head = c.querySelector(".head");
     const toggle = c.querySelector(".tool-toggle");
     toggle.onclick = () => {
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
+    if (turn.textEl) turn.textEl.classList.add("commentary");
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
     const dot = el("span", "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
+    const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
+    c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
     setToolStatus(c, "running");
     turn.block.appendChild(c); breakText(); scroll(); return c;
   }
   function renderDiff(diff) {
-    const wrap = el("div", "diff");
-    const path = (diff.match(/\+\+\+ b\/(.+)/) || [, "changed file"])[1].replace(/^\/+/, "");
-    const body = diff.split("\n").map((l) => {
-      const cls = l.startsWith("+") && !l.startsWith("+++") ? "add"
-        : l.startsWith("-") && !l.startsWith("---") ? "del"
-          : (l.startsWith("@@") || l.startsWith("---") || l.startsWith("+++")) ? "hh" : "ctx";
-      return `<span class="${cls}">${esc(l) || " "}</span>`;
+    const wrap = el("div", "diff open");
+    const newPath = (diff.match(/^\+\+\+\s+([^\n\t]+)/m) || [])[1];
+    const oldPath = (diff.match(/^---\s+([^\n\t]+)/m) || [])[1];
+    const rawPath = newPath && newPath !== "/dev/null" ? newPath : oldPath;
+    const path = String(rawPath || "changed file").replace(/^[ab]\//, "").replace(/^\/+/, "");
+    let additions = 0, deletions = 0, oldLine = null, newLine = null;
+    const body = diff.split("\n").map((line) => {
+      const hunk = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+      let cls = "ctx", oldNo = "", newNo = "";
+      if (hunk) { cls = "hh"; oldLine = Number(hunk[1]); newLine = Number(hunk[2]); }
+      else if (line.startsWith("---") || line.startsWith("+++")) cls = "hh";
+      else if (line.startsWith("+")) { cls = "add"; newNo = newLine ?? ""; if (newLine !== null) newLine++; additions++; }
+      else if (line.startsWith("-")) { cls = "del"; oldNo = oldLine ?? ""; if (oldLine !== null) oldLine++; deletions++; }
+      else { oldNo = oldLine ?? ""; newNo = newLine ?? ""; if (oldLine !== null) oldLine++; if (newLine !== null) newLine++; }
+      return `<span class="${cls}"><span class="ln old">${oldNo}</span><span class="ln new">${newNo}</span><span class="dc">${esc(line) || " "}</span></span>`;
     }).join("");
-    wrap.innerHTML = `<div class="dhead"><span class="dg">✎</span><span class="f">${esc(path)}</span></div><pre>${body}</pre>`;
-    wrap.querySelector(".dhead").appendChild(openFileBtn(path));
+    const bodyId = `diff-body-${++disclosureId}`;
+    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg">✎</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
+    const toggle = wrap.querySelector(".diff-toggle");
+    toggle.onclick = () => {
+      const open = wrap.classList.toggle("open");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.querySelector(".chev").textContent = open ? "⌄" : "›";
+      toggle.querySelector(".diff-action").textContent = open ? "Hide diff" : "Review";
+    };
+    if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
@@ -313,6 +372,196 @@
     document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
+
+  // ---- standing goal — durable state above the composer, with an active-work clock ----
+  let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
+  function currentGoalElapsed() {
+    return goalState.elapsed + (goalState.status === "active"
+      ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
+  }
+  function formatDuration(seconds) {
+    const total = Math.max(0, Math.floor(seconds || 0));
+    const hours = Math.floor(total / 3600), minutes = Math.floor(total % 3600 / 60), secs = total % 60;
+    return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+      : `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+  function paintGoalClock() { if (!goalBar.hidden) $("goal-time").textContent = formatDuration(currentGoalElapsed()); }
+  function setGoalState(next) {
+    const text = String(next?.text ?? next?.goal ?? "");
+    const status = text ? String(next?.status || "active") : "none";
+    const priorElapsed = currentGoalElapsed();
+    const explicit = Number(next?.elapsed_seconds);
+    goalState = { text, status,
+      elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
+        : (text === goalState.text ? priorElapsed : 0) };
+    goalObservedAt = Date.now();
+    goalBar.hidden = !text;
+    if (!text) return;
+    $("goal-text").textContent = text;
+    const paused = status === "blocked", completed = status === "completed";
+    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Active goal";
+    goalBar.dataset.status = status;
+    const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
+    toggle.hidden = false;
+    const resume = paused || completed;
+    icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
+    toggle.title = resume ? "Resume goal" : "Pause goal";
+    toggle.setAttribute("aria-label", resume ? "Resume standing goal" : "Pause standing goal");
+    paintGoalClock();
+  }
+  const goalClockTimer = setInterval(paintGoalClock, 500);
+  if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
+
+  // ---- dedicated non-chat surfaces (skills, MCP, docs, permissions, memory, hooks) ----
+  const SURFACE_META = {
+    skills: ["Skills", "library"], mcp: ["MCP servers", "plug"],
+    docs: ["Documentation", "book"], permissions: ["Permission rules", "shield"],
+    memory: ["Memory", "bookmark"], hooks: ["Lifecycle hooks", "run-all"],
+  };
+  let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
+  const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
+  function openSurface(kind) {
+    if (!SURFACE_META[kind]) return;
+    surfaceKind = kind;
+    if ($("surface").hidden) surfaceReturnFocus = document.activeElement;
+    $("surface-title-text").textContent = SURFACE_META[kind][0];
+    $("surface-icon").className = "codicon codicon-" + SURFACE_META[kind][1];
+    $("surface").hidden = false; surfaceSearch.value = "";
+    surfaceBody.innerHTML = '<div class="surface-empty">Loading…</div>';
+    $("surface-primary").hidden = true; $("surface-secondary").hidden = true;
+    surfaceSearch.focus();
+  }
+  function closeSurface() {
+    $("surface").hidden = true; surfaceKind = "";
+    const target = surfaceReturnFocus && typeof surfaceReturnFocus.focus === "function"
+      ? surfaceReturnFocus : input;
+    surfaceReturnFocus = null; target.focus();
+  }
+  function surfaceButtons(primary, primaryAction, secondary, secondaryAction) {
+    const p = $("surface-primary"), s = $("surface-secondary");
+    p.hidden = !primary; p.textContent = primary || ""; p.onclick = primaryAction || null;
+    s.hidden = !secondary; s.textContent = secondary || ""; s.onclick = secondaryAction || null;
+  }
+  function filterSurface() {
+    const query = surfaceSearch.value.trim().toLowerCase();
+    surfaceBody.querySelectorAll("[data-filter]").forEach((node) => {
+      node.hidden = Boolean(query) && !String(node.dataset.filter || "").includes(query);
+    });
+  }
+  function useSkill(name) {
+    input.value = `$${name} `; input.selectionStart = input.selectionEnd = input.value.length;
+    closeSurface(); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function renderSkills(items) {
+    surfaceRows = Array.isArray(items) ? items : [];
+    openSurface("skills");
+    surfaceBody.innerHTML = surfaceRows.length ? surfaceRows.map((skill, i) =>
+      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">$${esc(skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}</span></div><p>${esc(skill.description || "Reusable agent instructions")}</p><div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}">Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button></div></article>`).join("")
+      : '<div class="surface-empty">No skills are installed. Add a project skill at <code>.dgc/skills/&lt;name&gt;/SKILL.md</code>.</div>';
+    surfaceBody.querySelectorAll("[data-skill-use]").forEach((button) => button.onclick = () => useSkill(surfaceRows[+button.dataset.skillUse].name));
+    surfaceBody.querySelectorAll("[data-skill-view]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getSkill", name: surfaceRows[+button.dataset.skillView].name }));
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }));
+    filterSurface();
+  }
+  function renderSkillDetail(ev) {
+    openSurface("skills");
+    if (!ev.found) { surfaceBody.innerHTML = '<div class="surface-empty">That skill is no longer installed.</div>'; return; }
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← All skills</button><div class="surface-detail-head"><h2>$${esc(ev.name)}</h2><span class="surface-badge">${esc(ev.source)}</span></div><p class="muted">${esc(ev.description || "")}</p><div class="surface-markdown">${md(ev.markdown || "")}</div>`;
+    surfaceBody.querySelector(".surface-back").onclick = () => renderSkills(surfaceRows);
+    surfaceButtons("Use skill", () => useSkill(ev.name));
+  }
+  function mcpStateClass(value) { return ["connected", "configured"].includes(value) ? "ok" : value === "failed" ? "err" : ""; }
+  function showMcpForm(item) {
+    const value = item || { name: "", transport: "stdio", command: "", args: [], env_names: [], url: "", log_level: "warning" };
+    const remote = value.transport === "remote";
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><form id="mcp-config-form" class="surface-form"><input id="mcp-original" type="hidden" value="${esc(value.name || "")}"><label>Server name<input id="mcp-name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" value="${esc(value.name || "")}" placeholder="github"></label><label>Transport<select id="mcp-transport"><option value="stdio"${remote ? "" : " selected"}>Local STDIO</option><option value="remote"${remote ? " selected" : ""}>Remote Streamable HTTP (via mcp-remote)</option></select></label><label id="mcp-target-label">${remote ? "Server URL" : "Command"}<input id="mcp-target" required value="${esc(remote ? value.url : value.command)}" placeholder="${remote ? "https://mcp.example.com/mcp" : "npx"}"></label><label id="mcp-args-label">Arguments <span class="set-hint">one argument per line; no shell parsing</span><textarea id="mcp-args" rows="4" spellcheck="false">${esc((value.args || []).join("\n"))}</textarea></label><label id="mcp-env-label">Environment <span class="set-hint">KEY=value → SecretStorage · KEY → ambient lookup</span><textarea id="mcp-env" rows="4" spellcheck="false" placeholder="${esc((value.env_names || []).map((name) => `${name}=…`).join("\n") || "GITHUB_TOKEN=…")}"></textarea></label><label id="mcp-token-label">Bearer token <span class="set-hint">blank preserves the saved token</span><input id="mcp-token" type="password" spellcheck="false" placeholder="optional"></label><label class="surface-check"><input id="mcp-clear-secrets" type="checkbox"> Clear stored credentials before saving</label><label>Log level<select id="mcp-log"><option>warning</option><option>info</option><option>debug</option><option>error</option><option>off</option></select></label><div class="surface-actions"><button type="submit" class="act primary">Save and connect</button><button type="button" class="act" id="mcp-cancel">Cancel</button></div></form>`;
+    $("mcp-log").value = value.log_level || "warning";
+    const updateTransport = () => {
+      const isRemote = $("mcp-transport").value === "remote";
+      $("mcp-target-label").firstChild.textContent = isRemote ? "Server URL" : "Command";
+      $("mcp-args-label").hidden = isRemote; $("mcp-env-label").hidden = isRemote;
+      $("mcp-token-label").hidden = !isRemote;
+    };
+    $("mcp-transport").onchange = updateTransport; updateTransport();
+    surfaceBody.querySelector(".surface-back").onclick = () => renderMcp();
+    $("mcp-cancel").onclick = () => renderMcp();
+    $("mcp-config-form").onsubmit = (event) => {
+      event.preventDefault();
+      if (!event.target.reportValidity()) return;
+      vscode.postMessage({ type: "mcpSave", values: {
+        original_name: $("mcp-original").value, name: $("mcp-name").value,
+        transport: $("mcp-transport").value, target: $("mcp-target").value,
+        args: $("mcp-args").value, env: $("mcp-env").value,
+        env_names: value.env_names || [], token: $("mcp-token").value,
+        clear_secrets: $("mcp-clear-secrets").checked,
+        log_level: $("mcp-log").value,
+      } });
+      surfaceBody.innerHTML = '<div class="surface-empty">Saving and connecting…</div>';
+    };
+    surfaceButtons(); $("mcp-name").focus();
+  }
+  function renderMcp() {
+    openSurface("mcp");
+    const servers = mcpRows.length ? mcpRows.map((item, i) =>
+      `<article class="surface-card" data-filter="${esc(`${item.name} ${item.state} ${item.command} ${item.url}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(item.name)}</strong><span class="surface-state ${mcpStateClass(item.state)}">${esc(item.state || "configured")}</span></div><div class="surface-meta">${esc(item.transport === "remote" ? item.url : [item.command, ...(item.args || [])].join(" "))}</div><p>${Number(item.tool_count || 0)} tool(s)${item.protocol_era ? ` · ${esc(item.protocol_era)}` : ""}</p>${item.error ? `<div class="err">${esc(item.error)}</div>` : ""}<div class="surface-actions"><button type="button" class="act" data-mcp-edit="${i}">Edit</button><button type="button" class="act danger" data-mcp-remove="${i}">Remove</button></div></article>`).join("")
+      : '<div class="surface-empty">No MCP servers configured.</div>';
+    const tools = mcpTools.length ? `<h2 class="surface-subtitle">Available tools · ${mcpTools.length}</h2>${mcpTools.map((tool) => `<article class="surface-card compact" data-filter="${esc(`${tool.name} ${tool.description}`.toLowerCase())}"><strong>${esc(tool.name)}</strong><p>${esc(tool.description || "")}</p></article>`).join("")}` : "";
+    surfaceBody.innerHTML = servers + tools;
+    surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => button.onclick = () => showMcpForm(mcpRows[+button.dataset.mcpEdit]));
+    surfaceBody.querySelectorAll("[data-mcp-remove]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "mcpRemove", name: mcpRows[+button.dataset.mcpRemove].name }));
+    surfaceButtons("Add server", () => showMcpForm(), "Reload", () => vscode.postMessage({ type: "mcpReload" }));
+    filterSurface();
+  }
+  function renderDocs(items) {
+    surfaceRows = Array.isArray(items) ? items : []; openSurface("docs");
+    surfaceBody.innerHTML = surfaceRows.map((doc, i) => `<button type="button" class="surface-card surface-list-button" data-doc="${i}" data-filter="${esc(`${doc.title} ${doc.description}`.toLowerCase())}"><strong>${esc(doc.title)}</strong><span>${esc(doc.description)}</span></button>`).join("") || '<div class="surface-empty">No documentation is bundled.</div>';
+    surfaceBody.querySelectorAll("[data-doc]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getDoc", id: surfaceRows[+button.dataset.doc].id }));
+    surfaceButtons(); filterSurface();
+  }
+  function renderDoc(ev) {
+    openSurface("docs");
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← Documentation</button><div class="surface-markdown">${ev.found ? md(ev.markdown || "") : "Page not found."}</div>`;
+    surfaceBody.querySelector(".surface-back").onclick = () => renderDocs(surfaceRows);
+    surfaceButtons();
+  }
+  function renderPermissions(items) {
+    surfaceRows = Array.isArray(items) ? items : []; openSurface("permissions");
+    surfaceBody.innerHTML = `<form id="permission-form" class="surface-inline-form"><select id="permission-action" aria-label="Rule action"><option>deny</option><option>ask</option><option>allow</option></select><input id="permission-rule" required aria-label="Permission rule" placeholder="Bash(npm test *)"><button class="act primary" type="submit">Add</button></form>` + (surfaceRows.map((rule, i) => `<article class="surface-card compact" data-filter="${esc(`${rule.action} ${rule.rule}`.toLowerCase())}"><div class="surface-card-head"><span class="surface-badge ${esc(rule.action)}">${esc(rule.action)}</span><code>${esc(rule.rule)}</code><button type="button" class="icon-action" aria-label="Remove rule" data-rule-remove="${i}">×</button></div></article>`).join("") || '<div class="surface-empty">No custom permission rules. Mode defaults still apply.</div>');
+    $("permission-form").onsubmit = (event) => { event.preventDefault(); vscode.postMessage({ type: "permissionAdd", action: $("permission-action").value, rule: $("permission-rule").value }); };
+    surfaceBody.querySelectorAll("[data-rule-remove]").forEach((button) => button.onclick = () => { const rule = surfaceRows[+button.dataset.ruleRemove]; vscode.postMessage({ type: "permissionRemove", action: rule.action, rule: rule.rule }); });
+    surfaceButtons(); filterSurface();
+  }
+  function renderMemory(ev) {
+    openSurface("memory");
+    const block = (title, value) => `<section><h2 class="surface-subtitle">${title}</h2><div class="surface-markdown">${value ? md(value) : '<p class="muted">No memory saved.</p>'}</div></section>`;
+    surfaceBody.innerHTML = (ev.message ? `<div class="surface-notice">${esc(ev.message)}</div>` : "") + block("Project · DGC.md", ev.project) + block("Personal · ~/.dgc/DGC.md", ev.user);
+    const add = (scope) => {
+      surfaceBody.innerHTML = `<button type="button" class="surface-back">← Memory</button><form id="memory-form" class="surface-form"><label>Add ${scope} memory<textarea id="memory-text" required rows="6" maxlength="8000" placeholder="A durable fact or preference DGC should remember"></textarea></label><button class="act primary" type="submit">Save memory</button></form>`;
+      surfaceBody.querySelector(".surface-back").onclick = () => renderMemory(ev);
+      $("memory-form").onsubmit = (event) => { event.preventDefault(); vscode.postMessage({ type: "memoryAdd", scope, text: $("memory-text").value }); };
+      surfaceButtons(); $("memory-text").focus();
+    };
+    surfaceButtons("Add project memory", () => add("project"), "Add personal memory", () => add("user"));
+  }
+  function renderHooks(ev) {
+    openSurface("hooks");
+    const items = Array.isArray(ev.items) ? ev.items : [];
+    surfaceBody.innerHTML = (Number(ev.invalid || 0) ? `<div class="err surface-notice">${Number(ev.invalid)} invalid or unsupported hook entries</div>` : "") + items.map((hook) => `<article class="surface-card compact" data-filter="${esc(`${hook.event} ${(hook.matchers || []).join(" ")}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(hook.event)}</strong><span class="surface-state ${hook.valid ? "ok" : "err"}">${hook.valid ? "ready" : "invalid"}</span></div><p>${Number(hook.configured || 0)} configured${hook.matchers?.length ? ` · ${esc(hook.matchers.join(", "))}` : ""}</p></article>`).join("");
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "slash", action: "hooks" })); filterSurface();
+  }
+  surfaceSearch.addEventListener("input", filterSurface);
+  $("surface-close").onclick = closeSurface;
+  $("surface").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeSurface(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = [...$("surface").querySelectorAll("button, input, select, textarea, [tabindex]")]
+      .filter((node) => !node.disabled && !node.hidden && !node.closest("[hidden]")
+        && node.getAttribute("aria-hidden") !== "true");
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
 
   function onEvent(ev) {
     const stick = atBottom();
@@ -349,7 +598,11 @@
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
         break;
-      case "config": lastConfig = ev; if (!$("settings").hidden) fillSettings(ev); break;
+      case "config":
+        lastConfig = ev;
+        document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
+        if (!$("settings").hidden) fillSettings(ev);
+        break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
@@ -389,6 +642,9 @@
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
         setToolStatus(c, ev.is_error ? "failed" : "completed");
+        if (ev.is_error) {
+          c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
+        }
         if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
@@ -399,7 +655,9 @@
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny";
-        setToolStatus(c, "denied"); break;
+        setToolStatus(c, "denied");
+        c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
+        break;
       }
       case "permission_request": {
         ensureTurn();
@@ -582,25 +840,28 @@
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "skill_catalog": {
-        const items = Array.isArray(ev.items) ? ev.items : [];
-        if (!items.length) { sysLine("No skills are installed."); break; }
-        const rows = items.map((skill) => {
-          const description = String(skill.description || "skill");
-          return `${String(skill.name || "")}  [${String(skill.source || "unknown")}]  ${description}`;
-        }).join("\n");
-        decisionCard(`<div class="q"><span class="codicon codicon-library"></span> Installed skills · ${items.length}</div><pre>${esc(rows)}</pre>`, "Installed skills");
+        if (surfaceKind === "skills") renderSkills(ev.items);
         break;
       }
+      case "skill_detail": if (surfaceKind === "skills") renderSkillDetail(ev); break;
+      case "docs_catalog": if (surfaceKind === "docs") renderDocs(ev.items); break;
+      case "doc": if (surfaceKind === "docs") renderDoc(ev); break;
+      case "mcp_servers":
+        mcpRows = Array.isArray(ev.items) ? ev.items : [];
+        if (surfaceKind === "mcp") renderMcp();
+        if (ev.error && surfaceKind === "mcp") {
+          const warning = el("div", "err surface-notice", esc(ev.error));
+          surfaceBody.insertBefore(warning, surfaceBody.firstChild);
+        }
+        break;
+      case "mcp_tools":
+        mcpTools = Array.isArray(ev.tools) ? ev.tools : [];
+        if (surfaceKind === "mcp") renderMcp();
+        break;
+      case "permissions": if (surfaceKind === "permissions") renderPermissions(ev.items); break;
+      case "memory": if (surfaceKind === "memory") renderMemory(ev); break;
       case "hook_catalog": {
-        const items = Array.isArray(ev.items) ? ev.items : [];
-        const rows = items.map((hook) => {
-          const matchers = Array.isArray(hook.matchers) && hook.matchers.length
-            ? hook.matchers.join(", ") : "—";
-          return `${String(hook.event || "")}  ${Number(hook.configured || 0)}  ${matchers}  ${hook.valid ? "ready" : "invalid"}`;
-        }).join("\n");
-        const warning = Number(ev.invalid || 0)
-          ? `<div class="err">${Number(ev.invalid)} invalid or unsupported hook entries</div>` : "";
-        decisionCard(`<div class="q"><span class="codicon codicon-run-all"></span> Lifecycle hooks · ${Number(ev.total || 0)}</div><pre>${esc(rows)}</pre>${warning}`, "Lifecycle hooks");
+        if (surfaceKind === "hooks") renderHooks(ev);
         break;
       }
       case "hook_activity":
@@ -622,6 +883,7 @@
       }
       case "goal_changed": {
         const text = String(ev.goal || "");
+        setGoalState({ text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
         sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");
         break;
       }
@@ -647,6 +909,14 @@
   // ---- composer ----
   function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
+  $("goal-toggle").onclick = () => vscode.postMessage({
+    type: "slashText", text: goalState.status === "active" ? "/goal pause" : "/goal resume",
+  });
+  $("goal-clear").onclick = () => vscode.postMessage({ type: "slashText", text: "/goal clear" });
+  $("goal-edit").onclick = () => {
+    input.value = `/goal ${goalState.text}`; input.selectionStart = input.selectionEnd = input.value.length;
+    input.focus(); onInput();
+  };
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
@@ -809,7 +1079,12 @@
   const SET_FIELDS = ["base_url", "api_key", "model", "subagent_model", "subagent_base_url",
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
-    "capability_cache_ttl_s", "mode", "think", "context_size"];
+    "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
+    "sandbox_network", "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+    "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+    "subscription_engine", "subscription_model", "subscription_effort"];
+  const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
+    "show_reasoning", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
@@ -822,10 +1097,44 @@
       api_mode: cfg.api_mode, provider_state: cfg.provider_state,
       prompt_cache: String(cfg.prompt_cache !== false),
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
+      sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
+      show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      plan_artifact: String(cfg.plan_artifact !== false),
+      artifact_autostart: String(cfg.artifact_autostart !== false),
+      artifact_in_plan: String(cfg.artifact_in_plan === true),
+      tool_profile: cfg.tool_profile || "adaptive",
+      max_parallel_tasks: cfg.max_parallel_tasks || 4,
+      subscription_engine: cfg.subscription_engine || "",
+      subscription_model: cfg.subscription_model || "",
+      subscription_effort: cfg.subscription_effort || "",
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
+    renderSubscriptionStatus(cfg);
   }
-  function openSettings(providers, models) {
+  function renderSubscriptionStatus(cfg) {
+    const box = $("s-subscription_status");
+    if (!box) return;
+    const active = cfg.subscription_engine || "";
+    const list = Array.isArray(cfg.subscription_engines) ? cfg.subscription_engines : [];
+    if (!active) { box.textContent = "off — DGC drives the model above directly."; return; }
+    const s = list.find((e) => e && e.key === active);
+    if (!s) { box.textContent = ""; return; }
+    if (!s.installed) box.textContent = s.label + ": CLI not installed.";
+    else if (!s.logged_in) box.textContent = s.label + ": not signed in — run  " + s.login_cmd;
+    else box.textContent = s.label + ": signed in ✓ — turns run through your subscription.";
+  }
+  function showSettingsSection(section) {
+    const wanted = ["general", "models", "agents", "security", "extensions"].includes(section)
+      ? section : "general";
+    document.querySelectorAll(".set-section").forEach((node) => { node.hidden = node.dataset.section !== wanted; });
+    document.querySelectorAll(".set-tab").forEach((button) => {
+      const active = button.dataset.section === wanted;
+      button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
+    });
+    const first = $(`settings`).querySelector(`.set-section[data-section="${wanted}"] input, .set-section[data-section="${wanted}"] select, .set-section[data-section="${wanted}"] button`);
+    if (first) first.focus();
+  }
+  function openSettings(providers, models, section) {
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
@@ -833,7 +1142,7 @@
     if (lastConfig) fillSettings(lastConfig);
     settingsReturnFocus = document.activeElement;
     $("settings").hidden = false;
-    $("s-provider").focus();
+    showSettingsSection(section || "general");
   }
   function closeSettings() {
     $("settings").hidden = true;
@@ -844,7 +1153,7 @@
   function collectSettings() {
     const v = {};
     SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
-    v.prompt_cache = v.prompt_cache !== "false";
+    SET_BOOLEAN_FIELDS.forEach((key) => { v[key] = v[key] !== "false"; });
     return v;
   }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
@@ -865,9 +1174,14 @@
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
     if (p) {
       $("s-base_url").value = p.url; $("s-api_mode").value = "auto";
+      const se = $("s-subscription_engine"); if (se) se.value = "";   // a direct provider turns delegation off
       if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
     }
   };
+  document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
+  document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
+    closeSettings(); vscode.postMessage({ type: "slash", action: button.dataset.openSurface });
+  });
 
   function renderHistory(items) {
     // Non-destructive: replace only the history block, and place it ABOVE any live
@@ -882,7 +1196,7 @@
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
       } else {
         const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
-        if (it.text) m.appendChild(el("div", "text", md(it.text)));
+        if (it.text) m.appendChild(el("div", "text final", md(it.text)));
         if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
         frag.appendChild(m);
       }
@@ -903,9 +1217,18 @@
       $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
       if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
+      setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
-    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models); }
+    else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
+    else if (msg.type === "surface_open") { openSurface(msg.surface); }
+    else if (msg.type === "command_menu") {
+      input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput();
+    }
+    else if (msg.type === "composer_text") {
+      input.value = String(msg.text || ""); input.selectionStart = input.selectionEnd = input.value.length;
+      input.focus(); onInput();
+    }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { setSending(false); }
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
@@ -920,4 +1243,5 @@
     }
     else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
+  vscode.postMessage({ type: "webviewReady" });
 })();

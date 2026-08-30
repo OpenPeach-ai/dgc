@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -67,6 +67,12 @@
         "category": "DGC"
       },
       {
+        "command": "dgc.openCommandMenu",
+        "title": "DGC: Open Command Menu",
+        "category": "DGC",
+        "icon": "$(terminal)"
+      },
+      {
         "command": "dgc.newSession",
         "title": "DGC: New Session",
         "category": "DGC",
@@ -120,6 +126,71 @@
         "icon": "$(discard)"
       },
       {
+        "command": "dgc.nameSession",
+        "title": "DGC: Name Session",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openSkills",
+        "title": "DGC: Skills",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openMcp",
+        "title": "DGC: MCP Servers",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openDocs",
+        "title": "DGC: Documentation",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openPermissions",
+        "title": "DGC: Permission Rules",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openMemory",
+        "title": "DGC: Memory",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.openHooks",
+        "title": "DGC: Lifecycle Hooks",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.viewPlan",
+        "title": "DGC: View Saved Plan",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.artifacts",
+        "title": "DGC: Artifact Previews",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.goal",
+        "title": "DGC: Show Goal",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.handoff",
+        "title": "DGC: Generate Handoff",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.retainedTasks",
+        "title": "DGC: Retained Sub-agent Tasks",
+        "category": "DGC"
+      },
+      {
+        "command": "dgc.compact",
+        "title": "DGC: Compact Context",
+        "category": "DGC"
+      },
+      {
         "command": "dgc.updateCli",
         "title": "DGC: Update CLI to Latest",
         "category": "DGC"
@@ -133,6 +204,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "dgc.openCommandMenu",
+          "when": "view == dgc.chat",
+          "group": "navigation@0"
+        },
         {
           "command": "dgc.resume",
           "when": "view == dgc.chat",

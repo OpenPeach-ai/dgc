@@ -1058,7 +1058,7 @@ class TUI:
             ws = f" · {branch}" if branch else ""
             left_text = Text.from_markup(
                 f" [bold {th.accent}]Vibe DGC[/] "
-                f"[{th.faint}]· {_esc(self.config.model)} · {_esc(self.agent.mode)}"
+                f"[{th.faint}]· {_esc(self._model_label())} · {_esc(self.agent.mode)}"
                 f"{_esc(nm)}{_esc(ws)}[/]")
             chip, _ = self._context_chip(self._ctx_hover)      # top-right token counter
             right_text = Text.from_markup(chip)
@@ -1318,7 +1318,7 @@ class TUI:
         running = sum(1 for s in self._sessions if s.state == "running")
         needs = sum(1 for s in self._sessions if s.state == "needs_input")
 
-        h1 = Text("  "); h1.append(style_mod.terminal_safe_text(self.config.model),
+        h1 = Text("  "); h1.append(style_mod.terminal_safe_text(self._model_label()),
                                     style=f"bold {th.text_strong}")
         h1.append("   " + style_mod.terminal_safe_text(self.agent.mode)
                   + " · think " + style_mod.terminal_safe_text(
@@ -1605,12 +1605,24 @@ class TUI:
                   - _ansi_cell_len(R) - 1)
         return ANSI(indent + L + " " * gap + R)
 
+    def _model_label(self) -> str:
+        """What the status displays call 'the model' — the subscription engine's
+        name when delegating, otherwise the direct model DGC drives itself."""
+        se = str(self.config.get("subscription_engine", "")).strip().lower()
+        if se:
+            from . import subscriptions as subs
+            eng = subs.get_engine(se)
+            if eng is not None:
+                m = str(self.config.get("subscription_model", "")).strip()
+                return f"{eng.short_label} · {m}" if m else f"{eng.short_label} · subscription"
+        return self.config.model
+
     # ---- composer info line (model · mode) ----
     def _info(self):
         th = style_mod.theme()
         mode = self.agent.mode
         mc = {"default": th.muted, "acceptEdits": th.accent, "plan": th.accent_bright, "auto": th.err}
-        return ANSI(self._rich(f"[{th.faint}]{_esc(self.config.model)}[/]  "
+        return ANSI(self._rich(f"[{th.faint}]{_esc(self._model_label())}[/]  "
                                f"[{th.faint}]{glyphs.MIDDOT}[/]  "
                                f"[{mc.get(mode, th.muted)}]{_esc(mode)}[/]",
                                end=""))
@@ -1630,7 +1642,7 @@ class TUI:
         w = max(10, self._width)
         th = style_mod.theme()
         c, dim, rst = style_mod.ansi_fg(self._border_color()), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
-        info = (f" {style_mod.terminal_safe_text(self.config.model)} {glyphs.MIDDOT} "
+        info = (f" {style_mod.terminal_safe_text(self._model_label())} {glyphs.MIDDOT} "
                 f"{style_mod.terminal_safe_text(self.agent.mode)} ")
         n = w - 3 - _cell_len(info)
         if n < 2:
@@ -2873,10 +2885,10 @@ class TUI:
                 self._flash("standing goal → completed" if self.agent.update_goal("completed")
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to complete"))
-            elif rest.lower() in ("blocked", "block"):
-                self._flash("standing goal → blocked" if self.agent.update_goal("blocked")
+            elif rest.lower() in ("blocked", "block", "pause", "paused"):
+                self._flash("standing goal → paused" if self.agent.update_goal("blocked")
                             else (getattr(self.agent, "_last_persist_error", "")
-                                  or "no standing goal to block"))
+                                  or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
                 self._flash("standing goal → active" if self.agent.update_goal("active")
                             else (getattr(self.agent, "_last_persist_error", "")
@@ -2891,7 +2903,7 @@ class TUI:
                 if g:
                     self._open_reader(
                         f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{g}\n\n"
-                        "`/goal complete` · `/goal blocked` · `/goal resume` · `/goal clear`",
+                        "`/goal complete` · `/goal pause` · `/goal resume` · `/goal clear`",
                         footer="the standing objective · ↑↓ scroll · Esc close")
                 else:
                     self._flash("no goal set — /goal <objective> to set one")
@@ -2943,7 +2955,14 @@ class TUI:
         elif cmd == "resume":
             self._resume_flow()
         elif cmd in ("model", "models"):
-            if cmd == "model" and rest:
+            _se = str(self.config.get("subscription_engine", "")).strip().lower()
+            if _se:                                    # steer the subscription's model, not the endpoint
+                if rest:
+                    self.config.set("subscription_model", rest)
+                    self._flash(f"subscription model → {rest}")
+                else:
+                    self._subscription_model_flow(_se)
+            elif cmd == "model" and rest:
                 self._set_model_tui(rest)
             else:
                 self._model_flow()
@@ -2999,7 +3018,19 @@ class TUI:
             else:
                 self._cycle_mode()
         elif cmd == "think":
-            if rest in ("off", "low", "medium", "high"):
+            _se = str(cfg.get("subscription_engine", "")).strip().lower()
+            if _se:                                    # /think steers the subscription's reasoning effort
+                from . import subscriptions as subs
+                eng = subs.get_engine(_se)
+                if eng is not None and not eng.supports_effort():
+                    self._flash(f"{eng.short_label} takes no reasoning-effort flag — steer it via /model")
+                elif rest in ("off", "low", "medium", "high"):
+                    val = "" if rest == "off" else rest
+                    cfg.set("subscription_effort", val); self._flash(f"subscription effort → {val or 'default'}")
+                else:
+                    self._flash(f"subscription effort: {cfg.get('subscription_effort', '') or 'default'}"
+                                " — /think off|low|medium|high")
+            elif rest in ("off", "low", "medium", "high"):
                 cfg.set("thinking", rest); self._flash(f"thinking → {rest}")
             else:
                 self._flash(f"thinking: {cfg.get('thinking', 'off')} — /think off|low|medium|high")
@@ -3202,6 +3233,53 @@ class TUI:
                             "",
                             api_mode=self.agent._route_api_mode(base_url, "subagent_api_mode")))
         return client.list_models()
+
+    def _subscription_model_flow(self, engine_key: str) -> None:
+        """`/model` when a subscription engine is active — steer that CLI's own model
+        and reasoning effort, not the local endpoint."""
+        from . import subscriptions as subs
+        eng = subs.get_engine(engine_key)
+        if eng is None:
+            return
+        name = eng.short_label
+        cur_m = str(self.config.get("subscription_model", "")).strip() or "the CLI's default"
+        cur_e = str(self.config.get("subscription_effort", "")).strip() or "default"
+        hints = list(eng.model_hints)
+        labels = list(hints) + ["Custom model name…"]
+        eff_index = None
+        if eng.supports_effort():
+            eff_index = len(labels)
+            labels.append(f"Reasoning effort  ({cur_e})")
+        reset_index = len(labels)
+        labels.append("Reset to the CLI's default")
+
+        def pick(i):
+            if i < len(hints):
+                self.config.set("subscription_model", hints[i])
+                self._flash(f"{name} model → {hints[i]}")
+            elif i == len(hints):
+                self._ask_input(f"{name} model name (blank = its default)",
+                                lambda v: self._set_subscription_model(v.strip(), name))
+            elif eff_index is not None and i == eff_index:
+                self._subscription_effort_flow(name)
+            elif i == reset_index:
+                self.config.set("subscription_model", "")
+                self.config.set("subscription_effort", "")
+                self._flash(f"{name} → the CLI's defaults")
+        self._show_picker(f"{name} · your subscription   (model: {cur_m})", labels, pick)
+
+    def _set_subscription_model(self, model: str, name: str) -> None:
+        self.config.set("subscription_model", model)
+        self._flash(f"{name} model → {model or 'the CLI default'}")
+
+    def _subscription_effort_flow(self, name: str) -> None:
+        levels = ["default", "low", "medium", "high"]
+
+        def pick(i):
+            val = "" if i == 0 else levels[i]
+            self.config.set("subscription_effort", val)
+            self._flash(f"{name} reasoning effort → {val or 'default'}")
+        self._show_picker(f"Reasoning effort · {name}", levels, pick)
 
     def _model_flow(self, subagent: bool = False) -> None:
         base = self.config.get("subagent_base_url") or self.config.base_url if subagent else None
@@ -3433,6 +3511,7 @@ class TUI:
 
     def _connect_flow(self, rest: str, subagent: bool = False) -> None:
         from .config import PROVIDERS
+        from . import subscriptions as subs
         bk = "subagent_base_url" if subagent else "base_url"
         kk = "subagent_api_key" if subagent else "api_key"
         who = "sub-agent host" if subagent else "endpoint"
@@ -3449,6 +3528,7 @@ class TUI:
                 if subagent:
                     self.config.set("subagent_api_mode", "auto")
                 else:
+                    self.config.set("subscription_engine", "")   # a direct model turns delegation off
                     self.config.set("api_mode", "auto")
                     self.agent.refresh_client()
                 self._flash(f"{who} → {prov['base_url']}")
@@ -3458,26 +3538,79 @@ class TUI:
             else:
                 finish()
 
-        if rest:                                       # /connect <preset|url>
-            if rest in PROVIDERS:
+        def selected_engine(key: str) -> None:                # a subscription CLI (their own plan)
+            eng = subs.get_engine(key)
+            self.config.set("subscription_engine", key)
+            if eng.resolve() is None:
+                self._flash(f"provider → {eng.label}")
+                self._offer_engine_install(eng)
+            elif not eng.logged_in():
+                self._flash(f"provider → {eng.label}")
+                self._offer_engine_login(eng)
+            else:
+                self._flash(f"provider → {eng.label} (your subscription) — signed in ✓")
+
+        if rest:                                       # /connect <engine|preset|url>
+            if not subagent and subs.get_engine(rest) is not None:
+                selected_engine(rest.strip().lower())
+            elif rest in PROVIDERS:
                 selected_provider(PROVIDERS[rest])
             else:
                 self.config.set(bk, rest)
                 if not subagent:
+                    self.config.set("subscription_engine", "")
                     self.agent.refresh_client()
                 self._flash(f"{who} → {self.config.get(bk)}")
             return
+        sub_status = subs.status() if not subagent else []      # subscriptions are a main-model concept
+        sub_labels = [f"{s['label']} — your subscription"
+                      + ("  ✓" if s["logged_in"] else ("  (sign in)" if s["installed"] else "  (not installed)"))
+                      for s in sub_status]
+        n_sub = len(sub_status)
         keys = list(PROVIDERS)
-        labels = [f"{PROVIDERS[k]['label']}  ({PROVIDERS[k]['base_url']})" for k in keys]
+        labels = sub_labels + [f"{PROVIDERS[k]['label']}  ({PROVIDERS[k]['base_url']})" for k in keys]
         labels.append("Custom host — enter a URL (e.g. a machine on your LAN)")
 
         def pick(i):
+            if i < n_sub:                               # a subscription engine
+                selected_engine(sub_status[i]["key"]); return
+            i -= n_sub
             if i == len(keys):                          # custom host
                 self._ask_input("host URL (e.g. http://192.168.1.50:11434/v1) then Enter",
                                 lambda url: self._set_host(url.strip(), subagent))
                 return
             selected_provider(PROVIDERS[keys[i]])
         self._show_picker(f"Connect a {who}", labels, pick)
+
+    def _offer_engine_install(self, eng) -> None:
+        """Offer to install a not-yet-installed subscription CLI from inside DGC."""
+        if not eng.install_cmd:
+            self._flash(f"{eng.short_label} isn't installed — install its CLI, then /connect again")
+            return
+
+        def pick(i):
+            if i != 0:
+                return
+            self._flash(f"installing {eng.short_label} — then /connect again to sign in")
+            self._submit_shell(eng.install_cmd)     # streamed like any ! command; non-interactive
+        self._show_picker(f"{eng.short_label} isn't installed. Install it now?   ({eng.install_cmd})",
+                          ["Yes, install it", "No"], pick)
+
+    def _offer_engine_login(self, eng) -> None:
+        """Offer to sign in to a subscription CLI from inside DGC. The vendor's own
+        login opens the browser / prints a device URL and owns the token — DGC only
+        launches it (no credential handling here)."""
+        if not eng.login_run:
+            self._flash(f"sign in to {eng.short_label}: run  {eng.login_cmd}  in a terminal, then come back")
+            return
+
+        def pick(i):
+            if i != 0:
+                return
+            self._flash(f"opening {eng.short_label} sign-in — follow the link that appears")
+            self._submit_shell(eng.login_run)       # opens the browser / prints the device URL
+        self._show_picker(f"Sign in to {eng.short_label} now? (opens your browser)",
+                          ["Yes, sign in", "No"], pick)
 
     def _set_host(self, url: str, subagent: bool) -> None:
         if not url:
@@ -4069,6 +4202,58 @@ class TUI:
         self._flash("follow-up queued for the next turn")
         return "queued"
 
+    def _run_delegated_turn(self, engine_key: str, prompt: str) -> bool:
+        """3b — run this turn through the user's own subscription CLI, streaming its
+        output into the transcript via the same UI callbacks the agent uses. Esc/Ctrl-C
+        cancels it (the CLI's whole process group is killed)."""
+        from . import subscriptions as subs
+        engine = subs.get_engine(engine_key)
+        if engine is None:
+            self.error(f"unknown subscription engine '{engine_key}'")
+            return False
+        try:
+            subs.preflight(engine)
+        except subs.EngineError as e:
+            self.error(str(e))
+            return False
+        self.info(f"running this turn through {engine.label} (your subscription)…")
+        turns = getattr(self, "_delegated_turns", 0)
+        shown = {"text": False}
+
+        def on_event(ev: dict) -> None:
+            kind, text = ev.get("kind"), ev.get("text", "")
+            if not text:
+                return
+            if kind == "tool":
+                self.info(f"· {text[:200]}")
+            elif kind == "text":                 # the assistant's answer, streamed
+                shown["text"] = True
+                self.on_text(text if text.endswith("\n") else text + "\n")
+            elif kind == "result" and not shown["text"]:
+                self.on_text(text if text.endswith("\n") else text + "\n")
+            # "raw" (system/init/tool-result protocol frames) is never shown
+
+        budget = int(self.config.get("turn_budget_s") or 0) or 1800
+        try:
+            res = subs.run_turn(engine, prompt, self.config.project_root,
+                                cont=turns > 0, timeout=budget, on_event=on_event,
+                                cancel=self._cancel.is_set,
+                                model=str(self.config.get("subscription_model", "")).strip(),
+                                effort=str(self.config.get("subscription_effort", "")).strip())
+        except subs.EngineError as e:
+            self.error(str(e))
+            return False
+        finally:
+            self.end_stream()
+        if res.get("cancelled"):
+            self.info("stopped.")
+            return False
+        if res.get("timeout"):
+            self.error("the delegated turn hit the time budget and was stopped")
+            return False
+        setattr(self, "_delegated_turns", turns + 1)
+        return res.get("rc") == 0
+
     def _submit(self, text: str, *, echo: bool = True) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
@@ -4100,7 +4285,11 @@ class TUI:
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
                 model_text = self._expand_mentions(text)
-                succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
+                _se = str(self.config.get("subscription_engine", "")).strip().lower()
+                if _se:
+                    succeeded = self._run_delegated_turn(_se, model_text)
+                else:
+                    succeeded = self.agent.run_turn(model_text, reset_cancel=False) is not False
             except Exception as e:
                 self.error(f"{type(e).__name__}: {e}")
             finally:

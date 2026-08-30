@@ -1423,11 +1423,14 @@ class MCPManager:
                                      if isinstance(client_capabilities, dict) else {})
         atexit.register(self.stop_all)
 
-    def connect_all(self, config_servers: dict | None) -> None:
+    def connect_all(self, config_servers: dict | None, *, startup: bool = False) -> None:
+        """Connect configured servers, deferring editor-secret entries during cold startup."""
         if not isinstance(config_servers, dict):
             return
         for raw_name, raw_spec in config_servers.items():
             if not isinstance(raw_spec, dict):
+                continue
+            if startup and raw_spec.get("defer_until_setup") is True:
                 continue
             cmd = raw_spec.get("command")
             if not isinstance(cmd, str) or not cmd.strip():
@@ -1437,7 +1440,17 @@ class MCPManager:
             old = self.servers.pop(name, None)
             if old is not None:
                 old.stop()
-            server = MCPServer(name, cmd, raw_spec.get("args"), raw_spec.get("env"), self.root,
+            configured_env = raw_spec.get("env")
+            configured_env = dict(configured_env) if isinstance(configured_env, dict) else {}
+            # Editor-managed credentials are persisted only as environment-variable names. A CLI
+            # launch can still resolve those references from its ambient environment, while the
+            # editor reconnects with SecretStorage values in its typed setup frames.
+            env_names = raw_spec.get("env_names")
+            if isinstance(env_names, list):
+                for env_name in env_names[:64]:
+                    if isinstance(env_name, str) and env_name in os.environ:
+                        configured_env.setdefault(env_name, os.environ[env_name])
+            server = MCPServer(name, cmd, raw_spec.get("args"), configured_env, self.root,
                                str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
             if server.start():
                 self.servers[name] = server
