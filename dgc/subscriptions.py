@@ -108,7 +108,7 @@ ENGINES: dict[str, SubEngine] = {
         subcmd=(), resume=("-c",),
         flags=("--output-format", "stream-json", "--yolo"),
         prompt_flag="-p", stream="qwen", model_flag="-m",
-        install_cmd="npm install -g @qwen-code/qwen-code"),
+        install_cmd="npm install -g @qwen-code/qwen-code", login_run="qwen"),
     "kimi": SubEngine(
         key="kimi", label="Kimi for Coding (Moonshot subscription)", binary="kimi",
         auth_markers=(".kimi/credentials", ".kimi/kimi.json"), login_cmd="kimi login",
@@ -127,7 +127,7 @@ ENGINES: dict[str, SubEngine] = {
         # The Copilot CLI has no JSON stream mode; --allow-all is its auto-approve.
         flags=("--allow-all",),
         prompt_flag="--prompt", stream="copilot", model_flag="--model",
-        install_cmd="npm install -g @github/copilot"),
+        install_cmd="npm install -g @github/copilot", login_run="copilot"),
 }
 
 ENGINE_KEYS = tuple(ENGINES)
