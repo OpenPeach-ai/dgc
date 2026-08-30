@@ -19,3 +19,8 @@ site/dgc.tar.gz
 site/dgc.tar.gz.sha256
 site/vscode/*.vsix
 HARNESS_SYNTHESIS.md
+
+# internal-only, never publish
+docs/FRONTIER_AUDIT_AND_ROADMAP.md
+docs/NON_CODING_SURFACE_TESTS.md
+docs/fixtures/
