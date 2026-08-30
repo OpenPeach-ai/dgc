@@ -24,3 +24,7 @@ HARNESS_SYNTHESIS.md
 docs/FRONTIER_AUDIT_AND_ROADMAP.md
 docs/NON_CODING_SURFACE_TESTS.md
 docs/fixtures/
+PI_VS_DGC_COMPARISON.md
+PI_VS_DGC_COMPARISON_raw.json
+bench/sync_vast_results.sh
+output/
