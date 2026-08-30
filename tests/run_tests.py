@@ -13576,7 +13576,7 @@ def test_subscription_engines():
     check("subscriptions: copilot uses --prompt + --allow-all with prompt as its value",
           "--prompt" in cop and cop[cop.index("--prompt") + 1] == "fix it" and "--allow-all" in cop)
     check("subscriptions: copilot plain-text output normalizes to a text event",
-          S.parse_stream_line("copilot", "Reading files...") == {"kind": "text", "text": "Reading files..."})
+          S.parse_stream_events("copilot", "Reading files...") == [{"kind": "text", "text": "Reading files..."}])
     ce = S.ENGINES["claude"].build_argv("claude", "fix", cont=False, model="opus", effort="high")
     check("subscriptions: claude injects --model and --effort when set",
           "--model" in ce and ce[ce.index("--model") + 1] == "opus"
@@ -13605,17 +13605,31 @@ def test_subscription_engines():
     check("subscriptions: qwen passes the prompt via the -p value flag",
           "-p" in qw and qw[qw.index("-p") + 1] == "fix it" and "stream-json" in qw)
 
-    check("subscriptions: claude assistant text normalizes to a text event",
-          S.parse_stream_line("claude", json.dumps(
-              {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}}))
-          == {"kind": "text", "text": "Hi"})
-    check("subscriptions: codex agent_message normalizes to a text event",
-          S.parse_stream_line("codex", json.dumps({"msg": {"type": "agent_message", "message": "go"}}))
-          == {"kind": "text", "text": "go"})
-    check("subscriptions: an unparseable line becomes a raw event, never dropped",
-          S.parse_stream_line("codex", "not json") == {"kind": "raw", "text": "not json"})
-    check("subscriptions: a blank stream line yields nothing",
-          S.parse_stream_line("kimi", "  ") is None)
+    # rich stream events (real Claude schema): one assistant line = text + tool_use
+    claude_asst = S.parse_stream_events("claude", json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "I'll edit it."},
+        {"type": "thinking", "thinking": "consider the change"},
+        {"type": "tool_use", "id": "t1", "name": "Edit",
+         "input": {"file_path": "a.py", "old_string": "x=1", "new_string": "x=2"}}]}}))
+    check("subscriptions: a claude assistant line yields text + thinking + tool_call events",
+          [e["kind"] for e in claude_asst] == ["text", "thinking", "tool_call"]
+          and claude_asst[0]["text"] == "I'll edit it."
+          and claude_asst[2]["name"] == "Edit" and claude_asst[2]["id"] == "t1")
+    claude_tr = S.parse_stream_events("claude", json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "done"}]}}))
+    check("subscriptions: a claude tool_result maps to a tool_result event keyed by id",
+          claude_tr == [{"kind": "tool_result", "output": "done", "id": "t1"}])
+    check("subscriptions: claude result event carries the final text",
+          S.parse_stream_events("claude", json.dumps({"type": "result", "result": "all set"}))
+          == [{"kind": "result", "text": "all set"}])
+    check("subscriptions: codex agent_message yields a text event",
+          S.parse_stream_events("codex", json.dumps({"msg": {"type": "agent_message", "message": "go"}}))
+          == [{"kind": "text", "text": "go"}])
+    check("subscriptions: an unparseable line yields no events (never a raw dump)",
+          S.parse_stream_events("codex", "not json") == [] and S.parse_stream_events("kimi", "  ") == [])
+    edit = S.edit_diff("Edit", {"file_path": "a.py", "old_string": "x = 1\n", "new_string": "x = 2\n"})
+    check("subscriptions: edit_diff builds a unified diff DGC renders as a diff",
+          edit is not None and "--- a/a.py" in edit and "+x = 2" in edit and "-x = 1" in edit)
 
     old_home = os.environ.get("HOME")
     with tempfile.TemporaryDirectory() as hd:
