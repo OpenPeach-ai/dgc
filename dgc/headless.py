@@ -8,10 +8,12 @@ substrate the ACP adapter will reframe (Phase 4).
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from . import sessions as sessions_mod
@@ -26,7 +28,7 @@ from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
-from .skills import skill_catalog
+from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
 from .ui import arg_summary, split_diff, tool_output_is_error
 
@@ -37,17 +39,39 @@ _MAX_PROMPT_CHARS = 1_000_000
 _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 _MAX_MCP_LIST_BYTES = 1024 * 1024
 _MAX_MCP_LIST_LIMIT = 100
+_MAX_MCP_SERVERS = 64
+_MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+_MCP_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+_MCP_LOG_LEVELS = frozenset({
+    "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency", "off",
+})
+_MCP_SENSITIVE_QUERY_NAMES = frozenset({
+    "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
+    "authorization", "auth",
+})
+# Value-bearing CLI flags whose argument (or `--flag=value` tail) is a secret.
+# A persisted MCP spec must route these through env_names, never inline args.
+_MCP_SECRET_FLAGS = frozenset({
+    "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
+    "--auth", "--authorization", "--password", "--passwd", "--secret", "--bearer",
+    "--key", "--credential", "--credentials",
+})
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
-    "resolve_retained_task", "list_skills", "generate_handoff",
+    "resolve_retained_task", "list_skills", "reload_skills", "generate_handoff", "name_session",
+    "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "add_permission_rule", "remove_permission_rule", "add_memory",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
-    "get_config", "status",
+    "get_config", "status", "name_session", "reload_skills", "get_skill", "list_docs", "get_doc",
+    "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "list_permissions", "add_permission_rule", "remove_permission_rule",
+    "get_memory", "add_memory",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
 
@@ -67,6 +91,107 @@ def _json_payload_bytes(value) -> int:
                               allow_nan=False).encode("utf-8"))
     except (RecursionError, TypeError, ValueError, UnicodeError):
         return _MAX_MCP_ARGUMENT_BYTES + 1
+
+
+def _mcp_url_has_credentials(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        return bool(parsed.username or parsed.password) or any(
+            re.sub(r"[^a-z0-9]", "", key.lower()) in _MCP_SENSITIVE_QUERY_NAMES
+            for key, _item in parse_qsl(parsed.query, keep_blank_values=True))
+    except ValueError:
+        return True
+
+
+def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
+    """Validate one bounded editor MCP spec; persisted specs can never carry secret values."""
+    if not isinstance(value, dict):
+        return None, "server specification must be an object"
+    allowed = {"transport", "command", "args", "env", "env_names", "url", "log_level",
+               "defer_until_setup"}
+    if set(value) - allowed:
+        return None, "server specification contains unsupported fields"
+    command = value.get("command")
+    if not isinstance(command, str) or not command.strip() or len(command) > 4096 or "\x00" in command:
+        return None, "server command must contain 1-4096 safe characters"
+    args = value.get("args", [])
+    if (not isinstance(args, list) or len(args) > 128
+            or any(not isinstance(arg, str) or len(arg) > 8192 or "\x00" in arg for arg in args)):
+        return None, "server arguments must be an array of at most 128 bounded strings"
+    transport = str(value.get("transport") or "stdio")
+    if transport not in ("stdio", "remote"):
+        return None, "server transport must be stdio or remote"
+    url = str(value.get("url") or "")
+    if transport == "remote":
+        try:
+            parsed = urlsplit(url)
+            loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
+            valid_remote = (parsed.scheme == "https" or (parsed.scheme == "http" and loopback))
+            valid_remote = (valid_remote and bool(parsed.netloc)
+                            and not parsed.username and not parsed.password)
+            valid_remote = valid_remote and not _mcp_url_has_credentials(url)
+        except ValueError:
+            valid_remote = False
+        if not valid_remote or len(url) > 4096 or any(char.isspace() for char in url):
+            return None, "remote MCP servers require HTTPS (or loopback HTTP) without URL credentials"
+    log_level = str(value.get("log_level") or "warning").lower()
+    if log_level not in _MCP_LOG_LEVELS:
+        return None, "server log level is unsupported"
+    env_names = value.get("env_names", [])
+    if (not isinstance(env_names, list) or len(env_names) > 64
+            or any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
+                   for name in env_names)):
+        return None, "env_names must contain at most 64 environment variable names"
+    env = value.get("env", {})
+    if not isinstance(env, dict) or len(env) > 64:
+        return None, "server env must be an object with at most 64 entries"
+    if persisted and env:
+        return None, "persisted MCP specifications cannot contain environment values"
+    if persisted:
+        for index, arg in enumerate(args):
+            raw = arg.strip()
+            lowered = raw.lower()
+            prior_raw = args[index - 1].strip() if index else ""
+            prior = prior_raw.lower()
+            has_url_credentials = False
+            if lowered.startswith(("http://", "https://")):
+                try:
+                    parsed_arg = urlsplit(arg)
+                    has_url_credentials = bool(parsed_arg.username or parsed_arg.password)
+                except ValueError:
+                    has_url_credentials = True
+            # A secret can ride in as a value-bearing flag (`--api-key sk-...`,
+            # `--token=...`) or a header, not only as env/URL creds. Reject the
+            # whole persisted spec if any recognized secret flag is present, in
+            # either its own arg or the value that follows it. `-H` stays
+            # case-sensitive so it never collides with `-h`/help.
+            head = lowered.split("=", 1)[0]
+            prior_head = prior.split("=", 1)[0]
+            is_header_short = raw == "-H" or prior_raw == "-H"
+            if (lowered.startswith("authorization:") or lowered == "--header"
+                    or prior == "--header" or is_header_short
+                    or head in _MCP_SECRET_FLAGS or prior_head in _MCP_SECRET_FLAGS
+                    or has_url_credentials):
+                return None, ("persisted MCP specifications cannot contain inline secrets; "
+                              "declare tokens, headers, or credentials via env_names")
+    if any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
+           or not isinstance(item, str) or len(item) > 16_384 or "\x00" in item
+           for name, item in env.items()):
+        return None, "server env contains an invalid name or value"
+    if set(env) - set(env_names):
+        return None, "runtime env keys must be declared in env_names"
+    defer_until_setup = value.get("defer_until_setup", False)
+    if not isinstance(defer_until_setup, bool):
+        return None, "defer_until_setup must be true or false"
+    clean = {"transport": transport, "command": command.strip(), "args": list(args),
+             "env_names": list(dict.fromkeys(env_names)), "log_level": log_level}
+    if defer_until_setup:
+        clean["defer_until_setup"] = True
+    if url:
+        clean["url"] = url
+    if env:
+        clean["env"] = dict(env)
+    return clean, None
 
 
 def _request_fields(request_id: str | None) -> dict[str, str]:
@@ -341,6 +466,7 @@ class Backend:
                           "goal_state": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
+                          "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True},
             model=self.config.model, mode=self.agent.mode,
@@ -357,7 +483,8 @@ class Backend:
             skills=[s.name for s in self.agent.skills.values()],
             commands=editor_command_metadata(),
             custom_commands=custom_command_names(self.config.project_root),
-            goal={"text": self.agent.goal, "status": self.agent.goal_status},
+            goal={"text": self.agent.goal, "status": self.agent.goal_status,
+                  "elapsed_seconds": self._goal_elapsed_seconds()},
             context_size=self._context_window_size())
         self._emit_context()
 
@@ -549,6 +676,154 @@ class Backend:
         rows = skill_catalog(self.agent.skills, self.config.project_root)
         self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
 
+    def _emit_skill_detail(self, request_id: str, name: str) -> None:
+        normalized = normalize_skill_name(name)
+        skill = self.agent.skills.get(normalized)
+        metadata = {row["name"]: row
+                    for row in skill_catalog(self.agent.skills, self.config.project_root)}
+        row = metadata.get(normalized, {})
+        self.em.emit(
+            "skill_detail", request_id=request_id, found=skill is not None,
+            name=normalized, description=str(row.get("description") or ""),
+            source=str(row.get("source") or "unknown"),
+            markdown=(skill.render("") if skill is not None else ""))
+
+    def _emit_docs(self, request_id: str) -> None:
+        from .docs import catalog
+        items = catalog()
+        self.em.emit("docs_catalog", request_id=request_id, items=items, total=len(items))
+
+    def _emit_doc(self, request_id: str, identifier: str) -> None:
+        from .docs import find_id, slug
+        entry = find_id(identifier)
+        self.em.emit(
+            "doc", request_id=request_id, found=entry is not None,
+            id=slug(entry[0]) if entry else str(identifier)[:80],
+            title=entry[0] if entry else "", description=entry[1] if entry else "",
+            markdown=entry[2][:120_000] if entry else "")
+
+    @staticmethod
+    def _public_mcp_spec(raw) -> dict:
+        spec = raw if isinstance(raw, dict) else {}
+        raw_args = spec.get("args") if isinstance(spec.get("args"), list) else []
+        args, skip = [], False
+        for arg in raw_args[:128]:
+            text = str(arg)[:8192]
+            if skip:
+                skip = False
+                continue
+            if text == "--header":
+                skip = True
+                continue
+            if text.lower().startswith("authorization:"):
+                continue
+            if text.lower().startswith(("http://", "https://")) and _mcp_url_has_credentials(text):
+                text = "<credential-bearing URL hidden>"
+            args.append(text)
+        env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
+        declared = spec.get("env_names") if isinstance(spec.get("env_names"), list) else []
+        env_names = [name for name in [*declared, *env]
+                     if isinstance(name, str) and _MCP_ENV_RE.fullmatch(name)][:64]
+        transport = str(spec.get("transport") or "")
+        url = str(spec.get("url") or "")
+        if not transport:
+            transport = ("remote" if len(raw_args) >= 3 and raw_args[:2] == ["-y", "mcp-remote"]
+                         else "stdio")
+        if transport == "remote" and not url and len(raw_args) >= 3:
+            url = str(raw_args[2])[:4096]
+        if url and _mcp_url_has_credentials(url):
+            url = ""
+        return {
+            "transport": transport if transport in ("stdio", "remote") else "stdio",
+            "command": str(spec.get("command") or "")[:4096], "args": args,
+            "env_names": list(dict.fromkeys(env_names)), "url": url[:4096],
+            "log_level": str(spec.get("log_level") or "warning")[:16],
+        }
+
+    def _emit_mcp_servers(self, request_id: str, error: str | None = None) -> None:
+        configured = self.config.get("mcp_servers", {}) or {}
+        configured = configured if isinstance(configured, dict) else {}
+        statuses = {str(row.get("name")): row for row in self.agent.mcp.status()
+                    if isinstance(row, dict)}
+        items = []
+        for index, (raw_name, raw_spec) in enumerate(configured.items()):
+            if index >= _MAX_MCP_SERVERS:
+                break
+            name = str(raw_name)[:128]
+            status = statuses.pop(name, {})
+            items.append({"name": name, **self._public_mcp_spec(raw_spec),
+                          "state": str(status.get("state") or "configured")[:32],
+                          "tool_count": int(status.get("tool_count") or 0),
+                          "protocol_version": str(status.get("protocol_version") or "")[:64],
+                          "protocol_era": str(status.get("protocol_era") or "")[:32],
+                          "error": str(status.get("error") or "")[:500]})
+        for name, status in list(statuses.items())[:_MAX_MCP_SERVERS - len(items)]:
+            items.append({"name": name[:128], **self._public_mcp_spec({}),
+                          "state": str(status.get("state") or "failed")[:32],
+                          "tool_count": int(status.get("tool_count") or 0),
+                          "protocol_version": str(status.get("protocol_version") or "")[:64],
+                          "protocol_era": str(status.get("protocol_era") or "")[:32],
+                          "error": str(status.get("error") or "")[:500]})
+        fields = {"error": str(error)[:500]} if error else {}
+        self.em.emit("mcp_servers", request_id=request_id, items=items,
+                     total=len(items), **fields)
+
+    def _upsert_mcp_server(self, request_id: str, name: str,
+                           runtime_value, persisted_value) -> None:
+        if not _MCP_NAME_RE.fullmatch(name):
+            self._emit_mcp_servers(request_id, "server name must use 1-64 letters, digits, ., _, or -")
+            return
+        runtime, runtime_error = _mcp_spec(runtime_value, persisted=False)
+        persisted, persisted_error = _mcp_spec(persisted_value, persisted=True)
+        problem = runtime_error or persisted_error
+        if not problem and runtime and persisted:
+            if (any(runtime.get(key) != persisted.get(key)
+                    for key in ("transport", "command", "env_names", "url", "log_level"))
+                    or bool(runtime.get("defer_until_setup"))
+                    != bool(persisted.get("defer_until_setup"))):
+                problem = "runtime and persisted server identity do not match"
+            runtime_args, persisted_args = runtime.get("args", []), persisted.get("args", [])
+            extra = runtime_args[len(persisted_args):] if runtime_args[:len(persisted_args)] == persisted_args else None
+            if extra not in ([], None):
+                header_env = (re.fullmatch(
+                    r"Authorization:\s*Bearer\s+\$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}",
+                    extra[1], re.IGNORECASE) if len(extra) == 2 else None)
+                if (persisted.get("transport") != "remote" or len(extra) != 2
+                        or extra[0] != "--header" or header_env is None
+                        or header_env.group(1) not in runtime.get("env", {})
+                        or header_env.group(1) not in persisted.get("env_names", [])):
+                    problem = "runtime arguments may only add one bounded remote Authorization header"
+            elif extra is None:
+                problem = "runtime arguments must preserve the persisted argument prefix"
+        if problem or runtime is None or persisted is None:
+            self._emit_mcp_servers(request_id, problem or "invalid MCP server specification")
+            return
+        servers = dict(self.config.get("mcp_servers", {}) or {})
+        if name not in servers and len(servers) >= _MAX_MCP_SERVERS:
+            self._emit_mcp_servers(request_id, f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
+            return
+        servers[name] = persisted
+        self.config.set("mcp_servers", servers)
+        secret_candidates = list(runtime.get("env", {}).values())
+        existing = list(getattr(self.config, "_session_secret_values", ()))
+        self.config._session_secret_values = tuple((existing + secret_candidates)[-256:])
+        self.agent.mcp.connect_all({name: runtime})
+        self._emit_mcp_servers(request_id)
+
+    def _emit_permissions(self, request_id: str) -> None:
+        items = [{"action": action, "rule": str(rule)[:1000]}
+                 for action in ("deny", "ask", "allow")
+                 for rule in list(self.config.permissions.get(action, []))[:256]]
+        self.em.emit("permissions", request_id=request_id, items=items, total=len(items))
+
+    def _emit_memory(self, request_id: str, message: str | None = None) -> None:
+        from .memory import load_memories
+        project, user = load_memories(
+            self.config.project_root,
+            sanitizer=lambda value: redact_value(value, secret_values(self.config)))
+        fields = {"message": str(message)[:500]} if message else {}
+        self.em.emit("memory", request_id=request_id, project=project, user=user, **fields)
+
     def _emit_hook_catalog(self, request_id: str) -> None:
         catalog = hook_catalog(self.config)
         self.em.emit("hook_catalog", request_id=request_id, **catalog)
@@ -627,7 +902,12 @@ class Backend:
 
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
+        from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
+                     subscription_engine=str(c.get("subscription_engine", "")),
+                     subscription_model=str(c.get("subscription_model", "")),
+                     subscription_effort=str(c.get("subscription_effort", "")),
+                     subscription_engines=_subs.status(),
                      think=c.get("thinking", "off"), base_url=c.base_url,
                      api_mode=c.get("api_mode", "auto"),
                      provider_state=c.get("provider_state", "stateless"),
@@ -646,13 +926,33 @@ class Backend:
                      fallback_api_key_set=bool(c.get("fallback_api_key", "")),
                      fallback_api_mode=c.get("fallback_api_mode", ""),
                      context_size=c.get("context_size", 32768),
+                     sandbox=bool(c.get("sandbox", False)),
+                     sandbox_network=bool(c.get("sandbox_network", False)),
+                     show_reasoning=bool(c.get("show_reasoning", True)),
+                     suggest=bool(c.get("suggest", True)),
+                     plan_artifact=bool(c.get("plan_artifact", True)),
+                     artifact_autostart=bool(c.get("artifact_autostart", True)),
+                     artifact_in_plan=bool(c.get("artifact_in_plan", False)),
+                     tool_profile=str(c.get("tool_profile", "adaptive")),
+                     max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
                      goal={"text": getattr(self.agent, "goal", ""),
-                           "status": getattr(self.agent, "goal_status", "none")},
+                           "status": getattr(self.agent, "goal_status", "none"),
+                           "elapsed_seconds": self._goal_elapsed_seconds()},
                      **_request_fields(request_id))
+
+    def _goal_elapsed_seconds(self) -> int:
+        clock = getattr(self.agent, "goal_elapsed_seconds", None)
+        if not callable(clock):
+            return 0
+        try:
+            return max(0, int(clock()))
+        except (TypeError, ValueError, OverflowError):
+            return 0
 
     def _emit_goal(self, request_id: str | None = None) -> None:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
                      status=getattr(self.agent, "goal_status", "none"),
+                     elapsed_seconds=self._goal_elapsed_seconds(),
                      **_request_fields(request_id))
 
     def _history(self) -> list:
@@ -815,6 +1115,90 @@ class Backend:
                 return
             self._emit_skill_catalog(request_id)
 
+        elif t == "get_skill":
+            request_id = str(cmd.get("request_id") or "")
+            self._emit_skill_detail(request_id, str(cmd.get("name") or ""))
+
+        elif t == "reload_skills":
+            request_id = str(cmd.get("request_id") or "")
+            self.agent.skills = discover_skills(self.config.project_root)
+            if hasattr(getattr(self.agent, "ctx", None), "skills"):
+                self.agent.ctx.skills = self.agent.skills
+            self._emit_skill_catalog(request_id)
+
+        elif t == "list_docs":
+            self._emit_docs(str(cmd.get("request_id") or ""))
+
+        elif t == "get_doc":
+            self._emit_doc(str(cmd.get("request_id") or ""), str(cmd.get("id") or ""))
+
+        elif t == "list_mcp_servers":
+            self._emit_mcp_servers(str(cmd.get("request_id") or ""))
+
+        elif t == "upsert_mcp_server":
+            self._upsert_mcp_server(
+                str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
+                cmd.get("runtime"), cmd.get("persisted"))
+
+        elif t == "remove_mcp_server":
+            request_id = str(cmd.get("request_id") or "")
+            name = str(cmd.get("name") or "")
+            if not _MCP_NAME_RE.fullmatch(name):
+                self._emit_mcp_servers(
+                    request_id, "server name must use 1-64 letters, digits, ., _, or -")
+                return
+            servers = dict(self.config.get("mcp_servers", {}) or {})
+            servers.pop(name, None)
+            self.config.set("mcp_servers", servers)
+            live = self.agent.mcp.servers.pop(name, None)
+            self.agent.mcp.failures.pop(name, None)
+            if live is not None:
+                live.stop()
+            self.agent.mcp._rebuild_routes()
+            self._emit_mcp_servers(request_id)
+
+        elif t == "reload_mcp_servers":
+            request_id = str(cmd.get("request_id") or "")
+            self.agent.mcp.stop_all()
+            self.agent.mcp.connect_all(self.config.get("mcp_servers", {}), startup=True)
+            self._emit_mcp_servers(request_id)
+
+        elif t == "list_permissions":
+            self._emit_permissions(str(cmd.get("request_id") or ""))
+
+        elif t in ("add_permission_rule", "remove_permission_rule"):
+            request_id = str(cmd.get("request_id") or "")
+            action, rule = str(cmd.get("action") or ""), str(cmd.get("rule") or "").strip()
+            try:
+                rendered = Rule.parse(rule, action).render()
+            except ValueError as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_rule",
+                             message=str(exc)[:500], request_id=request_id)
+                return
+            rules = self.config.permissions.setdefault(action, [])
+            if t == "add_permission_rule" and rendered not in rules:
+                rules.append(rendered)
+            elif t == "remove_permission_rule":
+                self.config.permissions[action] = [item for item in rules if item != rendered]
+            self.config.save()
+            self._emit_permissions(request_id)
+
+        elif t == "get_memory":
+            self._emit_memory(str(cmd.get("request_id") or ""))
+
+        elif t == "add_memory":
+            from .memory import add_memory
+            request_id = str(cmd.get("request_id") or "")
+            try:
+                add_memory(str(cmd.get("text") or ""), self.config.project_root,
+                           str(cmd.get("scope") or "project"), cancelled=self.agent.cancelled)
+            except Exception as exc:
+                self.em.emit("command_rejected", command=t, reason="memory_save_failed",
+                             message=f"memory save failed ({type(exc).__name__}): {str(exc)[:300]}",
+                             request_id=request_id)
+                return
+            self._emit_memory(request_id, f"Saved {cmd.get('scope')} memory")
+
         elif t == "list_hooks":
             request_id = str(cmd.get("request_id") or "")
             if not request_id or len(request_id) > 128:
@@ -976,6 +1360,16 @@ class Backend:
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, **_request_fields(request_id))
             self._emit_goal()
+        elif t == "name_session":
+            name = str(cmd.get("name") or "").strip()[:200]
+            if not name or not self.agent.name_session(name):
+                self.em.emit("command_rejected", command=t, reason="session_name_failed",
+                             message=getattr(self.agent, "_last_persist_error", "")
+                             or "session name must not be empty",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("session_named", name=str(self.agent.session_name or ""),
+                         **_request_fields(request_id))
         elif t == "clear_session":
             # Archive the prior persisted transcript and start an actually empty model context.
             # The old webview implementation only removed DOM nodes while the model retained every
@@ -1072,9 +1466,49 @@ class Backend:
                        "provider_capabilities", "capability_cache_ttl_s",
                        "fallback_model", "fallback_base_url", "fallback_api_key",
                        "fallback_api_mode",
-                       "context_size", "search_provider")
+                       "context_size", "search_provider", "sandbox", "sandbox_network",
+                       "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+                       "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+                       "subscription_engine", "subscription_model", "subscription_effort")
             refresh = False
             values = {k: v for k, v in (cmd.get("values") or {}).items() if k in allowed}
+            boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
+                            "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"}
+            if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="boolean settings require true or false",
+                             **_request_fields(request_id))
+                return
+            if ("tool_profile" in values
+                    and values["tool_profile"] not in ("adaptive", "full")):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="tool_profile must be adaptive or full",
+                             **_request_fields(request_id))
+                return
+            from .subscriptions import ENGINE_KEYS as _sub_keys
+            if ("subscription_engine" in values and values["subscription_engine"]
+                    and values["subscription_engine"] not in _sub_keys):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="subscription_engine must be empty or one of: "
+                                     + ", ".join(_sub_keys),
+                             **_request_fields(request_id))
+                return
+            if ("max_parallel_tasks" in values
+                    and (isinstance(values["max_parallel_tasks"], bool)
+                         or not isinstance(values["max_parallel_tasks"], int)
+                         or not 1 <= values["max_parallel_tasks"] <= 8)):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="max_parallel_tasks must be an integer from 1 to 8",
+                             **_request_fields(request_id))
+                return
+            if values.get("sandbox") is True:
+                from . import sandbox
+                if not sandbox.available():
+                    self.em.emit(
+                        "command_rejected", command=t, reason="sandbox_unavailable",
+                        message="sandbox remains off because no supported confinement backend was found",
+                        **_request_fields(request_id))
+                    return
             secret_keys = ("subagent_api_key", "fallback_api_key")
             # Apply endpoints first: Config.set invalidates the old endpoint-bound secret. Then
             # install any replacement credential process-locally, regardless of JSON key order.
@@ -1097,7 +1531,8 @@ class Backend:
             self.em.emit("status", model=self.config.model, mode=self.agent.mode,
                          think=self.config.get("thinking", "off"), base_url=self.config.base_url,
                          goal={"text": getattr(self.agent, "goal", ""),
-                               "status": getattr(self.agent, "goal_status", "none")},
+                               "status": getattr(self.agent, "goal_status", "none"),
+                               "elapsed_seconds": self._goal_elapsed_seconds()},
                          context_used=self.agent.estimate_tokens(),
                          context_size=self._context_window_size(), **_request_fields(request_id))
         elif t == "shutdown":

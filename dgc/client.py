@@ -1,4 +1,4 @@
-"""Safe synchronous client for DGC's protocol-v3 ``serve`` backend.
+"""Safe synchronous client for DGC's versioned ``serve`` backend.
 
 The client owns one child process and is intentionally one-shot.  It validates both sides of the
 NDJSON contract, preserves unrelated events while waiting for correlated replies, bounds every
@@ -226,7 +226,7 @@ class DGCClient:
             return self._closed
 
     def start(self) -> dict[str, Any]:
-        """Launch the backend and wait for a valid protocol-v3 ``ready`` handshake."""
+        """Launch the backend and wait for the matching versioned ``ready`` handshake."""
         with self._condition:
             if self._closed:
                 raise DGCStartError("this one-shot client has already been closed")

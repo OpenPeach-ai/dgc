@@ -50,6 +50,11 @@ DEFAULTS: dict = {
     "api_key": "ollama",                        # dummy key works for ollama/lm-studio
     "model": "qwen3:8b",
     "api_mode": "auto",                         # auto | ollama | anthropic | chat_completions | responses
+    "subscription_engine": "",                  # "" = drive the model directly (above). Else one of
+                                                #   claude | codex | qwen | kimi | copilot: delegate each turn
+                                                #   to the user's own logged-in first-party CLI (subscription).
+    "subscription_model": "",                   # optional model override passed to that CLI ("" = its default)
+    "subscription_effort": "",                  # optional reasoning effort for CLIs that take one (claude/codex)
     "provider_state": "stateless",              # stateless | server; server permits provider-side storage
     "prompt_cache": True,                        # send a privacy-safe stable cache-routing key when supported
     "prompt_cache_key": "",                     # optional explicit key (never derived from prompt text verbatim)

@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v3 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v4 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -78,6 +78,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "goal_changed": {
         "goal": _S(),
         "status": _f("string", enum=("none", "active", "completed", "blocked")),
+        "elapsed_seconds": _I(False),
         "request_id": _S(False),
     },
     "info": {"message": _S()},
@@ -115,6 +116,13 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "fallback_model": _S(False), "fallback_base_url": _S(False),
         "fallback_api_mode": _S(False), "fallback_api_key_set": _B(False),
         "context_size": _I(False), "goal": _O(),
+        "sandbox": _B(False), "sandbox_network": _B(False),
+        "show_reasoning": _B(False), "suggest": _B(False),
+        "plan_artifact": _B(False), "artifact_autostart": _B(False),
+        "artifact_in_plan": _B(False), "tool_profile": _S(False),
+        "max_parallel_tasks": _I(False),
+        "subscription_engine": _S(False), "subscription_engines": _A(False),
+        "subscription_model": _S(False), "subscription_effort": _S(False),
     },
     "status": {
         "request_id": _S(False),
@@ -148,6 +156,23 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "output": _S(),
     },
     "skill_catalog": {"request_id": _S(), "items": _A(), "total": _I()},
+    "skill_detail": {
+        "request_id": _S(), "found": _B(), "name": _S(), "description": _S(),
+        "source": _S(), "markdown": _S(),
+    },
+    "docs_catalog": {"request_id": _S(), "items": _A(), "total": _I()},
+    "doc": {
+        "request_id": _S(), "found": _B(), "id": _S(), "title": _S(),
+        "description": _S(), "markdown": _S(),
+    },
+    "mcp_servers": {
+        "request_id": _S(), "items": _A(), "total": _I(), "error": _S(False),
+    },
+    "permissions": {"request_id": _S(), "items": _A(), "total": _I()},
+    "memory": {
+        "request_id": _S(), "project": _S(), "user": _S(), "message": _S(False),
+    },
+    "session_named": {"request_id": _S(False), "name": _S()},
     "hook_catalog": {
         "request_id": _S(), "items": _A(), "total": _I(), "invalid": _I(),
     },
@@ -222,6 +247,29 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(), "call_id": _S(False), "name": _S(), "arguments": _O(),
     },
     "list_skills": {"request_id": _S()},
+    "reload_skills": {"request_id": _S()},
+    "get_skill": {"request_id": _S(), "name": _S()},
+    "list_docs": {"request_id": _S()},
+    "get_doc": {"request_id": _S(), "id": _S()},
+    "list_mcp_servers": {"request_id": _S()},
+    "upsert_mcp_server": {
+        "request_id": _S(), "name": _S(), "runtime": _O(), "persisted": _O(),
+    },
+    "remove_mcp_server": {"request_id": _S(), "name": _S()},
+    "reload_mcp_servers": {"request_id": _S()},
+    "list_permissions": {"request_id": _S()},
+    "add_permission_rule": {
+        "request_id": _S(),
+        "action": _f("string", enum=("allow", "ask", "deny")), "rule": _S(),
+    },
+    "remove_permission_rule": {
+        "request_id": _S(),
+        "action": _f("string", enum=("allow", "ask", "deny")), "rule": _S(),
+    },
+    "get_memory": {"request_id": _S()},
+    "add_memory": {
+        "request_id": _S(), "scope": _f("string", enum=("project", "user")), "text": _S(),
+    },
     "list_hooks": {"request_id": _S()},
     "generate_handoff": {"request_id": _S(), "save": _B(False)},
     "set_think": {
@@ -237,6 +285,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_goal": {"request_id": _S(False)},
     "get_plan": {"request_id": _S(False)},
     "new_session": {"request_id": _S(False)},
+    "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
     "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},
     "list_sessions": {"request_id": _S(False)},

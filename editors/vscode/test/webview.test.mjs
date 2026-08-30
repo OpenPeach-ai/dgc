@@ -104,6 +104,7 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   // tool card 1 — read_file (glyph →)
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/auth.ts", call_id: "c1" } });
   assert.equal(doc.querySelector(".tool .tool-status").textContent, "running");
+  assert.equal(doc.querySelector(".tool .verb").textContent, "Reading");
   assert.equal(doc.querySelector(".tool .dot").getAttribute("aria-hidden"), "true");
   send({ type: "event", event: { type: "tool_progress", name: "read_file", call_id: "c1",
     message: "Indexing symbols", progress: 1, total: 2 } });
@@ -134,7 +135,7 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   const tools = doc.querySelectorAll(".tool");
   assert.equal(tools.length, 3, "expected exactly 3 tool cards");
   assert.equal(tools[0].querySelector(".glyph").textContent, "→", "read_file glyph");
-  assert.equal(tools[0].querySelector(".verb").textContent, "read_file");
+  assert.equal(tools[0].querySelector(".verb").textContent, "Read");
   assert.equal(tools[2].querySelector(".glyph").textContent, "✎", "edit_file glyph");
 
   const diff = doc.querySelector(".diff");
@@ -142,6 +143,12 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.ok(diff.querySelector(".add"), "diff add line missing");
   assert.ok(diff.querySelector(".del"), "diff del line missing");
   assert.match(diff.querySelector(".add").textContent, /iat/, "diff add line content");
+  assert.equal(diff.querySelector(".add-stat").textContent, "+1");
+  assert.equal(diff.querySelector(".del-stat").textContent, "−1");
+  assert.equal(diff.querySelector(".add .new").textContent, "5", "new line gutter");
+  diff.querySelector(".diff-toggle").click();
+  assert.equal(diff.querySelector(".diff-toggle").getAttribute("aria-expanded"), "false");
+  assert.equal(diff.querySelector(".diff-action").textContent, "Review");
   // mono+purple diff: added lines carry .add (styled purple), never a green class
   assert.equal(diff.querySelectorAll(".green, .add-green").length, 0);
 
@@ -164,6 +171,8 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   send({ type: "event", event: { type: "turn_end" } });
   assert.ok(doc.querySelector(".thinking.done"), "turn footer did not settle");
+  assert.ok([...doc.querySelectorAll(".text")].at(-1).classList.contains("final"),
+    "the last assistant segment should be marked as the final answer");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
   dom.window.close();
@@ -481,16 +490,48 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("pop").textContent, /standing objective/);
   assert.match(doc.getElementById("pop").textContent, /review-api/);
 
-  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active" } });
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active",
+    elapsed_seconds: 65 } });
+  const goalBar = doc.getElementById("goalbar");
+  assert.equal(goalBar.hidden, false);
+  assert.equal(doc.getElementById("goal-status").textContent, "Active goal");
+  assert.equal(doc.getElementById("goal-time").textContent, "1:05");
+  doc.getElementById("goal-toggle").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal pause");
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
+    elapsed_seconds: 67 } });
+  assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
+  assert.equal(doc.getElementById("goal-time").textContent, "1:07");
+  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume standing goal");
+  doc.getElementById("goal-toggle").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal resume");
+  doc.getElementById("goal-edit").click();
+  assert.equal(input.value, "/goal ship the release");
+  doc.getElementById("goal-clear").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal clear");
   send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
   ] } });
+  send({ type: "surface_open", surface: "skills" });
   send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
     items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
+  assert.match(doc.getElementById("surface").textContent, /\$matrix-fixture.*project.*Loaded/s,
+    "skills belong in the dedicated searchable browser, not the transcript");
+  assert.equal(doc.getElementById("log").textContent.includes("matrix-fixture"), false);
+  doc.querySelector("[data-skill-view]").click();
+  assert.equal(posted.filter((m) => m.type === "getSkill").pop().name, "matrix-fixture");
+  send({ type: "event", event: { type: "skill_detail", request_id: "skill-1", found: true,
+    name: "matrix-fixture", description: "Loaded safely", source: "project",
+    markdown: "# Fixture\n\nUse **carefully**. <script>bad()</script>" } });
+  assert.match(doc.getElementById("surface").textContent, /Fixture.*Use carefully/s);
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  send({ type: "surface_open", surface: "hooks" });
   send({ type: "event", event: { type: "hook_catalog", request_id: "hooks-1", total: 1, invalid: 0,
     items: [{ event: "PreToolUse", configured: 1,
       matchers: ["<img src=x onerror=hookBad()>"], valid: true, truncated: false }] } });
+  assert.match(doc.getElementById("surface").textContent, /Lifecycle hooks.*PreToolUse.*hookBad/s);
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
   send({ type: "event", event: { type: "hook_activity", event: "PreToolUse", status: "completed",
     configured: 1, duration_ms: 7, message: "<script>hookBad()</script>" } });
   send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
@@ -499,12 +540,10 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
-  assert.match(doc.getElementById("log").textContent, /matrix-fixture.*project.*Loaded/s);
-  assert.match(doc.getElementById("log").textContent, /Lifecycle hooks.*PreToolUse.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
   assert.equal(doc.getElementById("log").querySelector("img"), null,
-    "skill, hook, and handoff metadata must remain inert text");
+    "hook activity and handoff metadata must remain inert text");
   assert.equal(doc.getElementById("log").querySelector("script"), null,
     "handoff markdown must not synthesize executable elements");
   assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");
@@ -524,8 +563,15 @@ test("provider runtime settings and actual usage round-trip through the webview"
     subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
     fallback_api_key: "must-not-enter-webview",
     prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
+    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "high",
+    subscription_engines: [
+      { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
   } });
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
+  assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
+  assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
+  assert.equal(doc.getElementById("s-subscription_effort").value, "high");
+  assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
   assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
@@ -539,6 +585,9 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.subagent_api_mode, "ollama");
   assert.equal(saved.values.fallback_api_mode, "chat_completions");
   assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
+  assert.equal(saved.values.subscription_engine, "codex");
+  assert.equal(saved.values.subscription_model, "gpt-5.6");
+  assert.equal(saved.values.subscription_effort, "high");
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",
@@ -551,6 +600,76 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
   assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
   assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
+  dom.window.close();
+});
+
+test("feature browsers manage MCP, docs, permissions, memory, and settings without chat pollution", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "surface_open", surface: "mcp" });
+  send({ type: "event", event: { type: "mcp_servers", request_id: "servers-1", total: 1,
+    items: [{ name: "fixture", transport: "stdio", command: "node", args: ["server.js"],
+      env_names: ["FIXTURE_TOKEN"], url: "", log_level: "warning", state: "connected",
+      tool_count: 1, protocol_version: "2026", protocol_era: "modern", error: "" }] } });
+  send({ type: "event", event: { type: "mcp_tools", request_id: "tools-1", servers: [],
+    total: 1, offset: 0, next_offset: null,
+    tools: [{ name: "mcp__fixture__echo", description: "Echo text", parameters: {} }] } });
+  assert.match(doc.getElementById("surface").textContent, /fixture.*connected.*mcp__fixture__echo/s);
+  assert.equal(doc.getElementById("surface").textContent.includes("FIXTURE_TOKEN="), false,
+    "MCP catalogs must expose secret names, never values");
+  send({ type: "event", event: { type: "mcp_servers", request_id: "servers-err", total: 0,
+    items: [], error: "<img src=x onerror=mcpErr()>" } });
+  assert.equal(doc.getElementById("surface").querySelector("img"), null,
+    "MCP subsystem error notice must render as inert text, not active HTML");
+  doc.getElementById("surface-primary").click();
+  doc.getElementById("mcp-name").value = "local-test";
+  doc.getElementById("mcp-target").value = "node";
+  doc.getElementById("mcp-args").value = "server.js\n--stdio";
+  doc.getElementById("mcp-env").value = "LOCAL_TEST_TOKEN=secret-value";
+  doc.getElementById("mcp-config-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const mcpSave = posted.filter((message) => message.type === "mcpSave").pop();
+  assert.equal(mcpSave.values.name, "local-test");
+  assert.equal(mcpSave.values.env, "LOCAL_TEST_TOKEN=secret-value");
+  assert.equal(mcpSave.values.clear_secrets, false);
+
+  send({ type: "surface_open", surface: "docs" });
+  send({ type: "event", event: { type: "docs_catalog", request_id: "docs-1", total: 1,
+    items: [{ id: "plan-mode", title: "Plan mode", description: "Read-only planning" }] } });
+  doc.querySelector("[data-doc]").click();
+  assert.equal(posted.filter((message) => message.type === "getDoc").pop().id, "plan-mode");
+  send({ type: "event", event: { type: "doc", request_id: "doc-1", found: true,
+    id: "plan-mode", title: "Plan mode", description: "Read-only planning",
+    markdown: "# Plan mode\n\nNo writes. <img src=x onerror=bad()>" } });
+  assert.match(doc.getElementById("surface").textContent, /Plan mode.*No writes/s);
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
+
+  send({ type: "surface_open", surface: "permissions" });
+  send({ type: "event", event: { type: "permissions", request_id: "permissions-1", total: 1,
+    items: [{ action: "deny", rule: "Bash(rm *)" }] } });
+  assert.match(doc.getElementById("surface").textContent, /deny.*Bash\(rm \*\)/s);
+  doc.getElementById("permission-action").value = "allow";
+  doc.getElementById("permission-rule").value = "Bash(npm test)";
+  doc.getElementById("permission-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  const permissionAdd = posted.filter((message) => message.type === "permissionAdd").pop();
+  assert.equal(permissionAdd.type, "permissionAdd");
+  assert.equal(permissionAdd.action, "allow");
+  assert.equal(permissionAdd.rule, "Bash(npm test)");
+
+  send({ type: "surface_open", surface: "memory" });
+  send({ type: "event", event: { type: "memory", request_id: "memory-1",
+    project: "# DGC.md\n\nUse tabs", user: "", message: "Loaded" } });
+  assert.match(doc.getElementById("surface").textContent, /Project.*Use tabs.*Personal/s);
+  assert.equal(doc.getElementById("log").textContent.trim(), "",
+    "feature management must not synthesize conversation turns");
+  doc.getElementById("surface-close").click();
+  send({ type: "event", event: { type: "docs_catalog", request_id: "late-docs", total: 0,
+    items: [] } });
+  assert.equal(doc.getElementById("surface").hidden, true,
+    "a late feature response must not reopen a panel the user closed");
+
+  send({ type: "settings_open", providers: [], models: [], section: "security" });
+  assert.equal(doc.querySelector('.set-section[data-section="security"]').hidden, false);
+  assert.equal(doc.querySelector('.set-section[data-section="models"]').hidden, true);
+  assert.deepEqual(errors, [], "feature surfaces raised JS errors");
   dom.window.close();
 });
 
@@ -668,7 +787,7 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
   settingsButton.focus();
   send({ type: "settings_open", providers: [], models: [] });
   assert.equal(doc.getElementById("settings").getAttribute("aria-modal"), "true");
-  assert.equal(doc.activeElement, doc.getElementById("s-provider"));
+  assert.equal(doc.activeElement, doc.getElementById("s-mode"));
   key(doc.getElementById("settings"), "Escape");
   assert.equal(doc.getElementById("settings").hidden, true);
   assert.equal(doc.activeElement, settingsButton);

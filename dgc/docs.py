@@ -3,6 +3,8 @@ right in the TUI. Single source of truth: the DOCS list (title, description,
 markdown). Kept concise and accurate to DGC's actual features."""
 from __future__ import annotations
 
+import re
+
 from .commands import command_specs
 
 
@@ -396,6 +398,25 @@ Useful keys:
 
 def titles() -> list[str]:
     return [t for t, _, _ in DOCS]
+
+
+def slug(title: str) -> str:
+    """Stable public identifier for a bundled documentation page."""
+    return re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:80]
+
+
+def catalog() -> list[dict[str, str]]:
+    """Return editor-safe metadata without duplicating the documentation source of truth."""
+    return [{"id": slug(title), "title": title, "description": description}
+            for title, description, _markdown in DOCS]
+
+
+def find_id(identifier: str) -> tuple[str, str, str] | None:
+    wanted = str(identifier or "").strip().lower()
+    for entry in DOCS:
+        if wanted in (entry[0].lower(), slug(entry[0])):
+            return entry
+    return None
 
 
 def find(title: str) -> tuple[str, str, str] | None:

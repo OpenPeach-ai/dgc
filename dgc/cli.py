@@ -727,12 +727,12 @@ class CLI:
                         self.ui.error(self.agent._last_persist_error)
                     else:
                         self.ui.info("no standing goal to complete")
-            elif low in ("blocked", "block"):
+            elif low in ("blocked", "block", "pause", "paused"):
                 if not self.agent.update_goal("blocked"):
                     if self.agent._last_persist_error:
                         self.ui.error(self.agent._last_persist_error)
                     else:
-                        self.ui.info("no standing goal to block")
+                        self.ui.info("no standing goal to pause")
             elif low in ("resume", "active", "reactivate"):
                 if not self.agent.update_goal("active"):
                     if self.agent._last_persist_error:
@@ -1320,6 +1320,28 @@ def run_doctor(config: Config) -> None:
     if sandbox_requested and not sandbox_report.available:
         c.print("  [bold red]✗[/bold red] sandbox is enabled but this platform has no supported backend")
         c.print("    → install bubblewrap on Linux, use sandbox-exec on macOS, or run [bold]/sandbox off[/bold]")
+    # subscription engines — run your own plan through the official first-party CLI
+    from . import subscriptions as _subs
+    active = str(config.get("subscription_engine", "")).strip().lower()
+    c.print("  [bold]subscription engines[/bold] — run your own plan via the official CLI")
+    for s in _subs.status():
+        if s["logged_in"]:
+            state = "[green]✓ signed in[/green]"
+        elif s["installed"]:
+            state = "[yellow]! not signed in[/yellow]"
+        else:
+            state = "[dim]not installed[/dim]"
+        star = "  [bold cyan]← active[/bold cyan]" if s["key"] == active else ""
+        c.print(f"    {s['key']:6} {state}{star}")
+    if active in _subs.ENGINES:
+        eng = _subs.ENGINES[active]
+        c.print(f"  [cyan]→ delegating each turn to {terminal_safe_text(eng.label)}[/cyan] "
+                f"(the model endpoint below is only the fallback)\n")
+        if not eng.logged_in():
+            c.print(f"  [yellow]![/yellow] but you are not signed in — run "
+                    f"[bold]{terminal_safe_text(eng.login_cmd)}[/bold] once\n")
+    else:
+        c.print("")
     client = LLMClient(config.base_url, config.api_key, config.model,
                        api_mode=str(config.get("api_mode", "auto")))
     try:
@@ -1351,12 +1373,34 @@ def run_setup(config: Config) -> None:
     c = Console()
     c.print("\n[bold]DGC setup[/bold] — point DGC at a model you run\n")
     from .menu import select
+    from . import subscriptions as _subs
+    # Subscription engines first — run your own Claude/Codex/Qwen/Kimi plan via its official CLI.
+    subs_status = _subs.status()
+    sub_labels = [f"{s['label']} — your own subscription" for s in subs_status]
+    sub_hints = [("✓ signed in" if s["logged_in"]
+                  else (f"not signed in · run: {s['login_cmd']}" if s["installed"]
+                        else "CLI not installed")) for s in subs_status]
     keys = list(PROVIDERS)
-    prov_labels = [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
-    prov_hints = [PROVIDERS[k]["base_url"] for k in keys] + [""]
+    prov_labels = sub_labels + [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
+    prov_hints = sub_hints + [PROVIDERS[k]["base_url"] for k in keys] + [""]
     idx = select("Provider", prov_labels, prov_hints)
     if idx is None:
         c.print("[dim]cancelled[/dim]"); return
+    n_sub = len(subs_status)
+    if idx < n_sub:
+        s = subs_status[idx]
+        config.set("subscription_engine", s["key"])
+        c.print(f"\n  [bold green]selected[/bold green] {terminal_safe_text(s['label'])} — "
+                f"DGC will run each turn through your subscription via the official CLI.")
+        if s["logged_in"]:
+            c.print("  [green]✓ already signed in.[/green]")
+        else:
+            c.print(f"  [yellow]sign in first:[/yellow] run "
+                    f"[bold]{terminal_safe_text(s['login_cmd'])}[/bold] once, then retry.")
+        c.print('  try it:  [bold]dgc -p "list the files in this folder"[/bold]  ·  '
+                "[bold]dgc doctor[/bold] to verify\n")
+        return
+    idx -= n_sub                          # shift back into the direct-model provider list
     if idx < len(keys):
         prov = PROVIDERS[keys[idx]]
         base_url, api_key = prov["base_url"], prov["api_key"]
@@ -1369,6 +1413,7 @@ def run_setup(config: Config) -> None:
             c.print("[dim]cancelled[/dim]"); return
         from getpass import getpass
         api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
+    config.set("subscription_engine", "")     # a direct model turns delegation back off
     config.set("base_url", base_url)
     if idx < len(keys):
         config.set("api_mode", "auto")
@@ -1480,6 +1525,9 @@ def main(argv: list[str] | None = None) -> int | None:
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
     parser.add_argument("--model", help="model name (persisted)")
+    parser.add_argument("--engine", metavar="NAME", default=None,
+                        help="run this one turn through a subscription CLI "
+                             "(claude|codex|qwen|kimi) via your own login, without changing config")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
@@ -1554,6 +1602,11 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
+        _sub_engine = str(args.engine if args.engine is not None
+                          else config.get("subscription_engine", "")).strip().lower()
+        if _sub_engine:
+            return _run_subscription_oneshot(
+                config, _sub_engine, cli.expand_mentions(args.prompt), bool(args.cont))
         if config.data.get("mode") == "auto":
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
@@ -1579,7 +1632,16 @@ def main(argv: list[str] | None = None) -> int | None:
                         lan=(str(config.get("artifact_bind", "localhost")).lower() == "lan"))
                 except Exception:
                     pass
+            _se = str(config.get("subscription_engine", "")).strip().lower()
             if args.classic or not sys.stdout.isatty():
+                if _se:
+                    from . import subscriptions as _subs
+                    _eng = _subs.get_engine(_se)
+                    if _eng is not None:
+                        Console().print(
+                            f'  [yellow]note[/yellow] {terminal_safe_text(_eng.label)} (subscription) '
+                            f'delegation runs in the full-screen app and one-shot ([bold]dgc -p[/bold]); '
+                            f'the classic REPL uses your fallback model.\n')
                 cli.repl()
             else:
                 from .tui import TUI
@@ -1587,6 +1649,56 @@ def main(argv: list[str] | None = None) -> int | None:
         finally:
             termbg.reset()
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
+
+
+def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) -> int:
+    """One-shot turn delegated to the user's own logged-in first-party CLI (their
+    subscription). DGC streams the vendor CLI's output; the vendor owns auth, the
+    model call, its tools, and its ToS. Returns a process exit code."""
+    from . import subscriptions as subs
+    c = Console()
+    engine = subs.get_engine(engine_key)
+    if engine is None:
+        c.print(f"  [red]unknown subscription engine "
+                f"{_markup_literal(engine_key)}[/red] — one of: {', '.join(subs.ENGINE_KEYS)}")
+        return 1
+    try:
+        subs.preflight(engine)
+    except subs.EngineError as e:
+        c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
+        return 1
+    c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} "
+            f"(your subscription) —[/dim]")
+    last = {"text": ""}
+
+    def on_event(ev: dict) -> None:
+        text, kind = ev.get("text", ""), ev.get("kind")
+        if not text:
+            return
+        if kind == "tool":
+            c.print(f"[dim]· {terminal_safe_text(text[:200])}[/dim]", highlight=False)
+        elif kind == "text":
+            last["text"] = text
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            sys.stdout.flush()
+        elif kind == "result" and text.strip() and text.strip() != last["text"].strip():
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            sys.stdout.flush()
+
+    budget = int(config.get("turn_budget_s") or 0) or 1800
+    try:
+        res = subs.run_turn(engine, prompt, config.project_root, cont=cont,
+                            timeout=budget, on_event=on_event,
+                            model=str(config.get("subscription_model", "")).strip(),
+                            effort=str(config.get("subscription_effort", "")).strip())
+    except subs.EngineError as e:
+        c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
+        return 1
+    print()
+    if res.get("timeout"):
+        c.print("  [yellow]! the delegated turn hit the time budget and was stopped[/yellow]")
+        return 1
+    return 0 if res.get("rc") == 0 else 1
 
 
 def _print_resume_hint(agent, config) -> None:

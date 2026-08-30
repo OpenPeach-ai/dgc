@@ -795,7 +795,7 @@ class Agent:
         else:
             self.mcp = MCPManager(
                 config.project_root, client_capabilities=self._mcp_client_capabilities(ui))
-            self.mcp.connect_all(config.get("mcp_servers"))
+            self.mcp.connect_all(config.get("mcp_servers"), startup=True)
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.cancelled = threading.Event()  # a front-end sets this to interrupt the turn/tool wait
@@ -1409,6 +1409,8 @@ class Agent:
     def reset(self) -> None:
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
+        self._goal_elapsed_seconds = 0.0
+        self._goal_active_since = 0.0
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._active_mcp_tools: set[str] = set()
@@ -1849,6 +1851,8 @@ class Agent:
                 saved = sessions.save(
                     self.session_file, self.messages, self.session_root,
                     name=self.session_name, goal=self.goal, goal_status=self.goal_status,
+                    goal_elapsed_seconds=self._goal_elapsed_seconds,
+                    goal_active_since=self._goal_active_since,
                     usage=usage, activity=activity, timing=timing,
                     checkpoints=checkpoint_state,
                     expected_revision=self._session_revision,
@@ -2112,6 +2116,19 @@ class Agent:
             self.goal_status = (raw_status if self.goal
                                 and raw_status in ("active", "completed", "blocked")
                                 else ("active" if self.goal else "none"))
+            try:
+                elapsed = float(record.get("goal_elapsed_seconds") or 0)
+            except (TypeError, ValueError, OverflowError):
+                elapsed = 0.0
+            self._goal_elapsed_seconds = elapsed if 0 <= elapsed < float("inf") else 0.0
+            try:
+                active_since = float(record.get("goal_active_since") or 0)
+            except (TypeError, ValueError, OverflowError):
+                active_since = 0.0
+            now = time.time()
+            self._goal_active_since = (active_since if self.goal_status == "active"
+                                       and 0 < active_since <= now + 60 else
+                                       (now if self.goal_status == "active" else 0.0))
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""
@@ -2126,26 +2143,42 @@ class Agent:
     def set_goal(self, text: str, status: str = "active") -> bool:
         """Set (or clear) a bounded standing objective and persist it immediately."""
         clean = self._safe_text(text).strip()[:_GOAL_MAX_CHARS]
-        previous = (self.goal, self.goal_status)
+        previous = (self.goal, self.goal_status, self._goal_elapsed_seconds,
+                    self._goal_active_since)
         self.goal = clean
         self.goal_status = (status if clean and status in ("active", "completed", "blocked")
                             else ("active" if clean else "none"))
+        self._goal_elapsed_seconds = 0.0
+        self._goal_active_since = time.time() if self.goal_status == "active" else 0.0
         self._refresh_system()                          # re-emit the system prompt with the # Goal section
         if self._persist():
             return True
-        self.goal, self.goal_status = previous
+        (self.goal, self.goal_status, self._goal_elapsed_seconds,
+         self._goal_active_since) = previous
         self._refresh_system()
         return False
+
+    def goal_elapsed_seconds(self, now: float | None = None) -> int:
+        """Return the persisted active-work clock for the standing goal."""
+        elapsed = max(0.0, float(self._goal_elapsed_seconds))
+        if self.goal and self.goal_status == "active" and self._goal_active_since > 0:
+            current = time.time() if now is None else float(now)
+            elapsed += max(0.0, current - self._goal_active_since)
+        return max(0, int(elapsed))
 
     def update_goal(self, status: str) -> bool:
         """Transition an existing goal without deleting its auditable objective."""
         if not self.goal or status not in ("active", "completed", "blocked"):
             return False
-        previous = self.goal_status
+        previous = (self.goal_status, self._goal_elapsed_seconds, self._goal_active_since)
+        now = time.time()
+        if self.goal_status == "active" and self._goal_active_since > 0:
+            self._goal_elapsed_seconds += max(0.0, now - self._goal_active_since)
         self.goal_status = status
+        self._goal_active_since = now if status == "active" else 0.0
         self._refresh_system()
         if not self._persist():
-            self.goal_status = previous
+            self.goal_status, self._goal_elapsed_seconds, self._goal_active_since = previous
             self._refresh_system()
             return False
         notify = getattr(self.ui, "goal_changed", None)
@@ -3449,7 +3482,7 @@ class Agent:
                 isolated_mcp = MCPManager(
                     child_config.project_root,
                     client_capabilities=self._mcp_client_capabilities(sub_ui))
-                isolated_mcp.connect_all(child_config.get("mcp_servers"))
+                isolated_mcp.connect_all(child_config.get("mcp_servers"), startup=True)
             sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
             sub.depth = self.depth + 1
             sub.cancelled = self.cancelled
