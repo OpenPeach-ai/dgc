@@ -740,10 +740,10 @@ class TUI:
         self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
-    def _flash(self, msg: str) -> None:
+    def _flash(self, msg: str, secs: float = 2.2) -> None:
         """Show a short confirmation in the status line so an action visibly registered."""
         self._flash_msg = msg
-        self._flash_until = time.monotonic() + 2.2
+        self._flash_until = time.monotonic() + secs
         self._invalidate()
 
     # ------------------------------------------------------------ rendering ---
@@ -3539,16 +3539,18 @@ class TUI:
                 finish()
 
         def selected_engine(key: str) -> None:                # a subscription CLI (their own plan)
+            prev = str(self.config.get("subscription_engine", "")).strip().lower()
             eng = subs.get_engine(key)
             self.config.set("subscription_engine", key)
+            if key != prev:                    # model/effort are engine-specific — never carry them over
+                self.config.set("subscription_model", "")
+                self.config.set("subscription_effort", "")
             if eng.resolve() is None:
-                self._flash(f"provider → {eng.label}")
                 self._offer_engine_install(eng)
             elif not eng.logged_in():
-                self._flash(f"provider → {eng.label}")
                 self._offer_engine_login(eng)
             else:
-                self._flash(f"provider → {eng.label} (your subscription) — signed in ✓")
+                self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
 
         if rest:                                       # /connect <engine|preset|url>
             if not subagent and subs.get_engine(rest) is not None:
@@ -3582,33 +3584,62 @@ class TUI:
             selected_provider(PROVIDERS[keys[i]])
         self._show_picker(f"Connect a {who}", labels, pick)
 
+    def _run_setup_cmd(self, cmd_str: str, note: str = "") -> None:
+        """Hand the real terminal to an install / sign-in command (suspends the
+        full-screen app), then return to DGC. The vendor command owns the browser
+        flow and any token — DGC never touches credentials."""
+        from prompt_toolkit.application import run_in_terminal
+        import shlex
+        import subprocess
+
+        def runner():
+            print(f"\n  \033[1m$ {cmd_str}\033[0m")
+            if note:
+                print(f"  {note}")
+            print()
+            try:
+                subprocess.run(shlex.split(cmd_str))
+            except FileNotFoundError:
+                print(f"  command not found: {shlex.split(cmd_str)[0]}")
+            except KeyboardInterrupt:
+                pass
+            try:
+                input("\n  ── press Enter to return to DGC ── ")
+            except (EOFError, KeyboardInterrupt):
+                pass
+        try:
+            run_in_terminal(runner)
+        except Exception as e:
+            self.error(f"couldn't run '{cmd_str}': {e}")
+
     def _offer_engine_install(self, eng) -> None:
         """Offer to install a not-yet-installed subscription CLI from inside DGC."""
         if not eng.install_cmd:
-            self._flash(f"{eng.short_label} isn't installed — install its CLI, then /connect again")
+            self.info(f"{eng.short_label} isn't installed — install its CLI, then /connect again.")
             return
 
         def pick(i):
             if i != 0:
+                self.info(f"{eng.short_label} isn't installed — install it, then /connect again.")
                 return
-            self._flash(f"installing {eng.short_label} — then /connect again to sign in")
-            self._submit_shell(eng.install_cmd)     # streamed like any ! command; non-interactive
+            self._run_setup_cmd(eng.install_cmd, "installing — this can take a minute…")
         self._show_picker(f"{eng.short_label} isn't installed. Install it now?   ({eng.install_cmd})",
                           ["Yes, install it", "No"], pick)
 
     def _offer_engine_login(self, eng) -> None:
-        """Offer to sign in to a subscription CLI from inside DGC. The vendor's own
-        login opens the browser / prints a device URL and owns the token — DGC only
-        launches it (no credential handling here)."""
-        if not eng.login_run:
-            self._flash(f"sign in to {eng.short_label}: run  {eng.login_cmd}  in a terminal, then come back")
-            return
+        """Offer to sign in to a subscription CLI from inside DGC. It runs the vendor's
+        own login with the real terminal handed over, so the browser / device flow
+        works; the vendor keeps the token."""
+        cmd = eng.login_run or eng.binary        # a bare binary triggers the device flow (qwen/copilot)
+        hint = ("sign in, then type /quit (or Ctrl+D) in that CLI to come back"
+                if not eng.login_run.endswith("login") and eng.login_run in ("qwen", "copilot")
+                else "complete the sign-in in your browser, then come back here")
 
         def pick(i):
             if i != 0:
+                self.info(f"sign in later: run  {eng.login_cmd}  then reselect {eng.short_label}.")
                 return
-            self._flash(f"opening {eng.short_label} sign-in — follow the link that appears")
-            self._submit_shell(eng.login_run)       # opens the browser / prints the device URL
+            self._run_setup_cmd(cmd, hint)
         self._show_picker(f"Sign in to {eng.short_label} now? (opens your browser)",
                           ["Yes, sign in", "No"], pick)
 
