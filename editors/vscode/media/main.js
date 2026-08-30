@@ -1081,7 +1081,8 @@
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
     "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
     "sandbox_network", "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
-    "artifact_in_plan", "tool_profile", "max_parallel_tasks"];
+    "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+    "subscription_engine", "subscription_model", "subscription_effort"];
   const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
     "show_reasoning", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
   let settingsReturnFocus = null;
@@ -1103,8 +1104,24 @@
       artifact_in_plan: String(cfg.artifact_in_plan === true),
       tool_profile: cfg.tool_profile || "adaptive",
       max_parallel_tasks: cfg.max_parallel_tasks || 4,
+      subscription_engine: cfg.subscription_engine || "",
+      subscription_model: cfg.subscription_model || "",
+      subscription_effort: cfg.subscription_effort || "",
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
+    renderSubscriptionStatus(cfg);
+  }
+  function renderSubscriptionStatus(cfg) {
+    const box = $("s-subscription_status");
+    if (!box) return;
+    const active = cfg.subscription_engine || "";
+    const list = Array.isArray(cfg.subscription_engines) ? cfg.subscription_engines : [];
+    if (!active) { box.textContent = "off — DGC drives the model above directly."; return; }
+    const s = list.find((e) => e && e.key === active);
+    if (!s) { box.textContent = ""; return; }
+    if (!s.installed) box.textContent = s.label + ": CLI not installed.";
+    else if (!s.logged_in) box.textContent = s.label + ": not signed in — run  " + s.login_cmd;
+    else box.textContent = s.label + ": signed in ✓ — turns run through your subscription.";
   }
   function showSettingsSection(section) {
     const wanted = ["general", "models", "agents", "security", "extensions"].includes(section)
@@ -1157,6 +1174,7 @@
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
     if (p) {
       $("s-base_url").value = p.url; $("s-api_mode").value = "auto";
+      const se = $("s-subscription_engine"); if (se) se.value = "";   // a direct provider turns delegation off
       if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
     }
   };

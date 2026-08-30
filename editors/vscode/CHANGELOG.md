@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased — local candidate
+## 0.9.0 — 2026-08-30
 
+- **Bring your own subscription.** A new Subscription section in Settings → Models lets you run each
+  turn through your own Claude Code, Codex/ChatGPT, Qwen, Kimi, or GitHub Copilot plan via its
+  official CLI — with an optional model and reasoning-effort override, and a live sign-in status.
+  DGC never handles the vendor's tokens; it launches the official CLI, which owns auth and terms.
 - Added dedicated searchable Skills and Documentation browsers, including loaded source precedence,
   instruction detail, explicit skill reload, and one-click `$skill` insertion without transcript
   pollution.

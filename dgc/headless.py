@@ -902,7 +902,12 @@ class Backend:
 
     def _emit_config(self, request_id: str | None = None) -> None:
         c = self.config
+        from . import subscriptions as _subs
         self.em.emit("config", model=c.model, mode=self.agent.mode,
+                     subscription_engine=str(c.get("subscription_engine", "")),
+                     subscription_model=str(c.get("subscription_model", "")),
+                     subscription_effort=str(c.get("subscription_effort", "")),
+                     subscription_engines=_subs.status(),
                      think=c.get("thinking", "off"), base_url=c.base_url,
                      api_mode=c.get("api_mode", "auto"),
                      provider_state=c.get("provider_state", "stateless"),
@@ -1463,7 +1468,8 @@ class Backend:
                        "fallback_api_mode",
                        "context_size", "search_provider", "sandbox", "sandbox_network",
                        "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
-                       "artifact_in_plan", "tool_profile", "max_parallel_tasks")
+                       "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+                       "subscription_engine", "subscription_model", "subscription_effort")
             refresh = False
             values = {k: v for k, v in (cmd.get("values") or {}).items() if k in allowed}
             boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
@@ -1477,6 +1483,14 @@ class Backend:
                     and values["tool_profile"] not in ("adaptive", "full")):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message="tool_profile must be adaptive or full",
+                             **_request_fields(request_id))
+                return
+            from .subscriptions import ENGINE_KEYS as _sub_keys
+            if ("subscription_engine" in values and values["subscription_engine"]
+                    and values["subscription_engine"] not in _sub_keys):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="subscription_engine must be empty or one of: "
+                                     + ", ".join(_sub_keys),
                              **_request_fields(request_id))
                 return
             if ("max_parallel_tasks" in values

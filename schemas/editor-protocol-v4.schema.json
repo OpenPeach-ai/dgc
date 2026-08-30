@@ -996,6 +996,18 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "subscription_engine": {
+              "type": "string"
+            },
+            "subscription_engines": {
+              "type": "array"
+            },
+            "subscription_model": {
+              "type": "string"
+            },
+            "subscription_effort": {
+              "type": "string"
             }
           },
           "required": [

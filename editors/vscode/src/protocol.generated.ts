@@ -837,6 +837,30 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": false
+    },
+    "subscription_engine": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "subscription_engines": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "subscription_model": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "subscription_effort": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "status": {

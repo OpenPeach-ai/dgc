@@ -13562,6 +13562,102 @@ def e2e_verify(port: int, tmp: Path) -> bool:
             and any("test command passed" in str(m.get("content", "")) for m in msgs))
 
 
+def test_subscription_engines():
+    """Delegation to first-party CLIs: argv shape, tolerant stream parse, auth
+    detection, and friendly preflight errors — all offline, no CLI is launched."""
+    import os
+    from dataclasses import replace
+    from dgc import subscriptions as S
+    print("subscription engine tests:")
+
+    check("subscriptions: five first-party engines registered",
+          set(S.ENGINE_KEYS) == {"claude", "codex", "qwen", "kimi", "copilot"})
+    cop = S.ENGINES["copilot"].build_argv("copilot", "fix it", cont=False)
+    check("subscriptions: copilot uses --prompt + --allow-all with prompt as its value",
+          "--prompt" in cop and cop[cop.index("--prompt") + 1] == "fix it" and "--allow-all" in cop)
+    check("subscriptions: copilot plain-text output normalizes to a text event",
+          S.parse_stream_line("copilot", "Reading files...") == {"kind": "text", "text": "Reading files..."})
+    ce = S.ENGINES["claude"].build_argv("claude", "fix", cont=False, model="opus", effort="high")
+    check("subscriptions: claude injects --model and --effort when set",
+          "--model" in ce and ce[ce.index("--model") + 1] == "opus"
+          and "--effort" in ce and ce[ce.index("--effort") + 1] == "high")
+    cxe = S.ENGINES["codex"].build_argv("codex", "fix", cont=False, model="gpt-5", effort="high")
+    check("subscriptions: codex injects -m and -c model_reasoning_effort when set",
+          "-m" in cxe and 'model_reasoning_effort="high"' in cxe)
+    qe = S.ENGINES["qwen"].build_argv("qwen", "fix", cont=False, effort="high")
+    check("subscriptions: an engine without an effort flag ignores effort",
+          "--effort" not in qe and "model_reasoning_effort" not in " ".join(qe))
+
+    claude = S.ENGINES["claude"]
+    a = claude.build_argv("claude", "fix it", cont=False)
+    check("subscriptions: claude fresh argv is headless stream-json with prompt last",
+          a[0] == "claude" and "-p" in a and "stream-json" in a
+          and "--dangerously-skip-permissions" in a and a[-1] == "fix it")
+    check("subscriptions: claude continue argv adds --continue",
+          "--continue" in claude.build_argv("claude", "n", cont=True))
+    codex = S.ENGINES["codex"]
+    cx = codex.build_argv("codex", "fix it", cont=False)
+    check("subscriptions: codex uses exec subcommand + json with prompt positional",
+          cx[:2] == ["codex", "exec"] and "--json" in cx and cx[-1] == "fix it")
+    check("subscriptions: codex continue uses exec resume --last",
+          codex.build_argv("codex", "again", cont=True)[:4] == ["codex", "exec", "resume", "--last"])
+    qw = S.ENGINES["qwen"].build_argv("qwen", "fix it", cont=False)
+    check("subscriptions: qwen passes the prompt via the -p value flag",
+          "-p" in qw and qw[qw.index("-p") + 1] == "fix it" and "stream-json" in qw)
+
+    check("subscriptions: claude assistant text normalizes to a text event",
+          S.parse_stream_line("claude", json.dumps(
+              {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}}))
+          == {"kind": "text", "text": "Hi"})
+    check("subscriptions: codex agent_message normalizes to a text event",
+          S.parse_stream_line("codex", json.dumps({"msg": {"type": "agent_message", "message": "go"}}))
+          == {"kind": "text", "text": "go"})
+    check("subscriptions: an unparseable line becomes a raw event, never dropped",
+          S.parse_stream_line("codex", "not json") == {"kind": "raw", "text": "not json"})
+    check("subscriptions: a blank stream line yields nothing",
+          S.parse_stream_line("kimi", "  ") is None)
+
+    old_home = os.environ.get("HOME")
+    with tempfile.TemporaryDirectory() as hd:
+        os.environ["HOME"] = hd
+        try:
+            check("subscriptions: engine reports signed-out with no marker present",
+                  not codex.logged_in())
+            not_auth = False
+            try:
+                S.preflight(codex)
+            except S.EngineNotAuthenticated:
+                not_auth = True
+            except S.EngineError:
+                not_auth = "other-error"
+            check("subscriptions: preflight raises EngineNotAuthenticated when signed out",
+                  not_auth is True)
+            marker = Path(hd) / ".codex" / "auth.json"
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text("{}")
+            check("subscriptions: engine reports signed-in once its own marker exists",
+                  codex.logged_in())
+            missing = False
+            try:
+                S.preflight(replace(codex, binary="dgc-no-such-binary-zzz"))
+            except S.EngineNotInstalled:
+                missing = True
+            except S.EngineError:
+                missing = "other-error"
+            check("subscriptions: preflight raises EngineNotInstalled for a missing binary",
+                  missing is True)
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+
+    st = S.status()
+    check("subscriptions: status lists every engine with the expected fields",
+          len(st) == 5 and all(
+              {"key", "label", "installed", "logged_in", "login_cmd", "note"} <= set(s) for s in st))
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -13601,6 +13697,7 @@ def main():
         test_responses_adapter()
         test_overthink_watchdog()
         test_multi_edit()
+        test_subscription_engines()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

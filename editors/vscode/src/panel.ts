@@ -1462,6 +1462,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       artifact_in_plan: v.artifact_in_plan === true,
       tool_profile: v.tool_profile === "full" ? "full" : "adaptive",
       max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
+      subscription_engine: v.subscription_engine || "",
+      subscription_model: v.subscription_model || "",
+      subscription_effort: v.subscription_effort || "",
     };
     if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
     if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
@@ -1722,6 +1725,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <input id="s-api_key" type="password" spellcheck="false" placeholder="(dummy for local)"></label>
     <label>Model
       <span class="set-row"><input id="s-model" type="text" spellcheck="false" placeholder="model id" list="s-models"><datalist id="s-models"></datalist></span></label>
+
+    <div class="set-group">Subscription <span class="set-hint">run each turn through your own Claude/Codex/Qwen/Kimi/Copilot plan via its official CLI</span></div>
+    <label>Engine
+      <select id="s-subscription_engine"><option value="">off — use the model above</option><option value="claude">Claude Code (your subscription)</option><option value="codex">Codex / ChatGPT (your subscription)</option><option value="qwen">Qwen Code (your subscription)</option><option value="kimi">Kimi for Coding (your subscription)</option><option value="copilot">GitHub Copilot (your subscription)</option></select></label>
+    <div id="s-subscription_status" class="set-hint"></div>
+    <label>Subscription model <span class="set-hint">optional — overrides the CLI's own default</span>
+      <input id="s-subscription_model" type="text" spellcheck="false" placeholder="(the CLI's default)"></label>
+    <label>Reasoning effort <span class="set-hint">Claude &amp; Codex only</span>
+      <select id="s-subscription_effort"><option value="">default</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
 
     <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
     <label>API transport

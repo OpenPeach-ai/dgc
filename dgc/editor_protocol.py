@@ -121,6 +121,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "plan_artifact": _B(False), "artifact_autostart": _B(False),
         "artifact_in_plan": _B(False), "tool_profile": _S(False),
         "max_parallel_tasks": _I(False),
+        "subscription_engine": _S(False), "subscription_engines": _A(False),
+        "subscription_model": _S(False), "subscription_effort": _S(False),
     },
     "status": {
         "request_id": _S(False),

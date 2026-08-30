@@ -563,8 +563,15 @@ test("provider runtime settings and actual usage round-trip through the webview"
     subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
     fallback_api_key: "must-not-enter-webview",
     prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
+    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "high",
+    subscription_engines: [
+      { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
   } });
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
+  assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
+  assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
+  assert.equal(doc.getElementById("s-subscription_effort").value, "high");
+  assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
   assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
@@ -578,6 +585,9 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.subagent_api_mode, "ollama");
   assert.equal(saved.values.fallback_api_mode, "chat_completions");
   assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
+  assert.equal(saved.values.subscription_engine, "codex");
+  assert.equal(saved.values.subscription_model, "gpt-5.6");
+  assert.equal(saved.values.subscription_effort, "high");
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",
