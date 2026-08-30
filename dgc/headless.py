@@ -49,6 +49,13 @@ _MCP_SENSITIVE_QUERY_NAMES = frozenset({
     "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
     "authorization", "auth",
 })
+# Value-bearing CLI flags whose argument (or `--flag=value` tail) is a secret.
+# A persisted MCP spec must route these through env_names, never inline args.
+_MCP_SECRET_FLAGS = frozenset({
+    "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
+    "--auth", "--authorization", "--password", "--passwd", "--secret", "--bearer",
+    "--key", "--credential", "--credentials",
+})
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
@@ -142,8 +149,10 @@ def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
         return None, "persisted MCP specifications cannot contain environment values"
     if persisted:
         for index, arg in enumerate(args):
-            lowered = arg.strip().lower()
-            prior = args[index - 1].strip().lower() if index else ""
+            raw = arg.strip()
+            lowered = raw.lower()
+            prior_raw = args[index - 1].strip() if index else ""
+            prior = prior_raw.lower()
             has_url_credentials = False
             if lowered.startswith(("http://", "https://")):
                 try:
@@ -151,9 +160,20 @@ def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
                     has_url_credentials = bool(parsed_arg.username or parsed_arg.password)
                 except ValueError:
                     has_url_credentials = True
+            # A secret can ride in as a value-bearing flag (`--api-key sk-...`,
+            # `--token=...`) or a header, not only as env/URL creds. Reject the
+            # whole persisted spec if any recognized secret flag is present, in
+            # either its own arg or the value that follows it. `-H` stays
+            # case-sensitive so it never collides with `-h`/help.
+            head = lowered.split("=", 1)[0]
+            prior_head = prior.split("=", 1)[0]
+            is_header_short = raw == "-H" or prior_raw == "-H"
             if (lowered.startswith("authorization:") or lowered == "--header"
-                    or prior == "--header" or has_url_credentials):
-                return None, "persisted MCP specifications cannot contain authorization values"
+                    or prior == "--header" or is_header_short
+                    or head in _MCP_SECRET_FLAGS or prior_head in _MCP_SECRET_FLAGS
+                    or has_url_credentials):
+                return None, ("persisted MCP specifications cannot contain inline secrets; "
+                              "declare tokens, headers, or credentials via env_names")
     if any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
            or not isinstance(item, str) or len(item) > 16_384 or "\x00" in item
            for name, item in env.items()):

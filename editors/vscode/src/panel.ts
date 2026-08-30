@@ -991,6 +991,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "completed" }));
       } else if (["blocked", "block", "pause", "paused"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "blocked" }));
+        // Pausing the goal also interrupts any in-flight turn (parity with the
+        // Codex-style pause), not just a status relabel. Harmless when idle.
+        be.send({ type: "cancel" });
       } else if (["resume", "active", "reactivate"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "active" }));
       } else {

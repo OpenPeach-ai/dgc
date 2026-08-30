@@ -850,7 +850,7 @@
         mcpRows = Array.isArray(ev.items) ? ev.items : [];
         if (surfaceKind === "mcp") renderMcp();
         if (ev.error && surfaceKind === "mcp") {
-          const warning = el("div", "err surface-notice", ev.error);
+          const warning = el("div", "err surface-notice", esc(ev.error));
           surfaceBody.insertBefore(warning, surfaceBody.firstChild);
         }
         break;

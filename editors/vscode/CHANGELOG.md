@@ -14,6 +14,10 @@
   reasoning display, suggestions, sandbox/network, plan/artifact, tool-profile, and parallel-task
   controls while retaining the existing DGC mono/black/purple design.
 - Added protocol, backend, webview, accessibility, and feature-manager regression coverage.
+- Hardening pass before ship: the MCP subsystem-error notice renders as inert text instead of
+  raw HTML; persisted MCP specs now reject inline-secret arguments (`--api-key`, `--token`,
+  `-H`/`--header`, …) as well as env/URL credentials; and pausing a standing goal interrupts any
+  in-flight turn rather than only relabeling it. Covered by new Python and webview tests.
 
 ## 0.8.1 — 2026-08-21
 

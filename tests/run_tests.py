@@ -2455,6 +2455,18 @@ def unit_tests(tmp: Path):
                                "name": "bad-header", "runtime": _safe_remote,
                                "persisted": _safe_remote})
     _bad_header_event = _surface_cap.events[-1]
+    # A secret riding in as a value-bearing flag (`--api-key sk-...`) must be
+    # rejected too, not just env/URL/header creds — otherwise it lands in
+    # ~/.dgc/config.json in plaintext and can be echoed back by list_mcp_servers.
+    _inline_secret_arg = {
+        "transport": "stdio", "command": "npx",
+        "args": ["-y", "some-mcp", "--api-key", "sk-realsecret999"],
+        "env_names": [], "log_level": "warning",
+    }
+    _surface_backend.dispatch({"type": "upsert_mcp_server", "request_id": "mcp-inline-secret",
+                               "name": "inline-secret", "runtime": _inline_secret_arg,
+                               "persisted": _inline_secret_arg})
+    _inline_secret_event = _surface_cap.events[-1]
     _legacy_public = Backend._public_mcp_spec({
         "command": "npx",
         "args": ["-y", "mcp-remote", "https://user:pass@example.com/mcp?token=hidden",
@@ -2463,9 +2475,11 @@ def unit_tests(tmp: Path):
     })
     check("headless MCP persistence and catalogs reject URL/header credential values",
           "without URL credentials" in _bad_url_event.get("error", "")
-          and "cannot contain authorization values" in _bad_header_event.get("error", "")
+          and "cannot contain inline secrets" in _bad_header_event.get("error", "")
+          and "cannot contain inline secrets" in _inline_secret_event.get("error", "")
           and set(_SurfaceConfig.values["mcp_servers"]) == {"fixture"}
           and "must-not-persist" not in _json2.dumps(_bad_header_event)
+          and "sk-realsecret999" not in _json2.dumps(_inline_secret_event)
           and "user:pass" not in _json2.dumps(_legacy_public)
           and "Bearer hidden" not in _json2.dumps(_legacy_public)
           and _legacy_public.get("env_names") == ["FIXTURE_TOKEN"])

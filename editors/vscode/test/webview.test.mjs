@@ -606,6 +606,10 @@ test("feature browsers manage MCP, docs, permissions, memory, and settings witho
   assert.match(doc.getElementById("surface").textContent, /fixture.*connected.*mcp__fixture__echo/s);
   assert.equal(doc.getElementById("surface").textContent.includes("FIXTURE_TOKEN="), false,
     "MCP catalogs must expose secret names, never values");
+  send({ type: "event", event: { type: "mcp_servers", request_id: "servers-err", total: 0,
+    items: [], error: "<img src=x onerror=mcpErr()>" } });
+  assert.equal(doc.getElementById("surface").querySelector("img"), null,
+    "MCP subsystem error notice must render as inert text, not active HTML");
   doc.getElementById("surface-primary").click();
   doc.getElementById("mcp-name").value = "local-test";
   doc.getElementById("mcp-target").value = "node";
