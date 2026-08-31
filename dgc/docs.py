@@ -319,6 +319,124 @@ completion or a real blocker. Ending one turn or finishing one milestone is not
 goal completion.
 """.strip()),
 
+    ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
+# Connect your model
+
+DGC talks to any supported native or OpenAI-compatible endpoint. Pick one with
+`/connect` (or `dgc setup` on first run), then `/model` to choose the served model.
+
+## Local runtimes
+
+- **Ollama** — `/connect ollama` uses `http://localhost:11434/v1`. DGC auto-detects
+  Ollama and speaks its native chat API (which round-trips the model's own thinking).
+- **llama.cpp** — run `llama-server`, then `/connect llamacpp`
+  (`http://localhost:8080/v1`, no real key needed). This is the OpenAI-compatible
+  `/v1` server built into `llama.cpp`.
+- **vLLM / SGLang** — `/connect vllm` (`http://localhost:8000/v1`). The server
+  renders the chat template, so DGC sends the reasoning switch it understands.
+- **LM Studio** — `/connect lmstudio` (`http://localhost:1234/v1`).
+
+## unsloth GGUFs
+
+unsloth is not a serving runtime — its GGUF/quantized models are served **through**
+llama.cpp (`llama-server`), vLLM, or Ollama. Start one of those with your unsloth
+model, then pick that runtime's preset. `/think <level>` reaches Qwen3-family
+templates (which read the effort from inside `chat_template_kwargs`) automatically.
+
+## Custom / LAN hosts
+
+`/connect http://<host>:<port>` points DGC at any other OpenAI-compatible server.
+If you enter a bare host, DGC appends the `/v1` chat-completions path for you and
+prints a notice (Anthropic and native Ollama URLs are left as-is). Models are
+auto-discovered from the endpoint's `/v1/models`, so `/model` lists what the host
+actually serves.
+
+## Cloud providers
+
+`/connect openai | anthropic | openrouter | groq | deepseek | together | mistral`
+prompt for the provider's key and use its native auth contract. See **Subscriptions**
+to instead run your own Claude/Codex/Qwen/Kimi/Copilot plan through its official CLI.
+""".strip()),
+
+    ("Thinking & reasoning", "off · low · medium · high · xhigh, and preserving it", """
+# Thinking & reasoning
+
+DGC exposes one thinking dial, mapped to the correct wire format **per provider**.
+
+## Levels
+
+`off` · `low` · `medium` · `high` · `xhigh`. `off` is the default — a coding agent
+should act, not deliberate at length. `xhigh` is the deepest budget, for genuinely
+hard problems on reasoning-capable models.
+
+- `/think` — cycle, or `/think high` to set a level (persisted across restarts).
+- `--think <level>` — set it for one `dgc -p` run.
+- TUI: `/think` opens a picker; **Settings → Model & sampling → Thinking effort**.
+
+Reasoning models (o-series, DeepSeek-R1, qwen-thinking) tend to do better on hard
+tasks with `/think high` (or `xhigh`); non-reasoning models often ignore the dial.
+
+## Showing thinking
+
+`show_reasoning` (`/thoughts show|hide`) controls whether the model's thinking is
+shown, muted, in the transcript. It does **not** change how hard the model reasons —
+that is `/think`.
+
+## Preserving thinking across turns
+
+Backends differ in whether prior-turn reasoning is carried back into context:
+
+- **Anthropic** (signed thinking blocks) and **Ollama** (native thinking field)
+  round-trip their own reasoning automatically.
+- The **OpenAI-compatible / llama.cpp** chat-completions transport **strips** the
+  model's reasoning every turn.
+
+`preserve_thinking` (`/preserve-thinking on|off`, default off) re-embeds the last
+turn's reasoning as a `<think>…</think>` block in the assistant message sent back,
+so a compatible/local model can build on its own earlier thinking. It helps
+multi-turn coherence but costs context tokens, and only affects the
+chat-completions path (the Anthropic/Ollama paths are untouched).
+""".strip()),
+
+    ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
+# Subscriptions
+
+Instead of a raw model endpoint, DGC can drive a coding CLI you already pay for and
+are logged into — running each turn through **your own** subscription.
+
+## Engines
+
+- **Claude Code** — your Anthropic Pro / Max plan (`claude`).
+- **Codex** — your ChatGPT Plus / Pro plan (`codex`).
+- **Qwen Code** — your Qwen OAuth plan (`qwen`).
+- **Kimi for Coding** — your Moonshot plan (`kimi`).
+- **GitHub Copilot CLI** — your Copilot plan (`copilot`).
+
+## How it works (orchestration, not a token proxy)
+
+This is orchestration, not credential replay. DGC never reads, stores, refreshes,
+or replays the vendor's tokens and never sends vendor-private headers. Each engine
+authenticates through the vendor's **own** login command, which opens the vendor's
+own browser / device flow and keeps the token in its own store. When you run a turn,
+DGC shells out to the official binary in your workspace and streams its output into
+DGC's UI (session, checkpoints, transcript). Selecting one is equivalent to running
+that CLI directly.
+
+## Select and sign in
+
+- `dgc setup` lists subscription engines first, with each one's sign-in status.
+- `/connect claude|codex|qwen|kimi|copilot` selects an engine (a direct `/connect`
+  to a provider or URL turns delegation back off).
+- Sign in once with the vendor's own command, e.g. `claude auth login`, `codex login`,
+  `qwen` (device code), `kimi login`, `copilot login`. `dgc doctor` reports status.
+
+## Model + reasoning effort
+
+- `/model` steers the vendor's own model (e.g. opus/sonnet/haiku for Claude).
+- `/think low|medium|high|xhigh` sets the reasoning effort for engines that take one
+  (Claude, Codex, Copilot); engines without an effort flag steer it via `/model`.
+""".strip()),
+
     ("Configuration", "config.json, models, context, providers", """
 # Configuration
 
@@ -332,10 +450,19 @@ Useful keys:
   owner-only `~/.dgc/secrets.json`, VS Code SecretStorage, or `DGC_API_KEY` / the other
   `DGC_*_API_KEY` environment references; they are not written into normal config.
 - `mode`, `thinking` — permission mode and reasoning effort. `thinking` is **`off`
-  by default** (a coding agent should act, not deliberate at length). DGC sends the
-  correct reasoning switch **per provider** automatically — so `off` genuinely turns
-  reasoning off on Ollama, vLLM, OpenAI, etc. **Reasoning models (o-series,
-  DeepSeek-R1, qwen-thinking) do better on hard tasks with `/think high`.**
+  by default** (a coding agent should act, not deliberate at length) and accepts
+  `off · low · medium · high · xhigh`. DGC sends the correct reasoning switch **per
+  provider** automatically — so `off` genuinely turns reasoning off on Ollama, vLLM,
+  OpenAI, etc., and a set level reaches Qwen3-family llama.cpp/unsloth templates (which
+  read it from inside `chat_template_kwargs`). **Reasoning models (o-series,
+  DeepSeek-R1, qwen-thinking) do better on hard tasks with `/think high`.** See the
+  **Thinking & reasoning** guide.
+- `show_reasoning`, `preserve_thinking` — `show_reasoning` (`/thoughts show|hide`)
+  shows the model's thinking, muted, in the transcript. `preserve_thinking`
+  (`/preserve-thinking on|off`, default off) re-embeds the prior turn's reasoning in
+  the context sent back so a compatible/local model keeps its own thinking across
+  turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and
+  Ollama already round-trip their reasoning natively).
 - `think_budget_tokens`, `max_tokens` — safety backstops: a reasoning phase that
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation

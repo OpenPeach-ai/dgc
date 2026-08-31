@@ -334,7 +334,10 @@ class TUI:
     _SUBMENUS = {
         "thoughts": ([("Show thinking", "show"), ("Hide thinking", "hide")],
                      lambda s: "show" if s.config.get("show_reasoning", True) else "hide"),
-        "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high")],
+        "preserve-thinking": ([("On — keep prior reasoning in context", "on"), ("Off", "off")],
+                              lambda s: "on" if s.config.get("preserve_thinking", False) else "off"),
+        "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
+                   ("Extra-high", "xhigh")],
                   lambda s: s.config.get("thinking", "off")),
         "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
                   ("Plan — read-only", "plan"), ("Auto — full access", "auto")],
@@ -376,7 +379,7 @@ class TUI:
             ("prompt_cache", "Prompt cache routing", "bool"),
             ("prompt_cache_key", "Prompt cache key", "str"),
             ("capability_cache_ttl_s", "Capability retry TTL (s)", "int"),
-            ("thinking", "Thinking effort", "enum", ["off", "low", "medium", "high"]),
+            ("thinking", "Thinking effort", "enum", ["off", "low", "medium", "high", "xhigh"]),
             ("temperature", "Temperature", "float"), ("top_p", "Top-p", "float"),
             ("top_k", "Top-k", "int"), ("min_p", "Min-p", "float"),
             ("max_tokens", "Max output tokens", "int"), ("context_size", "Context window", "int"),
@@ -407,7 +410,9 @@ class TUI:
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
             ("background", "Background", "enum", ["auto", "dark", "inherit"]),
-            ("show_reasoning", "Show reasoning", "bool"), ("logo_animation", "Animate logo", "bool"),
+            ("show_reasoning", "Show reasoning", "bool"),
+            ("preserve_thinking", "Preserve thinking in context", "bool"),
+            ("logo_animation", "Animate logo", "bool"),
         ],
         "Artifacts": [
             ("artifact_bind", "Reach", "enum", ["localhost", "lan"]),
@@ -3027,16 +3032,16 @@ class TUI:
                 eng = subs.get_engine(_se)
                 if eng is not None and not eng.supports_effort():
                     self._flash(f"{eng.short_label} takes no reasoning-effort flag — steer it via /model")
-                elif rest in ("off", "low", "medium", "high"):
+                elif rest in ("off", "low", "medium", "high", "xhigh"):
                     val = "" if rest == "off" else rest
                     cfg.set("subscription_effort", val); self._flash(f"subscription effort → {val or 'default'}")
                 else:
                     self._flash(f"subscription effort: {cfg.get('subscription_effort', '') or 'default'}"
-                                " — /think off|low|medium|high")
-            elif rest in ("off", "low", "medium", "high"):
+                                " — /think off|low|medium|high|xhigh")
+            elif rest in ("off", "low", "medium", "high", "xhigh"):
                 cfg.set("thinking", rest); self._flash(f"thinking → {rest}")
             else:
-                self._flash(f"thinking: {cfg.get('thinking', 'off')} — /think off|low|medium|high")
+                self._flash(f"thinking: {cfg.get('thinking', 'off')} — /think off|low|medium|high|xhigh")
         elif cmd in ("thoughts", "reasoning", "reason"):   # display toggle (NOT the model's effort — that's /think)
             val = rest.strip().lower()
             if val in ("show", "on", "true", "1"):
@@ -3045,6 +3050,15 @@ class TUI:
                 cfg.set("show_reasoning", False); self._flash("thoughts hidden")
             else:
                 self._flash(f"thoughts: {'shown' if cfg.get('show_reasoning', True) else 'hidden'} — /thoughts show|hide")
+        elif cmd in ("preserve-thinking", "preserve-reasoning"):
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "show", "yes"):
+                cfg.set("preserve_thinking", True); self._flash("prior-turn reasoning kept in context")
+            elif val in ("off", "false", "0", "hide", "no"):
+                cfg.set("preserve_thinking", False); self._flash("prior-turn reasoning not kept")
+            else:
+                cur = "on" if cfg.get("preserve_thinking", False) else "off"
+                self._flash(f"preserve thinking: {cur} — /preserve-thinking on|off")
         elif cmd == "theme":
             val = rest or ("light" if cfg.get("theme") == "dark" else "dark")
             cfg.set("theme", val); style_mod.set_theme(val); self._flash(f"theme → {val}")
@@ -3276,7 +3290,7 @@ class TUI:
         self._flash(f"{name} model → {model or 'the CLI default'}")
 
     def _subscription_effort_flow(self, name: str) -> None:
-        levels = ["default", "low", "medium", "high"]
+        levels = ["default", "low", "medium", "high", "xhigh"]
 
         def pick(i):
             val = "" if i == 0 else levels[i]
@@ -4570,7 +4584,7 @@ def _tui_help() -> str:
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
                           ("/subagent", "sub-agent model + host + API transport"),
-                          ("/think off|low|medium|high", "reasoning effort")]),
+                          ("/think off|low|medium|high|xhigh", "reasoning effort")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),

@@ -54,7 +54,8 @@
                 "off",
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh"
               ]
             },
             "base_url": {
@@ -900,7 +901,8 @@
                 "off",
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh"
               ]
             },
             "base_url": {
@@ -1054,7 +1056,8 @@
                 "off",
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh"
               ]
             },
             "base_url": {
@@ -1167,7 +1170,8 @@
                 "off",
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh"
               ]
             },
             "request_id": {
@@ -2739,7 +2743,8 @@
                 "off",
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh"
               ]
             },
             "request_id": {

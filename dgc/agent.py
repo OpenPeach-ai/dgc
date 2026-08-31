@@ -382,7 +382,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
 from .tools import TOOL_SCHEMAS, bash_handle_tools, execute
 
-THINK_LEVELS = ("off", "low", "medium", "high")
+THINK_LEVELS = ("off", "low", "medium", "high", "xhigh")
 THINK_INSTRUCTIONS = {
     "off": "",
     "low": "Think briefly before acting; keep your reasoning short and focused.",
@@ -390,12 +390,29 @@ THINK_INSTRUCTIONS = {
     "high": ("Engage maximum reasoning depth (ultrathink). Analyze the problem thoroughly, "
              "explore alternative approaches, verify assumptions against the actual code, "
              "and double-check every action before taking it."),
+    "xhigh": ("Engage the deepest reasoning budget. Exhaustively analyze the problem, enumerate "
+              "and weigh alternative approaches, verify every assumption against the actual code, "
+              "and re-check each action before and after taking it."),
 }
 # prompt keywords bump the thinking level for that turn
 THINK_KEYWORDS = [
     ("ultrathink", "high"), ("think harder", "high"),
     ("think hard", "medium"), ("think", "low"),
 ]
+
+
+def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
+    """Content persisted to history for one assistant turn.
+
+    With ``preserve_thinking`` on, re-embed the reasoning that the chat_completions/generic
+    transport would otherwise strip (Anthropic and Ollama round-trip their own reasoning through
+    ``provider_message``, so those paths are left untouched). Prepending a ``<think>`` block keeps
+    the model's prior reasoning in the context sent back next turn."""
+    content = result.content or ""
+    if (preserve_thinking and not getattr(result, "provider_message", None)
+            and (getattr(result, "thinking", "") or "").strip()):
+        return "<think>\n" + result.thinking.strip() + "\n</think>\n" + content
+    return content
 
 COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
@@ -2665,7 +2682,9 @@ class Agent:
 
             native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
-            assistant: dict = {"role": "assistant", "content": result.content}
+            assistant: dict = {"role": "assistant",
+                               "content": _assistant_content_with_thinking(
+                                   result, bool(self.config.get("preserve_thinking", False)))}
             if result.provider_items:
                 assistant["_responses_output"] = result.provider_items
             if result.provider_message:

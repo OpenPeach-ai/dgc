@@ -10958,11 +10958,13 @@ def test_reasoning_payload():
     check("ollama off → effort:none", rp("ollama", "qwen3", "off") == {"reasoning_effort": "none"})
     check("ollama None → effort:none", rp("ollama", "qwen3", None) == {"reasoning_effort": "none"})
     check("ollama high → effort:high", rp("ollama", "qwen3", "high") == {"reasoning_effort": "high"})
-    # vLLM/SGLang: enable_thinking switch (server renders template)
+    # vLLM/SGLang: enable_thinking switch (server renders template) — effort now NESTED too so
+    # Qwen3-family Jinja templates that read it from inside chat_template_kwargs honor /think.
     check("vllm off → enable_thinking:false",
           rp("vllm", "qwen3", "off") == {"chat_template_kwargs": {"enable_thinking": False}})
-    check("vllm high → enable_thinking:true + effort",
-          rp("vllm", "qwen3", "high") == {"chat_template_kwargs": {"enable_thinking": True}, "reasoning_effort": "high"})
+    check("vllm high → nested + flat effort",
+          rp("vllm", "qwen3", "high") == {"reasoning_effort": "high",
+              "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "high"}})
     # OpenAI cloud: only o-series/gpt-5 accept effort; no "none"; non-reasoning gets nothing
     check("openai o3 off → low", rp("openai", "o3-mini", "off") == {"reasoning_effort": "low"})
     check("openai o3 high → high", rp("openai", "o3-mini", "high") == {"reasoning_effort": "high"})
@@ -10979,9 +10981,102 @@ def test_reasoning_payload():
     check("anthropic off → {}", rp("anthropic", "claude", "off") == {})
     check("anthropic high → budget",
           rp("anthropic", "claude", "high") == {"thinking": {"type": "enabled", "budget_tokens": 16384}})
-    # Unknown compat host → belt-and-suspenders both switches for OFF
-    check("compat off → both switches",
-          rp("compat", "x", "off") == {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}})
+    check("anthropic xhigh → largest budget",
+          rp("anthropic", "claude", "xhigh") == {"thinking": {"type": "enabled", "budget_tokens": 24576}})
+    # Generic/llama.cpp/unsloth compat host: OFF sends only enable_thinking:false (no effort);
+    # ON sends the level BOTH flat and nested inside chat_template_kwargs so /think reaches the
+    # Qwen3-family template (which reads chat_template_kwargs.reasoning_effort) and flat-reading hosts.
+    check("compat off → enable_thinking:false only",
+          rp("compat", "x", "off") == {"chat_template_kwargs": {"enable_thinking": False}})
+    for _lvl in ("low", "medium", "high", "xhigh"):
+        _p = rp("compat", "qwen3-next", _lvl)
+        check(f"compat {_lvl} → nested reasoning_effort == level",
+              _p["chat_template_kwargs"]["reasoning_effort"] == _lvl
+              and _p["chat_template_kwargs"]["enable_thinking"] is True
+              and _p["reasoning_effort"] == _lvl)
+    # llama.cpp family routes through the same compat shape (nested + flat)
+    check("llamacpp medium → nested + flat",
+          rp("llamacpp", "qwen3", "medium") == {"reasoning_effort": "medium",
+              "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "medium"}})
+    # xhigh is accepted by every transport without error
+    check("ollama xhigh → clamped to high (v1 chat path)",
+          rp("ollama", "qwen3", "xhigh") == {"reasoning_effort": "high"})
+    for _f in ("compat", "vllm", "llamacpp", "ollama", "openrouter", "groq", "openai", "anthropic",
+               "deepseek", "together", "mistral"):
+        try:
+            rp(_f, "o3-mini" if _f == "openai" else "some-model", "xhigh")
+            _ok = True
+        except Exception:
+            _ok = False
+        check(f"xhigh accepted without error: {_f}", _ok)
+    # Native Ollama think field only accepts low|medium|high|max → xhigh clamps to high, never crashes
+    from dgc.llm import LLMClient
+    _oc = LLMClient("http://localhost:11434/v1", "ollama", "qwen3")
+    check("_ollama_think xhigh → high", _oc._ollama_think("xhigh") == "high")
+    check("_ollama_think high → high", _oc._ollama_think("high") == "high")
+    check("_ollama_think off → False", _oc._ollama_think("off") is False)
+    _gpt = LLMClient("http://localhost:11434/v1", "ollama", "gpt-oss:120b")
+    check("_ollama_think gpt-oss xhigh → high", _gpt._ollama_think("xhigh") == "high")
+
+
+def test_thinking_levels_xhigh_selectable():
+    """xhigh is a first-class user-selectable level in every registry that offers off/low/medium/high."""
+    from dgc.cli import THINK_LEVELS as CLI_LEVELS
+    from dgc.agent import THINK_LEVELS as AGENT_LEVELS, THINK_INSTRUCTIONS
+    check("cli THINK_LEVELS include xhigh, ordered last",
+          CLI_LEVELS == ["off", "low", "medium", "high", "xhigh"])
+    check("agent THINK_LEVELS include xhigh, ordered last",
+          AGENT_LEVELS == ("off", "low", "medium", "high", "xhigh"))
+    check("xhigh carries a reasoning instruction", bool(THINK_INSTRUCTIONS.get("xhigh")))
+    from dgc.tui import TUI
+    _think_opts = dict(TUI._SUBMENUS["think"][0])
+    check("TUI /think submenu offers xhigh", "xhigh" in _think_opts.values())
+    _settings_thinking = next(row for row in TUI._SETTINGS["Model & sampling"] if row[0] == "thinking")
+    check("TUI settings thinking enum offers xhigh", "xhigh" in _settings_thinking[3])
+
+
+def test_preserve_thinking_roundtrip():
+    """F2: with preserve_thinking on, the chat_completions history re-embeds prior-turn reasoning."""
+    from dgc.agent import _assistant_content_with_thinking as build
+    from dgc.llm import ChatResult
+    from dgc.config import DEFAULTS
+    check("preserve_thinking config default is off", DEFAULTS.get("preserve_thinking") is False)
+    # chat_completions path (no provider_message) + reasoning present
+    r = ChatResult(content="answer", thinking="reasoned X")
+    on = build(r, True)
+    off = build(r, False)
+    check("preserve on → history embeds a <think> block + the answer",
+          on == "<think>\nreasoned X\n</think>\nanswer")
+    check("preserve off → history is only the answer", off == "answer")
+    # Anthropic/Ollama provider_message paths already round-trip reasoning → never double-embed
+    r2 = ChatResult(content="answer", thinking="reasoned X", provider_message={"role": "assistant"})
+    check("preserve on but provider_message set → untouched", build(r2, True) == "answer")
+    # No reasoning to preserve → unchanged
+    r3 = ChatResult(content="answer", thinking="")
+    check("preserve on but no thinking → only the answer", build(r3, True) == "answer")
+    # Empty final content still carries the reasoning forward
+    r4 = ChatResult(content="", thinking="mid-turn plan")
+    check("preserve on with empty content keeps the reasoning",
+          build(r4, True) == "<think>\nmid-turn plan\n</think>\n")
+
+
+def test_base_url_normalization():
+    """F3: a manually entered bare host gets the OpenAI-compatible /v1 path; special hosts are left alone."""
+    from dgc.config import normalize_custom_base_url as norm
+    check("bare host → append /v1", norm("http://localhost:8080") == ("http://localhost:8080/v1", True))
+    check("bare host trailing slash → /v1",
+          norm("http://localhost:8080/") == ("http://localhost:8080/v1", True))
+    check("already /v1 → unchanged", norm("http://localhost:8080/v1") == ("http://localhost:8080/v1", False))
+    check("already /v1 with slash → trimmed, unchanged",
+          norm("http://localhost:8080/v1/") == ("http://localhost:8080/v1", False))
+    check("versioned /v2 path → unchanged", norm("http://host:9000/v2") == ("http://host:9000/v2", False))
+    check("anthropic host → never /v1",
+          norm("https://api.anthropic.com") == ("https://api.anthropic.com", False))
+    check("native ollama :11434 → never /v1",
+          norm("http://localhost:11434") == ("http://localhost:11434", False))
+    check("bare no-scheme host → +/v1", norm("myhost:8000") == ("myhost:8000/v1", True))
+    check("empty input → unchanged", norm("") == ("", False))
+    check("non-versioned path → append /v1", norm("http://host/openai") == ("http://host/openai/v1", True))
 
 
 def test_provider_capabilities():
@@ -13951,6 +14046,9 @@ def main():
         test_add_skill_url()
         test_toolcall_recovery()
         test_reasoning_payload()
+        test_thinking_levels_xhigh_selectable()
+        test_preserve_thinking_roundtrip()
+        test_base_url_normalization()
         test_provider_capabilities()
         test_provider_retry_lifecycle()
         test_compatible_tool_deltas()

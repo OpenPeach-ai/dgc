@@ -28,7 +28,8 @@ from . import style as style_mod
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs_with_custom, command_specs,
                        custom_command_names)
-from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
+from .config import (PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config,
+                     normalize_custom_base_url)
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
@@ -61,7 +62,7 @@ def auto_warning(console: Console) -> None:
 MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
 # mono + purple: muted / accent / lavender / red (auto stays red as a danger signal)
 MODE_COLOR = {"default": "#9A9A9E", "acceptEdits": "#7C5CFF", "plan": "#A78BFA", "auto": "#DC5A64"}
-THINK_LEVELS = ["off", "low", "medium", "high"]
+THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
 
 
 class UI:
@@ -665,7 +666,10 @@ class CLI:
                     else:
                         cfg.set("api_key", prov["api_key"])
                 else:
-                    cfg.set("base_url", target)
+                    normalized, changed = normalize_custom_base_url(target)
+                    cfg.set("base_url", normalized)
+                    if changed:
+                        self.ui.info(f"normalized endpoint to {normalized} (OpenAI-compatible path)")
                 self.agent.refresh_client()
                 self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
         elif cmd == "models":
@@ -762,6 +766,17 @@ class CLI:
                 if rest == "off" and is_reasoning_model(cfg.get("model", "")):
                     self.ui.info("  tip: this looks like a reasoning model — /think high often does "
                                  "better on hard tasks")
+        elif cmd == "preserve-thinking":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "show", "yes"):
+                cfg.set("preserve_thinking", True)   # persisted across restarts
+                self.ui.info("preserve thinking → on (prior-turn reasoning kept in context)")
+            elif val in ("off", "false", "0", "hide", "no"):
+                cfg.set("preserve_thinking", False)
+                self.ui.info("preserve thinking → off")
+            else:
+                cur = "on" if cfg.get("preserve_thinking", False) else "off"
+                self.ui.info(f"preserve thinking: {cur} — /preserve-thinking on|off")
         elif cmd == "permissions":
             self._permissions_cmd(rest)
         elif cmd == "memory":
@@ -1430,6 +1445,9 @@ def run_setup(config: Config) -> None:
         base_url = input("  base URL (…/v1) › ").strip()
         if not base_url:
             c.print("[dim]cancelled[/dim]"); return
+        base_url, _bu_changed = normalize_custom_base_url(base_url)
+        if _bu_changed:
+            c.print(f"  [dim]normalized endpoint to {base_url} (OpenAI-compatible path)[/dim]")
         from getpass import getpass
         api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
     config.set("subscription_engine", "")     # a direct model turns delegation back off
