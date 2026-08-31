@@ -2,8 +2,8 @@
 # 1 AM launcher for the DGC polyglot benchmark. One model per night.
 #   bash run_night.sh 1     # qwen3.8-bench-64k   (Ollama alias with baked num_ctx)
 #   bash run_night.sh 2     # qwen122b-code-bench-64k (Ollama alias, 81GB)
-# Free GPU/unified memory FIRST (stop Chatterbox TTS :5126 / STT :5127, idle other
-# ollama models). This script only does a memory preflight + launch — it does NOT
+# Free GPU/unified memory FIRST (stop other GPU services, idle other ollama
+# models). This script only does a memory preflight + launch — it does NOT
 # stop services (that's a deliberate step we do together).
 set -euo pipefail
 cd "$(dirname "$0")"
