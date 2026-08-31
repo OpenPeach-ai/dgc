@@ -3550,8 +3550,10 @@ class TUI:
                 self.config.set("subscription_effort", "")
             if eng.resolve() is None:
                 self._offer_engine_install(eng)
-            elif not eng.logged_in():
+            elif not eng.logged_in() and not eng.auth_on_launch:
                 self._offer_engine_login(eng)
+            elif eng.auth_on_launch and not eng.logged_in():
+                self._flash(f"provider → {eng.label} — authentication checked by its CLI on launch", secs=8)
             else:
                 self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
 
@@ -3569,7 +3571,9 @@ class TUI:
             return
         sub_status = subs.status() if not subagent else []      # subscriptions are a main-model concept
         sub_labels = [f"{s['label']} — your subscription"
-                      + ("  ✓" if s["logged_in"] else ("  (sign in)" if s["installed"] else "  (not installed)"))
+                      + ("  ✓" if s["auth_state"] == "signed_in" else
+                         "  (auth checked on launch)" if s["auth_state"] == "check_on_launch" else
+                         "  (sign in)" if s["installed"] else "  (not installed)")
                       for s in sub_status]
         n_sub = len(sub_status)
         keys = list(PROVIDERS)
@@ -4245,13 +4249,16 @@ class TUI:
         if engine is None:
             self.error(f"unknown subscription engine '{engine_key}'")
             return False
+        if getattr(self.agent, "_pending_images", None):
+            self.agent._pending_images = None
+            self.error("subscription CLI delegation does not yet support DGC image attachments")
+            return False
         try:
             subs.preflight(engine)
         except subs.EngineError as e:
             self.error(str(e))
             return False
         self.info(f"running this turn through {engine.label} (your subscription)…")
-        turns = getattr(self, "_delegated_turns", 0)
         shown = {"text": False}
         names, diffs = {}, {}                     # tool_use id → (display name, prebuilt edit diff)
 
@@ -4275,14 +4282,28 @@ class TUI:
                 self.tool_result(names.get(cid, ""), diffs.get(cid) or ev.get("output", ""), cid)
             elif kind == "result" and not shown["text"] and ev.get("text"):
                 self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+            elif kind == "status" and ev.get("text"):
+                self.info(ev["text"])
 
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
+        mode = str(self.config.data.get("mode", "default"))
+        model = str(self.config.get("subscription_model", "")).strip()
+        effort = str(self.config.get("subscription_effort", "")).strip()
+        session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+
+        def delegate(safe_prompt: str) -> dict:
+            result = subs.run_turn(
+                engine, safe_prompt, self.config.project_root,
+                cont=bool(session_id), session_id=session_id, mode=mode,
+                timeout=budget, on_event=on_event, cancel=self._cancel.is_set,
+                model=model, effort=effort)
+            if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
+                self.agent.remember_subscription_session(
+                    engine.key, result["session_id"], mode, model, effort)
+            return result
+
         try:
-            res = subs.run_turn(engine, prompt, self.config.project_root,
-                                cont=turns > 0, timeout=budget, on_event=on_event,
-                                cancel=self._cancel.is_set,
-                                model=str(self.config.get("subscription_model", "")).strip(),
-                                effort=str(self.config.get("subscription_effort", "")).strip())
+            res = self.agent.run_external_turn(prompt, delegate, reset_cancel=False)
         except subs.EngineError as e:
             self.error(str(e))
             return False
@@ -4294,8 +4315,11 @@ class TUI:
         if res.get("timeout"):
             self.error("the delegated turn hit the time budget and was stopped")
             return False
-        setattr(self, "_delegated_turns", turns + 1)
-        return res.get("rc") == 0
+        if res.get("error"):
+            self.error(res["error"])
+        elif res.get("rc") not in (0, None):
+            self.error(f"{engine.short_label} exited with status {res['rc']}")
+        return bool(res.get("ok"))
 
     def _submit(self, text: str, *, echo: bool = True) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session

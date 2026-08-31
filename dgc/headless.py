@@ -532,6 +532,76 @@ class Backend:
             worker.start()
             return "started", 0
 
+    def _run_subscription_turn(self, engine_key: str, prompt: str) -> bool:
+        """Delegate one editor turn while preserving the native headless event contract."""
+        from . import subscriptions as subs
+        engine = subs.get_engine(engine_key)
+        if engine is None:
+            self.ui.error(f"unknown subscription engine '{engine_key}'")
+            return False
+        mode = str(self.config.data.get("mode", "default"))
+        model = str(self.config.get("subscription_model", "")).strip()
+        effort = str(self.config.get("subscription_effort", "")).strip()
+        session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+        names: dict[str, str] = {}
+        diffs: dict[str, str] = {}
+        shown = {"text": False}
+
+        def on_event(event: dict) -> None:
+            kind = event.get("kind")
+            if kind == "text" and event.get("text"):
+                shown["text"] = True
+                self.ui.on_text(event["text"])
+            elif kind == "thinking" and event.get("text"):
+                self.ui.on_thinking(event["text"])
+            elif kind == "tool_call":
+                name = str(event.get("name") or "tool")
+                call_id = str(event.get("id") or "") or None
+                args = event.get("args") if isinstance(event.get("args"), dict) else {}
+                if call_id:
+                    names[call_id] = name
+                    diff = subs.edit_diff(name, args)
+                    if diff:
+                        diffs[call_id] = diff
+                self.ui.tool_call(name, args, call_id)
+            elif kind == "tool_result":
+                call_id = str(event.get("id") or "") or None
+                output = diffs.get(call_id or "") or str(event.get("output") or "")
+                self.ui.tool_result(names.get(call_id or "", ""), output, call_id)
+            elif kind == "status" and event.get("text"):
+                self.ui.info(str(event["text"]))
+            elif kind == "result" and not shown["text"] and event.get("text"):
+                shown["text"] = True
+                self.ui.on_text(str(event["text"]))
+
+        budget = int(self.config.get("turn_budget_s") or 0) or 1800
+
+        def delegate(safe_prompt: str) -> dict:
+            result = subs.run_turn(
+                engine, safe_prompt, self.config.project_root,
+                cont=bool(session_id), session_id=session_id, mode=mode,
+                timeout=budget, on_event=on_event, cancel=self.agent.cancelled.is_set,
+                model=model, effort=effort)
+            if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
+                self.agent.remember_subscription_session(
+                    engine.key, result["session_id"], mode, model, effort)
+            return result
+
+        try:
+            result = self.agent.run_external_turn(prompt, delegate, reset_cancel=False)
+        except subs.EngineError as exc:
+            self.ui.error(str(exc))
+            return False
+        finally:
+            self.ui.end_stream()
+        if result.get("timeout"):
+            self.ui.error("the delegated turn hit the time budget and was stopped")
+        elif result.get("error") and result.get("persisted", True):
+            self.ui.error(str(result["error"]))
+        elif result.get("rc") not in (0, None):
+            self.ui.error(f"{engine.short_label} exited with status {result['rc']}")
+        return bool(result.get("ok"))
+
     def _run_turn_queue(self) -> None:
         """Drain the prompt FIFO in one worker so completion and enqueue cannot race."""
         current = threading.current_thread()
@@ -558,7 +628,20 @@ class Backend:
                 self.em.emit("turn_start", turn_id=tid, prompt=text)
                 failed = False
                 try:
-                    outcome = self.agent.run_turn(model_text, reset_cancel=False)
+                    config_get = getattr(active_config, "get", None)
+                    engine_key = str(
+                        config_get("subscription_engine", "") if callable(config_get)
+                        else getattr(active_config, "data", {}).get("subscription_engine", "")
+                    ).strip().lower()
+                    if engine_key and images:
+                        self.agent._pending_images = None
+                        self.ui.error(
+                            "subscription CLI delegation does not yet support DGC image attachments")
+                        outcome = False
+                    else:
+                        outcome = (self._run_subscription_turn(engine_key, model_text)
+                                   if engine_key else
+                                   self.agent.run_turn(model_text, reset_cancel=False))
                     failed = outcome is False
                 except Exception as e:             # a model/endpoint failure must NOT kill the turn silently
                     failed = True                  # (unreachable base_url, model not pulled, HTTP error, …)
@@ -1471,7 +1554,13 @@ class Backend:
                        "artifact_in_plan", "tool_profile", "max_parallel_tasks",
                        "subscription_engine", "subscription_model", "subscription_effort")
             refresh = False
-            values = {k: v for k, v in (cmd.get("values") or {}).items() if k in allowed}
+            raw_values = cmd.get("values") or {}
+            if not isinstance(raw_values, dict):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="settings values must be an object",
+                             **_request_fields(request_id))
+                return
+            values = {k: v for k, v in raw_values.items() if k in allowed}
             boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
                             "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"}
             if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
@@ -1486,13 +1575,51 @@ class Backend:
                              **_request_fields(request_id))
                 return
             from .subscriptions import ENGINE_KEYS as _sub_keys
-            if ("subscription_engine" in values and values["subscription_engine"]
-                    and values["subscription_engine"] not in _sub_keys):
+            if ("subscription_engine" in values
+                    and (not isinstance(values["subscription_engine"], str)
+                         or (values["subscription_engine"]
+                             and values["subscription_engine"] not in _sub_keys))):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message="subscription_engine must be empty or one of: "
                                      + ", ".join(_sub_keys),
                              **_request_fields(request_id))
                 return
+            if any(key in values and (not isinstance(values[key], str)
+                                      or len(values[key]) > (256 if key == "subscription_model" else 64)
+                                      or any(ord(char) < 32 for char in values[key]))
+                   for key in ("subscription_model", "subscription_effort")):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="subscription model/effort must be bounded plain strings",
+                             **_request_fields(request_id))
+                return
+            if ("subscription_effort" in values
+                    and values["subscription_effort"] not in
+                    ("", "low", "medium", "high", "xhigh", "max")):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="subscription_effort must be empty, low, medium, high, xhigh, or max",
+                             **_request_fields(request_id))
+                return
+            config_get = getattr(self.config, "get", None)
+            current_engine = (config_get("subscription_engine", "") if callable(config_get) else
+                              getattr(self.config, "data", {}).get("subscription_engine", ""))
+            selected_engine = str(values.get("subscription_engine", current_engine))
+            if selected_engine == "kimi" and self.agent.mode != "auto":
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="Kimi prompt mode requires DGC auto mode",
+                             **_request_fields(request_id))
+                return
+            if selected_engine in ("qwen", "kimi") and values.get("subscription_effort"):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message=f"{selected_engine} does not expose a subscription effort flag",
+                             **_request_fields(request_id))
+                return
+            previous_engine = str(current_engine)
+            if "subscription_engine" in values and selected_engine != previous_engine:
+                values.setdefault("subscription_model", "")
+                values.setdefault("subscription_effort", "")
+            if "subscription_engine" in values and not selected_engine:
+                values["subscription_model"] = ""
+                values["subscription_effort"] = ""
             if ("max_parallel_tasks" in values
                     and (isinstance(values["max_parallel_tasks"], bool)
                          or not isinstance(values["max_parallel_tasks"], int)

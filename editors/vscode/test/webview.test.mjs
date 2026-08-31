@@ -592,6 +592,26 @@ test("provider runtime settings and actual usage round-trip through the webview"
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",
     "a provider preset must not retain an incompatible forced transport");
+  assert.equal(doc.getElementById("s-subscription_engine").value, "");
+  assert.equal(doc.getElementById("s-subscription_model").value, "",
+    "a direct provider must not retain an engine-specific model");
+  assert.equal(doc.getElementById("s-subscription_effort").value, "",
+    "a direct provider must not retain an engine-specific effort");
+
+  send({ type: "event", event: {
+    type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
+    mode: "default", think: "low", subscription_engine: "copilot",
+    subscription_model: "", subscription_effort: "", subscription_engines: [
+      { key: "copilot", label: "Copilot", installed: true, logged_in: false,
+        auth_state: "check_on_launch", login_cmd: "copilot login" }],
+  } });
+  send({ type: "settings_open", providers: [], models: [] });
+  assert.match(doc.getElementById("s-subscription_status").textContent, /checked securely/);
+  doc.getElementById("s-subscription_engine").value = "qwen";
+  doc.getElementById("s-subscription_engine").dispatchEvent(
+    new dom.window.Event("change", { bubbles: true }));
+  assert.equal(doc.getElementById("s-subscription_effort").disabled, true,
+    "engines without an effort flag must not accept a stale effort override");
 
   send({ type: "event", event: { type: "context", used: 1000, size: 4000,
     input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,

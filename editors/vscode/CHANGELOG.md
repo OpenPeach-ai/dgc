@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0 — 2026-08-31
+
+- **Subscription delegation in the editor.** Selecting a subscription (Claude Code / Codex / Qwen / Kimi /
+  Copilot) now delegates editor chat turns to that vendor's own CLI — streaming thinking, tool cards, diffs,
+  and the final answer into the panel, with exact per-session resume and correct cancellation.
+- Hardening from an independent audit: delegated turns now honor DGC's permission mode (plan/default no
+  longer run full-auto), vendor stream schemas are normalized so a broken run fails visibly instead of
+  returning an empty success, cancellation kills the whole vendor process group, and sign-in status
+  distinguishes missing / signed-out / CLI-managed keychain auth.
+
 ## 0.9.0 — 2026-08-30
 
 - **Bring your own subscription.** A new Subscription section in Settings → Models lets you run each

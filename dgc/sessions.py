@@ -22,7 +22,7 @@ from .config import USER_HOME
 from .scheduler import named_process_lock
 
 SESSIONS_DIR = USER_HOME / "sessions"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 METRICS_SCHEMA_VERSION = 3
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
@@ -44,6 +44,8 @@ _MAX_TIMING_VALUE = (1 << 63) - 1
 _LOCKS_GUARD = threading.Lock()
 _LOCKS: dict[str, "_SessionLock"] = {}
 _SESSION_LOCK_TIMEOUT_S = 30.0
+_SUBSCRIPTION_ENGINES = frozenset({"claude", "codex", "qwen", "kimi", "copilot"})
+_SUBSCRIPTION_MODES = frozenset({"default", "acceptEdits", "plan", "auto"})
 
 
 def _session_family(path: Path) -> Path:
@@ -183,6 +185,25 @@ def _atomic_write(path: Path, text: str) -> None:
 def _slug(project_root) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "-", str(project_root)).strip("-").lower()
     return (s[-70:] or "root")
+
+
+def _clean_subscription_sessions(value) -> dict[str, dict[str, str]]:
+    """Validate opaque vendor session references without ever opening vendor auth stores."""
+    source = value if isinstance(value, dict) else {}
+    out: dict[str, dict[str, str]] = {}
+    for engine, raw in source.items():
+        if engine not in _SUBSCRIPTION_ENGINES or not isinstance(raw, dict):
+            continue
+        session_id = str(raw.get("id") or "")
+        mode = str(raw.get("mode") or "")
+        model = str(raw.get("model") or "")
+        effort = str(raw.get("effort") or "")
+        if (not session_id or len(session_id) > 512 or mode not in _SUBSCRIPTION_MODES
+                or len(model) > 256 or len(effort) > 64
+                or any(ord(ch) < 32 for ch in session_id + model + effort)):
+            continue
+        out[engine] = {"id": session_id, "mode": mode, "model": model, "effort": effort}
+    return out
 
 
 def project_dir(project_root) -> Path:
@@ -350,6 +371,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          timing: dict | None = None,
          checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
+         subscription_sessions: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -397,6 +419,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["timing"] = _timing_values(timing)
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
+        clean_subscription_sessions = _clean_subscription_sessions(subscription_sessions)
+        if clean_subscription_sessions:
+            data["subscription_sessions"] = clean_subscription_sessions
         with _lock_for(path):
             exists, current_revision = _generation(path, project_root)
             matches = _expected_generation_matches(
@@ -451,6 +476,12 @@ def load_record(path, project_root) -> dict:
 
 def load(path, project_root) -> list:
     return load_record(path, project_root).get("messages", [])
+
+
+def subscription_sessions_of(record: dict) -> dict[str, dict[str, str]]:
+    """Return bounded, structurally valid vendor thread references from a session record."""
+    return _clean_subscription_sessions(
+        record.get("subscription_sessions") if isinstance(record, dict) else None)
 
 
 def checkpoints_of(path, project_root) -> dict:

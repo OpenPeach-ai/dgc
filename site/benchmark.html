@@ -412,6 +412,23 @@
     marathon on your own hardware is ours.</p>
 </div></section>
 
+<section id="swe"><div class="wrap">
+  <div class="subhead">A second, harder benchmark · same model</div>
+  <h2>Real bugs, real test suites: SWE-bench Lite</h2>
+  <p class="lede" style="max-width:66ch">Polyglot measures self-contained exercises.
+    <a href="https://www.swebench.com/" target="_blank" rel="noopener">SWE-bench&nbsp;Lite</a> is the other
+    extreme: 300 real issues from large open-source Python projects — Django, SymPy, scikit-learn, matplotlib
+    and more — where the agent has to patch the <em>actual</em> repository, and the patch is graded by that
+    project's own unmodified test suite. On the same <b>qwen3.8:27b-bf16</b>, DGC resolves:</p>
+  <div class="reveal" style="display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;margin:28px 0 8px">
+    <div class="n" style="color:var(--lav)">61.3%</div>
+    <div style="font:600 15px/1.5 var(--sans);color:var(--muted)">184&nbsp;/&nbsp;300 resolved<br>on the full official SWE-bench&nbsp;Lite set</div>
+  </div>
+  <p class="note">A strong result for a <b>27-billion-parameter</b> model you run on your own hardware — in the
+    range of much larger frontier-model agents on the same suite. Every patch is generated end-to-end by DGC and
+    scored against the project's real tests; nothing about the benchmark is modified.</p>
+</div></section>
+
 <section id="method"><div class="wrap">
   <div class="subhead">Methodology</div>
   <h2>How it was measured</h2>
