@@ -206,11 +206,6 @@ frames and buffers, and gracefully shuts down then reaps its child (including th
 group on POSIX). A client instance is deliberately one-shot; create a new one after `close()` or any
 protocol/transport failure.
 
-For exact non-coding feature-matrix wiring—including plan artifacts, sessions, goals, skills, hooks,
-MCP permissions, rendering probes, and editor smoke commands—see
-[`docs/NON_CODING_SURFACE_TESTS.md`](docs/NON_CODING_SURFACE_TESTS.md). Its NDJSON command fixture is
-validated against the installed protocol rather than relying on slash text or copied interface lists.
-
 The same controller can verify skill precedence with
 `{"type":"list_skills","request_id":"skills-1"}` and receive a correlated `skill_catalog` whose
 entries identify `project`, `user`, or `builtin` without absolute paths. It can generate a continuation
@@ -334,9 +329,8 @@ streamed responses are always released before retry or transport fallback.
 ./scripts/preflight.sh                # complete local release gate
 ```
 
-See [AGENTS.md](AGENTS.md) for the layout and conventions, the
-[frontier audit and roadmap](docs/FRONTIER_AUDIT_AND_ROADMAP.md) for the evidence-backed delivery
-plan, and [bench/README.md](bench/README.md) for the controlled six-harness protocol.
+See [AGENTS.md](AGENTS.md) for the layout and conventions, and
+[bench/README.md](bench/README.md) for the controlled six-harness protocol.
 
 ## Security
 

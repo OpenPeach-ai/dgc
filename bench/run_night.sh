@@ -26,9 +26,8 @@ echo "== night $NIGHT: $MODEL =="
 echo "   base=$BASE  timeout=${TIMEOUT}s  tag=$TAG"
 echo "   memory available: ${AVAIL} GiB  (this model wants ~${NEED} GiB)"
 if [ "$AVAIL" -lt "$NEED" ]; then
-  echo "   ⚠ NOT enough free memory — stop TTS/STT + idle other models, then re-run."
-  echo "     Chatterbox TTS :5126, Whisper STT :5127; ollama models can be idled with 'ollama stop <m>'."
-  [ "$NIGHT" = "3" ] && echo "     DS4 also needs: systemctl --user reset-failed openpeach-ds4.service ds4-proxy.{service,socket}; then prewarm :11440."
+  echo "   ⚠ NOT enough free memory — idle other GPU services and models, then re-run."
+  echo "     ollama models can be idled with 'ollama stop <model>'."
   exit 2
 fi
 
