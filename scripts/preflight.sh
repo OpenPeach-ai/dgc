@@ -29,9 +29,23 @@ SBOM_TMP=$(mktemp)
 "$PYTHON" scripts/generate-sbom.py "$SBOM_TMP"
 "$PYTHON" -c 'import json,sys; b=json.load(open(sys.argv[1])); assert b["bomFormat"] == "CycloneDX" and b["components"]' "$SBOM_TMP"
 
-if [ -f bench/edit_corpus/all.jsonl ]; then
-  "$PYTHON" bench/edit_micro.py
+# Edit-primitive safety gate — the release gate that guards against DGC silently
+# corrupting a user's code (WRONG must stay 0). It MUST run; never silently skip.
+# The corpus is large + gitignored, so regenerate it deterministically from the
+# pinned dataset when absent, and fail loudly if neither corpus nor dataset exists.
+CORPUS=bench/edit_corpus/all.jsonl
+if [ ! -f "$CORPUS" ] && [ -d bench/data/polyglot-benchmark ]; then
+  echo "edit corpus absent — regenerating from the pinned dataset…"
+  mkdir -p bench/edit_corpus
+  "$PYTHON" bench/gen_edit_corpus.py > "$CORPUS.tmp" && mv "$CORPUS.tmp" "$CORPUS"
 fi
+if [ ! -f "$CORPUS" ]; then
+  echo "FATAL: the edit-primitive safety corpus is absent and cannot be regenerated" >&2
+  echo "  (bench/data/polyglot-benchmark is missing). This gate must not be skipped —" >&2
+  echo "  fetch the dataset, then re-run. See bench/gen_edit_corpus.py." >&2
+  exit 1
+fi
+"$PYTHON" bench/edit_micro.py "$CORPUS"
 
 (
   cd editors/vscode
