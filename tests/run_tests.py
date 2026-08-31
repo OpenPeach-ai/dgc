@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -13573,10 +13574,18 @@ def test_subscription_engines():
     check("subscriptions: five first-party engines registered",
           set(S.ENGINE_KEYS) == {"claude", "codex", "qwen", "kimi", "copilot"})
     cop = S.ENGINES["copilot"].build_argv("copilot", "fix it", cont=False)
-    check("subscriptions: copilot uses --prompt + --allow-all with prompt as its value",
-          "--prompt" in cop and cop[cop.index("--prompt") + 1] == "fix it" and "--allow-all" in cop)
-    check("subscriptions: copilot plain-text output normalizes to a text event",
-          S.parse_stream_events("copilot", "Reading files...") == [{"kind": "text", "text": "Reading files..."}])
+    cop_auto = S.ENGINES["copilot"].build_argv("copilot", "fix it", cont=False, mode="auto")
+    cop_edits = S.ENGINES["copilot"].build_argv(
+        "copilot", "fix it", cont=False, mode="acceptEdits")
+    check("subscriptions: copilot uses current JSONL and prompt flags without implicit auto approval",
+          "--prompt" in cop and cop[cop.index("--prompt") + 1] == "fix it"
+          and "--output-format" in cop and "json" in cop and "--allow-all" not in cop
+          and "--allow-tool=read" in cop and "--allow-tool=read,write" in cop_edits
+          and "--allow-all" in cop_auto)
+    check("subscriptions: copilot JSON assistant messages normalize to text",
+          S.parse_stream_events("copilot", json.dumps(
+              {"type": "assistant.message", "data": {"content": "Reading files..."}}))
+          == [{"kind": "text", "text": "Reading files..."}])
     ce = S.ENGINES["claude"].build_argv("claude", "fix", cont=False, model="opus", effort="high")
     check("subscriptions: claude injects --model and --effort when set",
           "--model" in ce and ce[ce.index("--model") + 1] == "opus"
@@ -13590,9 +13599,19 @@ def test_subscription_engines():
 
     claude = S.ENGINES["claude"]
     a = claude.build_argv("claude", "fix it", cont=False)
-    check("subscriptions: claude fresh argv is headless stream-json with prompt last",
+    check("subscriptions: claude default argv is headless JSON without implicit permission bypass",
           a[0] == "claude" and "-p" in a and "stream-json" in a
-          and "--dangerously-skip-permissions" in a and a[-1] == "fix it")
+          and "--dangerously-skip-permissions" not in a and a[-1] == "fix it")
+    claude_plan = claude.build_argv("claude", "fix", cont=False, mode="plan")
+    codex_plan = S.ENGINES["codex"].build_argv("codex", "fix", cont=False, mode="plan")
+    qwen_edits = S.ENGINES["qwen"].build_argv(
+        "qwen", "fix", cont=False, mode="acceptEdits")
+    check("subscriptions: explicit modes map to each vendor's real permission boundary",
+          "--dangerously-skip-permissions" in claude.build_argv(
+              "claude", "fix", cont=False, mode="auto")
+          and claude_plan[claude_plan.index("--permission-mode") + 1] == "plan"
+          and codex_plan[codex_plan.index("--sandbox") + 1] == "read-only"
+          and qwen_edits[qwen_edits.index("--approval-mode") + 1] == "auto-edit")
     check("subscriptions: claude continue argv adds --continue",
           "--continue" in claude.build_argv("claude", "n", cont=True))
     codex = S.ENGINES["codex"]
@@ -13604,6 +13623,14 @@ def test_subscription_engines():
     qw = S.ENGINES["qwen"].build_argv("qwen", "fix it", cont=False)
     check("subscriptions: qwen passes the prompt via the -p value flag",
           "-p" in qw and qw[qw.index("-p") + 1] == "fix it" and "stream-json" in qw)
+    kimi_refused = False
+    try:
+        S.ENGINES["kimi"].build_argv("kimi", "fix", cont=False, mode="plan")
+    except S.EngineModeUnsupported:
+        kimi_refused = True
+    kimi_auto = S.ENGINES["kimi"].build_argv("kimi", "fix", cont=False, mode="auto")
+    check("subscriptions: Kimi prompt mode is admitted only as honest full-auto",
+          kimi_refused and "--yolo" not in kimi_auto and "--auto" not in kimi_auto)
 
     # rich stream events (real Claude schema): one assistant line = text + tool_use
     claude_asst = S.parse_stream_events("claude", json.dumps({"type": "assistant", "message": {"content": [
@@ -13625,11 +13652,42 @@ def test_subscription_engines():
     check("subscriptions: codex agent_message yields a text event",
           S.parse_stream_events("codex", json.dumps({"msg": {"type": "agent_message", "message": "go"}}))
           == [{"kind": "text", "text": "go"}])
+    current_codex = S.parse_stream_events("codex", json.dumps({
+        "type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "done"}}))
+    current_tool_start = S.parse_stream_events("codex", json.dumps({
+        "type": "item.started", "item": {"id": "i2", "type": "command_execution",
+        "command": "/bin/bash -lc pwd", "status": "in_progress"}}))
+    current_tool_done = S.parse_stream_events("codex", json.dumps({
+        "type": "item.completed", "item": {"id": "i2", "type": "command_execution",
+        "aggregated_output": "/work\n", "exit_code": 0, "status": "completed"}}))
+    check("subscriptions: current Codex item schema preserves text and correlated tool lifecycle",
+          current_codex == [{"kind": "text", "text": "done"}]
+          and current_tool_start[0]["kind"] == "tool_call" and current_tool_start[0]["id"] == "i2"
+          and current_tool_done[0]["kind"] == "tool_result" and current_tool_done[0]["id"] == "i2")
+    check("subscriptions: vendor session IDs normalize without credential inspection",
+          S.parse_stream_events("codex", json.dumps(
+              {"type": "thread.started", "thread_id": "thread-123"}))
+          == [{"kind": "session", "id": "thread-123"}]
+          and S.parse_stream_events("claude", json.dumps(
+              {"type": "system", "session_id": "claude-123"}))
+          == [{"kind": "session", "id": "claude-123"}])
+    qwen_error = S.parse_stream_events("qwen", json.dumps({
+        "type": "result", "subtype": "error_during_execution", "is_error": True,
+        "session_id": "q1", "error": {"message": "No auth type is selected"}}))
+    check("subscriptions: Qwen structured failures are visible instead of empty success",
+          [event["kind"] for event in qwen_error] == ["session", "error"]
+          and qwen_error[-1]["text"] == "No auth type is selected")
+    kimi_events = S.parse_stream_events("kimi", json.dumps({"role": "assistant", "content": "working",
+        "tool_calls": [{"id": "k1", "function": {"name": "Shell", "arguments": "{\"cmd\":\"pwd\"}"}}]}))
+    check("subscriptions: Kimi role schema preserves assistant text and function calls",
+          [event["kind"] for event in kimi_events] == ["text", "tool_call"]
+          and kimi_events[1]["args"] == {"cmd": "pwd"})
     check("subscriptions: an unparseable line yields no events (never a raw dump)",
           S.parse_stream_events("codex", "not json") == [] and S.parse_stream_events("kimi", "  ") == [])
-    edit = S.edit_diff("Edit", {"file_path": "a.py", "old_string": "x = 1\n", "new_string": "x = 2\n"})
+    edit = S.edit_diff("Edit", {"file_path": "a.py", "old_string": "x = 1", "new_string": "x = 2"})
     check("subscriptions: edit_diff builds a unified diff DGC renders as a diff",
-          edit is not None and "--- a/a.py" in edit and "+x = 2" in edit and "-x = 1" in edit)
+          edit is not None and "--- a/a.py" in edit
+          and "-x = 1\n+x = 2\n" in edit)
 
     old_home = os.environ.get("HOME")
     with tempfile.TemporaryDirectory() as hd:
@@ -13648,6 +13706,10 @@ def test_subscription_engines():
                   not_auth is True)
             marker = Path(hd) / ".codex" / "auth.json"
             marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.mkdir()
+            check("subscriptions: a credential-marker directory never counts as signed in",
+                  not codex.logged_in())
+            marker.rmdir()
             marker.write_text("{}")
             check("subscriptions: engine reports signed-in once its own marker exists",
                   codex.logged_in())
@@ -13669,7 +13731,181 @@ def test_subscription_engines():
     st = S.status()
     check("subscriptions: status lists every engine with the expected fields",
           len(st) == 5 and all(
-              {"key", "label", "installed", "logged_in", "login_cmd", "note"} <= set(s) for s in st))
+              {"key", "label", "installed", "logged_in", "auth_state", "login_cmd", "note"}
+              <= set(s) for s in st))
+
+    # Exercise the actual subprocess/JSONL boundary with a fake official CLI. This catches parser
+    # drift, malformed UTF-8, silent-success, callback cleanup, and pipe-holding descendants without
+    # logging into or modifying any real vendor account.
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        fake = td / "fake-cli"
+        fake.write_text("#!/usr/bin/env python3\n"
+                        "import json\n"
+                        "print(json.dumps({'type':'thread.started','thread_id':'live-thread'}), flush=True)\n"
+                        "print(json.dumps({'type':'item.completed','item':{'id':'a','type':'agent_message','text':'LIVE OK'}}), flush=True)\n")
+        fake.chmod(0o755)
+        fake_engine = replace(S.ENGINES["claude"], binary=str(fake), stream="codex",
+                              auth_markers=(), auth_on_launch=True)
+        events = []
+        live = S.run_turn(fake_engine, "prompt", td, mode="default", timeout=5,
+                          on_event=events.append)
+        check("subscriptions: run_turn returns current streamed text and the exact vendor thread",
+              live["ok"] and live["text"] == "LIVE OK" and live["session_id"] == "live-thread"
+              and [event["kind"] for event in events] == ["session", "text"])
+
+        silent = td / "silent-cli"
+        silent.write_text("#!/usr/bin/env python3\npass\n"); silent.chmod(0o755)
+        silent_engine = replace(fake_engine, binary=str(silent))
+        silent_result = S.run_turn(silent_engine, "prompt", td, timeout=5)
+        check("subscriptions: zero-exit with an unknown/empty schema fails visibly",
+              not silent_result["ok"] and silent_result["rc"] == 0
+              and "no recognized assistant message" in silent_result["error"])
+
+        hanger = td / "hanger-cli"
+        hanger.write_text("#!/usr/bin/env python3\n"
+                          "import signal, subprocess, sys, time\n"
+                          "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                          "subprocess.Popen([sys.executable, '-c', "
+                          "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'], stdout=sys.stdout)\n"
+                          "time.sleep(30)\n")
+        hanger.chmod(0o755)
+        before = time.monotonic()
+        hung = S.run_turn(replace(fake_engine, binary=str(hanger)), "prompt", td, timeout=1)
+        check("subscriptions: timeout escalates and reaps a pipe-holding process group",
+              hung["timeout"] and not hung["ok"] and time.monotonic() - before < 5)
+
+        from dgc import sessions as session_store
+        session_file = session_store.new_path(td)
+        saved = session_store.save(
+            session_file, [{"role": "user", "content": "hello"}], td,
+            subscription_sessions={"codex": {"id": "thread-123", "mode": "auto",
+                                                "model": "gpt-5", "effort": "high"}})
+        restored = session_store.subscription_sessions_of(
+            session_store.load_record(session_file, td))
+        check("subscriptions: exact vendor continuation references survive DGC session resume",
+              saved and restored == {"codex": {"id": "thread-123", "mode": "auto",
+                                                "model": "gpt-5", "effort": "high"}})
+
+        from dgc.headless import Backend as SubscriptionBackend
+        class _SubscriptionConfig:
+            project_root = td
+            data = {"mode": "auto"}
+            def get(self, key, default=None):
+                return {"subscription_model": "gpt-5", "subscription_effort": "high",
+                        "turn_budget_s": 5}.get(key, default)
+        class _SubscriptionAgent:
+            def __init__(self):
+                self.cancelled = threading.Event(); self.remembered = None
+            def subscription_session_id(self, *args): return "prior-thread"
+            def remember_subscription_session(self, *args): self.remembered = args
+            def run_external_turn(self, prompt, runner, reset_cancel=False): return runner(prompt)
+        class _SubscriptionUI:
+            def __init__(self): self.rows = []
+            def on_text(self, text): self.rows.append(("text", text))
+            def on_thinking(self, text): self.rows.append(("thinking", text))
+            def tool_call(self, name, args, call_id=None): self.rows.append(("call", name, call_id))
+            def tool_result(self, name, out, call_id=None): self.rows.append(("result", name, call_id))
+            def info(self, text): self.rows.append(("info", text))
+            def error(self, text): self.rows.append(("error", text))
+            def end_stream(self): self.rows.append(("end",))
+        editor_backend = object.__new__(SubscriptionBackend)
+        editor_backend.config = _SubscriptionConfig()
+        editor_backend.agent = _SubscriptionAgent()
+        editor_backend.ui = _SubscriptionUI()
+        original_run_turn = S.run_turn
+        captured_kwargs = {}
+        def _fake_editor_turn(_engine, _prompt, _workdir, **kwargs):
+            captured_kwargs.update(kwargs)
+            kwargs["on_event"]({"kind": "tool_call", "name": "shell",
+                                "args": {"command": "pwd"}, "id": "tool-1"})
+            kwargs["on_event"]({"kind": "tool_result", "output": str(td), "id": "tool-1"})
+            # Some vendor schemas expose the final answer only as a terminal result event.
+            # The editor bridge must render that fallback exactly once as assistant text.
+            kwargs["on_event"]({"kind": "result", "text": "editor answer"})
+            return {"ok": True, "rc": 0, "text": "editor answer", "session_id": "next-thread",
+                    "timeout": False, "cancelled": False, "error": ""}
+        try:
+            S.run_turn = _fake_editor_turn
+            editor_ok = editor_backend._run_subscription_turn("codex", "fix in editor")
+        finally:
+            S.run_turn = original_run_turn
+        check("subscriptions: VS Code/Cursor chat renders delegated tools, terminal result, and exact resume",
+              editor_ok and captured_kwargs.get("cont") is True
+              and captured_kwargs.get("session_id") == "prior-thread"
+              and ("call", "shell", "tool-1") in editor_backend.ui.rows
+              and ("text", "editor answer") in editor_backend.ui.rows
+              and editor_backend.ui.rows[-1] == ("end",)
+              and editor_backend.agent.remembered[1] == "next-thread")
+
+        class _SettingsCapture:
+            def __init__(self): self.events = []
+            def emit(self, kind, **fields): self.events.append({"type": kind, **fields})
+        class _SettingsConfig:
+            def __init__(self):
+                self.data = {"subscription_engine": "claude", "subscription_model": "opus",
+                             "subscription_effort": "high"}
+                self._env_secret_keys = set()
+            def get(self, key, default=None): return self.data.get(key, default)
+            def set(self, key, value): self.data[key] = value
+        class _SettingsAgent:
+            mode = "default"
+            def refresh_client(self): pass
+        settings_backend = object.__new__(SubscriptionBackend)
+        settings_backend.em = _SettingsCapture(); settings_backend.config = _SettingsConfig()
+        settings_backend.agent = _SettingsAgent(); settings_backend._worker = None
+        settings_backend._foreground_worker = None
+        settings_backend._emit_config = lambda request_id=None: None
+        settings_backend.dispatch({"type": "set_config", "values": {
+            "subscription_engine": "qwen", "subscription_effort": "high"}})
+        rejected_settings = settings_backend.em.events[-1]
+        settings_backend.dispatch({"type": "set_config", "values": {
+            "subscription_engine": "codex"}})
+        check("subscriptions: editor settings reject unsupported effort and clear stale engine overrides",
+              rejected_settings.get("type") == "command_rejected"
+              and settings_backend.config.data["subscription_engine"] == "codex"
+              and settings_backend.config.data["subscription_model"] == ""
+              and settings_backend.config.data["subscription_effort"] == "")
+
+        # Exercise the terminal-handover plumbing without installing a package or starting an
+        # account login.  The setup command must stay list-argv all the way to subprocess.run;
+        # shell metacharacters are ordinary arguments, never executable syntax.
+        import builtins
+        import prompt_toolkit.application as prompt_app
+        from dgc.tui import TUI
+        setup_tui = object.__new__(TUI)
+        setup_tui.error = lambda message: None
+        setup_calls = []
+        setup_sentinel = td / "must-not-exist"
+        original_terminal = prompt_app.run_in_terminal
+        original_subprocess_run = subprocess.run
+        original_input = builtins.input
+        try:
+            prompt_app.run_in_terminal = lambda callback: callback()
+            subprocess.run = lambda argv, **kwargs: setup_calls.append((argv, kwargs))
+            builtins.input = lambda *args, **kwargs: ""
+            TUI._run_setup_cmd(
+                setup_tui, f'vendor login ; touch "{setup_sentinel}"', "offline simulation")
+        finally:
+            prompt_app.run_in_terminal = original_terminal
+            subprocess.run = original_subprocess_run
+            builtins.input = original_input
+        check("subscriptions: install/login terminal handover is shell-free list argv",
+              len(setup_calls) == 1 and setup_calls[0][0][:4] ==
+              ["vendor", "login", ";", "touch"] and not setup_calls[0][1]
+              and not setup_sentinel.exists())
+
+        class _SetupPicker:
+            def __init__(self): self.commands = []
+            def _show_picker(self, title, labels, on_pick, **kwargs): on_pick(0)
+            def _run_setup_cmd(self, command, note=""): self.commands.append((command, note))
+            def info(self, message): pass
+        setup_picker = _SetupPicker()
+        TUI._offer_engine_install(setup_picker, S.ENGINES["claude"])
+        TUI._offer_engine_login(setup_picker, S.ENGINES["qwen"])
+        check("subscriptions: install and sign-in offers hand only vendor-owned commands to the terminal",
+              [item[0] for item in setup_picker.commands] ==
+              [S.ENGINES["claude"].install_cmd, S.ENGINES["qwen"].login_run])
 
 
 def main():

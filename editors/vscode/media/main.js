@@ -1109,7 +1109,18 @@
       subscription_effort: cfg.subscription_effort || "",
     };
     for (const k in map) { const el = $("s-" + k); if (el && map[k] != null) el.value = map[k]; }
+    const subscriptionSelect = $("s-subscription_engine");
+    if (subscriptionSelect) subscriptionSelect.dataset.loadedValue = map.subscription_engine;
+    updateSubscriptionFields();
     renderSubscriptionStatus(cfg);
+  }
+  function updateSubscriptionFields() {
+    const engine = $("s-subscription_engine")?.value || "";
+    const effort = $("s-subscription_effort");
+    if (effort) {
+      effort.disabled = engine === "qwen" || engine === "kimi" || !engine;
+      if (effort.disabled) effort.value = "";
+    }
   }
   function renderSubscriptionStatus(cfg) {
     const box = $("s-subscription_status");
@@ -1120,6 +1131,9 @@
     const s = list.find((e) => e && e.key === active);
     if (!s) { box.textContent = ""; return; }
     if (!s.installed) box.textContent = s.label + ": CLI not installed.";
+    else if (s.auth_state === "check_on_launch") {
+      box.textContent = s.label + ": authentication is checked securely by its CLI on launch.";
+    }
     else if (!s.logged_in) box.textContent = s.label + ": not signed in — run  " + s.login_cmd;
     else box.textContent = s.label + ": signed in ✓ — turns run through your subscription.";
   }
@@ -1175,8 +1189,20 @@
     if (p) {
       $("s-base_url").value = p.url; $("s-api_mode").value = "auto";
       const se = $("s-subscription_engine"); if (se) se.value = "";   // a direct provider turns delegation off
+      const sm = $("s-subscription_model"); if (sm) sm.value = "";
+      const sf = $("s-subscription_effort"); if (sf) sf.value = "";
+      updateSubscriptionFields();
       if (!p.needsKey && !$("s-api_key").value) $("s-api_key").value = "ollama";
     }
+  };
+  const subscriptionEngine = $("s-subscription_engine");
+  if (subscriptionEngine) subscriptionEngine.onchange = () => {
+    if (subscriptionEngine.value !== subscriptionEngine.dataset.loadedValue) {
+      const model = $("s-subscription_model"); if (model) model.value = "";
+      const effort = $("s-subscription_effort"); if (effort) effort.value = "";
+      subscriptionEngine.dataset.loadedValue = subscriptionEngine.value;
+    }
+    updateSubscriptionFields();
   };
   document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
   document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
