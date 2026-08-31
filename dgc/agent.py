@@ -1416,6 +1416,9 @@ class Agent:
         self._active_mcp_tools: set[str] = set()
         self._mcp_query_text = ""
         self.messages = [{"role": "system", "content": self.system_prompt()}]
+        # Vendor thread IDs belong to this DGC session only. They are opaque continuation
+        # references, never auth tokens, and are restored only from DGC's private session file.
+        self.subscription_sessions: dict[str, dict[str, str]] = {}
         self.todos.clear()
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.session_name = None
@@ -1825,6 +1828,70 @@ class Agent:
                                          or "the turn stopped before it completed")
             return bool(saved and completed is not False)
 
+    def run_external_turn(self, user_text: str, runner, *, reset_cancel: bool = True) -> dict:
+        """Run a first-party delegated CLI turn through DGC's durable session boundary.
+
+        The vendor owns model/tool execution, but DGC still owns cross-process turn exclusion,
+        lifecycle hooks, transcript persistence, cancellation state, and exact session resume.
+        ``runner`` receives sanitized user text and returns the normalized subscription result.
+        """
+        self._last_turn_error = ""
+        with self._session_turn_scope(reentrant=False) as reserved:
+            if not reserved:
+                message = ("This session has an active turn in another DGC process. Wait for it "
+                           "to finish or start a new session; no delegated process was started.")
+                self._last_turn_error = self._last_persist_error = message
+                self.ui.error(message)
+                return {"ok": False, "rc": None, "text": "", "error": message,
+                        "timeout": False, "cancelled": False, "events": 0,
+                        "seconds": 0.0, "session_id": "", "persisted": False}
+            if self.session_file:
+                from . import sessions
+                if not sessions.generation_matches(
+                        self.session_file, self.session_root,
+                        expected_revision=self._session_revision,
+                        expected_exists=self._session_exists):
+                    message = ("This saved session changed or was deleted in another DGC process. "
+                               "Resume the latest generation or start a new session; no delegated "
+                               "process was started.")
+                    self._last_turn_error = self._last_persist_error = message
+                    self.ui.error(message)
+                    return {"ok": False, "rc": None, "text": "", "error": message,
+                            "timeout": False, "cancelled": False, "events": 0,
+                            "seconds": 0.0, "session_id": "", "persisted": False}
+            if self.depth == 0:
+                if reset_cancel:
+                    self.cancelled.clear()
+                if not self._session_started:
+                    self._session_started = True
+                    self._run_lifecycle_hooks(
+                        "SessionStart", {"project": str(self.config.project_root)},
+                        cancelled=self.cancelled)
+            safe_user_text = self._safe_text(user_text)
+            result = None
+            saved = False
+            try:
+                result = runner(safe_user_text)
+                if not isinstance(result, dict):
+                    raise TypeError("external turn runner returned an invalid result")
+                return_result = result
+            finally:
+                self.messages.append({"role": "user", "content": safe_user_text})
+                if isinstance(result, dict) and str(result.get("text") or "").strip():
+                    self.messages.append({"role": "assistant", "content": str(result["text"])})
+                self._refresh_system()
+                saved = self._persist()
+                if not saved and self.depth == 0:
+                    self._last_turn_error = self._last_persist_error or "could not persist this session"
+                    self.ui.error(self._last_turn_error)
+                if self.depth == 0:
+                    self._run_lifecycle_hooks(
+                        "Stop", {"prompt": safe_user_text}, cancelled=self.cancelled)
+            return_result["persisted"] = saved
+            if not saved:
+                return_result["ok"] = False
+            return return_result
+
     def _persist(self) -> bool:
         if not self.session_file:
             self._last_persist_error = ""
@@ -1855,6 +1922,7 @@ class Agent:
                     goal_active_since=self._goal_active_since,
                     usage=usage, activity=activity, timing=timing,
                     checkpoints=checkpoint_state,
+                    subscription_sessions=self.subscription_sessions,
                     expected_revision=self._session_revision,
                     expected_exists=self._session_exists,
                     redact_secrets=redact_secrets)
@@ -2132,6 +2200,7 @@ class Agent:
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""
+            self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
             checkpoint_state = record.get("checkpoints")
             self.checkpoints = CheckpointManager.from_state(
@@ -2139,6 +2208,27 @@ class Agent:
                 self.config.project_root, on_change=self._persist,
                 max_message_count=len(self.messages))
             return len(loaded)
+
+    def subscription_session_id(self, engine: str, mode: str, model: str, effort: str) -> str:
+        """Return this conversation's exact matching vendor thread, never an ambient latest one."""
+        record = self.subscription_sessions.get(str(engine))
+        if not isinstance(record, dict):
+            return ""
+        expected = {"mode": str(mode), "model": str(model), "effort": str(effort)}
+        if any(str(record.get(key) or "") != value for key, value in expected.items()):
+            return ""
+        return str(record.get("id") or "")
+
+    def remember_subscription_session(self, engine: str, session_id: str, mode: str,
+                                      model: str, effort: str) -> None:
+        """Associate a vendor thread with this transcript after a recognized streamed ID."""
+        if (engine not in {"claude", "codex", "qwen", "kimi", "copilot"}
+                or not session_id or len(session_id) > 512
+                or any(ord(ch) < 32 for ch in session_id)):
+            return
+        self.subscription_sessions[engine] = {
+            "id": session_id, "mode": mode, "model": model, "effort": effort,
+        }
 
     def set_goal(self, text: str, status: str = "active") -> bool:
         """Set (or clear) a bounded standing objective and persist it immediately."""

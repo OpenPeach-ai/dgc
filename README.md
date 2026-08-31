@@ -62,6 +62,13 @@ dgc           # start the interactive agent
 /model qwen3.6:27b-q8_0
 ```
 
+## Benchmarks
+
+Same local model (`qwen3.8:27b-bf16`), measured two ways — full writeup + a one-command reproduction at **[vibedgc.com/benchmark](https://vibedgc.com/benchmark)**:
+
+- **Aider polyglot** (225 problems across 6 languages): **98.9%** solved with the cap lifted to the time a local model actually needs — the marathon on your own hardware. On the leaderboards' strict 600&nbsp;s/problem sprint cap: 95.6% (level with OpenCode, a couple behind the leaders).
+- **SWE-bench Lite** (300 real GitHub issues; each patch graded by that project's own unmodified test suite): **61.3%** (184/300) — a strong result for a 27B model you run yourself.
+
 ## Permission modes
 
 Switch live with `/mode` (cycles) or `/mode <name>`, or launch with `--mode`:
@@ -199,11 +206,6 @@ frames and buffers, and gracefully shuts down then reaps its child (including th
 group on POSIX). A client instance is deliberately one-shot; create a new one after `close()` or any
 protocol/transport failure.
 
-For exact non-coding feature-matrix wiring—including plan artifacts, sessions, goals, skills, hooks,
-MCP permissions, rendering probes, and editor smoke commands—see
-[`docs/NON_CODING_SURFACE_TESTS.md`](docs/NON_CODING_SURFACE_TESTS.md). Its NDJSON command fixture is
-validated against the installed protocol rather than relying on slash text or copied interface lists.
-
 The same controller can verify skill precedence with
 `{"type":"list_skills","request_id":"skills-1"}` and receive a correlated `skill_catalog` whose
 entries identify `project`, `user`, or `builtin` without absolute paths. It can generate a continuation
@@ -327,9 +329,8 @@ streamed responses are always released before retry or transport fallback.
 ./scripts/preflight.sh                # complete local release gate
 ```
 
-See [AGENTS.md](AGENTS.md) for the layout and conventions, the
-[frontier audit and roadmap](docs/FRONTIER_AUDIT_AND_ROADMAP.md) for the evidence-backed delivery
-plan, and [bench/README.md](bench/README.md) for the controlled six-harness protocol.
+See [AGENTS.md](AGENTS.md) for the layout and conventions, and
+[bench/README.md](bench/README.md) for the controlled six-harness protocol.
 
 ## Security
 

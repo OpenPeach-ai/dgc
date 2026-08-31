@@ -1323,11 +1323,15 @@ def run_doctor(config: Config) -> None:
     # subscription engines — run your own plan through the official first-party CLI
     from . import subscriptions as _subs
     active = str(config.get("subscription_engine", "")).strip().lower()
+    active_problem = ""
     c.print("  [bold]subscription engines[/bold] — run your own plan via the official CLI")
-    for s in _subs.status():
-        if s["logged_in"]:
+    subscription_status = _subs.status()
+    for s in subscription_status:
+        if s["auth_state"] == "signed_in":
             state = "[green]✓ signed in[/green]"
-        elif s["installed"]:
+        elif s["auth_state"] == "check_on_launch":
+            state = "[cyan]? auth checked by CLI on launch[/cyan]"
+        elif s["auth_state"] == "signed_out":
             state = "[yellow]! not signed in[/yellow]"
         else:
             state = "[dim]not installed[/dim]"
@@ -1337,9 +1341,18 @@ def run_doctor(config: Config) -> None:
         eng = _subs.ENGINES[active]
         c.print(f"  [cyan]→ delegating each turn to {terminal_safe_text(eng.label)}[/cyan] "
                 f"(the model endpoint below is only the fallback)\n")
-        if not eng.logged_in():
+        active_status = next(s for s in subscription_status if s["key"] == active)
+        if not active_status["installed"]:
+            active_problem = f"the active {eng.short_label} CLI is not installed"
+            c.print(f"  [yellow]![/yellow] {terminal_safe_text(active_problem)}\n")
+        elif active_status["auth_state"] == "signed_out":
+            active_problem = f"the active {eng.short_label} CLI is not signed in"
             c.print(f"  [yellow]![/yellow] but you are not signed in — run "
                     f"[bold]{terminal_safe_text(eng.login_cmd)}[/bold] once\n")
+        elif eng.key == "kimi" and str(config.data.get("mode", "default")) != "auto":
+            active_problem = "Kimi prompt mode requires DGC auto mode"
+            c.print("  [yellow]![/yellow] Kimi's prompt mode is inherently auto-approved; "
+                    "select [bold]/mode auto[/bold] or another engine\n")
     else:
         c.print("")
     client = LLMClient(config.base_url, config.api_key, config.model,
@@ -1361,7 +1374,9 @@ def run_doctor(config: Config) -> None:
             shown = ", ".join(models[:12]) + ("…" if len(models) > 12 else "")
             c.print(f"    available: {terminal_safe_text(shown)}", markup=False, highlight=False)
         c.print("    → set one: [bold]dgc --model <name>[/bold]  or  [bold]dgc setup[/bold]")
-    if sandbox_requested and not sandbox_report.available:
+    if active_problem:
+        c.print(f"\n  [bold red]not ready[/bold red] — {terminal_safe_text(active_problem)}.\n")
+    elif sandbox_requested and not sandbox_report.available:
         c.print("\n  [bold red]not ready[/bold red] — sandboxed shell commands will fail closed.\n")
     else:
         c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
@@ -1377,8 +1392,10 @@ def run_setup(config: Config) -> None:
     # Subscription engines first — run your own Claude/Codex/Qwen/Kimi plan via its official CLI.
     subs_status = _subs.status()
     sub_labels = [f"{s['label']} — your own subscription" for s in subs_status]
-    sub_hints = [("✓ signed in" if s["logged_in"]
-                  else (f"not signed in · run: {s['login_cmd']}" if s["installed"]
+    sub_hints = [("✓ signed in" if s["auth_state"] == "signed_in"
+                  else ("authentication checked securely by the CLI on launch"
+                        if s["auth_state"] == "check_on_launch" else
+                        f"not signed in · run: {s['login_cmd']}" if s["installed"]
                         else "CLI not installed")) for s in subs_status]
     keys = list(PROVIDERS)
     prov_labels = sub_labels + [PROVIDERS[k]["label"] for k in keys] + ["custom endpoint (enter your own URL)"]
@@ -1392,8 +1409,10 @@ def run_setup(config: Config) -> None:
         config.set("subscription_engine", s["key"])
         c.print(f"\n  [bold green]selected[/bold green] {terminal_safe_text(s['label'])} — "
                 f"DGC will run each turn through your subscription via the official CLI.")
-        if s["logged_in"]:
+        if s["auth_state"] == "signed_in":
             c.print("  [green]✓ already signed in.[/green]")
+        elif s["auth_state"] == "check_on_launch":
+            c.print("  [cyan]authentication will be verified by the official CLI on first run.[/cyan]")
         else:
             c.print(f"  [yellow]sign in first:[/yellow] run "
                     f"[bold]{terminal_safe_text(s['login_cmd'])}[/bold] once, then retry.")
@@ -1527,7 +1546,7 @@ def main(argv: list[str] | None = None) -> int | None:
     parser.add_argument("--model", help="model name (persisted)")
     parser.add_argument("--engine", metavar="NAME", default=None,
                         help="run this one turn through a subscription CLI "
-                             "(claude|codex|qwen|kimi) via your own login, without changing config")
+                             "(claude|codex|qwen|kimi|copilot) via your own login, without changing config")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
@@ -1606,7 +1625,8 @@ def main(argv: list[str] | None = None) -> int | None:
                           else config.get("subscription_engine", "")).strip().lower()
         if _sub_engine:
             return _run_subscription_oneshot(
-                config, _sub_engine, cli.expand_mentions(args.prompt), bool(args.cont))
+                config, cli.agent, _sub_engine, cli.expand_mentions(args.prompt),
+                bool(args.cont or args.resume is not None))
         if config.data.get("mode") == "auto":
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
@@ -1651,7 +1671,7 @@ def main(argv: list[str] | None = None) -> int | None:
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
 
 
-def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) -> int:
+def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool) -> int:
     """One-shot turn delegated to the user's own logged-in first-party CLI (their
     subscription). DGC streams the vendor CLI's output; the vendor owns auth, the
     model call, its tools, and its ToS. Returns a process exit code."""
@@ -1661,6 +1681,11 @@ def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) 
     if engine is None:
         c.print(f"  [red]unknown subscription engine "
                 f"{_markup_literal(engine_key)}[/red] — one of: {', '.join(subs.ENGINE_KEYS)}")
+        return 1
+    if getattr(agent, "_pending_images", None):
+        agent._pending_images = None
+        c.print("  [yellow]subscription CLI delegation does not yet support DGC image "
+                "attachments; no vendor process was started[/yellow]")
         return 1
     try:
         subs.preflight(engine)
@@ -1681,6 +1706,11 @@ def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) 
             c.print(f"[dim]· {name}{(' ' + summ) if summ else ''}[/dim]", highlight=False)
         elif kind == "thinking" and ev.get("text"):
             c.print(f"[dim]  {terminal_safe_text(ev['text'][:200])}[/dim]", highlight=False)
+        elif kind == "status" and ev.get("text"):
+            c.print(f"[dim]· {terminal_safe_text(ev['text'])}[/dim]", highlight=False)
+        elif kind == "error" and ev.get("text"):
+            # Render once after process exit, where it can be paired with the exit status.
+            return
         elif kind == "text" and ev.get("text"):
             last["text"] = ev["text"]
             sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
@@ -1691,11 +1721,25 @@ def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) 
             sys.stdout.flush()
 
     budget = int(config.get("turn_budget_s") or 0) or 1800
+    mode = str(config.data.get("mode", "default"))
+    configured_engine = str(config.get("subscription_engine", "")).strip().lower()
+    model = (str(config.get("subscription_model", "")).strip()
+             if configured_engine == engine.key else "")
+    effort = (str(config.get("subscription_effort", "")).strip()
+              if configured_engine == engine.key else "")
+    session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
+
+    def delegate(safe_prompt: str) -> dict:
+        result = subs.run_turn(engine, safe_prompt, config.project_root,
+                               cont=bool(cont and session_id), session_id=session_id, mode=mode,
+                               timeout=budget, on_event=on_event, model=model, effort=effort)
+        if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
+            agent.remember_subscription_session(
+                engine.key, result["session_id"], mode, model, effort)
+        return result
+
     try:
-        res = subs.run_turn(engine, prompt, config.project_root, cont=cont,
-                            timeout=budget, on_event=on_event,
-                            model=str(config.get("subscription_model", "")).strip(),
-                            effort=str(config.get("subscription_effort", "")).strip())
+        res = agent.run_external_turn(prompt, delegate)
     except subs.EngineError as e:
         c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
         return 1
@@ -1703,7 +1747,15 @@ def _run_subscription_oneshot(config, engine_key: str, prompt: str, cont: bool) 
     if res.get("timeout"):
         c.print("  [yellow]! the delegated turn hit the time budget and was stopped[/yellow]")
         return 1
-    return 0 if res.get("rc") == 0 else 1
+    if res.get("cancelled"):
+        c.print("  [yellow]! delegated turn was stopped[/yellow]")
+        return 1
+    if res.get("error"):
+        c.print(f"  [red]{_markup_literal(res['error'])}[/red]")
+    elif res.get("rc") not in (0, None):
+        c.print(f"  [red]{terminal_safe_text(engine.short_label)} exited with status "
+                f"{res['rc']}[/red]")
+    return 0 if res.get("ok") else 1
 
 
 def _print_resume_hint(agent, config) -> None:
