@@ -24,4 +24,7 @@ cmp -s install.sh site/install.sh || {
   && [ -s site/provenance.json ] && [ -s site/dgc.cdx.json ] || {
   echo "site release artifacts are missing; promote a verified dist/release build first" >&2; exit 1;
 }
+# Keep the static version fallback in the HTML in sync with version.json so a
+# non-JS fetch (scraper / social preview) never shows a stale version number.
+bash "$ROOT/scripts/sync-site-version.sh"
 npx --yes "wrangler@$WRANGLER_VERSION" pages deploy site --project-name="$PROJECT"
