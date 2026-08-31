@@ -451,9 +451,21 @@ def _events_kimi(obj: dict) -> list[dict]:
         if meta_type == "session.resume_hint":
             return _session_event(obj.get("session_id"))
         if meta_type == "turn.step.retrying":
-            attempt = obj.get("attempt")
-            suffix = f" (attempt {attempt})" if attempt is not None else ""
-            return [{"kind": "status", "text": "Kimi is retrying the model request" + suffix}]
+            # Surface WHY it is retrying — the provider error and attempt count — instead of an
+            # opaque ping, so a failing delegation says what is wrong while it is happening.
+            nxt = obj.get("next_attempt") or obj.get("attempt")
+            mx = obj.get("max_attempts")
+            where = (f" (attempt {nxt}/{mx})" if nxt and mx
+                     else f" (attempt {nxt})" if nxt else "")
+            reason = str(obj.get("error_message") or obj.get("error_name") or "").strip()
+            code = obj.get("status_code")
+            detail = ""
+            if code and str(code) not in reason:
+                detail += f" [{code}]"
+            if reason:
+                detail += f": {reason}"
+            return [{"kind": "status",
+                     "text": f"Kimi is retrying the model request{where}{detail}"}]
         if "error" in meta_type:
             return _text_event("error", _error_text(obj) or meta_type)
     return _events_generic(obj)
