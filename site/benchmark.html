@@ -414,19 +414,29 @@
 
 <section id="swe"><div class="wrap">
   <div class="subhead">A second, harder benchmark · same model</div>
-  <h2>Real bugs, real test suites: SWE-bench Lite</h2>
-  <p class="lede" style="max-width:66ch">Polyglot measures self-contained exercises.
-    <a href="https://www.swebench.com/" target="_blank" rel="noopener">SWE-bench&nbsp;Lite</a> is the other
-    extreme: 300 real issues from large open-source Python projects — Django, SymPy, scikit-learn, matplotlib
-    and more — where the agent has to patch the <em>actual</em> repository, and the patch is graded by that
-    project's own unmodified test suite. On the same <b>qwen3.8:27b-bf16</b>, DGC resolves:</p>
-  <div class="reveal" style="display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;margin:28px 0 8px">
-    <div class="n" style="color:var(--lav)">61.3%</div>
-    <div style="font:600 15px/1.5 var(--sans);color:var(--muted)">184&nbsp;/&nbsp;300 resolved<br>on the full official SWE-bench&nbsp;Lite set</div>
+  <div class="bhero reveal" style="margin-top:2px">
+    <div>
+      <p class="eyebrow">SWE-bench Lite</p>
+      <h2 style="font:800 clamp(30px,4vw,46px)/1.07 var(--sans);margin:16px 0 0;text-wrap:balance">Real bugs, real repos,<br>graded by their own tests</h2>
+      <p class="sub"><a href="https://www.swebench.com/" target="_blank" rel="noopener">SWE-bench&nbsp;Lite</a> is
+        the opposite of self-contained exercises: 300 real issues from big open-source Python projects — Django,
+        SymPy, scikit-learn, matplotlib — where DGC patches the <em>actual</em> repository and the patch is graded
+        by that project's own unmodified test suite.</p>
+      <div class="stat3" style="margin-top:30px">
+        <div class="s"><div class="k">RESOLVED</div><div class="v">184<small>&nbsp;/&nbsp;300</small></div><div class="bar"><i style="width:61.3%"></i></div></div>
+        <div class="s"><div class="k">GRADEABLE</div><div class="v">62.8<small>%</small></div><div class="bar"><i style="width:62.8%"></i></div></div>
+        <div class="s"><div class="k">HARDWARE</div><div class="v">27B<small>&nbsp;local</small></div><div class="bar"><i style="width:100%;background:var(--lav)"></i></div></div>
+      </div>
+    </div>
+    <div class="bignum">
+      <div class="n">61.3%</div>
+      <div class="u">SWE-bench Lite · resolved</div>
+      <div class="m">184 / 300 · qwen3.8:27b-bf16 · run locally</div>
+    </div>
   </div>
-  <p class="note">A strong result for a <b>27-billion-parameter</b> model you run on your own hardware — in the
-    range of much larger frontier-model agents on the same suite. Every patch is generated end-to-end by DGC and
-    scored against the project's real tests; nothing about the benchmark is modified.</p>
+  <p class="note" style="margin-top:28px;max-width:72ch">A strong result for a <b>27-billion-parameter</b> model
+    on your own hardware — in the range of much larger frontier-model agents on the same suite. Every patch is
+    generated end-to-end by DGC and graded against the project's real, unmodified tests.</p>
 </div></section>
 
 <section id="method"><div class="wrap">
