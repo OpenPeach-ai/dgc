@@ -13682,6 +13682,18 @@ def test_subscription_engines():
     check("subscriptions: Kimi role schema preserves assistant text and function calls",
           [event["kind"] for event in kimi_events] == ["text", "tool_call"]
           and kimi_events[1]["args"] == {"cmd": "pwd"})
+    # Real capture from a live Moonshot 500: the retry ping must say WHY (provider error +
+    # attempt), not an opaque "retrying" — otherwise a failing delegation looks like a no-op.
+    kimi_retry = S.parse_stream_events("kimi", json.dumps({
+        "role": "meta", "type": "turn.step.retrying", "failed_attempt": 1, "next_attempt": 2,
+        "max_attempts": 3, "error_name": "APIStatusError",
+        "error_message": "500 The server had an error while processing your request",
+        "status_code": 500}))
+    check("subscriptions: Kimi retry surfaces the provider error and attempt count",
+          [event["kind"] for event in kimi_retry] == ["status"]
+          and "attempt 2/3" in kimi_retry[0]["text"]
+          and "500" in kimi_retry[0]["text"]
+          and "server had an error" in kimi_retry[0]["text"])
     check("subscriptions: an unparseable line yields no events (never a raw dump)",
           S.parse_stream_events("codex", "not json") == [] and S.parse_stream_events("kimi", "  ") == [])
     edit = S.edit_diff("Edit", {"file_path": "a.py", "old_string": "x = 1", "new_string": "x = 2"})
