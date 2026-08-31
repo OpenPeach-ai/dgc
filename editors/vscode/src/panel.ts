@@ -49,7 +49,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private featureRequest = 0;
   private correlatedStateRequests = false;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
-  private behaviorState = { showReasoning: true };
+  private behaviorState = { showReasoning: true, preserveThinking: false };
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
   private plaintextSecretWarnings = new Set<string>();
@@ -315,6 +315,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
+        this.behaviorState.preserveThinking = ev.preserve_thinking === true;
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
@@ -960,6 +961,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "toggleThoughts": this.ensureBackend().send(this.stateCommand("thoughts", {
         type: "set_config", values: { show_reasoning: !this.behaviorState.showReasoning },
       })); break;
+      case "togglePreserveThinking": this.ensureBackend().send(this.stateCommand("preserve-thinking", {
+        type: "set_config", values: { preserve_thinking: !this.behaviorState.preserveThinking },
+      })); break;
       case "nameSession": void this.nameSession(); break;
       case "skill": this.openSkills(); break;
       case "update": vscode.commands.executeCommand("dgc.updateCli"); break;
@@ -1066,7 +1070,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       subagent: "subagent", tasks: "retainedTasks", settings: "settings", bug: "bug",
       skills: "skills", hooks: "hooks", handoff: "handoff", docs: "docs", mcp: "mcp",
       permissions: "permissions", memory: "memory", help: "commandMenu",
-      thoughts: "toggleThoughts", sandbox: "securitySettings", context: "status",
+      thoughts: "toggleThoughts", "preserve-thinking": "togglePreserveThinking",
+      sandbox: "securitySettings", context: "status",
       agents: "subagent", update: "update", skill: "skill", name: "nameSession",
     };
     if (direct[name]) { this.slash(direct[name]); return; }

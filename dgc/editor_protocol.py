@@ -117,7 +117,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "fallback_api_mode": _S(False), "fallback_api_key_set": _B(False),
         "context_size": _I(False), "goal": _O(),
         "sandbox": _B(False), "sandbox_network": _B(False),
-        "show_reasoning": _B(False), "suggest": _B(False),
+        "show_reasoning": _B(False), "preserve_thinking": _B(False), "suggest": _B(False),
         "plan_artifact": _B(False), "artifact_autostart": _B(False),
         "artifact_in_plan": _B(False), "tool_profile": _S(False),
         "max_parallel_tasks": _I(False),

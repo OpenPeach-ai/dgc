@@ -1012,6 +1012,7 @@ class Backend:
                      sandbox=bool(c.get("sandbox", False)),
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
+                     preserve_thinking=bool(c.get("preserve_thinking", False)),
                      suggest=bool(c.get("suggest", True)),
                      plan_artifact=bool(c.get("plan_artifact", True)),
                      artifact_autostart=bool(c.get("artifact_autostart", True)),
@@ -1550,7 +1551,7 @@ class Backend:
                        "fallback_model", "fallback_base_url", "fallback_api_key",
                        "fallback_api_mode",
                        "context_size", "search_provider", "sandbox", "sandbox_network",
-                       "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+                       "show_reasoning", "preserve_thinking", "suggest", "plan_artifact", "artifact_autostart",
                        "artifact_in_plan", "tool_profile", "max_parallel_tasks",
                        "subscription_engine", "subscription_model", "subscription_effort")
             refresh = False
@@ -1562,7 +1563,8 @@ class Backend:
                 return
             values = {k: v for k, v in raw_values.items() if k in allowed}
             boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
-                            "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"}
+                            "preserve_thinking", "suggest", "plan_artifact", "artifact_autostart",
+                            "artifact_in_plan"}
             if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message="boolean settings require true or false",

@@ -804,6 +804,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "preserve_thinking": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "suggest": {
       "types": [
         "boolean"

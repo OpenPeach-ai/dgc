@@ -979,6 +979,9 @@
             "show_reasoning": {
               "type": "boolean"
             },
+            "preserve_thinking": {
+              "type": "boolean"
+            },
             "suggest": {
               "type": "boolean"
             },
