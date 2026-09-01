@@ -777,6 +777,44 @@ class CLI:
             else:
                 cur = "on" if cfg.get("preserve_thinking", False) else "off"
                 self.ui.info(f"preserve thinking: {cur} — /preserve-thinking on|off")
+        elif cmd in ("code-action", "codeaction", "python-tool"):
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes"):
+                cfg.set("code_action", True)   # persisted across restarts
+                self.ui.info("code-action → on (persistent `python` tool advertised)")
+            elif val in ("off", "false", "0", "no"):
+                cfg.set("code_action", False)
+                self.ui.info("code-action → off")
+            else:
+                cur = "on" if cfg.get("code_action", False) else "off"
+                self.ui.info(f"code-action: {cur} — /code-action on|off")
+        elif cmd in ("autonomous-gate", "auto-gate"):
+            val = rest.strip()
+            if val.lower() in ("off", "none", "clear", "unset", ""):
+                if not val:
+                    gate = cfg.get("autonomous_gate", "") or ""
+                    if gate:
+                        self.ui.info(f"autonomous gate: `{gate}` — max {cfg.get('autonomous_max_turns', 30)} "
+                                     "retries. /autonomous-gate off to clear")
+                    else:
+                        self.ui.info("autonomous gate: off — /autonomous-gate \"<cmd>\" to set one")
+                else:
+                    cfg.set("autonomous_gate", "")
+                    self.agent.autonomous_gate = ""
+                    self.ui.info("autonomous gate → off")
+            else:
+                cfg.set("autonomous_gate", val)
+                self.agent.autonomous_gate = val
+                self.ui.info(f"autonomous gate → `{val}` (must exit 0 before a turn may stop; "
+                             f"max {cfg.get('autonomous_max_turns', 30)} retries)")
+        elif cmd in ("export-training", "export-jsonl"):
+            summary = export_training_core(cfg, out=(rest.strip() or "./dgc-training.jsonl"))
+            if summary.get("error"):
+                self.ui.error(summary["error"])
+            else:
+                self.ui.info(
+                    f"export-training → wrote {summary['written']} session(s), "
+                    f"skipped {summary['skipped']}, to {summary['out']} (secrets scrubbed)")
         elif cmd == "permissions":
             self._permissions_cmd(rest)
         elif cmd == "memory":
@@ -1397,6 +1435,42 @@ def run_doctor(config: Config) -> None:
         c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
 
 
+def export_training_core(config, *, out: str = "./dgc-training.jsonl", all_projects: bool = False,
+                         session: str | None = None, successful_only: bool = False,
+                         min_turns: int = 1) -> dict:
+    """Shared engine for `dgc export-training` and the `/export-training` slash command.
+
+    Read-only over the persisted transcripts: selects the session files for the chosen scope,
+    reshapes + deep-scrubs each into one training record, and writes them as JSONL. Returns a
+    summary dict (``scope``/``written``/``skipped``/``out``/``successful_only``) or ``{"error": …}``.
+    """
+    from . import training_export
+    secrets = secret_values(config)
+    if session:
+        p = sessions_mod.by_id(config.project_root, session)
+        if p is None:
+            found = sessions_mod.find_global(session)
+            p = found[0] if found else None
+        if p is None:
+            return {"error": f"no session '{session}' found"}
+        files = [p]
+        scope = f"session {p.stem}"
+    elif all_projects:
+        files = [row[0] for row in sessions_mod.listing_all(redact_secrets=secrets)]
+        scope = "all projects"
+    else:
+        files = [row[0] for row in sessions_mod.listing(
+            config.project_root, redact_secrets=secrets)]
+        scope = f"project {config.project_root.name}"
+    total = len(files)
+    records = list(training_export.iter_training_records(
+        files, config, successful_only=successful_only, min_turns=max(1, int(min_turns or 1))))
+    out_path = Path(out).expanduser()
+    written = training_export.write_jsonl(records, out_path)
+    return {"scope": scope, "written": written, "skipped": total - written,
+            "out": out_path, "successful_only": successful_only}
+
+
 def run_export_training(argv: list[str]) -> int:
     """`dgc export-training` — turn real DGC sessions into scrubbed, training-ready JSONL.
 
@@ -1404,7 +1478,6 @@ def run_export_training(argv: list[str]) -> int:
     ``messages`` record (with ``tool_calls``) plus outcome ``meta``, deep-scrubs every field of
     every record through the redaction layer, and writes one JSON object per line.
     """
-    from . import training_export
     parser = argparse.ArgumentParser(
         allow_abbrev=False, prog="dgc export-training",
         description="Export your real DGC sessions as scrubbed fine-tuning JSONL for a local model.")
@@ -1423,34 +1496,18 @@ def run_export_training(argv: list[str]) -> int:
 
     config = Config()
     c = Console()
-    secrets = secret_values(config)
 
-    if args.session:
-        p = sessions_mod.by_id(config.project_root, args.session)
-        if p is None:
-            found = sessions_mod.find_global(args.session)
-            p = found[0] if found else None
-        if p is None:
-            c.print(f"  [yellow]![/yellow] no session '{terminal_safe_text(args.session)}' found")
-            return 1
-        files = [p]
-        scope = f"session {p.stem}"
-    elif args.all:
-        files = [row[0] for row in sessions_mod.listing_all(redact_secrets=secrets)]
-        scope = "all projects"
-    else:
-        files = [row[0] for row in sessions_mod.listing(
-            config.project_root, redact_secrets=secrets)]
-        scope = f"project {config.project_root.name}"
+    summary = export_training_core(
+        config, out=args.out, all_projects=args.all, session=args.session,
+        successful_only=args.successful_only, min_turns=args.min_turns)
+    if summary.get("error"):
+        c.print(f"  [yellow]![/yellow] {terminal_safe_text(summary['error'])}")
+        return 1
+    scope = summary["scope"]
+    written = summary["written"]
+    skipped = summary["skipped"]
+    out_path = summary["out"]
 
-    total = len(files)
-    records = list(training_export.iter_training_records(
-        files, config, successful_only=args.successful_only,
-        min_turns=max(1, int(args.min_turns or 1))))
-    written = training_export.write_jsonl(records, args.out)
-    skipped = total - written
-
-    out_path = Path(args.out).expanduser()
     c.print("[bold]DGC export-training[/bold] — your sessions → scrubbed fine-tuning JSONL\n")
     c.print(f"  scope         {terminal_safe_text(scope)}", markup=False, highlight=False)
     c.print(f"  exported      {written} session(s)", markup=False, highlight=False)

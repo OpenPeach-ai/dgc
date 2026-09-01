@@ -43,6 +43,15 @@ export function activate(context: vscode.ExtensionContext): void | object {
       term.sendText(`${cmd} update`);
       vscode.window.showInformationMessage("Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
     }),
+    vscode.commands.registerCommand("dgc.exportTraining", () => {
+      // parity with the CLI's /export-training: run the read-only exporter in a terminal so its
+      // full scrubbed-JSONL summary is visible; the subcommand writes ./dgc-training.jsonl.
+      const cmd = vscode.workspace.getConfiguration("dgc").get<string>("command", "dgc") || "dgc";
+      const term = vscode.window.createTerminal({ name: "DGC export-training" });
+      term.show();
+      term.sendText(`${cmd} export-training`);
+      vscode.window.showInformationMessage("Exporting your DGC sessions as scrubbed fine-tuning JSONL — see the terminal.");
+    }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }

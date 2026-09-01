@@ -49,7 +49,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private featureRequest = 0;
   private correlatedStateRequests = false;
   private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
-  private behaviorState = { showReasoning: true, preserveThinking: false };
+  private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
   private plaintextSecretWarnings = new Set<string>();
@@ -316,6 +316,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
         this.behaviorState.preserveThinking = ev.preserve_thinking === true;
+        this.behaviorState.codeAction = ev.code_action === true;
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
@@ -964,6 +965,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "togglePreserveThinking": this.ensureBackend().send(this.stateCommand("preserve-thinking", {
         type: "set_config", values: { preserve_thinking: !this.behaviorState.preserveThinking },
       })); break;
+      case "toggleCodeAction": this.ensureBackend().send(this.stateCommand("code-action", {
+        type: "set_config", values: { code_action: !this.behaviorState.codeAction },
+      })); break;
       case "nameSession": void this.nameSession(); break;
       case "skill": this.openSkills(); break;
       case "update": vscode.commands.executeCommand("dgc.updateCli"); break;
@@ -1071,6 +1075,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       skills: "skills", hooks: "hooks", handoff: "handoff", docs: "docs", mcp: "mcp",
       permissions: "permissions", memory: "memory", help: "commandMenu",
       thoughts: "toggleThoughts", "preserve-thinking": "togglePreserveThinking",
+      "code-action": "toggleCodeAction",
       sandbox: "securitySettings", context: "status",
       agents: "subagent", update: "update", skill: "skill", name: "nameSession",
     };
@@ -1378,6 +1383,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const fallbackKey = await this.storedSecret("fallbackApiKey", effectiveFallbackBase);
     if (fallbackKey) { values.fallback_api_key = fallbackKey; }
     const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
+    const gate = c.get<string>("autonomousGate", ""); if (gate) { values.autonomous_gate = gate; }
+    const gateMax = c.get<number>("autonomousMaxTurns", 0);
+    if (gateMax) { values.autonomous_max_turns = gateMax; }
     if (Object.keys(values).length) { send("config-setup", { type: "set_config", values }); }
     // Rehydrate extension-managed MCP credentials from SecretStorage on every backend generation.
     // Only the safe command/URL/env-name shape is persisted in ~/.dgc/config.json.

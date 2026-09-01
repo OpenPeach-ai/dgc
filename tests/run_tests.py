@@ -14309,6 +14309,141 @@ def test_training_export():
             _sessions.SESSIONS_DIR = saved_dir
 
 
+def test_surfaced_feature_commands():
+    """A/B/C: code-action, autonomous-gate, export-training reach the CLI, TUI, and editor surfaces."""
+    print("surfaced feature commands (code-action / autonomous-gate / export-training):")
+    import ast
+    import inspect
+    import textwrap
+    from dgc.commands import command_specs, resolve_command, editor_command_metadata
+    from dgc.cli import CLI, export_training_core
+    from dgc.tui import TUI
+    from dgc.headless import Backend
+    from dgc.config import DEFAULTS
+    import dgc.editor_protocol as ep
+
+    def route_literals(fn):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        return {node.value for node in ast.walk(tree)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+    tui_routes = route_literals(TUI._handle_slash)
+    classic_routes = route_literals(CLI.handle_slash)
+
+    # (A) code-action — advertised on classic/TUI/editor, and its editor action has a panel route.
+    ca = resolve_command("code-action", "tui")
+    check("code-action is advertised on tui/classic/editor",
+          ca is not None and ca.surfaces == frozenset({"tui", "classic", "editor"})
+          and ca.editor_action == "toggleCodeAction")
+    check("code-action defaults off and routes in both terminal handlers",
+          DEFAULTS.get("code_action") is False
+          and "code-action" in tui_routes and "code-action" in classic_routes)
+    # (B) autonomous-gate — terminal-only free-text command (no editor toggle).
+    ag = resolve_command("autonomous-gate", "classic")
+    check("autonomous-gate routes on tui+classic and carries no editor action",
+          ag is not None and ag.surfaces == frozenset({"tui", "classic"})
+          and ag.editor_action == "" and "autonomous-gate" in tui_routes
+          and "autonomous-gate" in classic_routes)
+    # (C) export-training — terminal slash command; editor uses a palette command, not a slash route.
+    ex = resolve_command("export-training", "tui")
+    check("export-training routes on tui+classic only",
+          ex is not None and ex.surfaces == frozenset({"tui", "classic"})
+          and "export-training" in tui_routes and "export-training" in classic_routes
+          and resolve_command("export-training", "editor") is None)
+
+    # every editor-surfaced action (now including toggleCodeAction) has an extension-host route
+    panel_src = (Path(__file__).parents[1] / "editors" / "vscode" / "src" / "panel.ts").read_text()
+    meta = editor_command_metadata()
+    check("code-action editor action has a panel.ts case",
+          any(c["name"] == "code-action" and c["action"] == "toggleCodeAction" for c in meta)
+          and 'case "toggleCodeAction"' in panel_src)
+
+    # the new config keys are carried on the editor config-state event
+    check("config-state event carries code_action",
+          "code_action" in ep.EVENT_FIELDS["config"])
+
+    # editor set_config: code_action is a validated boolean; autonomous_gate/max_turns are accepted
+    class _Cap:
+        def __init__(self): self.events = []
+        def emit(self, kind, **fields): self.events.append({"type": kind, **fields})
+    class _Cfg:
+        def __init__(self): self.data = {}; self._env_secret_keys = set()
+        def get(self, key, default=None): return self.data.get(key, default)
+        def set(self, key, value): self.data[key] = value
+    class _Ag:
+        mode = "default"
+        autonomous_gate = ""
+        autonomous_max_turns = 30
+        def refresh_client(self): pass
+
+    def _backend():
+        be = object.__new__(Backend)
+        be.em = _Cap(); be.config = _Cfg(); be.agent = _Ag()
+        be._worker = None; be._foreground_worker = None
+        be._emit_config = lambda request_id=None: None
+        return be
+
+    be = _backend()
+    be.dispatch({"type": "set_config", "values": {"code_action": True}})
+    check("editor set_config accepts code_action=true", be.config.data.get("code_action") is True)
+    be.dispatch({"type": "set_config", "values": {"code_action": "yes"}})
+    check("editor set_config rejects a non-boolean code_action",
+          be.em.events[-1]["type"] == "command_rejected"
+          and be.config.data.get("code_action") is True)
+
+    be = _backend()
+    be.dispatch({"type": "set_config", "values": {
+        "autonomous_gate": "npm run check", "autonomous_max_turns": 12}})
+    check("editor set_config applies the autonomous gate + syncs the live agent",
+          be.config.data.get("autonomous_gate") == "npm run check"
+          and be.config.data.get("autonomous_max_turns") == 12
+          and be.agent.autonomous_gate == "npm run check"
+          and be.agent.autonomous_max_turns == 12)
+    be.dispatch({"type": "set_config", "values": {"autonomous_max_turns": 0}})
+    check("editor set_config rejects an out-of-range autonomous_max_turns",
+          be.em.events[-1]["type"] == "command_rejected"
+          and be.config.data.get("autonomous_max_turns") == 12)
+    be.dispatch({"type": "set_config", "values": {"autonomous_gate": "bad\ngate"}})
+    check("editor set_config rejects a multi-line autonomous_gate",
+          be.em.events[-1]["type"] == "command_rejected"
+          and be.config.data.get("autonomous_gate") == "npm run check")
+
+    # export_training_core is the shared read-only engine for CLI + slash; returns a summary
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc import sessions as _sessions
+
+    class _ExCfg:
+        model = "qwen3:8b"
+        def get(self, key, default=None):
+            return "topsecret-export-key" if key == "api_key" else default
+
+    saved_dir = _sessions.SESSIONS_DIR
+    with _tf.TemporaryDirectory() as _hd:
+        _sessions.SESSIONS_DIR = _P(_hd) / "sessions"
+        try:
+            root = _P(_hd) / "proj-surface"
+            root.mkdir()
+            cfg = _ExCfg()
+            cfg.project_root = root
+            sess = _sessions.new_path(root)
+            _sessions.save(sess, [
+                {"role": "user", "content": "key topsecret-export-key -- fix it"},
+                {"role": "assistant", "content": "done"},
+            ], root, activity={"tool_calls": 1, "edits": 1, "edit_fails": 0})
+            out = _P(_hd) / "surface.jsonl"
+            summary = export_training_core(cfg, out=str(out))
+            blob = out.read_text()
+            check("export_training_core writes a summary + scrubbed JSONL for the project",
+                  summary.get("written") == 1 and summary.get("skipped") == 0
+                  and _P(summary["out"]) == out and out.exists()
+                  and "topsecret-export-key" not in blob and "[REDACTED]" in blob)
+            missing = export_training_core(cfg, session="does-not-exist")
+            check("export_training_core reports a missing session by id",
+                  "error" in missing and summary.get("written") == 1)
+        finally:
+            _sessions.SESSIONS_DIR = saved_dir
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -14354,6 +14489,7 @@ def main():
         test_subscription_engines()
         test_python_code_action()
         test_training_export()
+        test_surfaced_feature_commands()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

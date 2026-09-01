@@ -289,8 +289,10 @@ Every conversation is a session, saved as you go.
 - **/name** — rename the current session.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
-- **dgc export-training** — export your sessions as scrubbed fine-tuning JSONL
-  (see *Training export*); read-only, never modifies a session.
+- **dgc export-training** / **/export-training** — export your sessions as scrubbed
+  fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The
+  slash command runs the same export for the current project; the VS Code palette
+  exposes it as *DGC: Export Training Data*.
 - **/handoff** — create a bounded, redacted continuation document from one stable
   session generation. DGC saves it as a new private `HANDOFF-*.md` through the
   workspace lease; an overlapping turn is rejected instead of mixed into the file.
@@ -312,6 +314,10 @@ it non-interactively — there is nothing to configure:
 ```
 dgc export-training
 ```
+
+Inside a session, `/export-training` runs the same read-only export for the current
+project to `./dgc-training.jsonl` (pass a path to change it), and the VS Code command
+palette offers *DGC: Export Training Data*.
 
 Each session becomes one line of JSONL: the conversation as a standard
 OpenAI-style `messages` array — `system` / `user` / `assistant`-with-`tool_calls`
@@ -364,6 +370,12 @@ and the gate fails, DGC feeds the command's output back and keeps working; when 
 exits 0, the stop is allowed. Bounded by `--autonomous-max-turns` (default 30)
 failed attempts, so a persistently red gate can never loop forever. Unset (the
 default) leaves turn completion unchanged. e.g. `--autonomous-gate "npm run check"`.
+
+Set it live without restarting: `/autonomous-gate "npm run check"` in the classic
+or full-screen TUI (`/autonomous-gate off` clears it, no argument reports the current
+gate and retry bound). The gate command and its max-retry bound are also editable in
+the TUI settings screen (Behaviour). In the VS Code extension, set `dgc.autonomousGate`
+and `dgc.autonomousMaxTurns` in Settings.
 """.strip()),
 
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
@@ -488,7 +500,9 @@ that CLI directly.
 # Python code-action (power mode)
 
 An **optional** power tool, **off by default**. Turn it on with `code_action: true` in
-`~/.dgc/config.json` (or a project `.dgc/`). When on, DGC advertises a **`python`** tool.
+`~/.dgc/config.json` (or a project `.dgc/`), with `/code-action on` in the classic or
+full-screen TUI (a row in the TUI settings screen and a toggle in the VS Code panel do
+the same), or `/code-action off` to disable it. When on, DGC advertises a **`python`** tool.
 
 ## What it is
 

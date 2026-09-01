@@ -982,6 +982,9 @@
             "preserve_thinking": {
               "type": "boolean"
             },
+            "code_action": {
+              "type": "boolean"
+            },
             "suggest": {
               "type": "boolean"
             },

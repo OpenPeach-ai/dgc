@@ -336,6 +336,8 @@ class TUI:
                      lambda s: "show" if s.config.get("show_reasoning", True) else "hide"),
         "preserve-thinking": ([("On — keep prior reasoning in context", "on"), ("Off", "off")],
                               lambda s: "on" if s.config.get("preserve_thinking", False) else "off"),
+        "code-action": ([("On — persistent `python` power tool", "on"), ("Off", "off")],
+                        lambda s: "on" if s.config.get("code_action", False) else "off"),
         "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
                    ("Extra-high", "xhigh")],
                   lambda s: s.config.get("thinking", "off")),
@@ -390,6 +392,9 @@ class TUI:
             ("search_timeout", "Search timeout (s)", "int"),
             ("verify_before_done", "Verify before finishing", "bool"),
             ("verify_command", "Verify command", "str"), ("suggest", "Ghost-text suggestions", "bool"),
+            ("autonomous_gate", "Autonomous gate command", "str"),
+            ("autonomous_max_turns", "Autonomous gate max retries", "int"),
+            ("code_action", "Python code-action tool", "bool"),
             ("aux_idle_delay_ms", "Title/suggestion idle delay (ms)", "int"),
             ("sandbox", "Confine bash (sandbox)", "bool"),
             ("sandbox_network", "Sandbox network access", "bool"),
@@ -489,6 +494,10 @@ class TUI:
             self.config.set(key, val)
             if key in self._CLIENT_KEYS:
                 self.agent.refresh_client()     # sampling / model / timeouts take effect immediately
+            elif key == "autonomous_gate":
+                self.agent.autonomous_gate = str(val or "")   # cached on the agent — re-sync live
+            elif key == "autonomous_max_turns":
+                self.agent.autonomous_max_turns = int(val or 30)
         self._flash(f"{key} = {val}" if val not in ("",) else f"{key} reset to default")
         self._open_settings_cat(cat)            # back to the category page (values refreshed)
 
@@ -3059,6 +3068,35 @@ class TUI:
             else:
                 cur = "on" if cfg.get("preserve_thinking", False) else "off"
                 self._flash(f"preserve thinking: {cur} — /preserve-thinking on|off")
+        elif cmd in ("code-action", "codeaction", "python-tool"):
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes"):
+                cfg.set("code_action", True); self._flash("code-action on — persistent `python` tool advertised")
+            elif val in ("off", "false", "0", "no"):
+                cfg.set("code_action", False); self._flash("code-action off")
+            else:
+                cur = "on" if cfg.get("code_action", False) else "off"
+                self._flash(f"code-action: {cur} — /code-action on|off")
+        elif cmd in ("autonomous-gate", "auto-gate"):
+            val = rest.strip()
+            if val.lower() in ("off", "none", "clear", "unset"):
+                cfg.set("autonomous_gate", ""); self.agent.autonomous_gate = ""
+                self._flash("autonomous gate → off")
+            elif val:
+                cfg.set("autonomous_gate", val); self.agent.autonomous_gate = val
+                self._flash(f"autonomous gate → `{val}` (max {cfg.get('autonomous_max_turns', 30)} retries)")
+            else:
+                gate = cfg.get("autonomous_gate", "") or ""
+                self._flash(f"autonomous gate: `{gate}` (max {cfg.get('autonomous_max_turns', 30)} retries)"
+                            if gate else "autonomous gate: off — /autonomous-gate \"<cmd>\"")
+        elif cmd in ("export-training", "export-jsonl"):
+            from .cli import export_training_core
+            summary = export_training_core(cfg, out=(rest.strip() or "./dgc-training.jsonl"))
+            if summary.get("error"):
+                self._flash(summary["error"])
+            else:
+                self._flash(f"exported {summary['written']} session(s) → {summary['out']} "
+                            f"({summary['skipped']} skipped, secrets scrubbed)")
         elif cmd == "theme":
             val = rest or ("light" if cfg.get("theme") == "dark" else "dark")
             cfg.set("theme", val); style_mod.set_theme(val); self._flash(f"theme → {val}")

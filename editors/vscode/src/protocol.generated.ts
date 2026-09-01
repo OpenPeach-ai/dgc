@@ -810,6 +810,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "code_action": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "suggest": {
       "types": [
         "boolean"
