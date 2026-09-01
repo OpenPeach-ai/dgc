@@ -4107,6 +4107,91 @@ def unit_tests(tmp: Path):
     check("landed edits keep evolving repair cycles alive past the varied-failure cap",
           _repair_agent.client.n == 8
           and (_repair_root / "attempt.txt").read_text() == "fixed\n")
+
+    # --- Feature B: --autonomous-gate — a real check command must exit 0 before a turn may stop.
+    def _autonomous_gate_reminders(agent) -> list:
+        return [str(m.get("content") or "") for m in agent.messages
+                if m.get("role") == "user"
+                and "The autonomous gate `" in str(m.get("content") or "")]
+    # direct helper: exit-code passthrough + credential redaction of the gate's own output.
+    _gate_probe_root = Path(_tf.mkdtemp())
+    _gate_probe = _Ag(_Cfg(_gate_probe_root), _AgUI())
+    _gate_probe.config.data["api_key"] = "sk-gate-secret-value"
+    _gate_probe.autonomous_gate = "true"
+    check("autonomous gate helper reports a passing command", _gate_probe._run_autonomous_gate()[0] == 0)
+    _gate_probe.autonomous_gate = "echo sk-gate-secret-value; exit 3"
+    _probe_rc, _probe_out = _gate_probe._run_autonomous_gate()
+    check("autonomous gate helper passes the exit code back and redacts its output",
+          _probe_rc == 3 and "sk-gate-secret-value" not in _probe_out and "[REDACTED]" in _probe_out)
+
+    # (a)+(b): a failing gate injects its output and continues; the model's edit flips it to pass → stop.
+    _gate_flip_root = Path(_tf.mkdtemp())
+    _gate_flip = _Ag(_Cfg(_gate_flip_root), _AgUI())
+    _gate_flip.config.data["mode"] = "auto"
+    _gate_flip.autonomous_gate = "test -f gate-open"
+    class _GateFlipClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n == 1:
+                kwargs["on_text"]("All done.")            # tries to stop while the gate is still red
+                return _ChatResult(content="All done.")
+            if self.n == 2:
+                return _ChatResult(tool_calls=[_ToolCall(  # do the work that makes the gate pass
+                    "gate-open-edit", "write_file", {"path": "gate-open", "content": "x\n"})])
+            kwargs["on_text"]("Finished — the gate passes.")
+            return _ChatResult(content="Finished — the gate passes.")
+    _gate_flip.client = _GateFlipClient()
+    _gate_flip_outcome = _gate_flip.run_turn("keep working until the gate passes")
+    _flip_reminders = _autonomous_gate_reminders(_gate_flip)
+    check("a failing autonomous gate refuses the stop and feeds its output back",
+          _gate_flip.client.n == 3 and len(_flip_reminders) == 1
+          and "`test -f gate-open`" in _flip_reminders[0]
+          and "exited 1" in _flip_reminders[0]
+          and "attempt 1/30" in _flip_reminders[0]
+          and _gate_flip.timing_totals["by_request_reason"].get("autonomous_gate") == 1)
+    check("a passing autonomous gate lets the turn stop normally",
+          _gate_flip_outcome is True and (_gate_flip_root / "gate-open").exists())
+
+    # (c): a gate that never passes stops after autonomous_max_turns attempts (no infinite loop).
+    _gate_cap_root = Path(_tf.mkdtemp())
+    _gate_cap = _Ag(_Cfg(_gate_cap_root), _AgUI())
+    _gate_cap.config.data["mode"] = "auto"
+    _gate_cap.autonomous_gate = "false"
+    _gate_cap.autonomous_max_turns = 2
+    class _GateNeverPassClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            kwargs["on_text"]("Nothing more to do.")
+            return _ChatResult(content="Nothing more to do.")
+    _gate_cap.client = _GateNeverPassClient()
+    _gate_cap_outcome = _gate_cap.run_turn("stop even if the gate stays red")
+    check("a never-passing autonomous gate stops after the retry cap is exhausted",
+          _gate_cap_outcome is True and _gate_cap.client.n == 3
+          and len(_autonomous_gate_reminders(_gate_cap)) == 2
+          and _gate_cap.timing_totals["by_request_reason"].get("autonomous_gate") == 2)
+
+    # (d): with no autonomous gate configured, turn completion is completely unchanged.
+    _gate_off_root = Path(_tf.mkdtemp())
+    _gate_off = _Ag(_Cfg(_gate_off_root), _AgUI())
+    _gate_off.config.data["mode"] = "auto"
+    class _GateOffClient:
+        tools_supported = True
+        n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            kwargs["on_text"]("Done.")
+            return _ChatResult(content="Done.")
+    _gate_off.client = _GateOffClient()
+    _gate_off_outcome = _gate_off.run_turn("finish with no gate configured")
+    check("an unset autonomous gate leaves turn completion unchanged",
+          _gate_off_outcome is True and _gate_off.client.n == 1
+          and not _autonomous_gate_reminders(_gate_off)
+          and "autonomous_gate" not in _gate_off.timing_totals["by_request_reason"])
+
     # Last-known-good recovery shares the exact checkpoint primitives: binary bytes, mode,
     # symlink identity, and absence survive; it is project-bound, transactional, and skips rewrites.
     import stat as _stat_snapshot

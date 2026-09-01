@@ -1574,6 +1574,11 @@ def main(argv: list[str] | None = None) -> int | None:
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
                         help="resume a past session by id (dgc --resume <id>), or pick one (dgc --resume)")
+    parser.add_argument("--autonomous-gate", metavar="CMD", default=None,
+                        help="a check command that must exit 0 before the agent may stop a turn; "
+                             "a nonzero exit feeds its output back and continues (e.g. \"npm run check\")")
+    parser.add_argument("--autonomous-max-turns", type=int, default=None, metavar="N",
+                        help="bound on failed --autonomous-gate retries before the turn stops (default 30)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
@@ -1594,6 +1599,10 @@ def main(argv: list[str] | None = None) -> int | None:
         config.data["mode"] = args.mode
     if args.think:
         config.data["thinking"] = args.think
+    if args.autonomous_gate is not None:
+        config.data["autonomous_gate"] = args.autonomous_gate
+    if args.autonomous_max_turns is not None:
+        config.data["autonomous_max_turns"] = args.autonomous_max_turns
 
     if args.prompt is not None:
         from .trust import is_trusted, mark_trusted

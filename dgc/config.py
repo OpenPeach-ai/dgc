@@ -94,6 +94,9 @@ DEFAULTS: dict = {
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
     "verify_command": "",                       #   timed auto runs it after edit-only batches so red evidence
                                                 #   skips a model round. e.g. "npm test" / "pytest -q"
+    "autonomous_gate": "",                      # "" = OFF. A check command that must exit 0 before the model may
+                                                #   stop; a nonzero exit feeds its output back and continues.
+    "autonomous_max_turns": 30,                 # bound on failed autonomous_gate retries before the turn stops
     "bash_timeout": 120,
     "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)

@@ -317,6 +317,15 @@ or cleared. It survives `/resume`.
 The model can use the visible `update_goal` tool only for genuine whole-goal
 completion or a real blocker. Ending one turn or finishing one milestone is not
 goal completion.
+
+## Autonomous gate
+
+`--autonomous-gate "<cmd>"` bounds an autonomous run by a real check command: the
+agent may not end a turn until that command exits 0. When the model tries to stop
+and the gate fails, DGC feeds the command's output back and keeps working; when it
+exits 0, the stop is allowed. Bounded by `--autonomous-max-turns` (default 30)
+failed attempts, so a persistently red gate can never loop forever. Unset (the
+default) leaves turn completion unchanged. e.g. `--autonomous-gate "npm run check"`.
 """.strip()),
 
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """

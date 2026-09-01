@@ -78,7 +78,7 @@ _MAX_HANDOFF_OUTPUT_CHARS = 64_000
 # module startup. The regression suite locks this set to the session and benchmark readers.
 _REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
-    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "todo_gate", "empty_final", "goal_gate", "autonomous_gate", "verifier_evidence", "convergence_nudge",
     "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
     "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
@@ -843,6 +843,9 @@ class Agent:
         self._last_turn_error = ""
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.goal_status = "none"  # none | active | completed | blocked
+        # autonomous gate: an external check command that must exit 0 before a turn may stop ("" = off)
+        self.autonomous_gate = str(config.get("autonomous_gate", "") or "")
+        self.autonomous_max_turns = int(config.get("autonomous_max_turns", 30) or 30)
         self._session_started = False       # SessionStart hook fires once per session
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
@@ -2333,6 +2336,79 @@ class Agent:
         self.ui.error(self._last_turn_error)
         return False
 
+    def _run_autonomous_gate(self) -> tuple[int, str]:
+        """Run the configured autonomous gate command; return (returncode, bounded output).
+
+        Mirrors the bash tool's isolation: its own session/process group so a timeout kills the
+        whole tree, streaming credential redaction, and a bounded head/tail capture. A timeout
+        yields a nonzero return code + a short note so the caller treats it as a failing gate.
+        """
+        import subprocess
+        from .tools import _BoundedCommandCapture, _terminate_background
+        cmd = self.autonomous_gate
+        try:
+            timeout = max(1, int(self.config.get("bash_timeout", 120) or 120))
+        except (TypeError, ValueError):
+            timeout = 120
+        try:
+            proc = subprocess.Popen(
+                ["/bin/bash", "-lc", cmd], cwd=str(self.ctx.project_root),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", start_new_session=True)
+        except OSError as exc:
+            return 1, self._safe_text(f"error: {type(exc).__name__}: {exc}")
+        capture = _BoundedCommandCapture(self.ctx)
+
+        def read_output() -> None:
+            try:
+                if proc.stdout is not None:
+                    while True:
+                        chunk = proc.stdout.read(16_384)
+                        if not chunk:
+                            break
+                        capture.feed(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                capture.finish()
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        deadline = time.monotonic() + timeout
+        timed_out = False
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                if proc.poll() is None:
+                    try:
+                        proc.wait(timeout=min(0.05, remaining))
+                    except subprocess.TimeoutExpired:
+                        continue
+                if not reader.is_alive():
+                    break
+                reader.join(timeout=min(0.05, remaining))
+        finally:
+            # Kill the WHOLE process group even on a clean exit so a daemonized grandchild
+            # cannot keep the workspace busy after the gate returns.
+            _terminate_background(proc, sweep_exited_group=True)
+        reader.join(timeout=5)
+        if reader.is_alive() and proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except (OSError, ValueError):
+                pass
+            reader.join(timeout=1)
+        out, _source_chars, _omitted = capture.result()
+        out = self._safe_text(out).strip()
+        if timed_out:
+            note = f"error: the autonomous gate did NOT finish within {timeout}s and was killed"
+            return 124, (note + (f"\n--- output before it was killed ---\n{out}" if out else ""))
+        rc = proc.returncode if proc.returncode is not None else 1
+        return rc, (out or "(no output)")
+
     def _run_turn(self, user_text: str) -> bool:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
@@ -2393,6 +2469,7 @@ class Agent:
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
+        autonomous_gate_tries = 0   # failed autonomous-gate attempts this turn (bounded by autonomous_max_turns)
         overflow_retried = False    # context-overflow → compact-and-retry fires at most once
         # Why the next completed foreground provider request exists. This private controller state
         # never derives a label from transcript text, so a repository/user/model cannot forge
@@ -2818,6 +2895,28 @@ class Agent:
                             "completion withheld — checking the active standing goal")
                     next_request_reason = "goal_gate"
                     continue
+                if self.autonomous_gate and autonomous_gate_tries < self.autonomous_max_turns:
+                    # Autonomous gate: bound the run by a real check command. The model may not end the
+                    # turn until it exits 0; a nonzero exit feeds its output back and continues. This is
+                    # the LAST gate before stopping, so a passing gate falls through to the final stop.
+                    rc, gate_out = self._run_autonomous_gate()
+                    if rc != 0:
+                        autonomous_gate_tries += 1
+                        self.messages.append({"role": "user", "content":
+                            "<system-reminder>\nThe autonomous gate `" + self.autonomous_gate +
+                            f"` exited {rc} (attempt {autonomous_gate_tries}/{self.autonomous_max_turns}). "
+                            "Its output:\n" + gate_out[-3000:] + "\nKeep working until it exits 0 — do not "
+                            "stop until the gate passes.\n</system-reminder>"})
+                        if defer_completion:
+                            withhold_final(
+                                "[Completion withheld by DGC: the autonomous gate has not passed.]",
+                                "completion withheld — autonomous gate not yet passing")
+                        next_request_reason = "autonomous_gate"
+                        self.ui.info(
+                            f"↻ autonomous gate `{self.autonomous_gate}` failed (exit {rc}) — continuing")
+                        continue
+                    self.ui.info(f"✓ autonomous gate passed: {self.autonomous_gate}")
+                    # fall through to stop
                 # A successful exact verifier remains authoritative until a later mutation-capable
                 # action invalidates ``verified``.  The assistant's no-tools closing response cannot
                 # change the checkout, so rerunning the same command here adds latency and can turn a
