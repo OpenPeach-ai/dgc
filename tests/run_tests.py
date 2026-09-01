@@ -14015,6 +14015,101 @@ def test_subscription_engines():
               [S.ENGINES["claude"].install_cmd, S.ENGINES["qwen"].login_run])
 
 
+def test_python_code_action():
+    """The optional persistent Python 'code action' interpreter (config.code_action)."""
+    print("python code-action tool:")
+    from dgc.tools import (execute as _execute, shutdown_python_kernels as _shutdown_kernels,
+                           MAX_PYTHON_OUT as _MAX_PY_OUT)
+    from dgc.permissions import PermissionEngine as _PE
+
+    class _PyCfg:
+        def __init__(self, secrets=None, timeout=120):
+            self._secrets = secrets or {}
+            self._timeout = timeout
+
+        def get(self, key, default=None):
+            if key == "bash_timeout":
+                return self._timeout
+            return self._secrets.get(key, default)
+
+    class _PyCtx:
+        def __init__(self, root, owner, *, secrets=None, timeout=120, cancelled=None):
+            self.project_root = root
+            self.tool_owner = owner
+            self.config = _PyCfg(secrets, timeout)
+            self.cancelled = cancelled
+
+    root = Path(tempfile.mkdtemp())
+    try:
+        ctx = _PyCtx(root, "codeact-main")
+        # (a) persistence — a variable set in one call is visible in the next
+        _execute("python", {"code": "x = 41"}, ctx)
+        check("python persists state across calls", _execute("python", {"code": "x + 1"}, ctx) == "42")
+        # (b) stdout capture
+        check("python captures stdout", "hi" in _execute("python", {"code": "print('hi')"}, ctx))
+        # (c) trailing-expression repr (REPL-style)
+        check("python shows the trailing expression repr", _execute("python", {"code": "2 + 2"}, ctx) == "4")
+        # (d) exception isolation — a raising call returns a traceback AND the kernel survives
+        boom = _execute("python", {"code": "1 / 0"}, ctx)
+        check("python returns a clean traceback on error",
+              "ZeroDivisionError" in boom and "Traceback" in boom and "tools.py" not in boom)
+        check("python kernel stays alive after an exception",
+              _execute("python", {"code": "x + 2"}, ctx) == "43")
+        # (e) reset clears state
+        _execute("python", {"code": "", "reset": True}, ctx)
+        gone = _execute("python", {"code": "x"}, ctx)
+        check("python reset clears the namespace", "NameError" in gone and "'x'" in gone)
+        # (f) timeout/kill — an infinite loop is killed and the run continues on a fresh kernel
+        slow = _PyCtx(root, "codeact-timeout", timeout=1.0)
+        started = time.monotonic()
+        killed = _execute("python", {"code": "while True:\n    pass"}, slow)
+        elapsed = time.monotonic() - started
+        check("python kills a non-terminating call at the timeout",
+              "did NOT finish" in killed and elapsed < 8)
+        check("python recovers after a timeout kill (fresh kernel)",
+              _execute("python", {"code": "1 + 1"}, slow) == "2")
+        # (g) output is bounded AND a planted fake secret is redacted
+        secret = "sk-PLANTED-supersecret-abcd1234"
+        red = _PyCtx(root, "codeact-redact", secrets={"api_key": secret})
+        masked = _execute("python", {"code": f"print('tok=' + {secret!r})"}, red)
+        check("python redacts a known credential in output", secret not in masked and "[REDACTED]" in masked)
+        big = _execute("python", {"code": "print('A' * 100000)"}, red)
+        check("python bounds oversized output", len(big) <= _MAX_PY_OUT + 256 and "truncated" in big)
+    finally:
+        _shutdown_kernels()
+
+    # (h) the tool is ABSENT from the advertised schema when code_action is off, PRESENT when on
+    from dgc.agent import Agent as _PyAgent
+    from dgc.config import Config as _PyConfig
+
+    class _PyAgUI:
+        def __getattr__(self, _n):
+            return lambda *a, **k: None
+
+    agent = _PyAgent(_PyConfig(), _PyAgUI())
+    agent.config.data["mode"] = "default"          # in-memory only — never persisted to ~/.dgc
+    agent.config.data["tool_profile"] = "adaptive"
+
+    def _advertised():
+        return {t["function"]["name"] for t in agent._tool_schemas()}
+
+    agent.config.data["code_action"] = False
+    check("python tool is hidden when code_action is off", "python" not in _advertised())
+    agent.config.data["code_action"] = True
+    check("python tool is advertised when code_action is on", "python" in _advertised())
+    agent.config.data["mode"] = "plan"
+    check("python tool is never advertised in plan mode", "python" not in _advertised())
+
+    # (i) the tool is denied/blocked in plan mode and gated exactly like bash everywhere else
+    for _mode in ("default", "acceptEdits", "plan", "auto"):
+        _eng = _PE(_mode, {"allow": [], "ask": [], "deny": []})
+        _py = _eng.decide("python", {"code": "open('x')"})[0]
+        _bash = _eng.decide("bash", {"command": "cat x"})[0]
+        check(f"python is gated exactly like bash in {_mode} mode", _py == _bash)
+    check("python is denied in plan mode",
+          _PE("plan", {"allow": [], "ask": [], "deny": []}).decide("python", {"code": "1"})[0] == "deny")
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -14058,6 +14153,7 @@ def main():
         test_overthink_watchdog()
         test_multi_edit()
         test_subscription_engines()
+        test_python_code_action()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

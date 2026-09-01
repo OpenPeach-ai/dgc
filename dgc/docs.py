@@ -437,6 +437,40 @@ that CLI directly.
   (Claude, Codex, Copilot); engines without an effort flag steer it via `/model`.
 """.strip()),
 
+    ("Python code-action (power mode)", "a persistent Python interpreter for token-efficient work", """
+# Python code-action (power mode)
+
+An **optional** power tool, **off by default**. Turn it on with `code_action: true` in
+`~/.dgc/config.json` (or a project `.dgc/`). When on, DGC advertises a **`python`** tool.
+
+## What it is
+
+`python` runs code in a **persistent interpreter tied to your session**. Variables, imports, and
+function definitions **persist across tool calls** — the model can load data into a variable **once**
+and then run computations over it across many turns.
+
+## Why it saves tokens
+
+The usual loop re-reads data into the context on every step. With a persistent interpreter the model
+loads a file/dataset into a variable one time, then each later call is just a small snippet of code
+that operates on the already-loaded state. The bulky data never re-enters the prompt — only the code
+and its (bounded) output do. This is the "code action" / CodeAct pattern.
+
+## Behavior
+
+- The last statement, if it is a bare expression, has its `repr()` shown (REPL-style).
+- `stdout`/`stderr` printed during a call are captured and returned, redacted and length-bounded like
+  `bash`.
+- An exception returns a clean traceback and the interpreter **stays alive** for the next call.
+- Pass `reset: true` to restart with a fresh, empty namespace.
+- State also resets when the session ends (or on `/new`).
+
+## Safety
+
+It executes arbitrary code on your machine — identical risk to `bash` — so it is gated by the **same
+permission path**: it asks in `default`/`acceptEdits` mode and is **denied in plan mode**. Because it
+is off by default, ordinary users never see it until they explicitly opt in.
+""".strip()),
     ("Configuration", "config.json, models, context, providers", """
 # Configuration
 
@@ -491,6 +525,10 @@ Useful keys:
 - `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
   skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
   `full` to expose the whole execution catalog on every model request.
+- `code_action` — **off by default.** When `true`, DGC advertises a `python` power tool that runs
+  code in a **persistent per-session interpreter** (variables/imports survive across calls). See the
+  **Python code-action** guide. It executes arbitrary code, so it is gated by the same approval path
+  as `bash` (asked in default/acceptEdits, denied in plan) and is never shown until you opt in.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never
   repainting your terminal).
 - `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion

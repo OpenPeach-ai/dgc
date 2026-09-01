@@ -32,7 +32,7 @@ MODE_DESCRIPTIONS = {
 DISPLAY = {
     "read_file": "Read", "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel",
-    "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill",
+    "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "todo": "Todo", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
@@ -43,7 +43,7 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 
 # which argument a rule's pattern is matched against
 RULE_ARG = {
-    "bash": "command", "read_file": "path", "write_file": "path",
+    "bash": "command", "python": "code", "read_file": "path", "write_file": "path",
     "edit_file": "path", "multi_edit": "path", "apply_patch": "path",
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",

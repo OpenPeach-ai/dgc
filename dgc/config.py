@@ -81,6 +81,14 @@ DEFAULTS: dict = {
                                                 #   the fix as the clock runs down and preserves the last
                                                 #   test-passing files if it runs out of time (no 0-credit).
     "tool_profile": "adaptive",                 # adaptive intent-aware catalog | full catalog every round
+    "code_action": False,                       # optional "code action" power tool: advertise a `python`
+                                                #   tool that runs code in a PERSISTENT per-session
+                                                #   interpreter (variables/imports persist across calls, so
+                                                #   the model loads data once and computes over it across
+                                                #   turns instead of re-reading it every call). Off by
+                                                #   default: it executes arbitrary code and is gated by the
+                                                #   same approval path as `bash` (asks in default/acceptEdits,
+                                                #   denied in plan).
     "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
                                                 #   only sent to the ollama provider; "" = don't send)
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;

@@ -75,6 +75,11 @@ MAX_FETCH_CHARS = 8000
 MAX_FETCH_BYTES = 1_000_000
 MAX_FETCH_REDIRECTS = 5
 
+# Persistent Python "code action" kernel (optional, config.code_action). Mirrors bash's bounding.
+MAX_PYTHON_CODE_CHARS = 65_536         # per-call source ceiling (matches MAX_BASH_COMMAND_CHARS)
+MAX_PYTHON_OUT = MAX_BASH_OUT          # model-facing output ceiling before a head/tail preview
+MAX_PYTHON_FRAME_BYTES = 8_000_000     # hard ceiling on one IPC frame from the worker
+
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next",
              "dist", "build", ".pytest_cache", ".mypy_cache", "target"}
 
@@ -138,6 +143,17 @@ TOOL_SCHEMAS = [
         ["id"]),
     _fn("bash_kill", "Terminate a background bash task.",
         {"id": {"type": "string"}}, ["id"]),
+    _fn("python", "Run Python in a PERSISTENT interpreter tied to this session. Variables, imports, and "
+        "function definitions PERSIST across calls, so you can load data into a variable ONCE and then run "
+        "computations over it across many turns instead of re-reading the data into context each time "
+        "(token-efficient 'code action'). Returns captured stdout/stderr; if the last statement is a bare "
+        "expression its repr is also shown (REPL-style). An exception returns a traceback and the interpreter "
+        "STAYS ALIVE for the next call. State resets only when you pass reset:true (fresh namespace) or the "
+        "session ends. This runs real code on the user's machine — same trust as bash.",
+        {"code": {"type": "string", "description": "Python source to execute in the persistent namespace"},
+         "reset": {"type": "boolean", "default": False,
+                   "description": "Restart the interpreter with a fresh empty namespace before running code"}},
+        ["code"]),
     _fn("glob", "Find files by glob pattern, e.g. 'src/**/*.py'. Sorted by modification time.",
         {"pattern": {"type": "string"},
          "path": {"type": "string", "description": "Directory to search (default: project root)"}}, ["pattern"]),
@@ -1667,6 +1683,329 @@ def _shutdown_background() -> None:
 atexit.register(_shutdown_background)
 
 
+# ------------------------------------------------------ python code-action ---
+# An OPTIONAL (config.code_action) persistent Python interpreter, one long-lived worker subprocess per
+# session/owner. Code is exec'd into a namespace dict that PERSISTS across calls so the model can load
+# data once and compute over it across turns. The worker runs in its own process group (start_new_session)
+# so the tool timeout / ctx.cancel can kill the whole tree exactly like bash; a user-code exception is
+# isolated (clean traceback, kernel stays alive). Output is redacted + bounded with the bash helpers.
+_PY_KERNELS: dict[str, "_PythonKernel"] = {}
+_PY_KERNELS_LOCK = _threading.Lock()
+
+
+class _PythonKernelError(Exception):
+    """The kernel process failed at the transport level (not a user-code exception)."""
+
+
+class _PythonKernelTimeout(Exception):
+    """User code did not finish within the tool timeout; the process group was killed."""
+
+
+class _PythonKernelCancelled(Exception):
+    """The run was cancelled; the process group was killed."""
+
+
+def _read_python_frame(stream) -> dict | None:
+    """Read one length-prefixed JSON frame (`<n>\\n` header then n bytes). None on EOF."""
+    header = bytearray()
+    while not header.endswith(b"\n"):
+        ch = stream.read(1)
+        if not ch:
+            return None
+        header += ch
+        if len(header) > 24:                       # a decimal length header is never this long
+            raise _PythonKernelError("malformed kernel frame header")
+    try:
+        n = int(header.strip())
+    except ValueError as exc:
+        raise _PythonKernelError(f"invalid kernel frame length: {exc}")
+    if n < 0 or n > MAX_PYTHON_FRAME_BYTES:
+        raise _PythonKernelError("kernel frame exceeds size ceiling")
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = stream.read(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    try:
+        payload = json.loads(bytes(buf).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _PythonKernelError(f"undecodable kernel frame: {exc}")
+    if not isinstance(payload, dict):
+        raise _PythonKernelError("kernel frame is not an object")
+    return payload
+
+
+class _PythonKernel:
+    """A single persistent interpreter subprocess whose namespace survives across tool calls."""
+
+    def __init__(self, owner: str, project_root: Path):
+        self.owner = owner
+        self.project_root = project_root
+        self.proc: subprocess.Popen | None = None
+        self._lock = _threading.Lock()             # serialize calls sharing one namespace/pipe
+
+    def start(self) -> None:
+        # `-m dgc.tools --python-kernel-worker` must resolve the package regardless of the user's cwd,
+        # so put the package parent on PYTHONPATH while running IN the project root (user file ops are
+        # then project-relative, like bash).
+        repo_parent = str(Path(__file__).resolve().parent.parent)
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = repo_parent + (os.pathsep + existing if existing else "")
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "dgc.tools", "--python-kernel-worker"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            cwd=str(self.project_root), start_new_session=True, env=env)
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def kill(self) -> None:
+        if self.proc is not None:
+            _terminate_background(self.proc, sweep_exited_group=True)
+
+    def run(self, code: str, timeout: float, ctx) -> dict:
+        with self._lock:
+            if not self.alive():
+                raise _PythonKernelError("kernel process is not running")
+            assert self.proc is not None and self.proc.stdin is not None and self.proc.stdout is not None
+            payload = json.dumps({"code": code}).encode("utf-8")
+            try:
+                self.proc.stdin.write(f"{len(payload)}\n".encode("ascii"))
+                self.proc.stdin.write(payload)
+                self.proc.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                raise _PythonKernelError(f"could not send code to kernel: {exc}")
+            holder: dict = {}
+
+            def reader() -> None:
+                try:
+                    holder["frame"] = _read_python_frame(self.proc.stdout)
+                except BaseException as exc:       # transport failure; surfaced below
+                    holder["exc"] = exc
+
+            thread = _threading.Thread(target=reader, daemon=True,
+                                       name=f"dgc-python-{self.owner[:8]}")
+            thread.start()
+            deadline = time.monotonic() + timeout
+            cancelled = getattr(ctx, "cancelled", None)
+            while thread.is_alive():
+                if cancelled is not None and cancelled.is_set():
+                    self.kill()
+                    thread.join(timeout=1)
+                    raise _PythonKernelCancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self.kill()
+                    thread.join(timeout=1)
+                    raise _PythonKernelTimeout()
+                thread.join(timeout=min(0.05, remaining))
+            if "exc" in holder:
+                exc = holder["exc"]
+                raise _PythonKernelError(str(exc) or type(exc).__name__)
+            frame = holder.get("frame")
+            if frame is None:
+                raise _PythonKernelError("kernel closed the connection")
+            return frame
+
+
+def _get_python_kernel(owner: str, ctx) -> _PythonKernel:
+    with _PY_KERNELS_LOCK:
+        kernel = _PY_KERNELS.get(owner)
+        if kernel is not None and kernel.alive():
+            return kernel
+        if kernel is not None:                     # dead handle — reap and replace
+            kernel.kill()
+        kernel = _PythonKernel(owner, ctx.project_root)
+        kernel.start()
+        _PY_KERNELS[owner] = kernel
+        return kernel
+
+
+def _drop_python_kernel(owner: str) -> None:
+    with _PY_KERNELS_LOCK:
+        kernel = _PY_KERNELS.pop(owner, None)
+    if kernel is not None:
+        kernel.kill()
+
+
+def shutdown_python_kernels(owner: str | None = None) -> None:
+    """Kill the owner's persistent interpreter (or all of them). Hooked into session reset + atexit."""
+    with _PY_KERNELS_LOCK:
+        if owner is None:
+            items = list(_PY_KERNELS.values())
+            _PY_KERNELS.clear()
+        else:
+            kernel = _PY_KERNELS.pop(owner, None)
+            items = [kernel] if kernel is not None else []
+    for kernel in items:
+        try:
+            kernel.kill()
+        except Exception:
+            pass
+
+
+atexit.register(shutdown_python_kernels)
+
+
+def _bound_python_output(text: str, limit: int) -> str:
+    """Head/tail bound the redacted output without splitting a credential marker (no paging in v1)."""
+    if len(text) <= limit:
+        return text
+    note = f"\n… [output truncated to {limit} chars for this response] …\n"
+    budget = max(0, limit - len(note))
+    head = budget * 2 // 3
+    tail = budget - head
+    return (_prefix_without_split_marker(text, head) + note
+            + (_suffix_without_split_marker(text, tail) if tail else ""))
+
+
+def _format_python_result(result: dict, ctx) -> str:
+    """Redact + bound the worker's captured stdout, trailing-expression repr, and any traceback."""
+    parts: list[str] = []
+    stdout = result.get("stdout")
+    if isinstance(stdout, str) and stdout:
+        parts.append(stdout.rstrip("\n"))
+    error = result.get("error")
+    value_repr = result.get("value_repr")
+    if isinstance(error, str) and error:
+        parts.append(error.rstrip("\n"))
+    elif isinstance(value_repr, str):
+        parts.append(value_repr)
+    combined = "\n".join(part for part in parts if part != "")
+    # Reuse bash's streaming redactor + bounded head/tail so a credential can never be split into
+    # exposed fragments at the retention boundary.
+    capture = _BoundedCommandCapture(ctx)
+    capture.feed(combined)
+    capture.finish()
+    out, _source_chars, _omitted = capture.result()
+    out = _bound_python_output(out, MAX_PYTHON_OUT)
+    return out.strip() or "(no output)"
+
+
+def python(args: dict, ctx) -> str:
+    code = str(args.get("code", ""))
+    reset = bool(args.get("reset"))
+    if len(code) > MAX_PYTHON_CODE_CHARS:
+        return f"error: python code exceeds {MAX_PYTHON_CODE_CHARS} characters"
+    owner = _tool_owner(ctx)
+    if reset:
+        _drop_python_kernel(owner)                 # fresh namespace on the next start
+        if not code.strip():
+            return "python interpreter reset; namespace cleared."
+    if not code.strip():
+        return "error: python code is empty"
+    raw_timeout = ctx.config.get("bash_timeout", 120)
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError, OverflowError):
+        timeout = 120.0
+    if not math.isfinite(timeout):
+        timeout = 120.0
+    timeout = max(0.1, min(MAX_BASH_TIMEOUT_S, timeout))
+    try:
+        kernel = _get_python_kernel(owner, ctx)
+    except OSError as exc:
+        return f"error: could not start python interpreter: {exc}"
+    try:
+        result = kernel.run(code, timeout, ctx)
+    except _PythonKernelTimeout:
+        _drop_python_kernel(owner)                 # a stuck kernel is dead; the next call starts fresh
+        return (f"error: the code did NOT finish within {timeout:g}s and the interpreter was killed — it is "
+                "stuck (an INFINITE LOOP or a call that never returns is the usual cause). The persistent "
+                "namespace was lost; fix the non-terminating path, then run again in a fresh interpreter.")
+    except _PythonKernelCancelled:
+        _drop_python_kernel(owner)
+        return "error: the python run was cancelled and the interpreter was killed"
+    except _PythonKernelError as exc:
+        _drop_python_kernel(owner)                 # transport is unusable; drop so the next call restarts
+        return f"error: python interpreter failed: {_safe_output(str(exc), ctx)}"
+    return _format_python_result(result, ctx)
+
+
+def _python_kernel_worker_main() -> int:
+    """Private persistent-interpreter worker: exec framed code into ONE namespace that survives calls."""
+    import ast
+    import contextlib
+    import io
+    import traceback as _tb
+
+    namespace: dict = {"__name__": "__dgc_python__", "__builtins__": __builtins__}
+    stdin = sys.stdin.buffer
+    stdout = sys.stdout.buffer
+
+    def write_frame(obj: dict) -> None:
+        data = json.dumps(obj).encode("utf-8")
+        stdout.write(f"{len(data)}\n".encode("ascii"))
+        stdout.write(data)
+        stdout.flush()
+
+    def read_frame() -> dict | None:
+        header = bytearray()
+        while not header.endswith(b"\n"):
+            ch = stdin.read(1)
+            if not ch:
+                return None
+            header += ch
+            if len(header) > 24:
+                return None
+        n = int(header.strip())
+        if n < 0 or n > MAX_PYTHON_FRAME_BYTES:
+            return None
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = stdin.read(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return json.loads(bytes(buf).decode("utf-8"))
+
+    def clean_traceback() -> str:
+        # Hide the worker's own frame(s): keep the traceback from the first user-code frame onward.
+        exc_type, exc, tb = sys.exc_info()
+        user_tb = tb
+        while user_tb is not None and user_tb.tb_frame.f_code.co_filename != "<dgc-python>":
+            user_tb = user_tb.tb_next
+        if user_tb is None:                        # e.g. SyntaxError raised at compile time: no user frame
+            return "".join(_tb.format_exception_only(exc_type, exc)).rstrip("\n")
+        return "".join(_tb.format_exception(exc_type, exc, user_tb)).rstrip("\n")
+
+    while True:
+        try:
+            request = read_frame()
+        except Exception:
+            break
+        if request is None:
+            break
+        code = request.get("code", "") if isinstance(request, dict) else ""
+        buffer = io.StringIO()
+        value_repr = None
+        error = None
+        try:
+            parsed = ast.parse(code, "<dgc-python>", "exec")
+            trailing = None
+            if parsed.body and isinstance(parsed.body[-1], ast.Expr):
+                trailing = parsed.body.pop()
+            module = ast.Module(body=parsed.body, type_ignores=[])
+            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                exec(compile(module, "<dgc-python>", "exec"), namespace)
+                if trailing is not None:
+                    value = eval(compile(ast.Expression(trailing.value), "<dgc-python>", "eval"),
+                                 namespace)
+                    if value is not None:
+                        value_repr = repr(value)
+        except SystemExit as exc:                  # a user exit() must NOT kill the persistent kernel
+            error = f"SystemExit: {exc.code!r}"
+        except BaseException:                       # isolate any user-code fault; keep the kernel alive
+            error = clean_traceback()
+        try:
+            write_frame({"stdout": buffer.getvalue(), "value_repr": value_repr, "error": error})
+        except Exception:
+            break
+    return 0
+
+
 def _ripgrep_path() -> str | None:
     """Resolve the optional fast search engine without consulting a shell."""
     candidate = shutil.which("rg")
@@ -2616,7 +2955,7 @@ def save_memory(args: dict, ctx) -> str:
 EXECUTORS = {
     "read_file": read_file, "write_file": write_file, "edit_file": edit_file, "multi_edit": multi_edit,
     "apply_patch": apply_patch_tool,
-    "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill,
+    "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
     "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
@@ -2650,4 +2989,6 @@ def execute(name: str, args: dict, ctx) -> str:
 if __name__ == "__main__":  # private process-isolated compatibility worker; not a public CLI
     if sys.argv[1:] == ["--grep-fallback-worker"]:
         raise SystemExit(_grep_fallback_worker_main())
+    if sys.argv[1:] == ["--python-kernel-worker"]:
+        raise SystemExit(_python_kernel_worker_main())
     raise SystemExit(2)

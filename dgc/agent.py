@@ -380,7 +380,7 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
 
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
-from .tools import TOOL_SCHEMAS, bash_handle_tools, execute
+from .tools import TOOL_SCHEMAS, bash_handle_tools, execute, shutdown_python_kernels
 
 THINK_LEVELS = ("off", "low", "medium", "high", "xhigh")
 THINK_INSTRUCTIONS = {
@@ -1173,6 +1173,12 @@ class Agent:
             else:  # compatibility for injected/third-party manager shims
                 mcp_schemas = self.mcp.tool_schemas()
         schemas = TOOL_SCHEMAS + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas
+        if not self.config.get("code_action", False):
+            # The persistent Python "code action" interpreter runs arbitrary code; keep it out of the
+            # advertised catalog entirely unless the user opted in. (When on, it is still gated by the
+            # same permission path as bash — asked in default/acceptEdits, denied in plan.)
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "python"]
         if self.mode == "plan":
             allowed = set(_PLAN_TOOLS)
             if self.config.get("artifact_in_plan", False):
@@ -1424,6 +1430,9 @@ class Agent:
         return target
 
     def reset(self) -> None:
+        # A persistent Python "code action" interpreter belongs to the session being torn down; its
+        # in-memory namespace must not leak into the new session, so kill it here (lazily restarted).
+        shutdown_python_kernels(getattr(self.ctx, "tool_owner", None))
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
         self._goal_elapsed_seconds = 0.0
