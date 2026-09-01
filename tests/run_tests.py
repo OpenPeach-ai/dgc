@@ -14195,6 +14195,120 @@ def test_python_code_action():
           _PE("plan", {"allow": [], "ask": [], "deny": []}).decide("python", {"code": "1"})[0] == "deny")
 
 
+def test_training_export():
+    """`dgc export-training`: real sessions → scrubbed, training-ready JSONL (read-only)."""
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from dgc import sessions as _sessions, training_export as _te
+
+    class _Cfg:
+        """Minimal config stub: a model name and one configured credential to scrub."""
+        model = "qwen3:8b"
+
+        def get(self, key, default=None):
+            if key == "api_key":
+                return "supersecretvalue123"          # a configured secret that must never leak
+            return default
+
+    saved_dir = _sessions.SESSIONS_DIR
+    with _tf.TemporaryDirectory() as _hd:
+        _sessions.SESSIONS_DIR = _P(_hd) / "sessions"   # never touch the real ~/.dgc
+        try:
+            root = _P(_hd) / "proj-evolving-fungi"
+            root.mkdir()
+            cfg = _Cfg()
+
+            # (1) a successful session with a tool call + a planted secret in a user message
+            success = _sessions.new_path(root)
+            _sessions.save(success, [
+                {"role": "system", "content": "You are DGC."},
+                {"role": "user", "content":
+                    "my key is supersecretvalue123 and a token sk-proj-ABCDEFGHIJKL1234567890 "
+                    "-- please fix the bug"},
+                {"role": "assistant", "content": "reading the file",
+                 "tool_calls": [{"id": "c1", "type": "function",
+                                 "function": {"name": "read_file",
+                                              "arguments": {"path": "a.py"}}}]},
+                {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "print(1)"},
+                {"role": "assistant", "content": "fixed it"},
+            ], root, name="fix the bug",
+                activity={"tool_calls": 3, "edits": 2, "edit_fails": 0})
+
+            # (2) a failed session — an edit was attempted but repeatedly failed
+            failed = _sessions.new_path(root)
+            _sessions.save(failed, [
+                {"role": "user", "content": "try to edit the config"},
+                {"role": "assistant", "content": "attempting"},
+            ], root, activity={"tool_calls": 1, "edits": 1, "edit_fails": 3})
+
+            # (3) a trivial session with no user turn at all
+            trivial = _sessions.new_path(root)
+            _sessions.save(trivial, [{"role": "assistant", "content": "hello"}], root,
+                           activity={"tool_calls": 0, "edits": 0, "edit_fails": 0})
+
+            files = [success, failed, trivial]
+            before = {p: p.read_text() for p in files}
+
+            # (a) default export: real trajectory messages round-trip through JSONL
+            records = list(_te.iter_training_records(files, cfg))
+            out = _P(_hd) / "dgc-training.jsonl"
+            written = _te.write_jsonl(records, out)
+            lines = [ln for ln in out.read_text().splitlines() if ln.strip()]
+            parsed = [json.loads(ln) for ln in lines]
+            by_id = {r["meta"]["session_id"]: r for r in parsed}
+            success_rec = by_id.get(success.stem)
+            check("training export: JSONL parses, one record per usable session",
+                  written == 2 and len(parsed) == 2 and trivial.stem not in by_id
+                  and success.stem in by_id and failed.stem in by_id)
+            check("training export: trajectory keeps the OpenAI-style message roles",
+                  success_rec is not None
+                  and [m["role"] for m in success_rec["messages"]]
+                  == ["system", "user", "assistant", "tool", "assistant"])
+            check("training export: assistant tool_calls survive in portable shape",
+                  success_rec is not None
+                  and success_rec["messages"][2]["tool_calls"][0]["function"]["name"] == "read_file"
+                  and success_rec["messages"][3]["tool_call_id"] == "c1")
+            check("training export: meta carries model + outcome counters",
+                  success_rec is not None and success_rec["meta"]["model"] == "qwen3:8b"
+                  and success_rec["meta"]["turns"] == 1
+                  and success_rec["meta"]["edits"] == 2
+                  and success_rec["meta"]["successful"] is True
+                  and success_rec["meta"]["project"] == "proj-evolving-fungi")
+
+            # (b) secrets are scrubbed from every exported field
+            blob = out.read_text()
+            check("training export: configured secret is redacted, never exported",
+                  "supersecretvalue123" not in blob and "sk-proj-ABCDEFGHIJKL" not in blob
+                  and "[REDACTED]" in blob)
+
+            # (c) quality filters exclude failed / trivial sessions
+            successful_only = list(_te.iter_training_records(files, cfg, successful_only=True))
+            check("training export: --successful-only drops the failed session",
+                  len(successful_only) == 1
+                  and successful_only[0]["meta"]["session_id"] == success.stem)
+            min_turns = list(_te.iter_training_records(files, cfg, min_turns=2))
+            check("training export: --min-turns drops sessions below the threshold",
+                  len(min_turns) == 0)
+
+            # (d) malformed / short sessions never raise — they skip gracefully
+            bad = root  # a directory path, not a session file
+            missing = _P(_hd) / "sessions" / "nope.json"
+            junk = _P(_hd) / "junk.json"
+            junk.write_text("{ this is not valid json ")
+            empty = _sessions.new_path(root)
+            _sessions.save(empty, [], root)
+            robust = list(_te.iter_training_records(
+                [bad, missing, junk, empty, None], cfg))
+            check("training export: malformed/empty/missing sessions skip without raising",
+                  robust == [])
+
+            # read-only: exporting never mutates a session transcript
+            check("training export: sessions are never modified by the exporter",
+                  all(p.read_text() == before[p] for p in files))
+        finally:
+            _sessions.SESSIONS_DIR = saved_dir
+
+
 def main():
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -14239,6 +14353,7 @@ def main():
         test_multi_edit()
         test_subscription_engines()
         test_python_code_action()
+        test_training_export()
 
         print("end-to-end tests (mock LLM server):")
         server = HTTPServer(("127.0.0.1", 0), MockHandler)

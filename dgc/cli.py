@@ -1397,6 +1397,76 @@ def run_doctor(config: Config) -> None:
         c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
 
 
+def run_export_training(argv: list[str]) -> int:
+    """`dgc export-training` — turn real DGC sessions into scrubbed, training-ready JSONL.
+
+    Read-only over the persisted transcripts: reshapes each session into one OpenAI-style
+    ``messages`` record (with ``tool_calls``) plus outcome ``meta``, deep-scrubs every field of
+    every record through the redaction layer, and writes one JSON object per line.
+    """
+    from . import training_export
+    parser = argparse.ArgumentParser(
+        allow_abbrev=False, prog="dgc export-training",
+        description="Export your real DGC sessions as scrubbed fine-tuning JSONL for a local model.")
+    parser.add_argument("--out", default="./dgc-training.jsonl", metavar="FILE",
+                        help="output JSONL path (default ./dgc-training.jsonl)")
+    parser.add_argument("--all", action="store_true",
+                        help="export sessions from every project (default: this project's sessions)")
+    parser.add_argument("--session", metavar="ID",
+                        help="export a single session by id (a unique prefix is accepted)")
+    parser.add_argument("--successful-only", action="store_true",
+                        help="keep only sessions that show successful work (an edit landed, no edit "
+                             "failures, or a completed goal)")
+    parser.add_argument("--min-turns", type=int, default=1, metavar="N",
+                        help="drop sessions with fewer than N user turns (default 1)")
+    args = parser.parse_args(argv)
+
+    config = Config()
+    c = Console()
+    secrets = secret_values(config)
+
+    if args.session:
+        p = sessions_mod.by_id(config.project_root, args.session)
+        if p is None:
+            found = sessions_mod.find_global(args.session)
+            p = found[0] if found else None
+        if p is None:
+            c.print(f"  [yellow]![/yellow] no session '{terminal_safe_text(args.session)}' found")
+            return 1
+        files = [p]
+        scope = f"session {p.stem}"
+    elif args.all:
+        files = [row[0] for row in sessions_mod.listing_all(redact_secrets=secrets)]
+        scope = "all projects"
+    else:
+        files = [row[0] for row in sessions_mod.listing(
+            config.project_root, redact_secrets=secrets)]
+        scope = f"project {config.project_root.name}"
+
+    total = len(files)
+    records = list(training_export.iter_training_records(
+        files, config, successful_only=args.successful_only,
+        min_turns=max(1, int(args.min_turns or 1))))
+    written = training_export.write_jsonl(records, args.out)
+    skipped = total - written
+
+    out_path = Path(args.out).expanduser()
+    c.print("[bold]DGC export-training[/bold] — your sessions → scrubbed fine-tuning JSONL\n")
+    c.print(f"  scope         {terminal_safe_text(scope)}", markup=False, highlight=False)
+    c.print(f"  exported      {written} session(s)", markup=False, highlight=False)
+    c.print(f"  skipped       {skipped} (empty / below --min-turns"
+            + ("/ not successful" if args.successful_only else "") + ")",
+            markup=False, highlight=False)
+    c.print(f"  output        {terminal_safe_text(out_path)}", markup=False, highlight=False)
+    c.print("  secrets       [green]scrubbed[/green] — every field deep-redacted before export")
+    if written == 0:
+        c.print("\n  [yellow]nothing exported[/yellow] — no matching sessions in this scope.\n")
+    else:
+        c.print(f"\n  [bold green]done[/bold green] — wrote {written} record(s) "
+                f"to {terminal_safe_text(out_path)}\n", markup=True, highlight=False)
+    return 0
+
+
 def run_setup(config: Config) -> None:
     """`dgc setup` — interactive first-run wizard: pick a provider, key, model, context."""
     from .llm import LLMClient
@@ -1519,6 +1589,7 @@ def run_help() -> None:
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
     c.print("  dgc update              update DGC to the latest version")
+    c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
@@ -1527,9 +1598,12 @@ def run_help() -> None:
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in (
-            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug"):
+            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
+            "export-training"):
         if raw_argv[0] == "help":
             run_help(); return
+        if raw_argv[0] == "export-training":
+            return run_export_training(raw_argv[1:])
         if raw_argv[0] == "bug":
             print("\n  Report a bug or request a feature:\n"
                   "    https://github.com/OpenPeach-ai/dgc/issues\n")

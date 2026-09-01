@@ -289,6 +289,8 @@ Every conversation is a session, saved as you go.
 - **/name** — rename the current session.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
+- **dgc export-training** — export your sessions as scrubbed fine-tuning JSONL
+  (see *Training export*); read-only, never modifies a session.
 - **/handoff** — create a bounded, redacted continuation document from one stable
   session generation. DGC saves it as a new private `HANDOFF-*.md` through the
   workspace lease; an overlapping turn is rejected instead of mixed into the file.
@@ -299,6 +301,42 @@ Every conversation is a session, saved as you go.
   the edit is refused if that durable capture fails. Arbitrary shell writes are not
   guaranteed rewindable, and approved external-path snapshots last only for the
   current process so resume never gains ambient authority outside the project.
+""".strip()),
+
+    ("Training export", "your real sessions → scrubbed fine-tuning JSONL", """
+# Training export
+
+Turn the sessions DGC already keeps into a training set for a local model. Run
+it non-interactively — there is nothing to configure:
+
+```
+dgc export-training
+```
+
+Each session becomes one line of JSONL: the conversation as a standard
+OpenAI-style `messages` array — `system` / `user` / `assistant`-with-`tool_calls`
+/ `tool` results — plus a small `meta` object (model, project, turn and tool
+counts, edits, and an outcome flag). That is the shape common SFT and
+tool-calling fine-tuning tooling expects, so it drops straight into a training
+run for the model you run locally.
+
+## Flags
+
+- `--out <file>` — where to write (default `./dgc-training.jsonl`).
+- `--all` — export every project's sessions (default: just this project's).
+- `--session <id>` — export a single session (a unique id prefix works).
+- `--successful-only` — keep only sessions that show real successful work: an
+  edit landed with no failed edits, or a `/goal` was completed.
+- `--min-turns N` — drop trivial sessions with fewer than N user turns.
+
+## Secrets are stripped
+
+Every field of every record is deep-scrubbed through DGC's redaction layer
+before it is written: configured credentials (API keys, MCP/language-server
+secrets) and high-confidence credential shapes (`sk-…` tokens, JWTs, auth
+headers, private keys) are replaced with `[REDACTED]`. The export is read-only —
+it never modifies a session. Reasoning traces and provider continuation blobs
+are dropped so each record is a clean, portable conversation.
 """.strip()),
 
     ("Standing goals", "persistent objectives with an explicit lifecycle", """
