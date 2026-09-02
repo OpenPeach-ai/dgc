@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: python -m pip check
+      - run: python -m compileall -q dgc tests/run_tests.py
+      - run: python -m py_compile bench/*.py scripts/generate-sbom.py
+      - run: python tests/run_tests.py
+
+  windows-smoke:
+    name: Windows import and CLI smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: python -m compileall -q dgc
+      - run: python -m dgc --version
+
+  extension:
+    name: VS Code / Cursor extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm run check-types
+      - run: npm test
+      - run: npm audit --audit-level=moderate
+      - run: npm run package
+      - run: npm run test:host
+      - run: ./node_modules/.bin/vsce package --no-dependencies -o dgc-ci.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dgc-extension-ci
+          path: editors/vscode/dgc-ci.vsix
+
+  package:
+    name: Python package and release archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
+      - run: sha256sum -c dist/release/dgc.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dgc-release-candidate
+          path: |
+            dist/release/dgc.tar.gz
+            dist/release/dgc.tar.gz.sha256
+            dist/release/version.json
+            dist/release/provenance.json
+            dist/release/dgc.cdx.json

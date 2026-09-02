@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skills · DGC Docs</title>
+<meta name="description" content="reusable instruction packages">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body data-page="skills">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
+  <a class="brand" href="../index.html" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
+  <div class="topspacer"></div>
+  <div class="search" role="search">
+    <span class="ico">/</span>
+    <input id="docsearch" type="search" placeholder="Search docs…"
+           aria-label="Search documentation" autocomplete="off" spellcheck="false">
+    <span class="kbd">/</span>
+  </div>
+  <div class="toplinks">
+    <a href="../index.html">Home</a>
+  </div>
+</header>
+
+<div class="scrim" aria-hidden="true"></div>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
+<div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" aria-current="page" class="active" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div>
+</nav>
+  <main class="content" id="content">
+    <article class="doc">
+      <div class="crumb">Features<span class="sep">/</span>Skills</div>
+      <p class="lead">reusable instruction packages</p>
+<h1 id="skills">Skills<a class="anchor" href="#skills" aria-label="Link to this section">#</a></h1>
+<p>A <strong>skill</strong> is a folder with a <code>SKILL.md</code> that teaches the agent how to do a particular kind of work — a house style, a workflow, a checklist. DGC ships a few built in and you can add your own under <code>~/.dgc/skills/</code> or a project's <code>.dgc/skills/</code>.</p>
+<ul>
+<li><strong>/skills</strong> — browse installed skills (built-in + yours), add one by URL,</li>
+</ul>
+<p>remove a personal copy, or reload the catalog.</p>
+<ul>
+<li>Adaptive mode injects only an explicitly named or narrowly matching skill for</li>
+</ul>
+<p>the current turn. <code>tool_profile: full</code> exposes the whole loaded catalog.</p>
+<ul>
+<li>Project skills override personal skills, which override built-in skills. Typed</li>
+</ul>
+<p>headless/editor listings report that source layer without exposing host paths.</p>
+<ul>
+<li><strong>dgc-design</strong> ships by default but stays dormant for normal coding — artifact</li>
+</ul>
+<p>frontend work activates it automatically.</p>
+      <nav class="pager" aria-label="Pagination">
+<a class="prev" href="lifecycle-hooks.html"><div class="k">← Previous</div><div class="t">Lifecycle hooks</div></a>
+<a class="next" href="multiple-agents.html"><div class="k">Next →</div><div class="t">Multiple agents</div></a>
+</nav>
+    </article>
+  </main>
+  <aside class="toc" aria-label="On this page">
+<div class="h">On this page</div>
+<a href="#content" data-id="content" class="lvl2">Top</a>
+</aside>
+</div>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

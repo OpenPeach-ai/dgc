@@ -2,810 +2,1009 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script>if(location.protocol.indexOf('http')==0&&location.hostname.indexOf('.')>0&&!/(^|\.)vibedgc\.com$/i.test(location.hostname)&&!/\.pages\.dev$/i.test(location.hostname)){location.replace('https://vibedgc.com'+location.pathname+location.search+location.hash)}</script>
-
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vibe DGC — a coding agent for the models you run</title>
-<meta name="description" content="Vibe DGC is a coding agent that lives in your terminal — a full-screen TUI pointed at your own local model. Ollama, llama.cpp, vLLM, or any OpenAI-compatible endpoint. Reads, edits, runs and verifies, with permission modes you control. Includes a VS Code & Cursor extension.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230A0A0B'/%3E%3Cpath fill='%237C5CFF' d='M20 14 12 18 8 50l8-4zm18-4-8 4-4 36 8-4zm18 4-8 4-4 28 8-4z'/%3E%3C/svg%3E">
+<meta name="description" content="DGC is a local-first coding agent for your terminal and VS Code. It runs a real agentic loop against a model you choose — a local endpoint, any OpenAI-compatible host, or a coding subscription you already pay for. Your models, your machine, your data.">
+<meta name="theme-color" content="#0A0A0B">
+<link rel="canonical" href="https://vibedgc.com/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vibedgc.com/">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Vibe DGC — a coding agent for the models you run">
+<meta property="og:description" content="DGC is a local-first coding agent for your terminal and VS Code. It runs a real agentic loop against a model you choose — a local endpoint, any OpenAI-compatible host, or a coding subscription you already pay for. Your models, your machine, your data.">
+<meta property="og:image" content="https://vibedgc.com/assets/hero-poster.jpg">
+<meta property="og:image:width" content="1920">
+<meta property="og:image:height" content="1080">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Vibe DGC — a coding agent for the models you run">
+<meta name="twitter:description" content="DGC is a local-first coding agent for your terminal and VS Code. It runs a real agentic loop against a model you choose — a local endpoint, any OpenAI-compatible host, or a coding subscription you already pay for. Your models, your machine, your data.">
+<meta name="twitter:image" content="https://vibedgc.com/assets/hero-poster.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0B0B0C; --surface:#141416; --surface-2:#1A1A1D; --code:#0E0E10; --term:#0A0A0B;
-    --border:#232326; --border-strong:#303034;
-    --text:#F5F5F5; --text-strong:#FFFFFF; --muted:#9A9A9E; --faint:#6A6A6E;
-    --accent:#7C5CFF; --accent-hover:#6A4BF0; --lav:#A78BFA; --accent-soft:rgba(124,92,255,.12);
-    --logo-rest:#5E5E66; --logo-glint:#EDEDF2;
-    --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --bg:#0A0A0B; --surface:#121214; --surface-2:#171719; --surface-3:#0D0D0F; --term:#08080A;
+    --border:#212124; --border-strong:#2E2E33;
+    --text:#ECECEE; --text-strong:#FFFFFF; --muted:#96969B; --faint:#7C7C83;  /* was #65656B = 3.23-3.46:1; this clears 4.5:1 on every ground */
+    --accent:#7C5CFF; --accent-2:#6b4cf0; --lav:#A78BFA; --accent-soft:rgba(124,92,255,.1);
+    --accent-faint:rgba(124,92,255,.055); --accent-mid:rgba(124,92,255,.22); --line-soft:rgba(255,255,255,.045);
+    --good:var(--lav); --add:var(--accent); --del:#6A6A6E; --hero-text:#CACAD0;
+    --chrome:#0F0F12; --chrome-dot:#26262B; --card:#0C0C0F; --shine:#F3EEFF; --shine-a:#8B6FFF; --shine-b:#6A4BF0;
+    --sans:'Geist',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     --mono:'JetBrains Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    --maxw:1380px;
+    /* ONE vertical scale — every gap on the page is one of these four */
+    --band-pad:96px;   /* section top/bottom, flat, never fluid */
+    --s-block:40px;    /* section head -> content, block -> block */
+    --s-sub:20px;      /* block -> its own sub-element */
+    --gutter:24px;     /* grid gap between sibling cards */
+    /* ONE radius scale. 14 ad-hoc values collapsed to 4; pills keep 99px, FIG panels 2px. */
+    --r-xs:4px; --r-sm:8px; --r-md:11px; --r-lg:14px;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--text);overflow-x:hidden;
-    font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-  a{color:var(--accent);text-decoration:none} a:hover{color:var(--lav)}
-  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
-  h1,h2,h3{margin:0;letter-spacing:-.02em;color:var(--text-strong)}
-  img{max-width:100%}
-  .wrap{max-width:1320px;margin:0 auto;padding:0 28px}   /* fuller use of the viewport */
-  .measure{max-width:660px}
-  .eyebrow{font:500 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  b,strong{font-weight:500}
+  /* display type: one weight (400), one tracking value (-.02em); h3 is UI, not display */
+  h1,h2{margin:0;color:var(--text-strong);letter-spacing:-.02em;line-height:1.08;font-weight:400}
+  h3{margin:0;color:var(--text-strong);letter-spacing:-.01em;line-height:1.3;font-weight:500}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 26px}
+  .eyebrow{font:500 11.5px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  .hero .eyebrow{display:inline-block;color:var(--text);background:rgba(9,9,11,.58);border:1px solid var(--border-strong);border-radius:99px;padding:7px 13px}
+  code{font-family:var(--mono)}
+  .btn{display:inline-flex;align-items:center;gap:9px;font:500 13px/1 var(--mono);letter-spacing:.02em;padding:12px 17px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:transparent;color:var(--text-strong);text-transform:uppercase;transition:border-color .18s ease,background-color .18s ease,color .18s ease}
+  .btn:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .btn.solid{background:var(--accent);border-color:var(--accent);color:var(--text-strong)} .btn.solid:hover{background:var(--accent-2)}
 
-  /* ---- wordmark (nav + footer): the letters DGC, monospace ---- */
-  .mark{font:800 17px/1 var(--mono);letter-spacing:.06em;color:var(--text-strong);display:inline-flex;align-items:center}
-  .mark svg.mk{width:1.7em;height:1.7em;margin-right:.42em;color:var(--accent);flex:none}
-  .mark .cur{width:9px;height:16px;margin-left:3px;background:var(--accent);display:inline-block;animation:blink 1.1s step-end infinite}
-  @keyframes blink{50%{opacity:0}}
-  /* animated mark: the three slashes light up one-by-one, hold, repeat (like the CLI's ╱╱╱ thinking) */
-  svg.mk path,svg.tmk path{animation:mkpulse 2.1s ease-in-out infinite}
-  svg.mk path:nth-child(2),svg.tmk path:nth-child(2){animation-delay:.22s}
-  svg.mk path:nth-child(3),svg.tmk path:nth-child(3){animation-delay:.44s}
+
+  nav{position:fixed;top:0;left:0;right:0;z-index:50;transition:background .25s ease}
+  /* scrolled: a soft scrim, not a bar — the pills carry their own ground */
+  nav.solid{background:linear-gradient(to bottom,rgba(10,10,11,.94) 0%,rgba(10,10,11,.86) 62%,rgba(10,10,11,0) 100%)}
+  section[id]{scroll-margin-top:84px}
+  nav .wrap{display:flex;align-items:center;gap:10px;height:68px}
+  .brand{display:inline-flex;align-items:center;font:500 17px/1 var(--mono);letter-spacing:.06em;color:var(--text-strong)}
+  .brand svg{width:1.7em;height:1.7em;margin-right:.42em;color:var(--accent);flex:none}
+  /* the three slashes light up one-by-one, hold, repeat — exactly like the CLI's ╱╱╱ mark */
+  .brand svg path{animation:mkpulse 2.1s ease-in-out infinite}
+  .brand svg path:nth-child(2){animation-delay:.22s}
+  .brand svg path:nth-child(3){animation-delay:.44s}
   @keyframes mkpulse{0%{opacity:.28}22%{opacity:1}80%{opacity:1}100%{opacity:.28}}
-  @media (prefers-reduced-motion:reduce){svg.mk path,svg.tmk path{animation:none;opacity:1}}
+  .brand .cur{width:9px;height:16px;background:var(--accent);display:inline-block;margin-left:3px;animation:blink 1.1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  /* the five section links collect into one floating pill, pushed right by order (no DOM move) */
+  .navlinks{order:3;display:flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--border);border-radius:99px;background:rgba(9,9,12,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+  .navlinks a{display:inline-flex;align-items:center;padding:8px 13px;border:0;border-radius:99px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text);background:transparent;transition:border-color .18s ease,background-color .18s ease,color .18s ease}
+  .navlinks a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}
+  /* the 01..05 index repeats the FIG.N motif where it earns least — markup kept, cost removed */
+  .navlinks a .n{display:none}
+  /* over the hero video the nav is transparent → brighten links so they stay legible */
+  nav:not(.solid) .navlinks a,nav:not(.solid) .navright a{color:var(--text)}
+  nav:not(.solid) .navlinks a .n{color:var(--muted)}
+  .skip{position:absolute;left:-9999px;top:0;z-index:99;padding:11px 16px;background:var(--accent);color:#fff;font:500 12px/1 var(--mono);border-radius:0 0 var(--r-sm) 0}
+  .skip:focus{left:0}
+  .navspacer{flex:1;order:1}
+  /* the announcement, folded out of its own 40px strip into the nav row */
+  .ann{order:2;display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border:1px solid var(--border);border-radius:99px;background:rgba(9,9,12,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font:500 11px/1 var(--mono);letter-spacing:.02em;color:var(--text);transition:border-color .18s ease,background-color .18s ease,color .18s ease;white-space:nowrap}
+  .ann b{padding:4px 8px;border-radius:99px;background:var(--accent);color:#fff;font-weight:500;letter-spacing:.06em;text-transform:uppercase;font-size:10px}
+  .ann i{font-style:normal;color:var(--lav)}
+  .ann:hover{border-color:var(--border-strong);color:var(--text-strong)}
+  /* over the hero video the nav is transparent, and --border (#212124) vanishes against a bright
+     frame — give both pills a visible edge and a darker ground until the nav goes solid. */
+  nav:not(.solid) .navlinks,nav:not(.solid) .ann{border-color:rgba(255,255,255,.16);background:rgba(9,9,12,.62)}
+  .navright{order:4;display:flex;align-items:center;gap:2px;margin-left:8px}
+  .navright a{padding:8px 12px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text);border-radius:99px;transition:color .18s ease,background-color .18s ease,border-color .18s ease}
+  .navright a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}
+  .navright a.ext{margin-left:6px;padding:10px 15px;border:1px solid var(--accent);background:var(--accent);color:var(--text-strong)}
+  .navright a.ext:hover{background:var(--accent-2);border-color:var(--accent-2)}
 
-  /* ---- top bar ---- */
-  .topbar{background:var(--surface);border-bottom:1px solid var(--border);font:400 13px/1 var(--sans)}
-  .topbar .wrap{display:flex;justify-content:center;align-items:center;gap:8px;padding:9px 24px;color:var(--faint);text-align:center}
-  .topbar b{color:var(--muted);font-weight:600} .topbar a{color:var(--accent)}
+  .hero{position:relative;min-height:clamp(560px,78vh,720px);display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;border-bottom:1px solid var(--border);padding-top:96px}
+  .hero .bg{position:absolute;inset:0;z-index:0}
+  .hero .bg img,.hero .bg video{width:100%;height:100%;object-fit:cover;object-position:center 42%}
+  .hero .wrap{position:relative;z-index:2;width:100%;padding-top:0}
+  .hero .h-in{max-width:650px;padding-bottom:42px}
+  .hero h1{font:400 clamp(36px,4.6vw,64px)/1.05 var(--sans);letter-spacing:-.02em;margin:18px 0 0;color:var(--text-strong);text-wrap:balance}
+  .hero h1 .ac{color:var(--lav)}
+  .hero .sub{margin:20px 0 0;font:400 clamp(15px,1.5vw,18px)/1.55 var(--sans);color:var(--hero-text);max-width:52ch}
+  .hero .cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
+  .hero .install{margin-top:24px;display:inline-flex;align-items:center;gap:11px;max-width:100%;background:rgba(9,9,11,.62);backdrop-filter:blur(8px);border:1px solid var(--border-strong);border-radius:var(--r-md);padding:12px 14px;font:500 13px/1 var(--mono)}
+  /* the command is one unbreakable token — let it pan inside the box instead of being clipped
+     by the hero (it overflowed the viewport by 80px at 390px). */
+  .hero .install code{min-width:0;overflow-x:auto;scrollbar-width:none}
+  .hero .install code::-webkit-scrollbar{display:none}
+  .hero .install .g{color:var(--lav)} .hero .install code{color:var(--text);background:none;padding:0;white-space:nowrap}
+  .hero .install button{margin-left:2px;font:500 11px/1 var(--mono);color:var(--muted);background:transparent;border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:6px 9px;cursor:pointer;transition:color .18s ease,border-color .18s ease;min-width:calc(6ch + 20px);text-align:center}
+  .hero .install button:hover{color:var(--text-strong);border-color:var(--accent)}
+  .statbar{position:relative;z-index:2;border-top:1px solid var(--border);background:rgba(10,10,11,.42);backdrop-filter:saturate(1.2)}
+  .statbar .wrap{display:grid;grid-template-columns:repeat(5,1fr)}
+  .statbar .s{padding:20px 22px;border-left:1px solid var(--border)} .statbar .s:first-child{border-left:none}
+  .statbar .s .v{font:500 24px/1 var(--mono);color:var(--text-strong);font-variant-numeric:tabular-nums;letter-spacing:-.02em} .statbar .s .v b{color:var(--lav)}
+  .statbar .s .k{margin-top:8px;font:500 10px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#96969B}
 
-  /* ---- nav ---- */
-  nav{position:sticky;top:0;z-index:40;background:rgba(11,11,12,.82);backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--border)}
-  nav .wrap{display:flex;align-items:center;gap:24px;height:62px}
-  nav .links{margin-left:auto;display:flex;gap:22px;align-items:center;font:500 14px/1 var(--sans)}
-  nav .links a{color:var(--muted)} nav .links a:hover{color:var(--text)}
-  nav .ext{color:var(--text);border:1px solid var(--border-strong);border-radius:9px;padding:9px 14px}
-  nav .ext:hover{border-color:var(--accent);color:var(--text)}
+  /* Flat padding, and no full-bleed rule: 8 of the 9 seams already change ground
+     (.alt tint, video, stripe), so the hairline was drawn on top of a change that already reads. */
+  section.band{padding:var(--band-pad) 0}
+  section.band:not(.alt):not(.sub-band):not(.power-band):not(.stripe-band)
+  + section.band:not(.alt):not(.sub-band):not(.power-band):not(.stripe-band){border-top:1px solid var(--border)}
+  section.band.alt{background:var(--surface-3)}
+  /* founder quote — Prime-style centered pull-quote */
+  /* Plasma field behind Providers (21st.dev Shader Builder port, recoloured to our palette).
+     Vanilla WebGL — no React. Pauses when off-screen or the tab is hidden. */
+  #providers{position:relative;isolation:isolate;overflow:hidden}
+  .prov-bg{position:absolute;inset:0;z-index:-2;width:100%;height:100%;display:block;opacity:.75}
+  .prov-bg-scrim{position:absolute;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(125% 95% at 50% 42%,rgba(10,10,11,.20) 0%,rgba(10,10,11,.70) 58%,rgba(10,10,11,.93) 100%)}
+  #providers>.wrap{position:relative;z-index:1}
+  @media (prefers-reduced-motion:reduce){.prov-bg{display:none}}
+  .quote-band{position:relative;overflow:hidden;background:var(--bg);padding:clamp(46px,6vw,74px) 0}
+  .quote-shader{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block;opacity:.26;mask-image:radial-gradient(135% 110% at 50% 50%,transparent 0%,transparent 20%,#000 58%,transparent 88%);-webkit-mask-image:radial-gradient(135% 110% at 50% 50%,transparent 0%,transparent 20%,#000 58%,transparent 88%)}
+  .quote-band .wrap{position:relative;z-index:1}
+  .ceo-quote{max-width:790px;margin:0 auto;text-align:center}
+  .ceo-quote .qmark{display:block;font:500 50px/.6 var(--sans);color:var(--accent);opacity:.5;margin-bottom:10px}
+  .ceo-quote blockquote{margin:0;font:400 clamp(16px,1.85vw,22px)/1.5 var(--sans);letter-spacing:-.01em;color:var(--text);text-wrap:balance}
+  .ceo-quote blockquote .hl{color:var(--lav)}
+  .ceo-quote figcaption{margin-top:24px;display:inline-flex;align-items:baseline;gap:12px}
+  .ceo-quote .qn{font:500 13.5px/1 var(--sans);color:var(--text-strong)}
+  .ceo-quote .qt{font:500 10px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .ceo-quote .qt::before{content:"·";margin-right:12px;color:var(--faint)}
+  .sechead{margin-bottom:14px}
+  .sechead .lab{display:inline-flex;align-items:center;gap:9px;font:500 13px/1 var(--mono);color:var(--lav)}
+  .sechead .lab::before{content:"";width:2px;height:13px;background:var(--accent);flex:none}
+  .nb{white-space:nowrap}
+  .sechead h2{font:400 clamp(26px,2.9vw,40px)/1.14 var(--sans);letter-spacing:-.02em;margin-top:14px;max-width:24ch;text-wrap:balance}
+  .sechead .tag{margin-top:13px;color:var(--muted);font-size:16px;max-width:60ch}
 
-  /* ---- buttons ---- */
-  .btn{display:inline-flex;align-items:center;gap:8px;font:600 14px/1 var(--sans);
-    padding:12px 18px;border-radius:10px;white-space:nowrap;transition:.15s;cursor:pointer}
-  .btn svg{width:16px;height:16px;fill:currentColor}
-  .btn.primary{background:var(--accent);color:#fff} .btn.primary:hover{background:var(--accent-hover);color:#fff;transform:translateY(-1px)}
-  .btn.ghost{color:var(--text);border:1px solid var(--border-strong);background:transparent}
-  .btn.ghost:hover{border-color:var(--lav);color:var(--text)}
-
-  /* ---- hero ---- */
-  .hero{position:relative;padding:clamp(52px,7vw,96px) 0 clamp(44px,6vw,80px);overflow:hidden}
-  .hero::before{content:"";position:absolute;inset:-40% 0 auto 0;height:640px;pointer-events:none;z-index:0;
-    background:radial-gradient(60% 60% at 72% 20%,rgba(124,92,255,.16),transparent 62%),
-               radial-gradient(48% 48% at 22% 0%,rgba(167,139,250,.08),transparent 60%)}
-  .hero .wrap{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,.86fr) minmax(0,1.2fr);gap:clamp(34px,4.5vw,64px);align-items:center}
-  .hero .left,.hero .heroterm{min-width:0}
-  .hero h1{font:800 clamp(38px,5.2vw,56px)/1.04 var(--sans);margin:18px 0 0;text-wrap:balance}
-  .hero h1 .g{background:linear-gradient(92deg,var(--text-strong),var(--lav));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero .sub{font:400 clamp(17px,2.1vw,20px)/1.55 var(--sans);color:var(--muted);margin:18px 0 0;max-width:40ch}
-  .cmd{display:flex;align-items:center;gap:10px;margin-top:26px;background:var(--code);min-width:0;
-    border:1px solid var(--border);border-radius:11px;padding:12px 13px;font:400 13px/1 var(--mono)}
-  .cmd .p{color:var(--accent)} .cmd code{color:var(--text);white-space:nowrap;overflow-x:auto;flex:1;min-width:0;background:none;padding:0}
-  .cmd button{flex:none;font:600 12px/1 var(--sans);color:var(--muted);background:transparent;
-    border:1px solid var(--border-strong);border-radius:7px;padding:8px 12px;cursor:pointer;transition:.15s}
-  .cmd button:hover{color:var(--text);border-color:var(--accent)}
-  .herobtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
-  .exthint{margin-top:11px;font:400 13px/1.5 var(--sans);color:var(--faint)}
-  .exthint a{color:var(--muted);border-bottom:1px solid var(--border-strong)} .exthint a:hover{color:var(--lav);border-color:var(--lav)}
-  .proof{margin-top:22px;font:500 13px/1.6 var(--mono);color:var(--faint);letter-spacing:.02em}
-  .proof b{color:var(--muted);font-weight:500}
-
-  /* =====================================================================
-     TUI — a faithful mockup of the DGC full-screen welcome screen
-     ===================================================================== */
-  .win{background:var(--term);border:1px solid var(--border);border-radius:13px;overflow:hidden;
-    box-shadow:0 30px 80px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.015) inset}
-  .win .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--surface)}
-  .win .bar i{width:11px;height:11px;border-radius:50%;background:#2A2A2E}
-  .win .bar .ti{margin-left:10px;font:500 12px/1 var(--mono);color:var(--faint)}
-
-  .tui-body{display:flex;flex-direction:column;padding:clamp(14px,2vw,22px);min-height:404px;
-    font-family:var(--mono);background:var(--term)}
-  .tui-card{border:1px solid var(--border-strong);border-radius:11px;padding:clamp(14px,2vw,20px) clamp(16px,2.4vw,26px);
-    display:flex;gap:clamp(16px,3vw,34px);align-items:flex-start}
-  /* dotted /// mark: the SVG is a MASK; colour + the diagonal shimmer sweep come from the CSS
-     gradient (background-position animation), so it lights up exactly like the CLI mark. */
-  .tui-logo{flex:none;height:clamp(104px,14vw,158px);aspect-ratio:46/34;margin:0 clamp(6px,1.4vw,16px) 0 0;
-    -webkit-mask:url(/dgc-logo-dots.svg) center/contain no-repeat;
-    mask:url(/dgc-logo-dots.svg) center/contain no-repeat;
-    background:linear-gradient(112deg,#7C5CFF 0%,#8B6FFF 36%,#F3EEFF 50%,#A78BFA 64%,#6A4BF0 100%);
-    background-size:300% 100%;
-    filter:drop-shadow(0 3px 16px rgba(124,92,255,.24));
-    animation:logoshine 4.6s ease-in-out infinite}
+  /* ---- full CLI view ---- */
+  .cli-chrome{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--chrome);border-bottom:1px solid var(--border)}
+  .cli-chrome i{width:11px;height:11px;border-radius:50%;background:var(--chrome-dot);display:inline-block}
+  .cli-chrome .path{margin-left:10px;font:500 12px/1 var(--mono);color:var(--faint)}
+  .cli-cap{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
+  .cli-cap .c{font:500 11.5px/1 var(--mono);color:var(--muted);border:1px solid var(--border);border-radius:99px;padding:7px 12px;background:var(--surface)}
+  /* ===== the DGC welcome screen (what you see on launch) ===== */
+  .welwrap{margin-top:var(--s-block);border:1px solid var(--border-strong);border-radius:var(--r-lg);overflow:hidden;background:var(--term);box-shadow:0 60px 120px -60px rgba(0,0,0,.9),0 0 0 1px rgba(124,92,255,.05)}
+  .wel-body{padding:clamp(30px,4.5vw,58px) clamp(20px,3vw,34px);display:flex;flex-direction:column;align-items:center;gap:20px}
+  .wel-card{width:100%;max-width:730px;border:1px solid var(--border-strong);border-radius:var(--r-md);padding:clamp(24px,3vw,40px) clamp(26px,3.6vw,48px);display:flex;gap:clamp(24px,4vw,52px);align-items:center}
+  /* dotted /// mark: SVG is a MASK; colour + diagonal shimmer come from the animated gradient */
+  .wel-logo{flex:none;height:clamp(96px,12vw,140px);aspect-ratio:46/34;
+    -webkit-mask:url(assets/dgc-logo-dots.svg) center/contain no-repeat;mask:url(assets/dgc-logo-dots.svg) center/contain no-repeat;
+    background:linear-gradient(112deg,var(--accent) 0%,var(--shine-a) 36%,var(--shine) 50%,var(--lav) 64%,var(--shine-b) 100%);background-size:300% 100%;
+    filter:drop-shadow(0 3px 16px rgba(124,92,255,.24));animation:logoshine 4.6s ease-in-out infinite}
   @keyframes logoshine{0%{background-position:130% 0}55%{background-position:-50% 0}100%{background-position:-50% 0}}
-  @media (prefers-reduced-motion:reduce){.tui-logo{animation:none;background-position:50% 0}}
-  @media (prefers-reduced-motion:reduce){.tui-logo{animation:none}}
-  .tui-meta{min-width:0;flex:1;font-size:clamp(12px,1.5vw,14px);line-height:1.85}
-  .tui-title{font-weight:700;color:var(--text-strong);display:flex;align-items:center} .tui-title span{color:var(--faint);font-weight:400}
-  .tui-title svg.tmk{width:1.25em;height:1.25em;margin-right:.4em;color:var(--accent);flex:none}
-  .tui-tag{color:var(--muted)}
-  .tui-cta b{color:var(--accent);font-weight:700} .tui-cta span{color:var(--faint)}
-  .tui-menu{margin-top:2px}
-  .tui-menu .row{display:flex;justify-content:space-between;gap:16px}
-  .tui-menu .row .l{color:var(--text);font-weight:600} .tui-menu .row .k{color:var(--faint)}
-  .tui-sp{flex:1;min-height:16px}
-  .tui-comp{position:relative;border:1px solid var(--border-strong);border-radius:10px;margin-top:14px;
-    padding:13px 15px;display:flex;align-items:center;gap:9px;font-size:clamp(12px,1.5vw,14px)}
-  .tui-comp .pr{color:var(--accent);font-weight:700}
-  .tui-comp .ph{color:var(--faint)}
-  .tui-comp .cc{width:8px;height:15px;background:var(--accent);display:inline-block;vertical-align:-2px;animation:blink 1.1s step-end infinite}
-  .tui-comp .lbl{position:absolute;right:16px;bottom:-9px;background:var(--term);padding:0 8px;color:var(--faint);font-size:12px;white-space:nowrap}
+  .wel-meta{min-width:0;flex:1;font:400 clamp(13px,1.5vw,15px)/1.9 var(--mono)}
+  .wel-title{font-weight:500;color:var(--text-strong);font-size:clamp(16px,1.9vw,20px);letter-spacing:.01em}
+  .wel-title span{color:var(--faint);font-weight:400;font-size:.8em}
+  .wel-tag{color:var(--muted);margin-top:2px}
+  .wel-cta{margin-top:14px} .wel-cta b{color:var(--accent);font-weight:500} .wel-cta span{color:var(--faint)}
+  .wel-menu{margin-top:18px;display:grid;grid-template-columns:1fr auto auto;column-gap:clamp(12px,1.6vw,22px);row-gap:8px;align-items:baseline}
+  .wel-menu .row{display:contents}
+  .wel-menu .l{color:var(--text);text-align:left;white-space:nowrap}
+  .wel-menu .k{color:var(--faint);text-align:right;white-space:nowrap;font-size:.92em}
+  .wel-menu .s{color:var(--accent);text-align:left;white-space:nowrap}
+  .wel-comp{width:100%;max-width:730px;border:1px solid var(--border-strong);border-radius:var(--r-md);padding:14px 18px;display:flex;align-items:center;gap:10px;font:400 clamp(12px,1.5vw,14px)/1 var(--mono)}
+  .wel-comp .pr{color:var(--accent)} .wel-comp .ph{color:var(--faint);flex:1}
+  .wel-comp .cc{width:8px;height:15px;background:var(--accent);display:inline-block;animation:blink 1.1s step-end infinite}
+  .wel-comp .md{font:500 11px/1 var(--mono);color:var(--muted);border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:5px 9px}
+  @media (max-width:640px){.wel-card{flex-direction:column;text-align:center}.wel-menu{justify-content:center}}
+  @media (prefers-reduced-motion:reduce){.wel-logo{animation:none;background-position:50% 0}.wel-comp .cc{animation:none}}
 
-  /* =====================================================================
-     Animated in-session terminal (the "see it work" demo)
-     ===================================================================== */
-  .term .head{padding:12px 16px;border-bottom:1px solid var(--border);font:500 13px/1 var(--mono);background:var(--term)}
-  .term .head b{color:var(--accent);font-weight:700} .term .head span{color:var(--faint);font-weight:400}
-  .term .scene{padding:18px 20px;font:400 13.5px/1.7 var(--mono);min-height:328px;white-space:pre-wrap;word-break:break-word;background:var(--term)}
-  .term .prompt .pc{color:var(--accent);font-weight:700} .term .cmd-in{color:var(--text-strong)}
-  .term .think{color:var(--muted)} .term .tool{color:var(--accent);font-weight:600} .term .out{color:var(--text)}
-  .term .ok{color:var(--lav)} .term .dim{color:var(--faint)}
-  .term .add{color:var(--text-strong);background:rgba(124,92,255,.10);border-left:2px solid var(--accent);padding-left:8px;margin-left:-10px}
-  .term .del{color:var(--faint);background:rgba(255,255,255,.03);border-left:2px solid var(--border-strong);padding-left:8px;margin-left:-10px}
-  .cursor{display:inline-block;width:8px;height:15px;background:var(--accent);vertical-align:-2px;animation:blink 1.1s step-end infinite}
-  .dots{display:flex;gap:8px;margin-top:16px;justify-content:center}
-  .dots button{width:7px;height:7px;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:.2s;border:none;padding:0}
-  .dots button.on{background:var(--accent)}
+  /* ---- benchmark leaderboard (clean static) ---- */
+  .bmrow{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.6fr);gap:clamp(20px,3vw,36px);margin-top:var(--s-block);align-items:stretch}
+  .lead{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);overflow:hidden}
+  .lead .lh{display:flex;align-items:center;justify-content:space-between;padding:15px 20px;border-bottom:1px solid var(--border)}
+  .lead .lh .t{font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-strong)}
+  .lead .lh .t::before,.bm-evidence .ev-head span:first-child::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:9px;vertical-align:1px;box-shadow:0 0 9px var(--accent);animation:pulse-dot 2.4s ease-in-out infinite}
+  @keyframes pulse-dot{0%,100%{opacity:.45;transform:scale(.8)}50%{opacity:1;transform:scale(1.18)}}
+  .lead .lh .k{font:500 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .lrow{display:grid;grid-template-columns:22px 150px 1fr 60px;gap:15px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--border);transition:background .18s}
+  .lrow:not(.us):hover{background:rgba(124,92,255,.045)}
+  .lrow:last-child{border-bottom:none}
+  .lrow.us{background:rgba(124,92,255,.06)}
+  .lrow .rk{font:500 11px/1 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
+  .lrow .nm{font:500 13.5px/1 var(--sans);color:var(--text-strong)} .lrow.us .nm{color:var(--text-strong)}
+  .lrow .nm .tag{font:500 8.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:var(--r-xs);padding:2px 5px;margin-left:8px;vertical-align:1px}
+  .lrow .track{height:7px;border-radius:99px;background:var(--surface-2);overflow:hidden}
+  .lrow .track i{display:block;height:100%;border-radius:99px;background:var(--faint);width:0;transition:width 1.1s cubic-bezier(.22,1,.36,1)}
+  .lrow.us .track i{background:var(--accent);animation:bar-pulse 2s ease-in-out infinite}
+  @keyframes bar-pulse{0%,100%{filter:brightness(.82);opacity:.82}50%{filter:brightness(1.35);opacity:1}}
+  .lrow .sc{font:500 13px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums}
+  .lrow .heat{display:grid;grid-template-columns:repeat(6,1fr);gap:3px}
+  .lrow .heat .h{height:16px;border-radius:var(--r-xs);background:var(--surface-2);font:500 7.5px/16px var(--mono);text-align:center;color:var(--faint)}
+  .lead .lf{padding:13px 20px;font:500 11.5px/1.5 var(--mono);color:var(--faint)}
+  .swecard{border:1px solid var(--border-strong);border-radius:var(--r-lg);background:linear-gradient(158deg,var(--surface-2),var(--surface));padding:26px;box-shadow:0 40px 90px -55px rgba(124,92,255,.45)}
+  .swecard .lab{font:500 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+  .swecard .n{font:500 clamp(2.8rem,5.5vw,3.8rem)/.9 var(--mono);color:var(--lav);letter-spacing:-.03em;margin-top:14px;font-variant-numeric:tabular-nums}
+  .swecard .u{margin-top:12px;font:500 12px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--text)}
+  .swecard .m{margin-top:10px;font:400 12.5px/1.55 var(--sans);color:var(--faint)}
+  .swecard .stat2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
+  .swecard .stat2 .c{border:1px solid var(--border);border-radius:var(--r-md);padding:11px 12px}
+  .swecard .stat2 .cv{font:500 18px/1 var(--sans);color:var(--text-strong)} .swecard .stat2 .ck{font:500 9.5px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-top:6px}
+  .bmnote{margin:24px auto 0;color:#A3A3A8;font-size:13.5px;max-width:66ch;text-align:center}
 
-  /* ---- sections ---- */
-  section{padding:clamp(56px,8vw,104px) 0;border-top:1px solid var(--border)}
-  h2{font:700 clamp(27px,3.1vw,34px)/1.14 var(--sans)}
-  .lede{color:var(--muted);margin:12px 0 0;font-size:17px}
-  .center{text-align:center;margin:0 auto;max-width:720px}
-  .grid{display:grid;gap:16px;margin-top:38px}
-  .g3{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px}
-  .card:hover{border-color:var(--border-strong)}
-  .card .ic{font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
-  .card h3{font:600 18px/1.3 var(--sans);margin-bottom:8px}
-  .card p{font-size:15px;color:var(--muted);margin:0} .card p b{color:var(--text);font-weight:600}
-  .card .ico{width:40px;height:40px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;background:rgba(124,92,255,.12);color:var(--accent);margin-bottom:16px}
-  .card .ico svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-  .card:hover .ico{background:rgba(124,92,255,.18)}
-  code{font:400 .88em/1 var(--mono);background:var(--surface-2);color:var(--text);padding:.18em .42em;border-radius:5px}
-  .subhead{font:600 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin:40px 0 16px}
-  .chips{display:flex;flex-wrap:wrap;gap:9px}
-  .chip{font:500 13px/1 var(--mono);padding:9px 13px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted)}
-  .chip.local{color:var(--text)} .chip.local::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:8px;vertical-align:1px}
-  .note{color:var(--faint);font-size:14px;margin-top:16px}
+  /* providers matrix (clean static) */
+  .prov{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:var(--s-block)}
+  .pcol{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);padding:22px 22px 20px}
+  .pcol .ph{display:flex;align-items:center;gap:9px;padding-bottom:15px;border-bottom:1px solid var(--border);font:500 11px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+  .pcol .ph .pdot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none}
+  .pcol .plist{list-style:none;margin:0;padding:6px 0 0}
+  .pcol .plist li{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;gap:11px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .pcol .plist li:last-child{border-bottom:none}
+  .pcol .plist .pn{font:500 14px/1.2 var(--sans);color:var(--text-strong)}
+  .pcol .plist .pm{font:400 10px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+  .pcol .pf{margin-top:auto;padding-top:15px;font:400 12.5px/1.5 var(--sans);color:var(--muted)}
+  .pcol{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);overflow:hidden}
+  .pcol .ph2{display:flex;align-items:center;gap:9px;padding:14px 17px;border-bottom:1px solid var(--border);font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-strong)}
+  .pcol .ph2 .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .pcol.api .ph2 .dot{background:var(--lav)} .pcol.sub .ph2 .dot{background:var(--good)}
+  .pcol ul{list-style:none;margin:0;padding:7px 0}
+  .pcol li{display:flex;align-items:center;gap:11px;padding:10px 17px;font:500 14px/1.2 var(--sans);color:var(--text)}
+  .pcol li .m{font:500 10.5px/1 var(--mono);color:var(--faint);margin-left:auto;letter-spacing:.04em}
+  .pcol li::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--border-strong);flex:none;transform:rotate(45deg)}
 
-  /* ---- table ---- */
-  .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:13px;margin-top:36px}
-  table{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
-  th,td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--border)} tbody tr:last-child td{border-bottom:none}
-  thead th{background:var(--surface-2);font:500 11.5px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-  td:first-child{white-space:nowrap} td:first-child code{background:transparent;padding:0;color:var(--text-strong);font-weight:500}
-  td b{color:var(--text);font-weight:600}
+  .feat3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gutter);margin-top:var(--s-block)}
+  /* Deliberately thin glass so the video reads through the cards; the heavier blur is what
+     keeps the copy legible at this opacity. */
+  .fcard{border:1px solid rgba(255,255,255,.11);border-radius:var(--r-lg);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 52px -30px rgba(0,0,0,.7);padding:24px;transition:border-color .18s ease,background-color .18s ease} .fcard:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}
+  /* These two sit over video, not a flat surface — lifted off --muted/--faint to hold AA contrast
+     against the brightest frames now that the glass is thin. */
+  .fcard .ftrace{margin-top:14px;padding-top:13px;border-top:1px solid var(--border);font:400 11px/1.7 var(--mono);color:#A3A3A8} .fcard .ftrace .pass{color:var(--lav)}
+  .fcard .fi{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#A3A3A8}
+  .fcard h3{font:500 18px/1.2 var(--sans);margin:14px 0 8px;color:var(--text-strong)}
+  .fcard p{margin:0;color:#A3A3A8;font-size:14px;line-height:1.55}
+  .fcard .cmd{margin-top:16px;font:500 12px/1.5 var(--mono);color:var(--lav);background:rgba(6,6,9,.55);border:1px solid rgba(255,255,255,.07);border-radius:var(--r-sm);padding:9px 11px;overflow-x:auto;white-space:nowrap}
 
-  /* =====================================================================
-     Editor (VS Code / Cursor) mockup — the extension showcase
-     ===================================================================== */
-  .ide{margin-top:40px}
-  .editor{display:grid;grid-template-columns:48px 214px minmax(0,1fr) 350px;background:var(--term);min-height:472px}
-  .eb-activity{background:#141416;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:20px;padding:16px 0}
-  .eb-activity .ai{width:24px;height:24px;color:var(--faint);display:flex;align-items:center;justify-content:center}
-  .eb-activity .ai svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6}
-  .eb-activity .ai.on{color:var(--accent);position:relative}
-  .eb-activity .ai.on::before{content:"";position:absolute;left:-16px;top:-3px;height:30px;width:2px;background:var(--accent);border-radius:2px}
-  .eb-tree{background:#101012;border-right:1px solid var(--border);padding:14px 0;font:400 12.5px/1 var(--mono);min-width:0}
-  .eb-tree .th{font:500 10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:0 16px 12px}
-  .eb-tree .f{padding:6px 16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:8px}
-  .eb-tree .f.dir{color:var(--text)} .eb-tree .f.ind{padding-left:30px}
-  .eb-tree .f.sel{background:rgba(124,92,255,.14);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
-  .eb-tree .dot{color:var(--faint)}
-  .eb-editor{min-width:0;display:flex;flex-direction:column;background:var(--term)}
-  .eb-tabs{display:flex;border-bottom:1px solid var(--border);background:#101012;font:400 12.5px/1 var(--mono)}
-  .eb-tabs .tab{padding:11px 16px;color:var(--faint);border-right:1px solid var(--border)}
-  .eb-tabs .tab.on{color:var(--text);background:var(--term);border-top:2px solid var(--accent);padding-top:9px}
-  .eb-tabs .tab .m{color:var(--accent);margin-left:8px}
-  .eb-code{padding:14px 0;font:400 12.5px/1.75 var(--mono);overflow:auto;flex:1}
-  .eb-code .ln{display:flex;white-space:pre;min-width:max-content}
-  .eb-code .g{width:44px;flex:none;text-align:right;padding-right:16px;color:var(--faint);opacity:.7;user-select:none}
-  .eb-code .c{padding-right:20px;color:var(--text)}
-  .eb-code .ln.hl{background:rgba(124,92,255,.07)}
-  .eb-code .ln.hl .g{color:var(--accent);opacity:1}
-  .tk{color:var(--accent)} .ts{color:var(--muted)} .tc{color:var(--faint);font-style:italic} .tf{color:var(--lav)} .tv{color:var(--text)}
+  /* capability map — one compact figure for the whole harness (replaces 12 cards) */
+  .capmap{margin-top:var(--s-block);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+  .cap-lane{display:grid;grid-template-columns:168px minmax(0,1fr) auto;gap:24px;align-items:center;padding:20px 24px;border-top:1px solid var(--border)}
+  .cap-lane:first-child{border-top:none}
+  .cap-note{font:400 12px/1.4 var(--sans);color:var(--faint);text-align:right;white-space:nowrap}
+  .cap-lane .lh{display:flex;align-items:center;gap:11px;font:500 11px/1.3 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .cap-lane .lh::before{content:"";width:6px;height:6px;border-radius:1px;background:var(--accent);transform:rotate(45deg);flex:none}
+  .cap-chips{display:flex;flex-wrap:wrap;gap:9px}
+  .cap-chips span{font:500 13.5px/1 var(--sans);color:var(--text-strong);border:1px solid var(--border-strong);border-radius:var(--r-md);padding:10px 14px;background:var(--surface-2);transition:border-color .16s}
+  .cap-chips span:hover{border-color:var(--accent)}
+  @media(max-width:640px){.cap-lane{grid-template-columns:1fr;gap:12px;padding:17px 18px}.cap-note{display:none}}
 
-  .eb-panel{border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-width:0}
-  .eb-phead{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--border)}
-  .eb-phead .pm{font:800 13px/1 var(--mono);letter-spacing:.06em;color:var(--text-strong)}
-  .eb-phead .pd{margin-left:auto;font:400 11px/1 var(--mono);color:var(--faint)}
-  .eb-pbody{flex:1;overflow:auto;padding:16px;font:400 13px/1.62 var(--sans);display:flex;flex-direction:column;gap:14px}
-  .eb-pbody .asst{color:var(--text)} .eb-pbody .asst code{font-size:.85em}
-  .eb-toolcard{border:1px solid var(--border-strong);border-radius:9px;background:var(--term);padding:10px 12px;font:500 12.5px/1.4 var(--mono)}
-  .eb-toolcard .tt{color:var(--accent);font-weight:700} .eb-toolcard .ta{color:var(--faint)}
-  .eb-diff{margin-top:10px;border-top:1px dashed var(--border);padding-top:9px;font:400 12px/1.7 var(--mono);white-space:pre;overflow-x:auto}
-  .eb-diff .d-add{display:block;color:var(--text-strong);background:rgba(124,92,255,.12);border-left:2px solid var(--accent);padding:0 8px;margin:0 -12px}
-  .eb-diff .d-del{display:block;color:var(--faint);background:rgba(255,255,255,.025);border-left:2px solid var(--border-strong);padding:0 8px;margin:0 -12px}
-  .eb-diff .d-ctx{display:block;color:var(--faint);padding:0 8px;margin:0 -12px;opacity:.75}
-  .eb-pcomp{margin:14px;position:relative;border:1px solid var(--accent);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:9px;font:400 13px/1 var(--mono);box-shadow:0 0 0 3px rgba(124,92,255,.12)}
-  .eb-pcomp .pr{color:var(--accent);font-weight:700} .eb-pcomp .ph{color:var(--faint)}
-  .eb-pcomp .lbl{position:absolute;right:14px;bottom:-9px;background:var(--surface);padding:0 7px;color:var(--faint);font-size:11px}
-  .ide-caption{display:flex;flex-wrap:wrap;align-items:center;gap:14px 22px;margin-top:22px;color:var(--muted);font-size:14.5px}
-  .ide-caption code{color:var(--text)}
-  .tag2{display:inline-flex;align-items:center;font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
-    color:var(--accent);background:var(--accent-soft);padding:7px 11px;border-radius:7px}
+  /* ===== shared engineering-figure language ===== */
+  /* A FIG panel is a technical drawing, so it gets a drawing's corners: near-sharp, with crop
+     marks. Interface chrome (nav pills, buttons) stays rounded — the split is deliberate. */
+  .figure{position:relative;margin:var(--s-block) 0 0;border:1px solid var(--border);border-radius:2px;background:var(--surface-3);overflow:hidden;isolation:isolate}
+  .figure::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:2;
+    --bk:rgba(167,139,250,.5);--bl:13px;
+    background:
+      linear-gradient(var(--bk),var(--bk)) left top/var(--bl) 1px no-repeat,
+      linear-gradient(var(--bk),var(--bk)) left top/1px var(--bl) no-repeat,
+      linear-gradient(var(--bk),var(--bk)) right top/var(--bl) 1px no-repeat,
+      linear-gradient(var(--bk),var(--bk)) right top/1px var(--bl) no-repeat,
+      linear-gradient(var(--bk),var(--bk)) left bottom/var(--bl) 1px no-repeat,
+      linear-gradient(var(--bk),var(--bk)) left bottom/1px var(--bl) no-repeat,
+      linear-gradient(var(--bk),var(--bk)) right bottom/var(--bl) 1px no-repeat,
+      linear-gradient(var(--bk),var(--bk)) right bottom/1px var(--bl) no-repeat}
+  .figure::before{position:absolute;inset:0;z-index:-1;content:"";pointer-events:none;background-image:radial-gradient(circle,var(--line-soft) 1px,transparent 1px);background-size:22px 22px;opacity:.75}
+  .figcap{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:43px;padding:0 17px;border-bottom:1px solid var(--border);font:500 9.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .figcap .fig-name{color:var(--lav)}
+  .figcap .fig-state{display:inline-flex;align-items:center;gap:8px;letter-spacing:.09em}
+  .figcap .fig-state::before{width:5px;height:5px;border-radius:50%;content:"";background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .diagram-scroll{overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  .diagram-scroll svg{display:block;width:100%;height:auto;min-width:760px}
+  .blueprint text{font-family:var(--mono);font-weight:400}
+  .blueprint .guide{fill:none;stroke:var(--border);stroke-width:1;stroke-dasharray:3 7;vector-effect:non-scaling-stroke}
+  .blueprint .hair{fill:none;stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .blueprint .accent-line{fill:none;stroke:var(--muted);stroke-width:1.25;vector-effect:non-scaling-stroke}
+  .blueprint .node{fill:var(--surface);stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .blueprint .node-hi{fill:var(--surface-2);stroke:var(--muted);stroke-width:1.25;vector-effect:non-scaling-stroke}
+  .blueprint .halo{fill:rgba(255,255,255,.02);stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
+  .blueprint .label{fill:var(--text-strong);font-size:15px;letter-spacing:.09em}
+  .blueprint .micro{fill:var(--faint);font-size:9px;letter-spacing:.08em}
+  .blueprint .micro-accent{fill:var(--muted);font-size:9px;letter-spacing:.08em}
+  .blueprint .small{fill:var(--muted);font-size:11px}
+  .blueprint .current{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:7 13;vector-effect:non-scaling-stroke;animation:flow-current 18s linear infinite}
+  @keyframes flow-current{to{stroke-dashoffset:-200}}
 
-  /* ---- footer ---- */
-  footer{border-top:1px solid var(--border);padding:56px 0 48px}
-  footer .cols{display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:28px}
-  footer .fcol h4{font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin:0 0 14px}
-  footer .fcol a{display:block;color:var(--muted);font-size:14px;padding:4px 0} footer .fcol a:hover{color:var(--text)}
-  footer .brand p{color:var(--faint);font-size:13px;margin:12px 0 0;max-width:32ch}
-  footer .base{margin-top:40px;padding-top:24px;border-top:1px solid var(--border);color:var(--faint);font-size:13px}
+  /* FIG.1 — agentic loop */
+  .loop-figure svg{aspect-ratio:1.32/1;background:transparent}
+  .loop-figure .loop-node{transition:stroke .22s ease,fill .22s ease}
+  .loop-figure .node-dot,.loop-figure .halo,.loop-figure .label{transition:stroke .22s ease,fill .22s ease}
+  .loop-figure .loop-node:hover .node-dot{stroke:var(--accent);fill:var(--surface-2)}
+  .loop-figure .loop-node:hover .halo{fill:rgba(124,92,255,.07);stroke:var(--accent-mid)}
+  .loop-figure .loop-node:hover .label{fill:var(--lav)}
+  .loop-figure .loop-arrow{fill:none;stroke:var(--muted);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linecap:round;stroke-linejoin:round}
+  /* two compact feature figures side-by-side */
+  .figpair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:var(--s-block)}
+  .figpair .figure{margin:0;display:flex;flex-direction:column}
+  .figpair .diagram-scroll{flex:1;display:flex;align-items:center}
+  .figpair .diagram-scroll svg{min-width:0}
+  .ladder{padding:22px 26px;display:flex;flex-direction:column;flex:1;justify-content:space-between;gap:12px}
+  .ladder .rung{padding:14px 16px 15px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);transition:border-color .2s,background .2s,transform .2s}
+  .ladder .rung:hover{border-color:var(--accent);background:var(--surface-2);transform:translateX(4px)}
+  .ladder .rtop{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:12px}
+  .ladder .rk{font:500 13.5px/1 var(--mono);color:var(--text-strong)}
+  .ladder .rd{font:400 12px/1.35 var(--sans);color:var(--muted);text-align:right}
+  .ladder .rgauge{height:5px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+  .ladder .rgauge i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width 1s cubic-bezier(.22,1,.36,1)}
+  .ladder .rung.hot .rgauge i{background:linear-gradient(90deg,var(--accent),var(--lav))}
+  .reveal.in .ladder .rgauge i{width:var(--f)}
+  .laxis{display:flex;justify-content:space-between;margin-top:8px;font:500 9.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  @media(max-width:900px){.figpair{grid-template-columns:1fr}}
+  .loop-figure .loop-node:hover .node{stroke:var(--accent);fill:var(--surface-2)}
+  .loop-figure .node-dot{fill:var(--bg);stroke:var(--text-strong);stroke-width:1.5;vector-effect:non-scaling-stroke}
+  .loop-legend{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--border)}
+  .loop-legend .step{padding:14px 17px;border-left:1px solid var(--border);font:400 11px/1.55 var(--mono);color:var(--faint)}
+  .loop-legend .step:first-child{border-left:0}.loop-legend .step b{display:block;margin-bottom:3px;color:var(--text);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
 
-  /* ---- responsive ---- */
-  @media (max-width:900px){
-    .hero .wrap{grid-template-columns:minmax(0,1fr);gap:34px}
-    .hero .heroterm{order:2}
-    .editor{grid-template-columns:48px minmax(0,1fr) 320px}
-    .eb-tree{display:none}
-    footer .cols{grid-template-columns:1fr 1fr}
+  /* FIG.4 — native editor surface */
+  .field-band,.power-band{position:relative;isolation:isolate;overflow:hidden}
+  .field-band::before,.power-band::before{position:absolute;z-index:-1;inset:0;content:"";pointer-events:none}
+  /* subtle animated grain-gradient behind the extension section (purple, very soft) */
+  .field-band::before{background:radial-gradient(38% 52% at 22% 30%,rgba(124,92,255,.16),transparent 68%),radial-gradient(42% 58% at 80% 44%,rgba(167,139,250,.12),transparent 70%),radial-gradient(48% 60% at 56% 90%,rgba(106,76,240,.13),transparent 70%);filter:blur(34px);transform-origin:center;animation:grain-drift 26s ease-in-out infinite alternate;mask-image:linear-gradient(180deg,transparent,#000 15%,#000 85%,transparent)}
+  .field-band::after{content:"";position:absolute;z-index:-1;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:screen;mask-image:linear-gradient(180deg,transparent,#000 15%,#000 85%,transparent);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  @keyframes grain-drift{0%{transform:translate3d(-3%,-2%,0) scale(1.05)}50%{transform:translate3d(3%,3%,0) scale(1.13)}100%{transform:translate3d(2%,-2%,0) scale(1.05)}}
+  .editor-figure{background:var(--term)}
+  .editor-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  .editor-shell{display:grid;grid-template-columns:46px 188px minmax(430px,1fr) 336px;grid-template-rows:35px 430px 23px;min-width:1000px;background:var(--term);font:400 10.5px/1.5 var(--mono)}
+  .ed-titlebar{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);background:var(--surface);color:var(--faint)}
+  .ed-dots{display:flex;gap:6px}.ed-dots i{display:block;width:7px;height:7px;border-radius:50%;background:var(--border-strong)}
+  .ed-titlebar .ed-path{text-align:center}.ed-titlebar .ed-branch{color:var(--muted)}
+  .ed-activity{grid-row:2;display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:10px;border-right:1px solid var(--border);background:var(--surface-3)}
+  .ed-icon{display:grid;place-items:center;width:31px;height:31px;border-left:2px solid transparent;color:var(--faint);font-size:14px}.ed-icon.active{border-left-color:var(--accent);color:var(--lav);background:var(--accent-soft)}
+  .ed-tree{grid-row:2;padding:13px 0;border-right:1px solid var(--border);background:var(--surface-3);color:var(--muted)}
+  .ed-tree .ttl{padding:0 13px 11px;color:var(--faint);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase}
+  .ed-tree .tr{display:flex;align-items:center;gap:7px;padding:4px 12px;white-space:nowrap}.ed-tree .tr.sel{color:var(--text);background:var(--accent-soft)}.ed-tree .indent{padding-left:25px}.ed-tree .chev{color:var(--faint)}
+  .ed-main{grid-row:2;min-width:0;border-right:1px solid var(--border);background:var(--term);display:flex;flex-direction:column}
+  .ed-diffstat{margin-top:auto;display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border);font:400 11px/1 var(--mono);color:var(--faint)}
+  .ed-diffstat .dp{color:var(--muted)} .ed-diffstat .da{color:var(--lav)} .ed-diffstat .dd{color:var(--faint)} .ed-diffstat .drest{color:var(--faint)}
+  .ed-tabs{display:flex;height:34px;border-bottom:1px solid var(--border);background:var(--surface-3)}
+  .ed-tab{display:flex;align-items:center;gap:7px;padding:0 14px;border-right:1px solid var(--border);color:var(--faint)}.ed-tab.active{color:var(--text);background:var(--term);border-top:1px solid var(--accent)}
+  .ed-code{padding:14px 0;font-variant-numeric:tabular-nums}.code-line{display:grid;grid-template-columns:35px 24px 1fr;min-height:21px;padding-right:16px}.code-line .ln{text-align:right;color:var(--faint)}.code-line .sg{text-align:center;color:var(--border-strong)}.code-line .src{padding-left:12px;color:var(--muted);white-space:pre}.code-line.add{background:var(--accent-soft)}.code-line.add .sg,.code-line.add .src{color:var(--lav)}.code-line.del{background:var(--line-soft)}.code-line.del .sg,.code-line.del .src{color:var(--faint)}.tok{color:var(--text)}.fn{color:var(--lav)}
+  .ed-agent{grid-row:2;display:flex;flex-direction:column;min-width:0;background:var(--surface-3)}
+  .ed-agent-head{display:flex;align-items:center;gap:8px;height:35px;padding:0 12px;border-bottom:1px solid var(--border);color:var(--text)}.ed-agent-head .mark{color:var(--accent);letter-spacing:.08em}.ed-agent-head .ctx{margin-left:auto;color:var(--faint)}
+  .goal-strip{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--accent-mid);background:var(--accent-faint)}.goal-strip .goal-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}.goal-strip .goal-copy{min-width:0;color:var(--lav);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.goal-strip .goal-time{color:var(--faint);font-variant-numeric:tabular-nums}
+  .ed-chat{flex:1;padding:14px 13px;overflow:hidden;color:var(--muted)}.ed-chat .usr{padding-left:10px;border-left:2px solid var(--accent);color:var(--text)}.ed-chat .thinking{margin:13px 0;color:var(--faint);font-style:italic}.ed-tool{margin:8px 0;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--term);overflow:hidden}.ed-tool .tool-h{display:flex;gap:8px;padding:7px 9px;color:var(--lav);border-bottom:1px solid var(--border)}.ed-tool .tool-r{padding:7px 9px;color:var(--faint)}.ed-final{margin-top:12px;color:var(--text);line-height:1.65}
+  .ed-compose{display:flex;align-items:center;gap:8px;margin:0 11px 11px;padding:10px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--term)}.ed-compose .pr{color:var(--accent)}.ed-compose .ph{flex:1;color:var(--faint)}.ed-compose .mode{padding:3px 5px;border:1px solid var(--border);border-radius:var(--r-xs);color:var(--muted);font-size:8px}
+  .ed-status{grid-column:1/-1;grid-row:3;display:flex;align-items:center;gap:18px;padding:0 10px;background:rgba(124,92,255,.42);color:var(--text-strong);font-size:8.5px}.ed-status .push{margin-left:auto}
+
+  /* FIG.3 — providers graph */
+  .provider-figure svg{aspect-ratio:1.92/1;background:radial-gradient(circle at 50% 54%,var(--accent-faint),transparent 32%)}
+  .provider-figure .arc{fill:none;stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .provider-figure .arc-live{fill:none;stroke:var(--accent);stroke-width:1.2;stroke-linecap:round;stroke-dasharray:4 15;vector-effect:non-scaling-stroke;animation:provider-flow 24s linear infinite}
+  @keyframes provider-flow{to{stroke-dashoffset:-190}}
+  .provider-figure .hub-glow{fill:var(--accent-faint);stroke:var(--accent-mid);stroke-width:1;vector-effect:non-scaling-stroke}
+  .provider-figure .hub{fill:var(--surface-2);stroke:var(--accent);stroke-width:1.4;vector-effect:non-scaling-stroke}
+  .provider-figure .provider{fill:var(--surface);stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .provider-figure .provider-dot{fill:var(--lav)}
+  .provider-figure .cluster{fill:var(--lav);font-size:9px;letter-spacing:.14em}
+  .provider-figure .provider-name{fill:var(--text);font-size:10px}
+  .provider-figure .provider-meta{fill:var(--faint);font-size:8px;letter-spacing:.06em}
+  .provider-figure .hub-name{fill:var(--text-strong);font-family:var(--sans);font-size:28px;font-weight:500}
+  .provider-figure .connect{fill:var(--lav);font-size:9px;letter-spacing:.08em}
+  .provider-key{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--border)}
+  .provider-key .pk{display:flex;align-items:center;gap:10px;padding:13px 17px;border-left:1px solid var(--border);font:400 10px/1.4 var(--mono);color:var(--faint)}.provider-key .pk:first-child{border-left:0}.provider-key .pk b{color:var(--text);letter-spacing:.08em;text-transform:uppercase}.provider-key .sw{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent)}
+
+  /* FIG.5 — benchmark evidence panel */
+  .benchmark-figure{margin-top:var(--s-block)}.benchmark-figure .bmrow{margin:0;padding:16px}.benchmark-figure .proof-strip{margin:0 16px 16px}
+  .bmrow{grid-template-columns:minmax(0,1.12fr) minmax(360px,.88fr)}
+  .lead .lh{min-height:47px}
+  .lrow .nm{display:flex;align-items:center;min-width:0;white-space:nowrap}.lrow .nm .tag{display:inline-flex;flex:none;align-items:center;white-space:nowrap}
+  .bm-evidence{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);overflow:hidden;display:flex;flex-direction:column}
+  .bm-evidence .ev-head{display:flex;align-items:center;justify-content:space-between;min-height:47px;padding:0 17px;border-bottom:1px solid var(--border);font:500 9.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--faint)}.bm-evidence .ev-head b{color:var(--lav)}
+  .reward-chart{padding:17px 17px 8px;flex:1;display:flex;flex-direction:column;justify-content:center}.reward-chart svg{display:block;width:100%;height:auto}.reward-chart .axis,.reward-chart .gridline{fill:none;stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}.reward-chart .gridline{stroke-dasharray:2 7}.reward-chart .curve-shadow{fill:none;stroke:rgba(255,255,255,.06);stroke-width:6;vector-effect:non-scaling-stroke}.reward-chart .curve{fill:none;stroke:var(--text-strong);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.reward-chart .point{fill:var(--surface);stroke:var(--text-strong);stroke-width:1.5;vector-effect:non-scaling-stroke}.reward-chart text{font-family:var(--mono);font-size:8.5px;fill:var(--faint)}.reward-chart .value{fill:var(--text);font-size:11px}
+  .reward-chart .curve-hi{fill:none;stroke:var(--accent);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 6px rgba(124,92,255,.5))}
+  .reward-chart .shine-area{fill:var(--accent-faint);stroke:none}
+  .reward-chart .caps{fill:none;stroke:var(--border-strong);stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
+  .reward-chart .point-hi{fill:var(--surface);stroke:var(--accent);stroke-width:2.2;vector-effect:non-scaling-stroke}
+  .reward-chart .value-hi{fill:var(--lav);font-size:12px}
+  .spec-list{padding:4px 17px 15px}.spec-row{display:flex;align-items:baseline;gap:8px;min-height:27px;font:400 10.5px/1.3 var(--mono);color:var(--faint)}.spec-row::after{order:2;flex:1;border-bottom:1px dotted var(--border-strong);content:""}.spec-row .sk{order:1}.spec-row .sv{order:3;color:var(--text)}.spec-row .sv.ac{color:var(--lav)}
+  .proof-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:15px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--border)}.proof-strip .proof{padding:14px 16px;background:var(--surface)}.proof .pv{font:500 16px/1 var(--mono);color:var(--text-strong)}.proof .pk{margin-top:7px;font:500 8.5px/1.35 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .runbench{margin-top:20px;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;background:var(--surface-3)}
+  .runbench .rb-h{padding:13px 18px;border-bottom:1px solid var(--border);font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .runbench pre{margin:0;padding:18px 20px;overflow-x:auto;font:400 12.5px/1.7 var(--mono);color:var(--text);white-space:pre}
+  .runbench .c{color:var(--faint)} .runbench .k{color:var(--lav)}
+  .provisional{display:flex;align-items:flex-start;gap:9px;margin-top:18px;padding:11px 13px;border:1px solid var(--accent-mid);border-radius:var(--r-sm);background:var(--accent-faint);font:400 10.5px/1.55 var(--mono);color:var(--muted)}.provisional b{color:var(--lav);white-space:nowrap;text-transform:uppercase;letter-spacing:.08em}
+
+  /* FIG.2 — complete harness architecture */
+  .arch-figure svg{aspect-ratio:6.6/1;background:none}
+  .arch-figure .pname{fill:var(--text-strong);font-size:11px;letter-spacing:.05em}
+  .arch-figure .small{fill:var(--muted);font-size:8.5px}
+  .arch-figure .pidx{fill:var(--faint);font-size:9px;letter-spacing:.14em}
+  .arch-figure .pchip{fill:var(--surface);stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke;transition:stroke .2s,fill .2s}
+  .arch-figure .pname,.arch-figure .small{transition:fill .2s}
+  .arch-figure g:hover .pchip{stroke:var(--accent);fill:var(--surface-2)}
+  .arch-figure g:hover .pname{fill:var(--lav)}
+  .arch-figure .loopback{fill:none;stroke:var(--lav);stroke-width:1.4;vector-effect:non-scaling-stroke;opacity:.9}
+  .arch-figure .pill{fill:var(--surface-3);stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .arch-figure .looptext{fill:var(--lav);font-size:9px;letter-spacing:.1em}
+  .arch-figure .plane{fill:var(--surface);stroke:var(--border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+  .arch-figure .plane-hi{fill:var(--surface-2);stroke:var(--border-strong);stroke-width:1.2;vector-effect:non-scaling-stroke}
+  .arch-figure .lane{fill:none;stroke:var(--border-strong);stroke-width:1;stroke-dasharray:4 7;vector-effect:non-scaling-stroke}
+  .arch-figure .flow{fill:none;stroke:var(--muted);stroke-width:1.3;vector-effect:non-scaling-stroke}
+  .arch-figure .self-loop{fill:none;stroke:var(--muted);stroke-width:1.2;stroke-dasharray:5 8;vector-effect:non-scaling-stroke;animation:flow-current 20s linear infinite}
+  .arch-figure .section-lab{fill:var(--muted);font-size:9px;letter-spacing:.15em}
+  .arch-figure .box-lab{fill:var(--text);font-size:10px;letter-spacing:.04em}
+  .arch-figure .box-meta{fill:var(--faint);font-size:8px}
+  .arch-figure .core-title{fill:var(--text-strong);font-family:var(--sans);font-size:23px;font-weight:500}
+  .architecture-copy{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;margin-top:16px}.arch-note{padding:17px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}.arch-note .an{font:500 9px/1 var(--mono);letter-spacing:.12em;color:var(--lav);text-transform:uppercase}.arch-note p{margin:9px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+
+  /* power modes as an operational pipeline, not three prose cards */
+  .power-band::before{background:none}
+  /* diagonal stripe field (moved from Power → What's inside) */
+  .stripe-band{position:relative;isolation:isolate;overflow:hidden}
+  .stripe-band::before{position:absolute;z-index:-1;inset:0;content:"";pointer-events:none;background:repeating-linear-gradient(104deg,transparent 0 34px,var(--line-soft) 35px 36px,transparent 37px 72px);mask-image:linear-gradient(transparent,black 20%,black 86%,transparent)}
+
+  /* ===== Bring your own subscription ===== */
+  .sub-band{position:relative;isolation:isolate;overflow:hidden}
+  /* Cave excavation clip. Darker source than the Power desert clip, so it takes a lighter scrim. */
+  .sub-bg{position:absolute;inset:0;z-index:-2;overflow:hidden}
+  .sub-bg video{width:100%;height:100%;object-fit:cover;opacity:.72}
+  .sub-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,var(--surface-3) 0%,rgba(12,12,14,.42) 30%,rgba(12,12,14,.58) 100%)}
+  @media (prefers-reduced-motion:reduce){.sub-bg{background:linear-gradient(rgba(10,10,11,.28),rgba(10,10,11,.28)),url(assets/sub-poster.jpg) center/cover no-repeat}.sub-bg video{display:none}}
+  .sub-grid{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:clamp(18px,2.6vw,34px);margin-top:var(--s-block);align-items:stretch}
+  .sub-clis{display:flex;flex-direction:column;gap:10px}
+  /* Same thin glass as the Power tools cards — these sit over the cave video, so the blur (not
+     opacity) is what keeps them readable, and the dimmer type is lifted off --muted/--faint. */
+  .scli{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:15px 18px;border:1px solid rgba(255,255,255,.11);border-radius:var(--r-md);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07);transition:border-color .18s ease,background-color .18s ease}
+  .scli:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}
+  .scli .sn{font:500 15px/1 var(--sans);color:var(--text-strong)}
+  .scli .sp{font:500 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#A3A3A8}
+  .sub-flow{border:1px solid rgba(255,255,255,.11);border-radius:var(--r-lg);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 52px -30px rgba(0,0,0,.7);padding:clamp(22px,2.6vw,30px);display:flex;flex-direction:column;justify-content:center}
+  .sub-flow .fh{font:500 10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#A3A3A8;display:flex;align-items:center;gap:9px;margin-bottom:20px}
+  .sub-flow .fh::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent)}
+  .dstep{display:grid;grid-template-columns:132px 1fr;align-items:center;gap:16px}
+  .dstep .db{font:500 13px/1 var(--mono);color:var(--text-strong);border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:11px 13px;text-align:center;background:var(--surface)}
+  .dstep .dn{font:400 12.5px/1.5 var(--sans);color:#A3A3A8}
+  .darrow{margin:7px 0 7px 65px;color:var(--faint);font:400 15px/1 var(--mono)}
+
+  /* ===== Localhost artifacts (browser mockup) ===== */
+  .art-mock{margin-top:var(--s-block);max-width:820px}
+  .bw{border:1px solid var(--border-strong);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);box-shadow:0 50px 110px -55px rgba(0,0,0,.9),0 0 0 1px rgba(124,92,255,.05)}
+  .bw-bar{display:flex;align-items:center;gap:8px;padding:11px 15px;background:#0f0f12;border-bottom:1px solid var(--border)}
+  .bw-bar i{width:11px;height:11px;border-radius:50%;background:#26262b}
+  .bw-url{margin-left:10px;flex:1;font:400 12px/1 var(--mono);color:var(--muted);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px}
+  /* min-width reserves the longest label so the chip doesn't resize as the names cycle */
+  .bw-drop{font:500 11px/1 var(--mono);color:var(--lav);border:1px solid var(--accent);border-radius:var(--r-sm);padding:8px 11px;min-width:calc(16ch + 24px);text-align:center}
+  .bw-body{padding:clamp(22px,3vw,34px)}
+  .pm-tag{font:500 11px/1 var(--mono);letter-spacing:.16em;color:var(--accent)}
+  .pm-title{font:500 clamp(19px,2.2vw,25px)/1.2 var(--sans);color:var(--text-strong);margin:14px 0 10px;letter-spacing:-.02em}
+  .pm-desc{font:400 14.5px/1.6 var(--sans);color:var(--muted);max-width:60ch}
+  .pm-steps{margin:20px 0 0;padding:0;list-style:none;counter-reset:s}
+  .pm-steps li{counter-increment:s;position:relative;padding:11px 0 11px 40px;border-top:1px solid var(--border);font:400 14px/1.5 var(--sans);color:var(--text)}
+  .pm-steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:24px;height:24px;border-radius:var(--r-sm);border:1px solid var(--border-strong);display:grid;place-items:center;font:500 11px/1 var(--mono);color:var(--lav)}
+  /* All three panes share ONE grid cell, so the mock is always as tall as the tallest pane and
+     its height never changes as they cycle. Swapping display here reflowed the page mid-scroll. */
+  .pm-stack{display:grid}
+  .pm-pane{grid-area:1/1;opacity:0;visibility:hidden;pointer-events:none}
+  .pm-pane.on{opacity:1;visibility:visible;pointer-events:auto;animation:pm-in .55s cubic-bezier(.22,1,.36,1)}
+  @keyframes pm-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .bw-drop{transition:color .2s,border-color .2s} .bw-drop.pulse{color:#fff;border-color:var(--lav);box-shadow:0 0 14px rgba(124,92,255,.5)}
+  .bw-url{transition:opacity .25s}
+  .pm-cols{display:grid;grid-template-columns:1fr 230px;gap:32px;margin-top:20px;align-items:start}
+  .pm-cols .pm-steps{margin-top:0}
+  .pm-files{border-left:1px solid var(--border);padding-left:22px}
+  .pm-files .pf-h{font:500 10px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);margin-bottom:13px}
+  .pm-files .pf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:9px 0;font:400 12px/1.2 var(--mono);color:var(--text);border-bottom:1px solid var(--border)}
+  .pm-files .pf:last-child{border-bottom:none}
+  .pm-files .pf-t{font:500 9px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+  .pm-files .pf-t.new{color:var(--lav)}
+  .pm-meta{margin-left:auto;font:400 11px/1 var(--mono);color:var(--faint)}
+  @media(max-width:640px){.pm-cols{grid-template-columns:1fr;gap:18px}.pm-files{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px}.pm-meta{display:none}}
+  .pm-foot{margin-top:22px;display:flex;align-items:center;gap:14px}
+  .pm-approve{font:500 12px/1 var(--mono);color:#fff;background:var(--accent);border-radius:var(--r-sm);padding:11px 15px}
+  .pm-keep{font:400 12.5px/1 var(--sans);color:var(--faint)}
+  @media(max-width:820px){.sub-grid{grid-template-columns:1fr}.dstep{grid-template-columns:110px 1fr}.darrow{margin-left:52px}}
+  /* Power tools ambient video background (bright desert clip → heavily scrimmed for legibility) */
+  .power-bg{position:absolute;inset:0;z-index:-2;overflow:hidden}
+  .power-bg video{width:100%;height:100%;object-fit:cover;opacity:.58}
+  .power-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,var(--surface-3) 0%,rgba(12,12,14,.48) 30%,rgba(12,12,14,.6) 100%)}
+  /* Reduce-motion must still SHOW the scene — fall back to the video's own keyframe, like the hero.
+     Hiding the video alone left this section with an empty background. The flat overlay reproduces
+     the video's opacity:.58, which a background-image can't take. */
+  @media (prefers-reduced-motion:reduce){.power-bg{background:linear-gradient(rgba(10,10,11,.42),rgba(10,10,11,.42)),url(assets/power-poster.jpg) center/cover no-repeat}.power-bg video{display:none}}
+  .power-pipeline{display:grid;grid-template-columns:1fr 32px 1.12fr 32px 1fr;align-items:stretch;margin-top:var(--s-block)}
+  .pipe-node{position:relative;min-height:188px;padding:19px;border:1px solid rgba(255,255,255,.09);border-radius:var(--r-md);background:rgba(19,19,23,.44);backdrop-filter:blur(17px) saturate(1.3);-webkit-backdrop-filter:blur(17px) saturate(1.3);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 26px 62px -40px rgba(0,0,0,.8)}.pipe-node.active{border-color:rgba(124,92,255,.5);background:rgba(26,22,40,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 30px 72px -40px rgba(124,92,255,.5)}
+  .pipe-node .pn{font:500 9px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--lav)}.pipe-node .pt{margin-top:12px;font:500 17px/1.2 var(--sans);color:var(--text-strong)}.pipe-node .pcmd{margin-top:15px;padding:8px 9px;border:1px solid rgba(255,255,255,.06);border-radius:var(--r-sm);background:rgba(6,6,9,.82);font:400 10px/1.5 var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pipe-node .trace{margin-top:12px;font:400 9.5px/1.7 var(--mono);color:var(--faint)}.pipe-node .trace .pass{color:var(--lav)}
+  .pipe-link{position:relative}.pipe-link::before{position:absolute;top:50%;left:5px;right:5px;border-top:1px solid var(--accent);content:""}.pipe-link::after{position:absolute;top:calc(50% - 3px);right:4px;width:6px;height:6px;border-top:1px solid var(--accent);border-right:1px solid var(--accent);content:"";transform:rotate(45deg)}
+
+  @media(max-width:1040px){
+    .loop-legend{grid-template-columns:1fr 1fr}.loop-legend .step:nth-child(3){border-left:0;border-top:1px solid var(--border)}.loop-legend .step:nth-child(4){border-top:1px solid var(--border)}
+    .bmrow{grid-template-columns:1fr}.architecture-copy{grid-template-columns:1fr 1fr}.power-pipeline{grid-template-columns:1fr 24px 1fr 24px 1fr}.pipe-node{padding:15px}
   }
-  @media (max-width:680px){
-    .editor{grid-template-columns:1fr}
-    .eb-activity{flex-direction:row;justify-content:flex-start;gap:22px;padding:10px 16px;border-right:none;border-bottom:1px solid var(--border)}
-    .eb-activity .ai.on::before{left:-3px;top:auto;bottom:-10px;height:2px;width:26px}
-    .eb-editor{max-height:220px}
-    .eb-panel{border-left:none;border-top:1px solid var(--border)}
+  @media(max-width:768px){
+    .figcap{align-items:flex-start;flex-direction:column;justify-content:center;padding-block:11px}.figcap .fig-state{font-size:8px}
+    .editor-shell{grid-template-columns:42px 170px 430px 318px}.provider-key{grid-template-columns:1fr}.provider-key .pk{border-left:0;border-top:1px solid var(--border)}.provider-key .pk:first-child{border-top:0}
+    .architecture-copy{grid-template-columns:1fr}.power-pipeline{grid-template-columns:1fr;gap:10px}.pipe-link{height:22px}.pipe-link::before{top:4px;bottom:4px;left:50%;right:auto;border-top:0;border-left:1px solid var(--accent)}.pipe-link::after{top:auto;bottom:3px;left:calc(50% - 3px);right:auto;transform:rotate(135deg)}
+    .proof-strip{grid-template-columns:1fr}.loop-legend{grid-template-columns:1fr}.loop-legend .step{border-left:0;border-top:1px solid var(--border)}.loop-legend .step:first-child{border-top:0}
   }
-  @media (max-width:560px){
-    nav .links a[href^="#"]{display:none} nav .wrap{gap:14px}
-    .hero h1{font-size:clamp(29px,8vw,38px);text-wrap:wrap;overflow-wrap:break-word}
-    .tui-card{flex-direction:column;gap:14px}
-    .tui-logo{height:96px}
-    footer .cols{grid-template-columns:1fr}
+  @media(max-width:600px){.figure{margin-top:28px}.diagram-scroll svg{min-width:680px}.lrow{grid-template-columns:18px minmax(90px,1fr) 54px}.lrow .track{grid-column:2/-1;margin-top:2px}.lrow .sc{grid-column:3;grid-row:1}.lrow .nm{grid-column:2}.lrow .rk{grid-column:1}.lead .lh{align-items:flex-start;flex-direction:column;gap:7px}.provisional{flex-direction:column}.power-pipeline{margin-top:28px}}
+
+  @media(prefers-reduced-motion:reduce){.blueprint .current,.arch-figure .self-loop{animation:none;stroke-dashoffset:0}.field-band::before{animation:none}}
+
+  footer{padding:60px 0 42px;border-top:1px solid var(--border);background:var(--surface-3)}
+  footer .fcols{display:grid;grid-template-columns:minmax(0,1.7fr) repeat(3,minmax(0,1fr));gap:40px}
+  footer .fbrand .brand{color:var(--text-strong)}
+  footer .fbrand p{margin:16px 0 0;color:var(--muted);font-size:14px;line-height:1.6;max-width:30ch}
+  footer .col h3{font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:0 0 15px}
+  footer .col a{display:block;color:var(--muted);font-size:14px;margin:0;padding:9px 0;min-height:40px;line-height:22px} footer .col a:hover{color:var(--text-strong)}
+  footer .base{margin-top:44px;padding-top:22px;border-top:1px solid var(--border);color:var(--faint);font:500 12px/1.6 var(--mono)}
+  @media(max-width:1040px){footer .fcols{grid-template-columns:1fr 1fr}}
+
+  /* Keyboard focus: the page had no :focus rule at all and fell back to the UA outline. */
+  /* The ring follows each element's OWN radius — setting one here reshaped the components. */
+  :focus-visible{outline:2px solid var(--lav);outline-offset:3px}
+  .brand:focus-visible,footer .col a:focus-visible{border-radius:var(--r-xs)}
+  /* These scrollers sit inside overflow:hidden parents, so an offset ring is clipped away.
+     Draw it inside the box instead — always painted, never clipped. */
+  .diagram-scroll:focus-visible,.editor-scroll:focus-visible,.runbench pre:focus-visible,
+  .fcard .cmd:focus-visible,.hero .install code:focus-visible{outline-offset:-2px;border-radius:var(--r-xs)}
+  /* Ragged-right prose: even the lines and kill the last-line widow. text-wrap:pretty is
+     supported in this engine but measured a NO-OP on these blocks — balance re-breaks them. */
+  .sechead .tag,.hero .sub,.arch-note p,.fcard p,.pm-desc{text-wrap:balance}
+  .provisional span{text-wrap:balance;max-width:78ch}
+  .effgrid{display:grid;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;margin:2px 0 18px}
+  .eff{background:var(--surface-3);padding:15px 16px}
+  .eff .ev{font:500 21px/1 var(--mono);color:var(--text-strong);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .eff .ek{margin-top:7px;font:500 9.5px/1.4 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease} .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.hero .bg{background:url(assets/hero-poster.jpg) center 42%/cover no-repeat}.hero .bg video{display:none}.reveal{opacity:1;transform:none;transition:none}.brand svg path{animation:none;opacity:1}.brand .cur{animation:none}.lrow .track i{transition:none}}
+  @media(max-width:1040px){:root{--band-pad:72px;--s-block:32px;--gutter:20px}}
+  @media(max-width:640px){:root{--band-pad:56px;--s-block:28px;--s-sub:16px;--gutter:16px}}
+  @media (max-width:1240px){.ann{display:none}}
+  @media (max-width:1040px){.navlinks{display:none} .prov,.feat3{grid-template-columns:1fr} .bmrow{grid-template-columns:1fr} .inside{grid-template-columns:1fr 1fr} .statbar .wrap{grid-template-columns:1fr 1fr 1fr} .lrow{grid-template-columns:18px 132px 1fr 54px;} .lrow .heat{display:none}}
+  @media (max-width:600px){
+    nav .wrap{gap:6px}.navright a:not(.ext){display:none}.navright a.ext{margin-left:0;padding:9px 13px;font-size:10.5px}
+    .hero{display:block;min-height:0;padding-top:88px}.hero .install{display:flex;gap:8px;padding:10px 11px;font-size:11px}.hero>.wrap{padding-top:0}.hero .h-in{max-width:none;padding-bottom:30px}.hero .sub{max-width:29ch}.hero .statbar{width:100%}.statbar .wrap{grid-template-columns:repeat(2,1fr);padding:0}.statbar .s{min-height:104px;padding:16px 18px}.statbar .s:nth-child(5){grid-column:1/-1}.statbar .s:nth-child(odd){border-left:0}.statbar .s:nth-child(n+3){border-top:1px solid var(--border)}
+    .inside{grid-template-columns:1fr}
   }
-  @media (max-width:780px){
-    .bmgrid{grid-template-columns:1fr!important;gap:24px!important}
-    .swe-teaser{grid-template-columns:1fr!important;gap:0!important;text-align:center}
-    .swe-copy{border-left:none!important;padding-left:0!important;border-top:1px solid var(--border);margin-top:22px;padding-top:22px}
-  }
-  /* ---- artifact showcase: an animated localhost browser with a live dropdown ---- */
-  .browser{max-width:900px;margin:44px auto 0;border:1px solid var(--border-strong);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:0 40px 90px -50px rgba(0,0,0,.85)}
-  .browser .chrome{display:flex;align-items:center;gap:12px;padding:11px 14px;background:#0f0f11;border-bottom:1px solid var(--border)}
-  .browser .lights{display:flex;gap:7px} .browser .lights i{width:11px;height:11px;border-radius:50%;background:#2a2a2e;display:inline-block}
-  .browser .url{flex:1;display:flex;align-items:center;gap:8px;background:var(--term);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font:400 12.5px/1 var(--mono);color:var(--muted);min-width:0}
-  .browser .url .lock{color:var(--faint)} .browser .url .host{color:var(--text)} .browser .url .q{color:var(--accent);transition:opacity .3s}
-  .abar{display:flex;align-items:center;gap:12px;padding:9px 14px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap}
-  .abar .mk{font:800 14px/1 var(--mono);color:var(--accent);letter-spacing:.06em}
-  .adrop{position:relative;display:inline-flex;align-items:center;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:8px;padding:7px 30px 7px 13px;font:600 13px/1 var(--sans);color:var(--text);min-width:170px;transition:border-color .2s}
-  .adrop.pulse{border-color:var(--accent)} .adrop::after{content:"\25BE";position:absolute;right:11px;color:var(--muted);font-size:11px}
-  .abar .acount{color:var(--faint);font:500 12px/1 var(--mono)} .abar .aspacer{flex:1}
-  .abtn{font:600 12px/1 var(--sans);border:1px solid var(--border-strong);border-radius:7px;padding:7px 12px;color:var(--muted);background:transparent}
-  .abtn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  .astage{position:relative;height:308px;background:var(--bg);overflow:hidden}
-  .apane{position:absolute;inset:0;opacity:0;transform:translateY(10px);transition:opacity .55s ease,transform .55s ease;padding:26px;display:flex;flex-direction:column;justify-content:center}
-  .apane.on{opacity:1;transform:none}
-  .apane .amark{font:800 15px/1 var(--mono);color:var(--accent);letter-spacing:.08em;margin-bottom:14px}
-  .apane h4{font:800 26px/1.1 var(--sans);letter-spacing:-.02em;margin:0 0 4px;color:var(--text-strong)}
-  .apane .asub{color:var(--muted);font-size:13px;margin-bottom:18px}
-  .stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .stat3 .s{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 14px}
-  .stat3 .s .k{font:600 10px/1 var(--mono);color:var(--muted);letter-spacing:.1em}
-  .stat3 .s .v{font:800 24px/1.1 var(--sans);margin-top:7px;color:var(--text-strong)}
-  .stat3 .s .v small{font-size:12px;color:var(--muted);font-weight:600}
-  .stat3 .s .bar{height:4px;border-radius:3px;background:var(--border);margin-top:10px;overflow:hidden}
-  .stat3 .s .bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
-  .price{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .price .p{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
-  .price .p.hi{border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}
-  .price .p .t{font:700 12px/1 var(--sans);color:var(--muted)} .price .p .amt{font:800 28px/1 var(--sans);margin:10px 0;color:var(--text-strong)}
-  .price .p .amt small{font-size:12px;color:var(--muted);font-weight:600} .price .p .cta{margin-top:8px;font:600 11px/1 var(--sans);color:var(--accent)}
-  .todo .row{display:flex;align-items:center;gap:11px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:9px;font-size:14px;color:var(--text)}
-  .todo .box{width:16px;height:16px;border-radius:5px;border:1.5px solid var(--border-strong);flex:none}
-  .todo .row.done .box{background:var(--accent);border-color:var(--accent)} .todo .row.done span{color:var(--faint);text-decoration:line-through}
-  @media(max-width:640px){.stat3,.price{grid-template-columns:1fr 1fr}.astage{height:340px}}
-  /* ---- IDE panel: play the interaction (thinking -> stream -> diff -> test -> done) ---- */
-  .eb-think{display:none;align-items:center;gap:8px;font:400 12px/1.5 var(--mono);color:var(--muted);padding:2px 0 6px}
-  .eb-think .tsp{color:var(--accent)}
-  .eb-pbody.playing > *:not(.eb-think){opacity:0;transform:translateY(6px)}
-  .eb-reveal{opacity:1 !important;transform:none !important;transition:opacity .42s ease,transform .42s ease}
-  .eb-editor .ln.hl{transition:background .5s ease}
-  .eb-editor .ln.hl.flash{background:var(--accent-soft)}
-  #artifacts h2 code{font-family:var(--mono);font-size:.82em;color:var(--accent);background:none}
-  .mplan{width:100%;max-width:560px} .mptag{font:600 10px/1 var(--mono);letter-spacing:.16em;color:var(--faint);margin-bottom:9px}
-  .mpt{font:800 22px/1.15 var(--sans);color:var(--text-strong);letter-spacing:-.02em;margin-bottom:6px}
-  .mpsum{color:var(--muted);font-size:13px;margin-bottom:16px;line-height:1.5}
-  .mpstep{display:flex;gap:11px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 13px;margin-bottom:8px;font-size:13.5px;color:var(--text);line-height:1.45}
-  .mpstep .n{flex:none;width:20px;height:20px;border-radius:6px;background:var(--accent);color:#fff;font:700 11px/20px var(--mono);text-align:center}
-  .mplan code{font-family:var(--mono);font-size:.85em;background:var(--surface2);color:var(--lav);padding:.1em .4em;border-radius:5px}
 </style>
 </head>
 <body>
 
-<div class="topbar"><div class="wrap"><span><b class="js-ver">v0.24.0</b> — <b>/goal</b> to set a finish line, a live <b>settings</b> menu with sampling controls, and a stronger default <b>skill</b> set&nbsp;</span><a href="/vscode/">Get it →</a></div></div>
-
+<a class="skip" href="#content">Skip to content</a>
 <nav><div class="wrap">
-  <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
-  <div class="links">
-    <a href="#why">Why</a>
-    <a href="#terminal">Terminal</a>
-    <a href="#extension">Extension</a>
-    <a href="#providers">Providers</a>
-    <a href="#benchmark">Benchmark</a>
-    <a href="https://github.com/OpenPeach-ai/dgc">GitHub</a>
-    <a class="ext" href="/vscode/">VS&nbsp;Code / Cursor</a>
+  <a class="brand" href="#top"><svg viewBox="0 0 90 90" fill="currentColor"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></a>
+  <a class="ann" href="#subscription"><b>New</b>Bring your own subscription<i>&nearr;</i></a>
+  <div class="navlinks">
+    <a href="#cli">CLI <span class="n">01</span></a>
+    <a href="#extension">Extension <span class="n">02</span></a>
+    <a href="#providers">Providers <span class="n">03</span></a>
+    <a href="#benchmark">Benchmark <span class="n">04</span></a>
+    <a href="#power">Power <span class="n">05</span></a>
   </div>
+  <span class="navspacer"></span>
+  <div class="navright"><a href="docs/index.html">Docs</a><a href="https://github.com/OpenPeach-ai/dgc" target="_blank" rel="noopener">GitHub</a><a class="ext" href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc" target="_blank" rel="noopener">VS&nbsp;Code / Cursor</a></div>
 </div></nav>
 
-<header class="hero"><div class="wrap">
-  <div class="left">
-    <p class="eyebrow">Local-first coding agent</p>
-    <h1>A coding agent for <span class="g">the models you run.</span></h1>
-    <p class="sub">Vibe DGC is a full-screen agent that lives in your terminal — pointed at your own local model. It reads, edits, runs and verifies your code, with permission modes you control.</p>
-    <div class="cmd"><span class="p">$</span><code id="cmd">curl -fsSL https://vibedgc.com/install.sh | bash</code><button id="copy" onclick="copyCmd()">Copy</button></div>
-    <div class="herobtns">
-      <a class="btn primary" href="vscode:extension/vibedgc.dgc"><svg viewBox="0 0 24 24"><path d="M12 3v9.6l3.3-3.3L16.7 10.7 12 15.4 7.3 10.7 8.7 9.3 12 12.6V3h0zM5 18h14v2.5H5z"/></svg>Install in VS&nbsp;Code</a>
-      <a class="btn ghost" href="cursor:extension/vibedgc.dgc"><svg viewBox="0 0 24 24"><path d="M12 3v9.6l3.3-3.3L16.7 10.7 12 15.4 7.3 10.7 8.7 9.3 12 12.6V3h0zM5 18h14v2.5H5z"/></svg>Install in Cursor</a>
-      <a class="btn ghost" href="https://github.com/OpenPeach-ai/dgc">
-        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
-    </div>
-    <p class="exthint">Opens your editor's extension page. No editor? <a href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc">View on the Marketplace</a> or <a href="/vscode/">install manually</a>.</p>
-    <p class="proof">PolyForm&nbsp;Noncommercial&nbsp; <b>·</b> &nbsp;Pure Python&nbsp; <b>·</b> &nbsp;15+ providers&nbsp; <b>·</b> &nbsp;CLI + VS&nbsp;Code</p>
-  </div>
+<main id="content">
+<header class="hero" id="top">
+  <div class="bg"><video autoplay muted loop playsinline preload="auto" poster="assets/hero-poster.jpg"><source src="assets/hero.mp4" type="video/mp4"></video></div>
+  <div class="wrap"><div class="h-in">
+    <span class="eyebrow">A coding agent for the models you run</span>
+    <h1>Own your <span class="ac">coding agent</span>.</h1>
+    <p class="sub">DGC runs a real agentic coding loop against a local model, any OpenAI-compatible endpoint, or your own Claude / Codex / Qwen / Kimi / Copilot subscription — in the terminal and in VS&nbsp;Code. Your models, your machine, your data.</p>
+    <div class="cta"><a class="btn solid" href="docs/getting-started.html">Get started →</a><a class="btn" href="#benchmark">See the benchmark</a></div>
+    <div class="install"><span class="g">$</span><code id="inst">curl -fsSL vibedgc.com/install.sh | bash</code><button id="copy">copy</button></div>
+  </div></div>
+  <div class="statbar"><div class="wrap">
+    <div class="s"><div class="v"><b>94.4%</b></div><div class="k">DGC · Aider polyglot (27B)</div></div>
+    <div class="s"><div class="v">61.3%*</div><div class="k">SWE-bench Lite · provisional</div></div>
+    <div class="s"><div class="v">11</div><div class="k">Providers in /connect</div></div>
+    <div class="s"><div class="v">5</div><div class="k">Subscriptions</div></div>
+    <div class="s"><div class="v">100%</div><div class="k">Local · on your machine</div></div>
+  </div></div>
+</header>
 
-  <!-- Faithful mockup of the DGC full-screen welcome screen -->
-  <div class="win heroterm">
-    <div class="bar"><i></i><i></i><i></i><span class="ti">dgc — ~/project</span></div>
-    <div class="tui-body">
-      <div class="tui-card">
-<div class="tui-logo" role="img" aria-label="/// DGC"></div>
-        <div class="tui-meta">
-          <div class="tui-title"><svg class="tmk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>Vibe DGC <span class="js-ver">v0.24.0</span></div>
-          <div class="tui-tag">a coding agent for the models you run</div>
-          <div class="tui-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
-          <div class="tui-menu">
-            <div class="row"><span class="l">New session</span><span class="k">Ctrl+N</span></div>
-            <div class="row"><span class="l">Switch mode</span><span class="k">Shift+Tab</span></div>
-            <div class="row"><span class="l">Commands</span><span class="k">/help</span></div>
-            <div class="row"><span class="l">Quit</span><span class="k">Ctrl+Q</span></div>
+<!-- ===== FULL CLI VIEW ===== -->
+<section class="band" id="cli"><div class="wrap">
+  <div class="sechead"><div class="lab">The CLI.</div><h2>A real agentic loop, in your terminal.</h2><div class="tag">Reads, edits, runs tests, and self-corrects — permission modes, plans, skills, hooks, and a multi-agent fleet, in one focused terminal UI.</div></div>
+  <div class="figpair">
+    <figure class="figure loop-figure reveal">
+      <figcaption class="figcap"><span><span class="fig-name">FIG.1</span> — AGENTIC LOOP</span><span class="fig-state">SELF-CORRECTING</span></figcaption>
+      <div class="diagram-scroll" data-scroll-start="center">
+        <svg class="blueprint" viewBox="0 0 500 430" role="img" aria-labelledby="loop-title loop-desc">
+          <title id="loop-title">DGC agentic coding loop</title><desc id="loop-desc">A clockwise loop connects read, edit, run and verify, returning to read when verification finds another issue.</desc>
+          <circle class="guide" cx="250" cy="215" r="148"/>
+          <path class="hair" d="M250 95L405 215L250 335L95 215Z"/>
+          <path class="current" d="M250 95L405 215L250 335L95 215L250 95"/>
+          <g class="loop-dir" aria-hidden="true">
+            <path class="loop-arrow" transform="translate(327.5 155) rotate(37.7)" d="M-7 -6 L1 0 L-7 6"/>
+            <path class="loop-arrow" transform="translate(327.5 275) rotate(142.3)" d="M-7 -6 L1 0 L-7 6"/>
+            <path class="loop-arrow" transform="translate(172.5 275) rotate(217.7)" d="M-7 -6 L1 0 L-7 6"/>
+            <path class="loop-arrow" transform="translate(172.5 155) rotate(322.3)" d="M-7 -6 L1 0 L-7 6"/>
+          </g>
+          <g opacity=".7"><path class="hair" d="M237 215H263M250 202V228"/><path class="hair" d="M242 207L258 223M258 207L242 223"/></g>
+          <g class="loop-node"><circle class="halo" cx="250" cy="95" r="48"/><circle class="node-dot" cx="250" cy="95" r="14"/><text class="label" x="250" y="52" text-anchor="middle">READ</text><text class="small" x="250" y="150" text-anchor="middle">read · grep</text></g>
+          <g class="loop-node"><circle class="halo" cx="405" cy="215" r="48"/><circle class="node-dot" cx="405" cy="215" r="14"/><text class="label" x="405" y="284" text-anchor="middle">EDIT</text><text class="small" x="405" y="303" text-anchor="middle">multi_edit</text></g>
+          <g class="loop-node"><circle class="halo" cx="250" cy="335" r="48"/><circle class="node-dot" cx="250" cy="335" r="14"/><text class="label" x="250" y="392" text-anchor="middle">RUN</text><text class="small" x="250" y="300" text-anchor="middle">run tests</text></g>
+          <g class="loop-node"><circle class="halo" cx="95" cy="215" r="48"/><circle class="node-dot" cx="95" cy="215" r="14"/><text class="label" x="95" y="284" text-anchor="middle">VERIFY</text><text class="small" x="95" y="303" text-anchor="middle">self-correct</text></g>
+          <text class="micro" x="250" y="207" text-anchor="middle">DGC CORE</text><text class="micro" x="250" y="234" text-anchor="middle">UNTIL VERIFIED</text>
+        </svg>
+      </div>
+    </figure>
+    <figure class="figure ladder-figure reveal">
+      <figcaption class="figcap"><span><span class="fig-name">FIG.2</span> — PERMISSION LADDER</span><span class="fig-state">YOU SET THE ROPE</span></figcaption>
+      <div class="ladder">
+        <div class="rung" style="--f:26%"><div class="rtop"><span class="rk">plan</span><span class="rd">read-only — research &amp; propose</span></div><div class="rgauge"><i></i></div></div>
+        <div class="rung" style="--f:52%"><div class="rtop"><span class="rk">default</span><span class="rd">ask before every shell command</span></div><div class="rgauge"><i></i></div></div>
+        <div class="rung" style="--f:78%"><div class="rtop"><span class="rk">accept-edits</span><span class="rd">auto-apply edits · gate the shell</span></div><div class="rgauge"><i></i></div></div>
+        <div class="rung hot" style="--f:100%"><div class="rtop"><span class="rk">auto</span><span class="rd">full autonomy — nothing gated</span></div><div class="rgauge"><i></i></div></div>
+        <div class="laxis"><span>less autonomy</span><span>⇧⇥ cycles live</span><span>more</span></div>
+      </div>
+    </figure>
+  </div>
+  <!-- the DGC welcome screen (faithful to what launches in the terminal) -->
+  <div class="welwrap reveal">
+    <div class="cli-chrome"><i></i><i></i><i></i><span class="path">dgc — ~/acme-api</span></div>
+    <div class="wel-body">
+      <div class="wel-card">
+        <div class="wel-logo" role="img" aria-label="/// DGC"></div>
+        <div class="wel-meta">
+          <div class="wel-title">Vibe DGC <span class="js-ver">v0.25.0</span></div>
+          <div class="wel-tag">a coding agent for the models you run</div>
+          <div class="wel-cta"><b>[ New session ]</b><span>  or just start typing</span></div>
+          <div class="wel-menu">
+            <div class="row"><span class="l">New session</span><span class="k">Ctrl+N</span><span class="s">/new</span></div>
+            <div class="row"><span class="l">Switch mode</span><span class="k">Shift+Tab</span><span class="s">/mode</span></div>
+            <div class="row"><span class="l">Commands</span><span class="k">type /</span><span class="s">/help</span></div>
+            <div class="row"><span class="l">Quit</span><span class="k">Ctrl+Q</span><span class="s">/quit</span></div>
           </div>
         </div>
       </div>
-      <div class="tui-sp"></div>
-      <div class="tui-comp">
-        <span class="pr">❯</span><span class="ph">Ask DGC to build, fix or explain…</span><span class="cc"></span>
-        <span class="lbl">qwen3:8b · default</span>
-      </div>
+      <div class="wel-comp"><span class="pr">❯</span><span class="ph">Ask DGC to build, fix or explain…</span><span class="cc"></span><span class="md">qwen3.8:27b · default</span></div>
     </div>
   </div>
-</div></header>
-
-<section id="why"><div class="wrap">
-  <div class="measure">
-    <p class="eyebrow">Why DGC</p>
-    <h2>A real harness, not a chat wrapper.</h2>
-    <p class="lede">Tools, four permission modes, plan mode, memory, web search, localhost artifacts — everything a serious coding agent needs, running against whatever model you point it at.</p>
-  </div>
-  <div class="grid g3">
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div><h3>Your model, your machine</h3><p>Ollama, llama.cpp, LM&nbsp;Studio, vLLM — or any OpenAI-compatible cloud. Code stays local unless <b>you</b> pick a cloud model.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></div><h3>Reads, edits, runs, verifies</h3><p>Streams every tool call, diff and result. <b>Four permission modes</b> set the rope: ask, auto-edit, plan-first, or full-auto.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div><h3>Terminal or IDE</h3><p>A full-screen Python TUI <b>and</b> a native VS&nbsp;Code &amp; Cursor extension — same agent, same local models, inline diffs.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><h3>A fleet, not one agent</h3><p><b>Ctrl+N</b> spawns another agent — even mid-turn; <b>Ctrl+\</b> opens a dashboard of every agent's live state, to attach, pin or rename.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div><h3>Sub-agents &amp; hooks</h3><p>The <code>task</code> tool delegates to a sub-agent on <b>its own model or host</b>. Plus MCP servers, background shells, checkpoints, rewind and hooks.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><h3>Artifacts on localhost</h3><p>A proposed plan (or app, or chart) rendered as a page on <b>one local port</b>, with a dropdown to switch — the list survives a restart.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M9 3h6v2H9z"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 14l2 2 4-4"/></svg></div><h3>Plan mode that sticks</h3><p>Read-only research → an approved plan → execute. Saved to <b><code>plan.md</code></b> beside the session; reopen with <code>/view-plan</code>.</p></div>
-    <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div><h3>Edits that land</h3><p>A tiered matcher forgives a local model's near-misses — smart quotes, indentation, a drifted line — and <b><code>multi_edit</code></b> applies many hunks at once, keeping the good ones.</p></div>
-  </div>
-  <p class="subhead">The toolbox</p>
-  <div class="chips">
-    <span class="chip">read_file</span><span class="chip">write_file</span><span class="chip">edit_file</span><span class="chip">multi_edit</span><span class="chip">apply_patch</span><span class="chip">bash</span><span class="chip">bash_output</span><span class="chip">bash_kill</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip">repo_map</span><span class="chip">web_fetch</span><span class="chip">web_search</span><span class="chip">task</span><span class="chip">artifact</span><span class="chip">todo</span><span class="chip">skill</span><span class="chip">add_skill</span><span class="chip">save_memory</span><span class="chip">present_plan</span><span class="chip">propose_options</span>
-  </div>
-  <p class="note">Also in the box: <b>artifacts</b> (localhost previews the agent proposes opening), in-app <code>/docs</code>, next-prompt suggestions, vision / image input, model fallback, custom slash-commands, 16 bundled skills, and MCP servers.</p>
+  <div class="cli-cap"><span class="c">permission modes</span><span class="c">/plan</span><span class="c">skills</span><span class="c">lifecycle hooks</span><span class="c">multi-agent fleet</span><span class="c">rewind</span><span class="c">/goal</span><span class="c">MCP</span></div>
 </div></section>
 
-<section id="terminal"><div class="wrap">
-  <div class="center">
-    <p class="eyebrow">In the terminal</p>
-    <h2>Watch it work.</h2>
-    <p class="lede">Every prompt streams the model's reasoning, each tool call, the diffs it writes and the commands it runs — right in your terminal.</p>
-  </div>
-  <div class="win term" style="margin-top:40px">
-    <div class="bar"><i></i><i></i><i></i><span class="ti" id="ti">dgc — ~/project</span></div>
-    <div class="head"><b>Vibe DGC</b> <span id="hd">· qwen3:8b · default</span></div>
-    <div class="scene" id="scene"></div>
-  </div>
-  <div class="dots" id="dots"></div>
+<!-- ===== VS CODE / CURSOR EXTENSION ===== -->
+<section class="band alt field-band" id="extension"><div class="wrap">
+  <div class="sechead"><div class="lab">The extension.</div><h2>The same harness, native to your editor.</h2><div class="tag">Real tool calls, readable diffs, standing goals, permission decisions, and plan feedback — without reducing the agent to a chat bubble.</div></div>
+  <figure class="figure editor-figure reveal">
+    <figcaption class="figcap"><span><span class="fig-name">FIG.3</span> — EDITOR SURFACE</span><span class="fig-state">VS CODE · CURSOR · PROTOCOL V4</span></figcaption>
+    <div class="editor-scroll">
+      <div class="editor-shell" role="img" aria-label="DGC extension in a code editor showing a file tree, rate limiting diff, and structured agent turn">
+        <div class="ed-titlebar"><span class="ed-dots"><i></i><i></i><i></i></span><span class="ed-path">acme-api — Visual Studio Code</span><span class="ed-branch">main*</span></div>
+        <aside class="ed-activity" aria-hidden="true"><span class="ed-icon">◇</span><span class="ed-icon">⌕</span><span class="ed-icon active">///</span><span class="ed-icon">⑂</span><span class="ed-icon">⚙</span></aside>
+        <aside class="ed-tree"><div class="ttl">Explorer · acme-api</div><div class="tr"><span class="chev">⌄</span> src</div><div class="tr indent"><span>◇</span> index.ts</div><div class="tr indent sel"><span>◇</span> login.ts</div><div class="tr indent"><span>◇</span> rateLimit.ts</div><div class="tr"><span class="chev">⌄</span> tests</div><div class="tr indent"><span>◇</span> login.test.ts</div><div class="tr"><span class="chev">›</span> package.json</div><div class="tr"><span class="chev">›</span> tsconfig.json</div></aside>
+        <div class="ed-main"><div class="ed-tabs"><span class="ed-tab active">◇ login.ts&nbsp; M</span><span class="ed-tab">◇ login.test.ts&nbsp; M</span></div><div class="ed-code">
+          <div class="code-line"><span class="ln">1</span><span class="sg"></span><span class="src"><span class="tok">import</span> { Router } from 'express'</span></div>
+          <div class="code-line add"><span class="ln">2</span><span class="sg">+</span><span class="src"><span class="tok">import</span> { <span class="fn">rateLimit</span> } from '../mw/rateLimit'</span></div>
+          <div class="code-line"><span class="ln">3</span><span class="sg"></span><span class="src"></span></div>
+          <div class="code-line"><span class="ln">4</span><span class="sg"></span><span class="src"><span class="tok">const</span> router = Router()</span></div>
+          <div class="code-line del"><span class="ln"></span><span class="sg">−</span><span class="src">router.post('/login', loginHandler)</span></div>
+          <div class="code-line add"><span class="ln">5</span><span class="sg">+</span><span class="src">router.post('/login', <span class="fn">rateLimit</span>(5, '1m'), loginHandler)</span></div>
+          <div class="code-line"><span class="ln">6</span><span class="sg"></span><span class="src"></span></div>
+          <div class="code-line"><span class="ln">7</span><span class="sg"></span><span class="src"><span class="tok">export default</span> router</span></div>
+        </div><div class="ed-diffstat"><span class="dp">◇ login.ts</span><span class="da">+2</span><span class="dd">−1</span><span class="drest">· staged · npm test ✓ 12 passed</span></div></div>
+        <aside class="ed-agent"><div class="ed-agent-head"><span class="mark">/// DGC</span><span>Agent</span><span class="ctx">32k · 41%</span></div><div class="goal-strip"><span class="goal-dot"></span><span class="goal-copy">Goal · ship verified login hardening</span><span class="goal-time">08:42</span></div><div class="ed-chat"><div class="usr">Add rate limiting to <code>/api/login</code> and cover it with a test.</div><div class="thinking">Inspecting the route and middleware boundary…</div><div class="ed-tool"><div class="tool-h">→ Read <span>src/routes/login.ts</span></div><div class="tool-r">42 lines · symbols indexed</div></div><div class="ed-tool"><div class="tool-h">✎ Edit <span>2 files</span></div><div class="tool-r">+ limiter middleware · + regression case</div></div><div class="ed-tool"><div class="tool-h">$ Bash <span>npm test -- login</span></div><div class="tool-r">12 passed · 2.4s</div></div><div class="ed-final">Implemented a per-IP sliding window and verified both rejection and recovery paths.</div></div><div class="ed-compose"><span class="pr">❯</span><span class="ph">Ask DGC to keep going…</span><span class="mode">accept-edits</span></div></aside>
+        <div class="ed-status"><span>⑂ main*</span><span>✓ tests</span><span>UTF-8</span><span class="push">DGC · qwen3.8:27b</span></div>
+      </div>
+    </div>
+  </figure>
+  <div class="cli-cap"><span class="c">structured tool cards</span><span class="c">inline diffs</span><span class="c">goal timer</span><span class="c">pause + cancel</span><span class="c">plan review</span><span class="c">MCP + skills</span></div>
 </div></section>
 
-<section id="artifacts"><div class="wrap">
-  <div class="center">
-    <p class="eyebrow">The part no local-model harness does</p>
-    <h2>Your <code>plan.md</code> &mdash; made to look at.</h2>
-    <p class="lede">When the agent proposes a plan, DGC renders it as a clean page at a <b>localhost URL</b> &mdash; the steps, the files it&rsquo;ll touch, the approach &mdash; as a rendered page, not raw markdown scrolling past the terminal. The CLI offers to open it; you approve in the terminal, or keep planning. Every proposal shares one port behind a dropdown.</p>
-  </div>
-  <div class="browser" role="img" aria-label="A localhost browser previewing DGC artifacts with a dropdown to switch between them">
-    <div class="chrome">
-      <span class="lights"><i></i><i></i><i></i></span>
-      <span class="url"><span class="lock">&#9670;</span> <span class="host">127.0.0.1:45000</span><span class="q" id="aurl">/?a=a1</span></span>
-    </div>
-    <div class="abar">
-      <span class="mk">///</span>
-      <span class="adrop" id="adrop">refactor auth plan</span>
-      <span class="acount" id="acount">3 proposals</span>
-      <span class="aspacer"></span>
-      <span class="abtn primary">Open</span><span class="abtn">Stop</span>
-    </div>
-    <div class="astage" id="astage">
-      <div class="apane on">
-        <div class="mplan">
-          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
-          <div class="mpt">Refactor auth into its own package</div>
-          <div class="mpsum">Move the token + verify helpers into an <code>auth/</code> package and re-export them, so the app imports from one place.</div>
-          <div class="mpstep"><span class="n">1</span><span>Create the <code>auth/</code> package; move <code>token.py</code> and <code>verify.py</code> in.</span></div>
-          <div class="mpstep"><span class="n">2</span><span>Re-export both from <code>auth/__init__.py</code>.</span></div>
-          <div class="mpstep"><span class="n">3</span><span>Update the 7 imports, then run the suite.</span></div>
-        </div>
-      </div>
-      <div class="apane">
-        <div class="mplan">
-          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
-          <div class="mpt">Add an <code>iat</code> claim to the JWT</div>
-          <div class="mpsum">Stamp tokens with an issued-at time and cover it with a test &mdash; a two-line change.</div>
-          <div class="mpstep"><span class="n">1</span><span>In <code>sign()</code>, add <code>iat: now()</code> to the payload.</span></div>
-          <div class="mpstep"><span class="n">2</span><span>Add a test asserting the claim is present + valid.</span></div>
-          <div class="mpstep"><span class="n">3</span><span>Run <code>pytest -q</code> to confirm both pass.</span></div>
-        </div>
-      </div>
-      <div class="apane">
-        <div class="mplan">
-          <div class="mptag">/// &nbsp; PROPOSED PLAN</div>
-          <div class="mpt">Cache the <code>/profile</code> route</div>
-          <div class="mpsum">Add a small in-memory TTL cache so repeat profile reads skip the DB.</div>
-          <div class="mpstep"><span class="n">1</span><span>Wrap the handler with a 60s TTL cache keyed by user id.</span></div>
-          <div class="mpstep"><span class="n">2</span><span>Invalidate on profile update.</span></div>
-          <div class="mpstep"><span class="n">3</span><span>Add a test for hit / miss / invalidation.</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="grid g3" style="margin-top:34px">
-    <div class="card"><div class="ic">One port</div><h3>localhost, with a dropdown</h3><p>Every proposal shares <code>127.0.0.1:45000</code> behind a top-left switcher &mdash; open one, switch, or stop it. The list is saved, so it survives a restart. Bind it to your <b>LAN</b> to read a plan on your phone.</p></div>
-    <div class="card"><div class="ic">A separate skill</div><h3>dgc-design, for your own frontends</h3><p>Turn on the <b>dgc-design</b> skill and DGC builds <i>your</i> frontends in its own design language &mdash; the fonts, palette and spacing of this site. It&rsquo;s a standalone skill, off by default; artifacts just switch it on automatically, so every preview looks right.</p></div>
-    <div class="card"><div class="ic">Still just markdown</div><h3>It&rsquo;s your <code>plan.md</code></h3><p>The page is a render of the real <b><code>plan.md</code></b> DGC saves beside the session &mdash; reopen it with <code>/view-plan</code>, and approve or keep planning right in the terminal. Fancy to look at, plain to keep.</p></div>
-  </div>
-</div></section>
-
-<section id="extension"><div class="wrap">
-  <div class="center">
-    <span class="tag2">VS Code · Cursor</span>
-    <h2 style="margin-top:16px">DGC, docked in your editor.</h2>
-    <p class="lede">The same agent and the same local models, inside a native side panel — streaming tool cards, inline diffs, session resume and a purple composer. It installs alongside the CLI.</p>
-  </div>
-
-  <!-- Editor (VS Code / Cursor-like) mockup with the DGC panel -->
-  <div class="win ide">
-    <div class="bar"><i></i><i></i><i></i><span class="ti">auth.ts — my-app — Cursor</span></div>
-    <div class="editor">
-      <!-- activity bar -->
-      <div class="eb-activity">
-        <span class="ai"><svg viewBox="0 0 24 24"><path d="M3 5h18M3 12h18M3 19h18"/></svg></span>
-        <span class="ai"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span>
-        <span class="ai"><svg viewBox="0 0 24 24"><path d="M6 3v12M6 21a3 3 0 100-6 3 3 0 000 6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 9c0 6-12 2-12 6"/></svg></span>
-        <span class="ai on"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></span>
-      </div>
-      <!-- file tree -->
-      <div class="eb-tree">
-        <div class="th">Explorer — my-app</div>
-        <div class="f dir">▾ src</div>
-        <div class="f ind sel">auth.ts<span class="dot" style="margin-left:auto">●</span></div>
-        <div class="f ind">routes.ts</div>
-        <div class="f ind">server.ts</div>
-        <div class="f dir">▸ tests</div>
-        <div class="f">package.json</div>
-        <div class="f">tsconfig.json</div>
-      </div>
-      <!-- editor pane -->
-      <div class="eb-editor">
-        <div class="eb-tabs"><span class="tab on">auth.ts<span class="m">●</span></span><span class="tab">routes.ts</span></div>
-        <div class="eb-code">
-          <div class="ln"><span class="g">1</span><span class="c"><span class="tc">// issue an access token for a verified user</span></span></div>
-          <div class="ln"><span class="g">2</span><span class="c"><span class="tk">import</span> jwt <span class="tk">from</span> <span class="ts">"jsonwebtoken"</span>;</span></div>
-          <div class="ln"><span class="g">3</span><span class="c"></span></div>
-          <div class="ln"><span class="g">4</span><span class="c"><span class="tk">export function</span> <span class="tf">sign</span>(sub: <span class="tf">string</span>) {</span></div>
-          <div class="ln"><span class="g">5</span><span class="c">  <span class="tk">const</span> now = <span class="tf">Math</span>.floor(<span class="tf">Date</span>.now() / <span class="ts">1000</span>);</span></div>
-          <div class="ln hl"><span class="g">6</span><span class="c">  <span class="tk">return</span> jwt.<span class="tf">sign</span>({ sub, iat: now }, <span class="tv">KEY</span>, {</span></div>
-          <div class="ln hl"><span class="g">7</span><span class="c">    algorithm: <span class="ts">"HS256"</span>, expiresIn: <span class="ts">"15m"</span>,</span></div>
-          <div class="ln"><span class="g">8</span><span class="c">  });</span></div>
-          <div class="ln"><span class="g">9</span><span class="c">}</span></div>
-          <div class="ln"><span class="g">10</span><span class="c"></span></div>
-          <div class="ln"><span class="g">11</span><span class="c"><span class="tk">export function</span> <span class="tf">verify</span>(token: <span class="tf">string</span>) {</span></div>
-          <div class="ln"><span class="g">12</span><span class="c">  <span class="tk">return</span> jwt.<span class="tf">verify</span>(token, <span class="tv">KEY</span>);</span></div>
-          <div class="ln"><span class="g">13</span><span class="c">}</span></div>
-        </div>
-      </div>
-      <!-- DGC panel -->
-      <div class="eb-panel">
-        <div class="eb-phead"><span class="mark" style="font-size:13px"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC</span><span class="pd">qwen3:8b</span></div>
-        <div class="eb-pbody">
-          <div class="asst">I'll add an <code>iat</code> claim so tokens carry an issued-at time, then run the suite to confirm nothing breaks.</div>
-          <div class="eb-toolcard">
-            <span class="tt">✎ edit_file</span> <span class="ta">src/auth.ts&nbsp;&nbsp;+2 −1</span>
-            <div class="eb-diff"><span class="d-ctx">  const now = Math.floor(Date.now()/1000);</span><span class="d-del">- return jwt.sign({ sub }, KEY, {</span><span class="d-add">+ return jwt.sign({ sub, iat: now }, KEY, {</span><span class="d-ctx">    algorithm: "HS256", expiresIn: "15m",</span></div>
+<!-- ===== PROVIDERS ===== -->
+<!-- ===== LOCALHOST ARTIFACTS ===== -->
+<section class="band" id="artifacts"><div class="wrap">
+  <div class="sechead"><div class="lab">Localhost artifacts.</div><h2>The part no <span class="nb">local-model</span> harness does.</h2><div class="tag">When the agent proposes a plan, DGC renders it as a clean page on one localhost port — the steps, the files it’ll touch, the approach — not raw markdown scrolling past the terminal. Approve in the terminal, or keep planning. Every proposal shares one port behind a dropdown.</div></div>
+  <div class="art-mock reveal">
+    <div class="bw">
+      <div class="bw-bar"><i></i><i></i><i></i><span class="bw-url" id="artUrl">127.0.0.1:45000/plan/refactor-auth</span><span class="bw-drop" id="artDrop">refactor auth&nbsp;▾</span></div>
+      <div class="bw-body">
+        <div class="pm-stack">
+        <div class="pm-pane on">
+          <div class="pm-tag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="pm-title">Refactor auth into its own package</div>
+          <div class="pm-desc">Move the token + verify helpers into an <code>auth/</code> package and re-export them, so the app imports from one place.</div>
+          <div class="pm-cols">
+            <ol class="pm-steps"><li>Create the <code>auth/</code> package; move <code>token.py</code> and <code>verify.py</code> in.</li><li>Re-export both from <code>auth/__init__.py</code>.</li><li>Update the 7 imports, then run the suite.</li></ol>
+            <div class="pm-files"><div class="pf-h">Files it’ll touch</div><div class="pf"><span>auth/__init__.py</span><span class="pf-t new">new</span></div><div class="pf"><span>token.py</span><span class="pf-t">moved</span></div><div class="pf"><span>verify.py</span><span class="pf-t">moved</span></div><div class="pf"><span>7 call-sites</span><span class="pf-t">edited</span></div></div>
           </div>
-          <div class="eb-toolcard">
-            <span class="tt">$ bash</span> <span class="ta">npm test -- token</span>
-            <div class="eb-diff"><span class="d-ctx" style="opacity:1;color:var(--lav)">  ✓ signs a token with an iat claim</span><span class="d-ctx" style="opacity:1;color:var(--lav)">  ✓ verifies a valid token</span><span class="d-ctx">  2 passing (0.4s)</span></div>
-          </div>
-          <div class="asst">Done — the token now includes <code>iat</code> and both tests are green.</div>
         </div>
-        <div class="eb-pcomp"><span class="pr">❯</span><span class="ph">Ask DGC to change this file…</span><span class="lbl">acceptEdits</span></div>
+        <div class="pm-pane">
+          <div class="pm-tag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="pm-title">Add an iat claim to the JWT</div>
+          <div class="pm-desc">Stamp tokens with an issued-at time and cover it with a test — a two-line change.</div>
+          <div class="pm-cols">
+            <ol class="pm-steps"><li>In <code>sign()</code>, add <code>iat: now()</code> to the payload.</li><li>Add a test asserting the claim is present + valid.</li><li>Run <code>npm test</code> to confirm both pass.</li></ol>
+            <div class="pm-files"><div class="pf-h">Files it’ll touch</div><div class="pf"><span>auth/jwt.ts</span><span class="pf-t">+2</span></div><div class="pf"><span>tests/jwt.test.ts</span><span class="pf-t new">+1</span></div></div>
+          </div>
+        </div>
+        <div class="pm-pane">
+          <div class="pm-tag">/// &nbsp; PROPOSED PLAN</div>
+          <div class="pm-title">Cache the /profile route</div>
+          <div class="pm-desc">Add a small in-memory TTL cache so repeat profile reads skip the DB.</div>
+          <div class="pm-cols">
+            <ol class="pm-steps"><li>Wrap the handler with a 60s TTL cache keyed by user id.</li><li>Invalidate on profile update.</li><li>Add a test for hit / miss / invalidation.</li></ol>
+            <div class="pm-files"><div class="pf-h">Files it’ll touch</div><div class="pf"><span>routes/profile.ts</span><span class="pf-t">+cache</span></div><div class="pf"><span>lib/ttl-cache.ts</span><span class="pf-t new">new</span></div><div class="pf"><span>tests/profile.test.ts</span><span class="pf-t new">+1</span></div></div>
+          </div>
+        </div>
+        </div>
+        <div class="pm-foot"><span class="pm-approve">Approve in terminal</span><span class="pm-keep">or keep planning</span><span class="pm-meta">3 steps · saved · survives restart</span></div>
       </div>
     </div>
   </div>
+</div></section>
 
-  <div class="ide-caption">
-    <span>The DGC side panel, running inside VS&nbsp;Code &amp; Cursor.</span>
-    <a class="btn primary" href="vscode:extension/vibedgc.dgc" style="padding:10px 16px">Install in VS&nbsp;Code</a>
-    <a class="btn ghost" href="cursor:extension/vibedgc.dgc" style="padding:10px 16px">Install in Cursor</a>
-    <a href="/vscode/">Setup guide →</a>
+<section class="band" id="providers"><canvas class="prov-bg" aria-hidden="true"></canvas><div class="prov-bg-scrim" aria-hidden="true"></div><div class="wrap">
+  <div class="sechead"><div class="lab">Providers.</div><h2>Point it at anything that serves a model.</h2><div class="tag">Local inference, direct APIs, or your own first-party subscription — one harness and one <code style="color:var(--lav)">/connect</code> surface.</div></div>
+  <div class="prov reveal">
+    <div class="pcol">
+      <div class="ph"><span class="pdot"></span>Local · on device</div>
+      <ul class="plist">
+        <li><span class="pn">Ollama</span><span class="pm">native chat</span></li>
+        <li><span class="pn">llama.cpp</span><span class="pm">openai /v1</span></li>
+        <li><span class="pn">vLLM</span><span class="pm">openai /v1</span></li>
+        <li><span class="pn">LM Studio</span><span class="pm">local server</span></li>
+      </ul>
+      <div class="pf">Model and data stay on your machine.</div>
+    </div>
+    <div class="pcol">
+      <div class="ph"><span class="pdot"></span>API · direct endpoint</div>
+      <ul class="plist">
+        <li><span class="pn">OpenAI</span><span class="pm">api key</span></li>
+        <li><span class="pn">Anthropic</span><span class="pm">api key</span></li>
+        <li><span class="pn">OpenRouter</span><span class="pm">100s of models</span></li>
+        <li><span class="pn">Groq · DeepSeek · more</span><span class="pm">openai /v1</span></li>
+      </ul>
+      <div class="pf">Native or OpenAI-compatible transport.</div>
+    </div>
+    <div class="pcol">
+      <div class="ph"><span class="pdot"></span>Subscription · official CLI</div>
+      <ul class="plist">
+        <li><span class="pn">Claude Code</span><span class="pm">pro / max</span></li>
+        <li><span class="pn">Codex</span><span class="pm">chatgpt</span></li>
+        <li><span class="pn">Qwen · Kimi</span><span class="pm">coding plan</span></li>
+        <li><span class="pn">GitHub Copilot</span><span class="pm">github plan</span></li>
+      </ul>
+      <div class="pf">Delegated to each vendor’s official CLI.</div>
+    </div>
+  </div>
+  <p class="bmnote">One <code style="color:var(--text)">/connect</code> switches between all three. Subscriptions are covered <a href="#subscription" style="color:var(--lav)">below</a>.</p>
+</div></section>
+
+<!-- ===== BENCHMARK ===== -->
+<!-- ===== BRING YOUR OWN SUBSCRIPTION ===== -->
+<section class="band sub-band" id="subscription"><div class="sub-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata" poster="assets/sub-poster.jpg"><source src="assets/sub.mp4" type="video/mp4"></video></div><div class="wrap">
+  <div class="sechead"><div class="lab">Bring your own subscription.</div><h2>Already pay for Claude, ChatGPT, or Copilot? Run it here.</h2><div class="tag">Pick your vendor in <code style="color:var(--lav)">/connect</code> and DGC drives each turn through the official CLI — your login, your plan, your terms, no extra API bill. <b style="color:var(--text)">DGC never handles the vendor’s tokens.</b></div></div>
+  <div class="sub-grid reveal">
+    <div class="sub-clis">
+      <div class="scli"><span class="sn">Claude Code</span><span class="sp">Pro / Max</span></div>
+      <div class="scli"><span class="sn">Codex · ChatGPT</span><span class="sp">ChatGPT</span></div>
+      <div class="scli"><span class="sn">Qwen Code</span><span class="sp">coding plan</span></div>
+      <div class="scli"><span class="sn">Kimi for Coding</span><span class="sp">coding plan</span></div>
+      <div class="scli"><span class="sn">GitHub Copilot</span><span class="sp">GitHub</span></div>
+    </div>
+    <div class="sub-flow">
+      <div class="fh">How it works</div>
+      <div class="dstep"><span class="db">DGC</span><span class="dn">spawns the vendor’s official binary as a subprocess</span></div>
+      <div class="darrow">↓</div>
+      <div class="dstep"><span class="db">Official&nbsp;CLI</span><span class="dn">owns your sign-in · your plan · your terms · no API bill</span></div>
+      <div class="darrow">↓</div>
+      <div class="dstep"><span class="db">Your&nbsp;model</span><span class="dn">Claude · GPT · Qwen · Kimi · Copilot — steered by DGC, effort and all</span></div>
+    </div>
   </div>
 </div></section>
 
-<section id="providers"><div class="wrap">
-  <div class="measure">
-    <p class="eyebrow">Connect anything</p>
-    <h2>One command to point it at any model.</h2>
-    <p class="lede"><code>dgc setup</code> walks you through these with arrow-key menus — local endpoints need no key; cloud ones prompt and store it safely.</p>
-  </div>
-  <div class="chips" style="margin-top:32px">
-    <span class="chip local">ollama</span><span class="chip local">llama.cpp</span><span class="chip local">LM Studio</span><span class="chip local">vLLM</span>
-    <span class="chip">OpenAI</span><span class="chip">OpenRouter</span><span class="chip">Groq</span><span class="chip">DeepSeek</span><span class="chip">Together</span><span class="chip">Mistral</span>
-  </div>
-  <p class="note"><span style="color:var(--accent)">●</span> local — no API key, runs on your machine</p>
+<section class="band alt" id="benchmark"><div class="wrap">
+  <div class="sechead"><div class="lab">Benchmark.</div><h2>Proven on a model you run yourself.</h2><div class="tag">The same <b style="color:var(--text)">Qwen3.8-27B</b> endpoint for every harness, scored by real tests on a deterministic Aider polyglot slice — hardware-independent and reproducible.</div></div>
+  <figure class="figure benchmark-figure reveal">
+    <figcaption class="figcap"><span><span class="fig-name">FIG.4</span> — HARNESS EVALUATION</span><span class="fig-state">MEASURED · IDENTICAL ENDPOINT · RAW TRACES SAVED</span></figcaption>
+    <div class="bmrow">
+      <div class="lead">
+        <div class="lh"><span class="t">Harness performance · Qwen3.8-27B</span><span class="k">pass@2 · 600 s cap · bars 70–100%</span></div>
+        <div class="lrow"><span class="rk">01</span><span class="nm">goose</span><span class="track"><i data-w="95.6"></i></span><span class="sc">95.6%</span></div>
+        <div class="lrow us"><span class="rk">02</span><span class="nm">DGC <span class="us-tag">this is us</span></span><span class="track"><i data-w="94.4"></i></span><span class="sc">94.4%</span></div>
+        <div class="lrow"><span class="rk">03</span><span class="nm">pi</span><span class="track"><i data-w="94.4"></i></span><span class="sc">94.4%</span></div>
+        <div class="lrow"><span class="rk">04</span><span class="nm">OpenCode</span><span class="track"><i data-w="88.9"></i></span><span class="sc">88.9%</span></div>
+        <div class="lrow"><span class="rk">05</span><span class="nm">Codex CLI</span><span class="track"><i data-w="87.8"></i></span><span class="sc">87.8%</span></div>
+        <div class="lf">On an identical endpoint at a 600 s cap, DGC solves <b style="color:var(--lav)">85 of 90</b> — second, level with pi and one problem behind goose. It is the only harness here that never ran out of clock, and it reaches that on <b style="color:var(--lav)">25% fewer output tokens</b> than the leader.</div>
+      </div>
+      <div class="bm-evidence">
+        <div class="ev-head"><span>Cost of that score</span><b>measured, same endpoint</b></div>
+        <div class="effgrid">
+          <div class="eff"><div class="ev">0</div><div class="ek">timeouts · only harness with none</div></div>
+          <div class="eff"><div class="ev">122 s</div><div class="ek">avg per round · fastest of five</div></div>
+          <div class="eff"><div class="ev">−25%</div><div class="ek">output tokens vs the leader</div></div>
+        </div>
+        <div class="spec-list"><div class="spec-row"><span class="sk">local model</span><span class="sv">Qwen3.8-27B</span></div><div class="spec-row"><span class="sk">scoring</span><span class="sv">pass@2</span></div><div class="spec-row"><span class="sk">suite</span><span class="sv">Aider polyglot · 90</span></div><div class="spec-row"><span class="sk">languages</span><span class="sv">py js java go c++ rs</span></div><div class="spec-row"><span class="sk">endpoint</span><span class="sv">identical</span></div><div class="spec-row"><span class="sk">raw traces</span><span class="sv">saved</span></div></div>
+      </div>
+    </div>
+    <div class="proof-strip"><div class="proof"><div class="pv">184 / 300*</div><div class="pk">SWE-bench Lite · 61.3% · provisional</div></div><div class="proof"><div class="pv">1 endpoint</div><div class="pk">same weights · every harness</div></div><div class="proof"><div class="pv">3 commands</div><div class="pk">re-run it yourself · raw traces saved</div></div></div>
+  </figure>
+  <div class="runbench reveal">
+    <div class="rb-h">Run it yourself — same 27B, your machine</div>
+    <pre><span class="c"># the whole harness ships with DGC (DGC + the other agents + toolchains)</span>
+git clone https://github.com/OpenPeach-ai/dgc && cd dgc/bench
+bash install_harnesses.sh
 
-  <div class="measure" style="margin-top:64px">
-    <p class="eyebrow">Bring your own subscription</p>
-    <h2>Already pay for Claude, ChatGPT, or Copilot? Run it here.</h2>
-    <p class="lede">Pick <b>Claude Code</b>, <b>Codex / ChatGPT</b>, <b>Qwen</b>, <b>Kimi</b>, or <b>GitHub Copilot</b> in <code>/connect</code> and DGC runs each turn through your <em>own</em> official CLI — your login, your plan, your terms, no extra API bill. DGC never handles the vendor's tokens: it launches the official client, which owns your sign-in and can steer the model and reasoning effort right from DGC.</p>
+<span class="c"># score DGC on the deterministic 90-problem subset</span>
+python3 run_bench.py <span class="k">--engine</span> dgc <span class="k">--model</span> qwen3.8:27b-bf16 \
+    <span class="k">--base-url</span> http://localhost:11434/v1 <span class="k">--limit</span> 15 <span class="k">--rounds</span> 2</pre>
   </div>
-  <div class="chips" style="margin-top:32px">
-    <span class="chip">Claude&nbsp;Code</span><span class="chip">Codex&nbsp;· ChatGPT</span><span class="chip">Qwen&nbsp;Code</span><span class="chip">Kimi&nbsp;for&nbsp;Coding</span><span class="chip">GitHub&nbsp;Copilot</span>
-  </div>
-  <p class="note"><span style="color:var(--accent)">●</span> your subscription — DGC drives the official CLI, no tokens handled</p>
-
-  <div class="measure" style="margin-top:64px">
-    <p class="eyebrow">You decide the rope</p>
-    <h2>Four permission modes.</h2>
-    <p class="lede">Switch live with <code>Shift+Tab</code>. Fine-grained allow / ask / deny rules layer on top, evaluated deny&nbsp;→&nbsp;ask&nbsp;→&nbsp;allow.</p>
-  </div>
-  <div class="scroll"><table>
-    <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
-    <tbody>
-      <tr><td><code>default</code></td><td>read-only built-in tools auto-run; <b>every shell command and write asks first</b></td></tr>
-      <tr><td><code>acceptEdits</code></td><td><b>file edits auto-approved</b>; shell commands still ask</td></tr>
-      <tr><td><code>plan</code></td><td><b>read-only</b> — research and propose a plan you approve</td></tr>
-      <tr><td><code>auto</code></td><td><b>full-auto</b> — everything approved; deny-rules still apply</td></tr>
-    </tbody>
-  </table></div>
+  <div class="provisional"><b>* Benchmark note</b><span>Every harness ran the same model build on the same endpoint — identical digest, 600 s cap, 32,768-token window, pass@2 over the same 90 problems. Raw per-problem traces are saved. Aider is absent because it did not complete a valid run in this configuration; SWE-bench Lite remains provisional.</span></div>
 </div></section>
 
-<section id="benchmark"><div class="wrap">
-  <div class="center">
-    <div class="subhead" style="margin:0 auto 16px">Two benchmarks · one 27B you run yourself</div>
-    <h2>Proven on a model you run yourself</h2>
-    <p class="lede">Same 27B for every agent, scored by the real test suites. Given the time a local model needs, DGC
-      solves all but one of Aider polyglot's 90 problems (98.9%); at the leaderboard's strict 600-second cap it scores
-      95.6% — level with OpenCode, just behind the sprint leaders. It then holds up on SWE-bench Lite: real GitHub
-      issues, real repos. No frontier model, no cloud.</p>
-  </div>
-  <div class="bmgrid" style="display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr);gap:clamp(26px,4vw,52px);align-items:center;margin-top:46px">
-    <div style="text-align:center;background:linear-gradient(158deg,var(--surface-2),var(--surface));border:1px solid var(--border-strong);border-radius:18px;padding:42px 28px;box-shadow:0 30px 70px -44px rgba(124,92,255,.42);min-width:0">
-      <div style="font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px">Aider polyglot</div>
-      <div id="bm-num" style="font:800 clamp(3rem,7vw,4.9rem)/.92 var(--mono);color:var(--lav);font-variant-numeric:tabular-nums;letter-spacing:-.03em">98.9%</div>
-      <div style="margin-top:12px;font:500 12px/1.5 var(--mono);color:var(--text);text-transform:uppercase;letter-spacing:.08em">89 / 90 · no time cap</div>
-      <div style="margin-top:12px;font:400 12.5px/1.5 var(--sans);color:var(--faint)">95.6% at the 600&nbsp;s cap · qwen3.8:27b-bf16 · pass@2</div>
-    </div>
-    <div id="bm-bars" style="display:flex;flex-direction:column;gap:12px"><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Python</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">JavaScript</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Java</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Go</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">C++</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--good, #5BCB8B);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="100%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">15/15</span></div><div class="bmrow" style="display:grid;grid-template-columns:82px 1fr 44px;gap:14px;align-items:center"><span style="font:500 12px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Rust</span><div style="position:relative;height:9px;border-radius:99px;background:var(--surface-2);overflow:hidden"><span style="position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;background:var(--lav);transition:width 1s cubic-bezier(.22,1,.36,1)" data-w="93%"></span></div><span style="font:700 12px/1 var(--mono);color:var(--text-strong);text-align:right;font-variant-numeric:tabular-nums">14/15</span></div></div>
-  </div>
-  <div class="swe-teaser" style="margin-top:24px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:clamp(20px,4vw,40px);align-items:center;background:linear-gradient(158deg,var(--surface-2),var(--surface));border:1px solid var(--border-strong);border-radius:18px;padding:clamp(24px,3.2vw,32px) clamp(24px,3.4vw,36px);box-shadow:0 30px 70px -50px rgba(124,92,255,.4)">
-    <div class="swe-num" style="text-align:center;min-width:0">
-      <div style="font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:12px">SWE-bench Lite</div>
-      <div id="bm-swe" style="font:800 clamp(2.7rem,6vw,3.7rem)/.92 var(--mono);color:var(--lav);font-variant-numeric:tabular-nums;letter-spacing:-.03em">61.3%</div>
-      <div style="margin-top:10px;font:500 11.5px/1.5 var(--mono);color:var(--text);text-transform:uppercase;letter-spacing:.08em">184 / 300 resolved</div>
-    </div>
-    <div class="swe-copy" style="min-width:0;border-left:1px solid var(--border);padding-left:clamp(20px,4vw,40px)">
-      <h3 style="font:800 clamp(19px,2.4vw,24px)/1.15 var(--sans);letter-spacing:-.02em;margin:0 0 8px;color:var(--text-strong)">The harder test: real bugs, real repos</h3>
-      <p style="margin:0;font:400 14.5px/1.6 var(--sans);color:var(--muted)">300 real GitHub issues from Django, SymPy,
-        scikit-learn and matplotlib — patched in the <em>actual</em> repository and graded by each project's own test
-        suite. Same 27B, run locally.</p>
-    </div>
-  </div>
-  <div class="center" style="margin-top:40px"><a class="btn primary" href="/benchmark">See the full benchmark
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+<!-- ===== FOUNDER QUOTE ===== -->
+<section class="band quote-band"><canvas class="quote-shader" aria-hidden="true"></canvas><div class="wrap">
+  <figure class="ceo-quote reveal">
+    <span class="qmark" aria-hidden="true">“</span>
+    <blockquote>DGC’s bet is that the <span class="hl">harness matters more than the model</span>. We parse tool calls straight from the model’s text, so a local model with no function-calling API still runs the full read → edit → run → verify loop. The capability lives in the harness — not the weights.</blockquote>
+    <figcaption><span class="qn">Mohit Kalra</span><span class="qt">Founder &amp; CEO · Vibe DGC</span></figcaption>
+  </figure>
 </div></section>
 
-<script>
-  (function(){
-    var rm = matchMedia('(prefers-reduced-motion:reduce)').matches;
-    var sec = document.getElementById('benchmark'); if(!sec) return;
-    function countUp(el, target){
-      if(!el) return;
-      if(rm){ el.textContent = target.toFixed(1)+'%'; return; }
-      var s=null; el.textContent='0.0%';
-      (function step(ts){ s=s||ts; var p=Math.min(1,(ts-s)/1100); el.textContent=(target*(1-Math.pow(1-p,3))).toFixed(1)+'%'; if(p<1) requestAnimationFrame(step); })(performance.now());
-    }
-    function run(){
-      countUp(document.getElementById('bm-num'), 98.9);
-      countUp(document.getElementById('bm-swe'), 61.3);
-      sec.querySelectorAll('#bm-bars span[data-w]').forEach(function(b){ b.style.width = b.getAttribute('data-w'); });
-    }
-    if(rm){ run(); return; }
-    var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ run(); io.disconnect(); } }); }, {threshold:.3});
-    io.observe(sec);
-  })();
-</script>
+<!-- ===== POWER TOOLS ===== -->
+<section class="band alt power-band" id="power"><div class="power-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata" poster="assets/power-poster.jpg"><source src="assets/power.mp4" type="video/mp4"></video></div><div class="wrap">
+  <div class="sechead"><div class="lab">Power tools.</div><h2>Built for real, long, autonomous work.</h2><div class="tag">Optional power-modes for data-heavy tasks, unattended runs, and closing the loop back to your own model.</div></div>
+  <div class="feat3 reveal">
+    <div class="fcard"><div class="fi">Code action · persistent state</div><h3>A persistent Python REPL</h3><p>Load a dataset into a variable once, then run functions over it across turns — instead of re-reading data into context. Token-efficient by design.</p><div class="cmd">/code-action on</div><div class="ftrace">dataset → python variable · turn 08 → <span class="pass">state retained</span></div></div>
+    <div class="fcard"><div class="fi">Autonomous gate · verifiable</div><h3>Run until it passes</h3><p>Bind an unattended run to a real check. DGC won’t stop the turn until your command exits 0 — feeding failures back and continuing.</p><div class="cmd">dgc --autonomous-gate "npm run check"</div><div class="ftrace">attempt 01 · 3 failures → attempt 03 · <span class="pass">exit 0 · gate open</span></div></div>
+    <div class="fcard"><div class="fi">Trace → training · owned</div><h3>Your usage becomes data</h3><p>Turn your real DGC sessions into scrubbed, training-ready JSONL — fine-tune your own local model on how you actually work.</p><div class="cmd">dgc export-training --successful-only</div><div class="ftrace">secrets → scrubbed · output → <span class="pass">training.jsonl</span></div></div>
+  </div>
+</div></section>
 
+<!-- ===== WHAT’S INSIDE ===== -->
+<section class="band stripe-band" id="inside"><div class="wrap">
+  <div class="sechead"><div class="lab">What’s inside.</div><h2>A complete harness, not a wrapper.</h2></div>
+  <figure class="figure arch-figure reveal">
+    <figcaption class="figcap"><span><span class="fig-name">FIG.5</span> — EXECUTION PIPELINE</span><span class="fig-state">THE MODEL PROPOSES · DGC OWNS THE REST</span></figcaption>
+    <div class="diagram-scroll" data-scroll-start="center"><svg class="blueprint" viewBox="0 0 1200 182" role="img" aria-labelledby="arch-title arch-desc">
+      <title id="arch-title">DGC execution pipeline</title><desc id="arch-desc">A request flows left to right through prompt, permission, tools and sandbox, your model, verification and reviewable output; a failed check loops back to the tools stage until the work is verified.</desc>
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--muted)"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--lav)"/></marker></defs>
+      <path class="flow" d="M182 72H215" marker-end="url(#ah)"/><path class="flow" d="M382 72H415" marker-end="url(#ah)"/><path class="flow" d="M582 72H615" marker-end="url(#ah)"/><path class="flow" d="M782 72H815" marker-end="url(#ah)"/><path class="flow" d="M982 72H1015" marker-end="url(#ah)"/>
+      <g><rect class="pchip" x="20" y="40" width="160" height="64" rx="11"/><text class="pidx" x="34" y="60">01</text><text class="pname" x="100" y="70" text-anchor="middle">PROMPT</text><text class="small" x="100" y="89" text-anchor="middle">task · repo · goal</text></g>
+      <g><rect class="pchip" x="220" y="40" width="160" height="64" rx="11"/><text class="pidx" x="234" y="60">02</text><text class="pname" x="300" y="70" text-anchor="middle">PERMISSION</text><text class="small" x="300" y="89" text-anchor="middle">plan · edit · auto</text></g>
+      <g><rect class="pchip" x="420" y="40" width="160" height="64" rx="11"/><text class="pidx" x="434" y="60">03</text><text class="pname" x="500" y="70" text-anchor="middle">TOOLS · SANDBOX</text><text class="small" x="500" y="89" text-anchor="middle">read · edit · bash · MCP</text></g>
+      <g><rect class="pchip" x="620" y="40" width="160" height="64" rx="11"/><text class="pidx" x="634" y="60">04</text><text class="pname" x="700" y="70" text-anchor="middle">YOUR MODEL</text><text class="small" x="700" y="89" text-anchor="middle">local · API · subscription</text></g>
+      <g><rect class="pchip" x="820" y="40" width="160" height="64" rx="11"/><text class="pidx" x="834" y="60">05</text><text class="pname" x="900" y="70" text-anchor="middle">VERIFY</text><text class="small" x="900" y="89" text-anchor="middle">run the real tests</text></g>
+      <g><rect class="pchip" x="1020" y="40" width="160" height="64" rx="11"/><text class="pidx" x="1034" y="60">06</text><text class="pname" x="1100" y="70" text-anchor="middle">OUTPUT</text><text class="small" x="1100" y="89" text-anchor="middle">diffs · tests · traces</text></g>
+      <path class="loopback" d="M900 104L900 134Q900 148 886 148L514 148Q500 148 500 134L500 104" marker-end="url(#ahl)"/>
+      <rect class="pill" x="592" y="138" width="216" height="20" rx="10"/><text class="looptext" x="700" y="152" text-anchor="middle">ON FAILURE → PATCH → RERUN</text>
+    </svg></div>
+  </figure>
+  <div class="architecture-copy reveal"><div class="arch-note"><div class="an">Not a chat wrapper</div><p>The model proposes actions; DGC owns permission evaluation, workspace boundaries, execution, correlation, persistence, and convergence.</p></div><div class="arch-note"><div class="an">Evidence before completion</div><p>Diffs and tests stay first-class. Failed checks return to the loop instead of being polished into an unsupported “done.”</p></div></div>
+  <div class="capmap reveal">
+    <div class="cap-lane"><div class="lh">Control</div><div class="cap-chips"><span>Permission modes</span><span>Plan mode</span><span>Thinking control</span></div><div class="cap-note">how you gate the loop</div></div>
+    <div class="cap-lane"><div class="lh">Execution</div><div class="cap-chips"><span>Sandbox</span><span>MCP servers</span><span>Artifacts</span><span>Lifecycle hooks</span></div><div class="cap-note">what the agent may touch</div></div>
+    <div class="cap-lane"><div class="lh">Memory &amp; state</div><div class="cap-chips"><span>Memory</span><span>Standing goals</span><span>Rewind &amp; checkpoints</span></div><div class="cap-note">what persists across turns</div></div>
+    <div class="cap-lane"><div class="lh">Scale</div><div class="cap-chips"><span>Multi-agent fleet</span><span>Skills</span><span>Sub-agents · task tool</span></div><div class="cap-note">how it runs in parallel</div></div>
+  </div>
+</div></section>
+
+</main>
 <footer><div class="wrap">
-  <div class="cols">
-    <div class="fcol brand">
-      <span class="mark"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></span>
+  <div class="fcols">
+    <div class="fbrand">
+      <a class="brand" href="#top"><svg viewBox="0 0 90 90" fill="currentColor"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur"></span></a>
       <p>Vibe DGC — a coding agent for the models you run.</p>
     </div>
-    <div class="fcol"><h4>Product</h4>
-      <a href="#why">Overview</a><a href="#terminal">Terminal</a><a href="#extension">Extension</a><a href="#providers">Providers &amp; modes</a>
-    </div>
-    <div class="fcol"><h4>Resources</h4>
-      <a href="/install.sh">install.sh</a><a href="/vscode/">VS Code / Cursor</a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">License (PolyForm&nbsp;Noncommercial)</a>
-    </div>
-    <div class="fcol"><h4>Project</h4>
-      <a href="https://github.com/OpenPeach-ai/dgc">GitHub</a><a href="https://github.com/OpenPeach-ai/dgc/issues">Issues</a>
-    </div>
+    <div class="col"><h3>Product</h3><a href="#cli">CLI</a><a href="#extension">Extension</a><a href="#providers">Providers &amp; modes</a><a href="#benchmark">Benchmark</a><a href="#power">Power tools</a></div>
+    <div class="col"><h3>Resources</h3><a href="https://vibedgc.com/install.sh" target="_blank" rel="noopener">install.sh</a><a href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc" target="_blank" rel="noopener">VS&nbsp;Code / Cursor</a><a href="https://github.com/OpenPeach-ai/dgc/releases" target="_blank" rel="noopener">Releases</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE" target="_blank" rel="noopener">License (PolyForm&nbsp;Noncommercial)</a></div>
+    <div class="col"><h3>Project</h3><a href="https://github.com/OpenPeach-ai/dgc" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/OpenPeach-ai/dgc/issues" target="_blank" rel="noopener">Issues</a><a href="docs/index.html">Docs</a></div>
   </div>
-  <div class="base">Built by Mohit Kalra · PolyForm Noncommercial licensed</div>
+  <div class="base">PolyForm Noncommercial licensed · your models · your machine · your data</div>
 </div></footer>
 
 <script>
-function copyCmd(){var t=document.getElementById('cmd').textContent,b=document.getElementById('copy');
-  navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy';},1600);});}
+  var c=document.getElementById('copy');
+  if(c) c.addEventListener('click',function(){navigator.clipboard.writeText(document.getElementById('inst').textContent).then(function(){c.textContent='copied';setTimeout(function(){c.textContent='copy';},1400);}).catch(function(){});});
+  var nv=document.querySelector('nav');
+  function syncNav(){if(window.scrollY>60){nv.classList.add('solid');}else{nv.classList.remove('solid');}}
+  addEventListener('scroll',syncNav,{passive:true});syncNav();
+  function positionDiagrams(){
+    document.querySelectorAll('[data-scroll-start="center"]').forEach(function(el){
+      if(window.matchMedia('(max-width:600px)').matches&&el.scrollWidth>el.clientWidth){el.scrollLeft=(el.scrollWidth-el.clientWidth)/2;}
+    });
+  }
+  positionDiagrams();
+  addEventListener('resize',positionDiagrams,{passive:true});
+  // leaderboard bars: remap onto a 70-100% floor so a few-point spread is legible (true % still shown in the score column)
+  function fillBars(root){root.querySelectorAll('.lrow .track i').forEach(function(b){var v=parseFloat(b.getAttribute('data-w'))||0;var w=v<=0?0:Math.max(5,Math.min(100,(v-70)/30*100));b.style.width=w.toFixed(1)+'%';});}
+  if(window.matchMedia('(prefers-reduced-motion:reduce)').matches){ fillBars(document); }
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');
+    if(e.target.querySelector('.lrow')){ fillBars(e.target); }
+    io.unobserve(e.target);}});},{threshold:.15});
+  document.querySelectorAll('.reveal').forEach(function(e){io.observe(e);});
 
-/* ---- live terminal: cycle through real DGC sessions (monochrome + purple) ---- */
-(function(){
-  var scene=document.getElementById('scene'), dotsWrap=document.getElementById('dots'),
-      ti=document.getElementById('ti'), hd=document.getElementById('hd');
-  if(!scene) return;
-  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var GL=["⣋","⣙","⣹","⣸","⣼","⣴","⣦","⣧","⣇","⣏"];
-  var SCENES=[
-    { dir:"~/api", steps:[
-      ["prompt","add an `iat` claim to the JWT and cover it with a test"],
-      ["think","Reading the token module, then editing + adding a test."],
-      ["tool","→ read_file  auth/token.py"],
-      ["tool","✎ edit_file  auth/token.py   +12 −3"],
-      ["del","- return jwt.encode({\"sub\": sub}, KEY)"],
-      ["add","+ return jwt.encode({\"sub\": sub, \"iat\": now()}, KEY)"],
-      ["tool","$ bash  python -m pytest -q"],
-      ["ok","  2 passed in 0.4s"],
-      ["out","Done — the token is signed with `iat` and the test is green."],
-      ["dim","  · done · 6s · 3 tools"]
-    ]},
-    { dir:"~/web", steps:[
-      ["prompt","the /login route 500s — find and fix it"],
-      ["tool","✱ grep  \"@app.post(.*/login\""],
-      ["tool","→ read_file  routes/auth.py"],
-      ["think","The handler calls an async function without awaiting it."],
-      ["tool","✎ edit_file  routes/auth.py   +1 −1"],
-      ["del","- user = verify(token)"],
-      ["add","+ user = await verify(token)"],
-      ["tool","$ bash  curl -s :8000/login -d @cred.json"],
-      ["ok","  200 OK"],
-      ["out","Fixed — `verify()` is a coroutine; it needed `await`."],
-      ["dim","  · done · 8s · 4 tools"]
-    ]},
-    { dir:"~/service", steps:[
-      ["prompt","refactor the auth module into its own package"],
-      ["dim","  [plan mode — read-only]"],
-      ["think","Mapping the imports and the surface I'd need to move."],
-      ["tool","▸ present_plan"],
-      ["out","Plan"],
-      ["dim","  1. create auth/ package · move token.py, verify.py"],
-      ["dim","  2. update 7 imports · re-export from auth/__init__.py"],
-      ["dim","  3. run the suite"],
-      ["ok","  ▸ approve → acceptEdits   · default   · keep planning"]
-    ]}
-  ];
-  var s=0;
-  SCENES.forEach(function(_,i){var b=document.createElement('button');b.type='button';b.setAttribute('aria-label','Show demo '+(i+1)+' of '+SCENES.length);if(i===0){b.className='on';b.setAttribute('aria-current','true');}b.onclick=function(){jump(i);};dotsWrap.appendChild(b);});
-  function setDot(i){[].forEach.call(dotsWrap.children,function(d,j){d.className=j===i?'on':'';if(j===i)d.setAttribute('aria-current','true');else d.removeAttribute('aria-current');});}
-  var timers=[];
-  function clearT(){timers.forEach(clearTimeout);timers=[];}
-  function line(kind,text){var d=document.createElement('div');if(kind)d.className=kind;d.textContent=text;scene.appendChild(d);return d;}
-  function jump(i){clearT();s=i;render();}
-  function render(){
-    scene.innerHTML=''; setDot(s); ti.textContent='dgc — '+SCENES[s].dir;
-    var steps=SCENES[s].steps, i=0;
-    var pl=document.createElement('div'); pl.className='prompt';
-    var pspan=document.createElement('span'); pspan.className='pc'; pspan.textContent='❯ '; pl.appendChild(pspan);
-    var txt=document.createElement('span'); txt.className='cmd-in'; pl.appendChild(txt);
-    var cur=document.createElement('span'); cur.className='cursor'; pl.appendChild(cur);
-    scene.appendChild(pl);
-    var prompt=steps[0][1], p=0;
-    if(reduce){ txt.textContent=prompt; cur.remove(); i=1; runRest(); return; }
-    (function type(){
-      if(p<prompt.length){ txt.textContent+=prompt[p++]; timers.push(setTimeout(type, 26)); }
-      else { cur.remove(); i=1; timers.push(setTimeout(runRest, 400)); }
-    })();
-    function runRest(){
-      if(i>=steps.length){ timers.push(setTimeout(function(){ s=(s+1)%SCENES.length; render(); }, 2800)); return; }
-      var st=steps[i++];
-      if(st[0]==='think'){
-        var t0=Date.now(), gi=0; var d=line('think','');
-        (function spin(){
-          var el=Date.now()-t0;
-          d.textContent=GL[gi=(gi+1)%GL.length]+' working…  ('+Math.floor(el/1000)+'s)';
-          if(el<1300){ timers.push(setTimeout(spin,120)); }
-          else { d.className='think'; d.textContent='› '+st[1]; timers.push(setTimeout(runRest,320)); }
-        })();
-      } else {
-        line(st[0], st[1]);
-        var delay = st[0]==='tool'?520 : st[0]==='out'?900 : 240;
-        timers.push(setTimeout(runRest, delay));
-      }
+  /* neon-dither shader behind the founder quote (inline WebGL GLSL — paper-shaders style, self-contained) */
+  (function(){
+    var cv=document.querySelector('.quote-shader'); if(!cv) return;
+    var gl=cv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false}); if(!gl) return;
+    var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+    var vsrc='attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
+    var fsrc=['precision highp float;','uniform vec2 u_res;uniform float u_time;',
+      'float B2(vec2 a){a=floor(a);return fract(a.x*0.5+a.y*a.y*0.75);}',
+      'float B4(vec2 a){return B2(0.5*a)*0.25+B2(a);}',
+      'float B8(vec2 a){return B4(0.5*a)*0.25+B2(a);}',
+      'void main(){vec2 frag=gl_FragCoord.xy;float px=3.0;vec2 cell=floor(frag/px);vec2 uv=(cell*px)/u_res;',
+      'float f=0.5+0.5*sin(uv.y*8.0-u_time*1.1+sin(uv.x*3.5+u_time*0.7)*1.6);',
+      'f=pow(clamp(f,0.0,1.0),1.25);float thr=B8(cell);float on=step(thr,f);',
+      'vec3 col=mix(vec3(0.42,0.30,1.0),vec3(0.80,0.34,1.0),uv.x);',
+      'float a=on*(0.30+0.55*f);gl_FragColor=vec4(col,a);}'].join('\n');
+    function sh(ty,s){var o=gl.createShader(ty);gl.shaderSource(o,s);gl.compileShader(o);return o;}
+    var prog=gl.createProgram();gl.attachShader(prog,sh(gl.VERTEX_SHADER,vsrc));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,fsrc));gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) return;
+    gl.useProgram(prog);
+    var buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    var loc=gl.getAttribLocation(prog,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+    var uRes=gl.getUniformLocation(prog,'u_res'),uTime=gl.getUniformLocation(prog,'u_time');
+    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    function resize(){var r=cv.getBoundingClientRect();cv.width=Math.max(1,Math.round(r.width));cv.height=Math.max(1,Math.round(r.height));gl.viewport(0,0,cv.width,cv.height);}
+    resize();addEventListener('resize',resize,{passive:true});
+    var t=0,last=0;
+    function draw(){gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform2f(uRes,cv.width,cv.height);gl.uniform1f(uTime,t);gl.drawArrays(gl.TRIANGLES,0,3);}
+    function loop(ts){ if(ts-last>=33){ t+=0.02; last=ts; draw(); } requestAnimationFrame(loop); }
+    if(reduce){ draw(); } else { requestAnimationFrame(loop); }
+  })();
+
+  /* localhost-artifact preview: cycle the 3 proposals (matches the live CLI’s dropdown) */
+  (function(){
+    var panes=document.querySelectorAll('.pm-pane'); if(panes.length<2) return;
+    if(matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    var drop=document.getElementById('artDrop'), url=document.getElementById('artUrl');
+    var names=['refactor auth ▾','add iat claim ▾','cache /profile ▾'];
+    var slugs=['refactor-auth','iat-claim','cache-profile'];
+    var i=0;
+    setInterval(function(){
+      i=(i+1)%panes.length;
+      for(var j=0;j<panes.length;j++){ panes[j].classList.toggle('on', j===i); }
+      if(drop){ drop.innerHTML=names[i]; drop.classList.add('pulse'); setTimeout(function(){drop.classList.remove('pulse');},700); }
+      if(url){ url.style.opacity=.25; setTimeout(function(){ url.textContent='127.0.0.1:45000/plan/'+slugs[i]; url.style.opacity=1; },250); }
+    },3600);
+  })();
+
+
+  /* Plasma field behind Providers — ported from the 21st.dev Shader Builder component to vanilla
+     WebGL, recoloured onto our palette (bg -> deep violet -> accent -> lavender). */
+  (function(){
+    var cv=document.querySelector('.prov-bg'); if(!cv) return;
+    if(matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    var gl=cv.getContext('webgl',{antialias:false,alpha:false}); if(!gl) return;
+    var VERT='attribute vec2 a_position;void main(){gl_Position=vec4(a_position,0.0,1.0);}';
+    var FRAG="#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\nuniform vec3 u_colors[8];\nuniform vec4 u_scene;\nuniform vec4 u_shape;\nuniform vec4 u_surface;\nuniform vec4 u_finish;\nuniform vec4 u_transform;\nuniform vec4 u_space;\n#define u_resolution u_scene.xy\n#define u_time u_scene.z\n#define u_colorCount u_scene.w\n#define u_scale u_shape.x\n#define u_intensity u_shape.y\n#define u_warp u_shape.w\n#define u_detail u_surface.x\n#define u_contrast u_surface.y\n#define u_brightness u_surface.z\n#define u_saturation u_surface.w\n#define u_vignette u_finish.y\n#define u_blur u_finish.z\n#define u_grain u_finish.w\n#define u_seed u_transform.x\n#define u_rotate u_transform.y\n#define u_drift u_transform.z\n#define u_offset u_space.xy\nfloat hash21(vec2 p){p=fract(p*vec2(234.34,435.345));p+=dot(p,p+34.23);return fract(p.x*p.y);}\nfloat grainHash(vec2 p){vec3 q=fract(vec3(p.xyx)*0.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}\nfloat noise(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.0-2.0*f);\nreturn mix(mix(hash21(i),hash21(i+vec2(1.0,0.0)),u.x),mix(hash21(i+vec2(0.0,1.0)),hash21(i+vec2(1.0,1.0)),u.x),u.y);}\nfloat fbm(vec2 p){float v=0.0;float a=0.5;for(int i=0;i<5;i++){v+=a*noise(p);p=p*2.03+vec2(17.0,9.2);a*=0.5;}return v;}\nvec3 palette(float x){float n=max(u_colorCount-1.0,1.0);float f=clamp(x,0.0,1.0)*n;vec3 col=u_colors[0];\nfor(int i=0;i<7;i++){if(float(i)<n) col=mix(col,u_colors[i+1],smoothstep(0.0,1.0,clamp(f-float(i),0.0,1.0)));}return col;}\nvec3 shade(vec2 p,float t){float k=2.0+u_intensity*6.0;\nfloat v=sin(p.x*k+t)+sin(p.y*k*0.8-t*0.7)+sin((p.x+p.y)*k*0.6+t*0.5)+sin(length(p)*k*1.2-t);\nreturn palette(0.5+0.5*sin(v+u_seed));}\nvoid main(){\nvec2 screenUv=gl_FragCoord.xy/u_resolution.xy;\nvec2 p=(gl_FragCoord.xy-0.5*u_resolution.xy)/min(u_resolution.x,u_resolution.y);\np*=u_scale;\nif(abs(u_rotate)>0.0001){float cr=cos(u_rotate),sr=sin(u_rotate);p=mat2(cr,-sr,sr,cr)*p;}\np+=u_offset;\nif(u_drift>0.0001) p+=u_drift*vec2(sin(u_time*0.31),cos(u_time*0.23));\nif(u_warp>0.0) p+=u_warp*(vec2(fbm(p*u_detail+u_seed),fbm(p*u_detail+vec2(5.2,1.3)))-0.5);\nvec3 col;\nif(u_blur>0.0){float pe=u_blur*u_scale;\ncol =shade(p,u_time)*0.36;\ncol+=shade(p+vec2(pe,0.0),u_time)*0.16;\ncol+=shade(p-vec2(pe,0.0),u_time)*0.16;\ncol+=shade(p+vec2(0.0,pe),u_time)*0.16;\ncol+=shade(p-vec2(0.0,pe),u_time)*0.16;\n}else{col=shade(p,u_time);}\nif(abs(u_contrast-1.0)>0.0001) col=(col-0.5)*u_contrast+0.5;\nif(abs(u_saturation-1.0)>0.0001){float luma=dot(col,vec3(0.299,0.587,0.114));col=mix(vec3(luma),col,u_saturation);}\nif(abs(u_brightness)>0.0001) col+=u_brightness;\nif(u_vignette>0.0001){float vd=length(screenUv-0.5)*1.41421356;col*=1.0-u_vignette*smoothstep(0.35,1.0,vd);}\nif(u_grain>0.0001) col+=(grainHash(gl_FragCoord.xy+vec2(u_seed*17.0,u_seed*31.0))-0.5)*u_grain;\ngl_FragColor=vec4(clamp(col,0.0,1.0),1.0);}\n";
+    function sh(t,src){var o=gl.createShader(t);gl.shaderSource(o,src);gl.compileShader(o);return o;}
+    var prog=gl.createProgram(), vs=sh(gl.VERTEX_SHADER,VERT), fs=sh(gl.FRAGMENT_SHADER,FRAG);
+    gl.attachShader(prog,vs);gl.attachShader(prog,fs);gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) return;
+    gl.deleteShader(vs);gl.deleteShader(fs);gl.useProgram(prog);
+    var buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    var loc=gl.getAttribLocation(prog,'a_position');
+    gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+    var U=function(n){return gl.getUniformLocation(prog,n);};
+    var uScene=U('u_scene');
+    /* #0A0A0B -> #2A1F52 -> #7C5CFF -> #A78BFA */
+    gl.uniform3fv(U('u_colors'),new Float32Array([
+      0.039,0.039,0.043, 0.165,0.122,0.322, 0.486,0.361,1.0, 0.655,0.545,0.980,
+      0.655,0.545,0.980, 0.655,0.545,0.980, 0.655,0.545,0.980, 0.655,0.545,0.980]));
+    gl.uniform4f(U('u_shape'),1.5,0.48,0.5,0.0);        /* scale, intensity, -, warp */
+    gl.uniform4f(U('u_surface'),2.4,0.924,-0.34,1.0);   /* detail, contrast, brightness, saturation */
+    gl.uniform4f(U('u_finish'),0.0,0.61,0.016,0.30);    /* -, vignette, blur, grain */
+    gl.uniform4f(U('u_transform'),7.0,0.0,0.156,0.0);   /* seed, rotate, drift, - */
+    gl.uniform4f(U('u_space'),0,0,0,0);
+    var raf=0,start=performance.now(),vis=true,inView=false;
+    function size(){
+      var r=cv.getBoundingClientRect(), dpr=Math.min(window.devicePixelRatio||1,2);
+      var w=Math.max(1,Math.round(r.width*dpr)), h=Math.max(1,Math.round(r.height*dpr));
+      var k=Math.min(1,Math.sqrt(2000000/Math.max(1,w*h)));
+      w=Math.max(1,Math.round(w*k)); h=Math.max(1,Math.round(h*k));
+      if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;gl.viewport(0,0,w,h);}
     }
-  }
-  render();
-})();
-/* ---- artifact showcase: cycle the dropdown + preview like switching tabs ---- */
-(function(){
-  var stage=document.getElementById('astage'); if(!stage) return;
-  var panes=stage.querySelectorAll('.apane'), drop=document.getElementById('adrop'),
-      url=document.getElementById('aurl'), names=['refactor auth plan','add iat claim','cache /profile'];
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var i=0;
-  setInterval(function(){
-    i=(i+1)%panes.length;
-    for(var j=0;j<panes.length;j++){ panes[j].classList.toggle('on', j===i); }
-    drop.textContent=names[i]; drop.classList.add('pulse');
-    url.style.opacity=.25;
-    setTimeout(function(){ url.textContent='/?a=a'+(i+1); url.style.opacity=1; }, 250);
-    setTimeout(function(){ drop.classList.remove('pulse'); }, 650);
-  }, 3400);
-})();
-/* ---- IDE panel: replay the DGC interaction so the editor feels live ---- */
-(function(){
-  var panel=document.querySelector('#extension .eb-pbody'); if(!panel) return;
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var items=[].slice.call(panel.children);
-  var hl=[].slice.call(document.querySelectorAll('#extension .eb-editor .ln.hl'));
-  var GL=["⣋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
-  var think=document.createElement('div'); think.className='eb-think';
-  var timers=[]; function clr(){timers.forEach(clearTimeout);timers=[];}
-  function play(){
-    clr(); panel.classList.add('playing');
-    items.forEach(function(el){el.classList.remove('eb-reveal');});
-    hl.forEach(function(l){l.classList.remove('flash');});
-    if(think.parentNode!==panel) panel.insertBefore(think, panel.firstChild);
-    think.style.display='flex';
-    var gi=0, t0=Date.now();
-    (function spin(){
-      var el=Date.now()-t0;
-      think.innerHTML='<span class="tsp">'+GL[gi=(gi+1)%GL.length]+'</span> working… ('+Math.floor(el/1000)+'s)';
-      if(el<1500){ timers.push(setTimeout(spin,120)); } else { think.style.display='none'; reveal(0); }
-    })();
-    function reveal(i){
-      if(i>=items.length){ return; }   // settle on the full panel (no blank loop)
-      items[i].classList.add('eb-reveal');
-      if(items[i].querySelector && items[i].querySelector('.eb-diff') && hl.length){   // the edit lands -> flash the code
-        hl.forEach(function(l){l.classList.add('flash');});
-        timers.push(setTimeout(function(){hl.forEach(function(l){l.classList.remove('flash');});}, 1400));
-      }
-      var isCard = items[i].classList && items[i].classList.contains('eb-toolcard');
-      timers.push(setTimeout(function(){reveal(i+1);}, isCard?950:650));
+    function frame(now){
+      raf=0; if(!vis||!inView) return;
+      size();
+      gl.uniform4f(uScene,cv.width,cv.height,((now-start)/1000)*0.86,4.0);
+      gl.drawArrays(gl.TRIANGLES,0,3);
+      raf=requestAnimationFrame(frame);
     }
-  }
-  /* start when it scrolls into view (and replay each time) */
-  if('IntersectionObserver' in window){
-    var io=new IntersectionObserver(function(es){es.forEach(function(e){ if(e.isIntersecting) play(); else clr(); });},{threshold:.35});
-    io.observe(panel);
-  } else { play(); }
-})();
-</script>
-<script>
-  /* Keep the displayed version in sync with the live release, so the banner/mockup number can't go
-     stale on a bump. (The feature blurb next to it is still edited by hand per release.) */
-  fetch('/version.json').then(function(r){return r.json();}).then(function(d){
-    if(!d||!d.version) return;
-    document.querySelectorAll('.js-ver').forEach(function(e){ e.textContent='v'+d.version; });
-  }).catch(function(){});
+    function go(){ if(vis&&inView&&raf===0) raf=requestAnimationFrame(frame); }
+    function stop(){ if(raf){cancelAnimationFrame(raf);raf=0;} }
+    new IntersectionObserver(function(es){ inView=es[0].isIntersecting; inView?go():stop(); })
+      .observe(cv);
+    new ResizeObserver(function(){ size(); go(); }).observe(cv);
+    document.addEventListener('visibilitychange',function(){
+      vis=document.visibilityState==='visible'; vis?go():stop(); });
+  })();
 </script>
 </body>
 </html>

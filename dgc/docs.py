@@ -47,6 +47,32 @@ native and compatible endpoints** — Ollama, Anthropic Messages, OpenAI Respons
 LM Studio, llama.cpp, vLLM, and cloud providers — so your code and prompts go only
 where you choose.
 
+## Install
+
+Requires **Python 3.10+**. The installer creates its own virtualenv under
+`~/dgc` and links the launcher into `~/.local/bin`, so it never touches your
+system Python:
+
+```
+curl -fsSL https://vibedgc.com/install.sh | bash
+```
+
+Then confirm it is on your PATH:
+
+```
+dgc --version
+```
+
+If that reports `command not found`, add the bin directory to your PATH:
+
+```
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+Two environment variables let you override where things land: `DGC_DIR` (the
+install directory, default `~/dgc`) and `DGC_BIN` (the launcher directory,
+default `~/.local/bin`).
+
 ## First launch
 
 ```
@@ -92,6 +118,74 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 """.strip()),
 
     ("Slash commands", "the full / command reference", _slash_command_doc()),
+
+    ("Command line", "flags, subcommands, and one-shot runs", """
+# Command line
+
+`dgc help` prints a short version of this page in the terminal.
+
+## Starting a session
+
+- `dgc` — the full-screen app, rooted at the current directory.
+- `dgc --classic` — the classic inline REPL instead of the full-screen app.
+- `dgc -p "fix the failing test"` — run one prompt non-interactively and exit.
+  Add `--mode auto` for a hands-off run.
+- `dgc -c` (`--continue`) — resume the most recent session in this directory.
+- `dgc --resume <id>` — resume a past session by id; `dgc --resume` with no id
+  opens a picker.
+
+## Per-session flags
+
+- `--mode MODE` — permission mode for this session: `default`, `acceptEdits`,
+  `plan`, or `auto`. See **Permission modes**.
+- `--think LEVEL` — thinking level for this session: `off`, `low`, `medium`,
+  `high`, or `xhigh`. See **Thinking & reasoning**.
+- `--trust` — trust this workspace for a non-interactive `acceptEdits`/`auto`
+  run. Without it, an unattended run in an untrusted directory will not edit.
+- `--engine NAME` — run the turn through a subscription CLI instead of the
+  configured endpoint. See **Subscriptions**.
+
+## Model and endpoint
+
+These persist to `config.json`, so you only pass them once:
+
+- `--model NAME` — the model to use.
+- `--base-url URL` — an OpenAI-compatible endpoint.
+- `--api-key-env NAME` — read the endpoint key from environment variable `NAME`
+  **without persisting it**. Prefer this to pasting a key anywhere.
+
+## Unattended runs
+
+- `--autonomous-gate "CMD"` — a check command that must exit `0` before the
+  agent is allowed to stop a turn. A failing check is fed back and the agent
+  keeps going.
+- `--autonomous-max-turns N` — bound on failed gate retries before the turn
+  stops anyway (default `30`).
+
+## Subcommands
+
+- `dgc setup` — configure provider / model / context.
+- `dgc doctor` — check that the endpoint and model are reachable.
+- `dgc update` — update DGC to the latest version.
+- `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
+- `dgc protocol describe` — print the installed headless/editor contract as JSON.
+- `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
+  protocol-only.
+- `dgc acp` — the agent-client-protocol surface.
+- `dgc bug` — print the issue tracker URL.
+- `dgc help`, `dgc --version`.
+
+## dgc export-training
+
+- `--out PATH` — output path (default `./dgc-training.jsonl`).
+- `--all` — every project, not just the current one.
+- `--session ID` — a single session; a unique id prefix is accepted.
+- `--successful-only` — keep only sessions that show successful work (an edit
+  landed, no edit failures).
+- `--min-turns N` — drop sessions with fewer than N user turns (default `1`).
+
+Secrets are scrubbed on the way out. See **Training export**.
+"""),
 
     ("Permission modes", "default · acceptEdits · plan · auto", """
 # Permission modes
@@ -289,6 +383,10 @@ Every conversation is a session, saved as you go.
 - **/name** — rename the current session.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
+- **dgc export-training** / **/export-training** — export your sessions as scrubbed
+  fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The
+  slash command runs the same export for the current project; the VS Code palette
+  exposes it as *DGC: Export Training Data*.
 - **/handoff** — create a bounded, redacted continuation document from one stable
   session generation. DGC saves it as a new private `HANDOFF-*.md` through the
   workspace lease; an overlapping turn is rejected instead of mixed into the file.
@@ -299,6 +397,46 @@ Every conversation is a session, saved as you go.
   the edit is refused if that durable capture fails. Arbitrary shell writes are not
   guaranteed rewindable, and approved external-path snapshots last only for the
   current process so resume never gains ambient authority outside the project.
+""".strip()),
+
+    ("Training export", "your real sessions → scrubbed fine-tuning JSONL", """
+# Training export
+
+Turn the sessions DGC already keeps into a training set for a local model. Run
+it non-interactively — there is nothing to configure:
+
+```
+dgc export-training
+```
+
+Inside a session, `/export-training` runs the same read-only export for the current
+project to `./dgc-training.jsonl` (pass a path to change it), and the VS Code command
+palette offers *DGC: Export Training Data*.
+
+Each session becomes one line of JSONL: the conversation as a standard
+OpenAI-style `messages` array — `system` / `user` / `assistant`-with-`tool_calls`
+/ `tool` results — plus a small `meta` object (model, project, turn and tool
+counts, edits, and an outcome flag). That is the shape common SFT and
+tool-calling fine-tuning tooling expects, so it drops straight into a training
+run for the model you run locally.
+
+## Flags
+
+- `--out <file>` — where to write (default `./dgc-training.jsonl`).
+- `--all` — export every project's sessions (default: just this project's).
+- `--session <id>` — export a single session (a unique id prefix works).
+- `--successful-only` — keep only sessions that show real successful work: an
+  edit landed with no failed edits, or a `/goal` was completed.
+- `--min-turns N` — drop trivial sessions with fewer than N user turns.
+
+## Secrets are stripped
+
+Every field of every record is deep-scrubbed through DGC's redaction layer
+before it is written: configured credentials (API keys, MCP/language-server
+secrets) and high-confidence credential shapes (`sk-…` tokens, JWTs, auth
+headers, private keys) are replaced with `[REDACTED]`. The export is read-only —
+it never modifies a session. Reasoning traces and provider continuation blobs
+are dropped so each record is a clean, portable conversation.
 """.strip()),
 
     ("Standing goals", "persistent objectives with an explicit lifecycle", """
@@ -317,8 +455,177 @@ or cleared. It survives `/resume`.
 The model can use the visible `update_goal` tool only for genuine whole-goal
 completion or a real blocker. Ending one turn or finishing one milestone is not
 goal completion.
+
+## Autonomous gate
+
+`--autonomous-gate "<cmd>"` bounds an autonomous run by a real check command: the
+agent may not end a turn until that command exits 0. When the model tries to stop
+and the gate fails, DGC feeds the command's output back and keeps working; when it
+exits 0, the stop is allowed. Bounded by `--autonomous-max-turns` (default 30)
+failed attempts, so a persistently red gate can never loop forever. Unset (the
+default) leaves turn completion unchanged. e.g. `--autonomous-gate "npm run check"`.
+
+Set it live without restarting: `/autonomous-gate "npm run check"` in the classic
+or full-screen TUI (`/autonomous-gate off` clears it, no argument reports the current
+gate and retry bound). The gate command and its max-retry bound are also editable in
+the TUI settings screen (Behaviour). In the VS Code extension, set `dgc.autonomousGate`
+and `dgc.autonomousMaxTurns` in Settings.
 """.strip()),
 
+    ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
+# Connect your model
+
+DGC talks to any supported native or OpenAI-compatible endpoint. Pick one with
+`/connect` (or `dgc setup` on first run), then `/model` to choose the served model.
+
+## Local runtimes
+
+- **Ollama** — `/connect ollama` uses `http://localhost:11434/v1`. DGC auto-detects
+  Ollama and speaks its native chat API (which round-trips the model's own thinking).
+- **llama.cpp** — run `llama-server`, then `/connect llamacpp`
+  (`http://localhost:8080/v1`, no real key needed). This is the OpenAI-compatible
+  `/v1` server built into `llama.cpp`.
+- **vLLM / SGLang** — `/connect vllm` (`http://localhost:8000/v1`). The server
+  renders the chat template, so DGC sends the reasoning switch it understands.
+- **LM Studio** — `/connect lmstudio` (`http://localhost:1234/v1`).
+
+## unsloth GGUFs
+
+unsloth is not a serving runtime — its GGUF/quantized models are served **through**
+llama.cpp (`llama-server`), vLLM, or Ollama. Start one of those with your unsloth
+model, then pick that runtime's preset. `/think <level>` reaches Qwen3-family
+templates (which read the effort from inside `chat_template_kwargs`) automatically.
+
+## Custom / LAN hosts
+
+`/connect http://<host>:<port>` points DGC at any other OpenAI-compatible server.
+If you enter a bare host, DGC appends the `/v1` chat-completions path for you and
+prints a notice (Anthropic and native Ollama URLs are left as-is). Models are
+auto-discovered from the endpoint's `/v1/models`, so `/model` lists what the host
+actually serves.
+
+## Cloud providers
+
+`/connect openai | anthropic | openrouter | groq | deepseek | together | mistral`
+prompt for the provider's key and use its native auth contract. See **Subscriptions**
+to instead run your own Claude/Codex/Qwen/Kimi/Copilot plan through its official CLI.
+""".strip()),
+
+    ("Thinking & reasoning", "off · low · medium · high · xhigh, and preserving it", """
+# Thinking & reasoning
+
+DGC exposes one thinking dial, mapped to the correct wire format **per provider**.
+
+## Levels
+
+`off` · `low` · `medium` · `high` · `xhigh`. `off` is the default — a coding agent
+should act, not deliberate at length. `xhigh` is the deepest budget, for genuinely
+hard problems on reasoning-capable models.
+
+- `/think` — cycle, or `/think high` to set a level (persisted across restarts).
+- `--think <level>` — set it for one `dgc -p` run.
+- TUI: `/think` opens a picker; **Settings → Model & sampling → Thinking effort**.
+
+Reasoning models (o-series, DeepSeek-R1, qwen-thinking) tend to do better on hard
+tasks with `/think high` (or `xhigh`); non-reasoning models often ignore the dial.
+
+## Showing thinking
+
+`show_reasoning` (`/thoughts show|hide`) controls whether the model's thinking is
+shown, muted, in the transcript. It does **not** change how hard the model reasons —
+that is `/think`.
+
+## Preserving thinking across turns
+
+Backends differ in whether prior-turn reasoning is carried back into context:
+
+- **Anthropic** (signed thinking blocks) and **Ollama** (native thinking field)
+  round-trip their own reasoning automatically.
+- The **OpenAI-compatible / llama.cpp** chat-completions transport **strips** the
+  model's reasoning every turn.
+
+`preserve_thinking` (`/preserve-thinking on|off`, default off) re-embeds the last
+turn's reasoning as a `<think>…</think>` block in the assistant message sent back,
+so a compatible/local model can build on its own earlier thinking. It helps
+multi-turn coherence but costs context tokens, and only affects the
+chat-completions path (the Anthropic/Ollama paths are untouched).
+""".strip()),
+
+    ("Subscriptions", "bring your own Claude / Codex / Qwen / Kimi / Copilot plan", """
+# Subscriptions
+
+Instead of a raw model endpoint, DGC can drive a coding CLI you already pay for and
+are logged into — running each turn through **your own** subscription.
+
+## Engines
+
+- **Claude Code** — your Anthropic Pro / Max plan (`claude`).
+- **Codex** — your ChatGPT Plus / Pro plan (`codex`).
+- **Qwen Code** — your Qwen OAuth plan (`qwen`).
+- **Kimi for Coding** — your Moonshot plan (`kimi`).
+- **GitHub Copilot CLI** — your Copilot plan (`copilot`).
+
+## How it works (orchestration, not a token proxy)
+
+This is orchestration, not credential replay. DGC never reads, stores, refreshes,
+or replays the vendor's tokens and never sends vendor-private headers. Each engine
+authenticates through the vendor's **own** login command, which opens the vendor's
+own browser / device flow and keeps the token in its own store. When you run a turn,
+DGC shells out to the official binary in your workspace and streams its output into
+DGC's UI (session, checkpoints, transcript). Selecting one is equivalent to running
+that CLI directly.
+
+## Select and sign in
+
+- `dgc setup` lists subscription engines first, with each one's sign-in status.
+- `/connect claude|codex|qwen|kimi|copilot` selects an engine (a direct `/connect`
+  to a provider or URL turns delegation back off).
+- Sign in once with the vendor's own command, e.g. `claude auth login`, `codex login`,
+  `qwen` (device code), `kimi login`, `copilot login`. `dgc doctor` reports status.
+
+## Model + reasoning effort
+
+- `/model` steers the vendor's own model (e.g. opus/sonnet/haiku for Claude).
+- `/think low|medium|high|xhigh` sets the reasoning effort for engines that take one
+  (Claude, Codex, Copilot); engines without an effort flag steer it via `/model`.
+""".strip()),
+
+    ("Python code-action (power mode)", "a persistent Python interpreter for token-efficient work", """
+# Python code-action (power mode)
+
+An **optional** power tool, **off by default**. Turn it on with `code_action: true` in
+`~/.dgc/config.json` (or a project `.dgc/`), with `/code-action on` in the classic or
+full-screen TUI (a row in the TUI settings screen and a toggle in the VS Code panel do
+the same), or `/code-action off` to disable it. When on, DGC advertises a **`python`** tool.
+
+## What it is
+
+`python` runs code in a **persistent interpreter tied to your session**. Variables, imports, and
+function definitions **persist across tool calls** — the model can load data into a variable **once**
+and then run computations over it across many turns.
+
+## Why it saves tokens
+
+The usual loop re-reads data into the context on every step. With a persistent interpreter the model
+loads a file/dataset into a variable one time, then each later call is just a small snippet of code
+that operates on the already-loaded state. The bulky data never re-enters the prompt — only the code
+and its (bounded) output do. This is the "code action" / CodeAct pattern.
+
+## Behavior
+
+- The last statement, if it is a bare expression, has its `repr()` shown (REPL-style).
+- `stdout`/`stderr` printed during a call are captured and returned, redacted and length-bounded like
+  `bash`.
+- An exception returns a clean traceback and the interpreter **stays alive** for the next call.
+- Pass `reset: true` to restart with a fresh, empty namespace.
+- State also resets when the session ends (or on `/new`).
+
+## Safety
+
+It executes arbitrary code on your machine — identical risk to `bash` — so it is gated by the **same
+permission path**: it asks in `default`/`acceptEdits` mode and is **denied in plan mode**. Because it
+is off by default, ordinary users never see it until they explicitly opt in.
+""".strip()),
     ("Configuration", "config.json, models, context, providers", """
 # Configuration
 
@@ -332,10 +639,19 @@ Useful keys:
   owner-only `~/.dgc/secrets.json`, VS Code SecretStorage, or `DGC_API_KEY` / the other
   `DGC_*_API_KEY` environment references; they are not written into normal config.
 - `mode`, `thinking` — permission mode and reasoning effort. `thinking` is **`off`
-  by default** (a coding agent should act, not deliberate at length). DGC sends the
-  correct reasoning switch **per provider** automatically — so `off` genuinely turns
-  reasoning off on Ollama, vLLM, OpenAI, etc. **Reasoning models (o-series,
-  DeepSeek-R1, qwen-thinking) do better on hard tasks with `/think high`.**
+  by default** (a coding agent should act, not deliberate at length) and accepts
+  `off · low · medium · high · xhigh`. DGC sends the correct reasoning switch **per
+  provider** automatically — so `off` genuinely turns reasoning off on Ollama, vLLM,
+  OpenAI, etc., and a set level reaches Qwen3-family llama.cpp/unsloth templates (which
+  read it from inside `chat_template_kwargs`). **Reasoning models (o-series,
+  DeepSeek-R1, qwen-thinking) do better on hard tasks with `/think high`.** See the
+  **Thinking & reasoning** guide.
+- `show_reasoning`, `preserve_thinking` — `show_reasoning` (`/thoughts show|hide`)
+  shows the model's thinking, muted, in the transcript. `preserve_thinking`
+  (`/preserve-thinking on|off`, default off) re-embeds the prior turn's reasoning in
+  the context sent back so a compatible/local model keeps its own thinking across
+  turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and
+  Ollama already round-trip their reasoning natively).
 - `think_budget_tokens`, `max_tokens` — safety backstops: a reasoning phase that
   runs away with no output is aborted + retried with less reasoning
   (`think_budget_tokens`, 0=off); output is capped at `max_tokens` (length-truncation
@@ -364,6 +680,10 @@ Useful keys:
 - `tool_profile` — `adaptive` (default) keeps all core coding tools while activating web, artifact,
   skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use
   `full` to expose the whole execution catalog on every model request.
+- `code_action` — **off by default.** When `true`, DGC advertises a `python` power tool that runs
+  code in a **persistent per-session interpreter** (variables/imports survive across calls). See the
+  **Python code-action** guide. It executes arbitrary code, so it is gated by the same approval path
+  as `bash` (asked in default/acceptEdits, denied in plan) and is never shown until you opt in.
 - `theme`, `background` — appearance (`background` defaults to *inherit*, never
   repainting your terminal).
 - `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion
@@ -392,6 +712,73 @@ Useful keys:
   DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle,
   and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set
   `code_intel_lsp_idle_s` to `0` for one-shot isolation everywhere.
+
+## Credentials
+
+Keys never live in `config.json`. `api_key`, `search_api_key`, `subagent_api_key` and
+`fallback_api_key` are written to `~/.dgc/secrets.json` with owner-only permissions, and each can
+be supplied by environment variable instead (`DGC_API_KEY`, `DGC_SEARCH_API_KEY`, …). On the
+command line, `--api-key-env NAME` reads a key from the environment **without persisting it at
+all**. `fallback_base_url` and `subagent_base_url` point the fallback and sub-agent at their own
+endpoints.
+
+## Sampling and limits
+
+Sampling keys are empty by default, which means *use the endpoint's own defaults* — set one only
+when you want to override it.
+
+- `temperature`, `top_p`, `top_k`, `min_p` — sampling parameters, passed through when set.
+- `max_turns` (default `80`) — tool-use iterations the agent may take in one turn.
+- `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
+  reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
+- `request_timeout` (default `1800`) — seconds to wait on a single provider response.
+- `bash_timeout` (default `120`) — per-command shell timeout.
+- `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
+- `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.
+- `prompt_cache_key` — an explicit cache key for providers that support prompt caching.
+
+## Web search
+
+- `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches.
+- `search_url` — a custom endpoint for a self-hosted search backend; empty uses the provider's own.
+- `search_timeout` bounds every query, and `search_api_key` lives in `secrets.json` (above).
+
+## Sandbox
+
+- `sandbox` (default `false`) — run shell commands inside the sandbox.
+- `sandbox_network` (default `false`) — allow network access from sandboxed commands.
+- `sandbox_env_allow` (default `[]`) — environment variable names to pass through to sandboxed
+  commands. Everything else is withheld.
+
+## Artifacts
+
+- `artifact_autostart` (default `true`) — serve artifacts automatically as they are produced.
+- `artifact_port` (default `45000`) — the single localhost port every artifact shares.
+- `artifact_bind` (default `localhost`) — the bind address. Set it to a LAN address to preview
+  from another device on your own network.
+- `artifact_hostname` — the hostname used when building the printed URL, if it differs from the
+  bind address.
+- `plan_artifact` (default `true`) — render proposed plans as an artifact page.
+- `artifact_in_plan` (default `false`) — also serve artifacts while in plan mode.
+
+## Unattended runs
+
+- `autonomous_gate` — a check command that must exit `0` before the agent may stop a turn.
+- `autonomous_max_turns` (default `30`) — bound on failed gate retries.
+- `verify_before_done` (default `false`) and `verify_command` — run a command and feed a failure
+  back before allowing the turn to end.
+
+Each has a command-line equivalent; see **Command line**.
+
+## Subscriptions
+
+- `subscription_engine` — which vendor CLI drives the turn.
+- `subscription_model`, `subscription_effort` — model and effort passed through to that CLI.
+
+## Appearance
+
+- `logo_animation` (default `true`) — the animated mark on the welcome screen. Turn it off for a
+  static logo.
 """.strip()),
 ]
 

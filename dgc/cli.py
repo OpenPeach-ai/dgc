@@ -28,7 +28,8 @@ from . import style as style_mod
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs_with_custom, command_specs,
                        custom_command_names)
-from .config import PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
+from .config import (PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config,
+                     normalize_custom_base_url)
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
@@ -61,7 +62,7 @@ def auto_warning(console: Console) -> None:
 MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
 # mono + purple: muted / accent / lavender / red (auto stays red as a danger signal)
 MODE_COLOR = {"default": "#9A9A9E", "acceptEdits": "#7C5CFF", "plan": "#A78BFA", "auto": "#DC5A64"}
-THINK_LEVELS = ["off", "low", "medium", "high"]
+THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
 
 
 class UI:
@@ -665,7 +666,10 @@ class CLI:
                     else:
                         cfg.set("api_key", prov["api_key"])
                 else:
-                    cfg.set("base_url", target)
+                    normalized, changed = normalize_custom_base_url(target)
+                    cfg.set("base_url", normalized)
+                    if changed:
+                        self.ui.info(f"normalized endpoint to {normalized} (OpenAI-compatible path)")
                 self.agent.refresh_client()
                 self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
         elif cmd == "models":
@@ -762,6 +766,55 @@ class CLI:
                 if rest == "off" and is_reasoning_model(cfg.get("model", "")):
                     self.ui.info("  tip: this looks like a reasoning model — /think high often does "
                                  "better on hard tasks")
+        elif cmd == "preserve-thinking":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "show", "yes"):
+                cfg.set("preserve_thinking", True)   # persisted across restarts
+                self.ui.info("preserve thinking → on (prior-turn reasoning kept in context)")
+            elif val in ("off", "false", "0", "hide", "no"):
+                cfg.set("preserve_thinking", False)
+                self.ui.info("preserve thinking → off")
+            else:
+                cur = "on" if cfg.get("preserve_thinking", False) else "off"
+                self.ui.info(f"preserve thinking: {cur} — /preserve-thinking on|off")
+        elif cmd in ("code-action", "codeaction", "python-tool"):
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes"):
+                cfg.set("code_action", True)   # persisted across restarts
+                self.ui.info("code-action → on (persistent `python` tool advertised)")
+            elif val in ("off", "false", "0", "no"):
+                cfg.set("code_action", False)
+                self.ui.info("code-action → off")
+            else:
+                cur = "on" if cfg.get("code_action", False) else "off"
+                self.ui.info(f"code-action: {cur} — /code-action on|off")
+        elif cmd in ("autonomous-gate", "auto-gate"):
+            val = rest.strip()
+            if val.lower() in ("off", "none", "clear", "unset", ""):
+                if not val:
+                    gate = cfg.get("autonomous_gate", "") or ""
+                    if gate:
+                        self.ui.info(f"autonomous gate: `{gate}` — max {cfg.get('autonomous_max_turns', 30)} "
+                                     "retries. /autonomous-gate off to clear")
+                    else:
+                        self.ui.info("autonomous gate: off — /autonomous-gate \"<cmd>\" to set one")
+                else:
+                    cfg.set("autonomous_gate", "")
+                    self.agent.autonomous_gate = ""
+                    self.ui.info("autonomous gate → off")
+            else:
+                cfg.set("autonomous_gate", val)
+                self.agent.autonomous_gate = val
+                self.ui.info(f"autonomous gate → `{val}` (must exit 0 before a turn may stop; "
+                             f"max {cfg.get('autonomous_max_turns', 30)} retries)")
+        elif cmd in ("export-training", "export-jsonl"):
+            summary = export_training_core(cfg, out=(rest.strip() or "./dgc-training.jsonl"))
+            if summary.get("error"):
+                self.ui.error(summary["error"])
+            else:
+                self.ui.info(
+                    f"export-training → wrote {summary['written']} session(s), "
+                    f"skipped {summary['skipped']}, to {summary['out']} (secrets scrubbed)")
         elif cmd == "permissions":
             self._permissions_cmd(rest)
         elif cmd == "memory":
@@ -1382,6 +1435,95 @@ def run_doctor(config: Config) -> None:
         c.print("\n  [bold green]ready[/bold green] — run [bold]dgc[/bold] to start.\n")
 
 
+def export_training_core(config, *, out: str = "./dgc-training.jsonl", all_projects: bool = False,
+                         session: str | None = None, successful_only: bool = False,
+                         min_turns: int = 1) -> dict:
+    """Shared engine for `dgc export-training` and the `/export-training` slash command.
+
+    Read-only over the persisted transcripts: selects the session files for the chosen scope,
+    reshapes + deep-scrubs each into one training record, and writes them as JSONL. Returns a
+    summary dict (``scope``/``written``/``skipped``/``out``/``successful_only``) or ``{"error": …}``.
+    """
+    from . import training_export
+    secrets = secret_values(config)
+    if session:
+        p = sessions_mod.by_id(config.project_root, session)
+        if p is None:
+            found = sessions_mod.find_global(session)
+            p = found[0] if found else None
+        if p is None:
+            return {"error": f"no session '{session}' found"}
+        files = [p]
+        scope = f"session {p.stem}"
+    elif all_projects:
+        files = [row[0] for row in sessions_mod.listing_all(redact_secrets=secrets)]
+        scope = "all projects"
+    else:
+        files = [row[0] for row in sessions_mod.listing(
+            config.project_root, redact_secrets=secrets)]
+        scope = f"project {config.project_root.name}"
+    total = len(files)
+    records = list(training_export.iter_training_records(
+        files, config, successful_only=successful_only, min_turns=max(1, int(min_turns or 1))))
+    out_path = Path(out).expanduser()
+    written = training_export.write_jsonl(records, out_path)
+    return {"scope": scope, "written": written, "skipped": total - written,
+            "out": out_path, "successful_only": successful_only}
+
+
+def run_export_training(argv: list[str]) -> int:
+    """`dgc export-training` — turn real DGC sessions into scrubbed, training-ready JSONL.
+
+    Read-only over the persisted transcripts: reshapes each session into one OpenAI-style
+    ``messages`` record (with ``tool_calls``) plus outcome ``meta``, deep-scrubs every field of
+    every record through the redaction layer, and writes one JSON object per line.
+    """
+    parser = argparse.ArgumentParser(
+        allow_abbrev=False, prog="dgc export-training",
+        description="Export your real DGC sessions as scrubbed fine-tuning JSONL for a local model.")
+    parser.add_argument("--out", default="./dgc-training.jsonl", metavar="FILE",
+                        help="output JSONL path (default ./dgc-training.jsonl)")
+    parser.add_argument("--all", action="store_true",
+                        help="export sessions from every project (default: this project's sessions)")
+    parser.add_argument("--session", metavar="ID",
+                        help="export a single session by id (a unique prefix is accepted)")
+    parser.add_argument("--successful-only", action="store_true",
+                        help="keep only sessions that show successful work (an edit landed, no edit "
+                             "failures, or a completed goal)")
+    parser.add_argument("--min-turns", type=int, default=1, metavar="N",
+                        help="drop sessions with fewer than N user turns (default 1)")
+    args = parser.parse_args(argv)
+
+    config = Config()
+    c = Console()
+
+    summary = export_training_core(
+        config, out=args.out, all_projects=args.all, session=args.session,
+        successful_only=args.successful_only, min_turns=args.min_turns)
+    if summary.get("error"):
+        c.print(f"  [yellow]![/yellow] {terminal_safe_text(summary['error'])}")
+        return 1
+    scope = summary["scope"]
+    written = summary["written"]
+    skipped = summary["skipped"]
+    out_path = summary["out"]
+
+    c.print("[bold]DGC export-training[/bold] — your sessions → scrubbed fine-tuning JSONL\n")
+    c.print(f"  scope         {terminal_safe_text(scope)}", markup=False, highlight=False)
+    c.print(f"  exported      {written} session(s)", markup=False, highlight=False)
+    c.print(f"  skipped       {skipped} (empty / below --min-turns"
+            + ("/ not successful" if args.successful_only else "") + ")",
+            markup=False, highlight=False)
+    c.print(f"  output        {terminal_safe_text(out_path)}", markup=False, highlight=False)
+    c.print("  secrets       [green]scrubbed[/green] — every field deep-redacted before export")
+    if written == 0:
+        c.print("\n  [yellow]nothing exported[/yellow] — no matching sessions in this scope.\n")
+    else:
+        c.print(f"\n  [bold green]done[/bold green] — wrote {written} record(s) "
+                f"to {terminal_safe_text(out_path)}\n", markup=True, highlight=False)
+    return 0
+
+
 def run_setup(config: Config) -> None:
     """`dgc setup` — interactive first-run wizard: pick a provider, key, model, context."""
     from .llm import LLMClient
@@ -1430,6 +1572,9 @@ def run_setup(config: Config) -> None:
         base_url = input("  base URL (…/v1) › ").strip()
         if not base_url:
             c.print("[dim]cancelled[/dim]"); return
+        base_url, _bu_changed = normalize_custom_base_url(base_url)
+        if _bu_changed:
+            c.print(f"  [dim]normalized endpoint to {base_url} (OpenAI-compatible path)[/dim]")
         from getpass import getpass
         api_key = getpass("  API key (blank for local) › ").strip() or "sk-local"
     config.set("subscription_engine", "")     # a direct model turns delegation back off
@@ -1501,6 +1646,7 @@ def run_help() -> None:
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
     c.print("  dgc update              update DGC to the latest version")
+    c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
@@ -1509,9 +1655,12 @@ def run_help() -> None:
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in (
-            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug"):
+            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
+            "export-training"):
         if raw_argv[0] == "help":
             run_help(); return
+        if raw_argv[0] == "export-training":
+            return run_export_training(raw_argv[1:])
         if raw_argv[0] == "bug":
             print("\n  Report a bug or request a feature:\n"
                   "    https://github.com/OpenPeach-ai/dgc/issues\n")
@@ -1556,6 +1705,11 @@ def main(argv: list[str] | None = None) -> int | None:
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
                         help="resume a past session by id (dgc --resume <id>), or pick one (dgc --resume)")
+    parser.add_argument("--autonomous-gate", metavar="CMD", default=None,
+                        help="a check command that must exit 0 before the agent may stop a turn; "
+                             "a nonzero exit feeds its output back and continues (e.g. \"npm run check\")")
+    parser.add_argument("--autonomous-max-turns", type=int, default=None, metavar="N",
+                        help="bound on failed --autonomous-gate retries before the turn stops (default 30)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
@@ -1576,6 +1730,10 @@ def main(argv: list[str] | None = None) -> int | None:
         config.data["mode"] = args.mode
     if args.think:
         config.data["thinking"] = args.think
+    if args.autonomous_gate is not None:
+        config.data["autonomous_gate"] = args.autonomous_gate
+    if args.autonomous_max_turns is not None:
+        config.data["autonomous_max_turns"] = args.autonomous_max_turns
 
     if args.prompt is not None:
         from .trust import is_trusted, mark_trusted

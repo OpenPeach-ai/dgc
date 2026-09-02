@@ -928,17 +928,31 @@ def is_reasoning_model(model: str) -> bool:
             or "qwq" in m or "think" in m)
 
 
+def _compat_reasoning_payload(off: bool, level) -> dict:
+    """Reasoning fields for a generic OpenAI-compatible transport (llama.cpp `llama-server`,
+    unsloth GGUFs served through it, vLLM/SGLang, LM Studio, or any other /v1 host).
+
+    Qwen3-family Jinja chat templates (served via llama.cpp/unsloth) read the effort level ONLY
+    from INSIDE `chat_template_kwargs` (`{"reasoning_effort": "medium"}`); other servers read a
+    flat `reasoning_effort`. So when thinking is ON we send BOTH — each server ignores the field
+    it does not understand — otherwise `/think <level>` silently no-ops on the template path.
+    OFF sends only `enable_thinking: False` (no effort level)."""
+    if off:
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    return {"reasoning_effort": level,
+            "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": level}}
+
+
 def _reasoning_payload(family: str, model: str, level) -> dict:
-    """Request fields expressing thinking `level` (off|low|medium|high|None) for
+    """Request fields expressing thinking `level` (off|low|medium|high|xhigh|None) for
     this provider. `{}` means 'let the model's own default stand'."""
     off = level in _REASONING_OFF
     if family == "ollama":                              # omitting forces thinking ON → always send
-        return {"reasoning_effort": "none" if off else level}
+        if off:
+            return {"reasoning_effort": "none"}
+        return {"reasoning_effort": "high" if str(level).lower() == "xhigh" else level}
     if family == "vllm":                                # server renders the chat template
-        p = {"chat_template_kwargs": {"enable_thinking": not off}}
-        if not off:
-            p["reasoning_effort"] = level
-        return p
+        return _compat_reasoning_payload(off, level)
     if family == "openai":                              # only o-series / gpt-5 accept effort; no "none"
         if not _openai_reasoning_model(model):
             return {}
@@ -954,12 +968,10 @@ def _reasoning_payload(family: str, model: str, level) -> dict:
     if family == "anthropic":
         if off:
             return {}
-        budget = {"low": 2048, "medium": 8192, "high": 16384}.get(level, 8192)
+        budget = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}.get(level, 8192)
         return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-    # unknown OpenAI-compatible host → send both switches; each server ignores the other's field
-    if off:
-        return {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}}
-    return {"reasoning_effort": level, "chat_template_kwargs": {"enable_thinking": True}}
+    # unknown OpenAI-compatible host (llama.cpp / unsloth / LM Studio / …)
+    return _compat_reasoning_payload(off, level)
 
 
 class LLMClient:
@@ -1543,7 +1555,7 @@ class LLMClient:
             return {"type": "disabled"}
         if self._anthropic_adaptive_model(self.model):
             return {"type": "adaptive", "display": "summarized"}
-        target = {"low": 2048, "medium": 8192, "high": 16384}.get(
+        target = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576}.get(
             str(level).lower(), 8192)
         # Legacy extended thinking requires budget_tokens < max_tokens. A tiny explicit output cap
         # cannot carry the minimum useful thinking budget, so honor the cap and disable thinking.
@@ -1958,7 +1970,7 @@ class LLMClient:
         disabled: set[str] = set()
         overthink = 0
         level = reasoning_effort
-        lower = {"high": "medium", "medium": "low", "low": "off",
+        lower = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off",
                  "none": "off", "off": "off"}
         last_err = ""
         max_tokens_limit: int | None = None
@@ -2152,6 +2164,8 @@ class LLMClient:
         if level in _REASONING_OFF:
             return False
         value = str(level).lower()
+        if value == "xhigh":                 # Ollama accepts low|medium|high|max — clamp the extra tier
+            return "high"
         return value if value in ("low", "medium", "high", "max") else True
 
     def _consume_ollama(self, r: requests.Response, on_text, on_thinking, cancel=None,
@@ -2388,7 +2402,7 @@ class LLMClient:
         repaired = False
         overthink = 0
         level = reasoning_effort
-        lower = {"high": "medium", "medium": "low", "low": "off",
+        lower = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off",
                  "none": "off", "off": "off"}
         for _ in range(8):
             if cancel is not None and cancel.is_set():
@@ -2531,7 +2545,7 @@ class LLMClient:
         repaired = False   # whether we've swapped in the endpoint-agnostic repaired shape
         overthink = 0      # F4: times the reasoning-watchdog fired this turn (bounded)
         level = reasoning_effort   # current thinking level; the watchdog steps it down on a runaway
-        _LOWER = {"high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
+        _LOWER = {"xhigh": "high", "high": "medium", "medium": "low", "low": "off", "none": "off", "off": "off"}
         for _ in range(8):  # 400-fallbacks + up to 4 transient retries share this budget
             # A deadline may expire while requests.post is waiting for response headers. Never turn
             # that terminal cancellation into several fresh provider generations via the transient

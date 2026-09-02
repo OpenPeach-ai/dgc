@@ -78,7 +78,7 @@ _MAX_HANDOFF_OUTPUT_CHARS = 64_000
 # module startup. The regression suite locks this set to the session and benchmark readers.
 _REQUEST_REASON_LABELS = frozenset({
     "user_turn", "tool_result", "steering", "output_continue", "tool_reissue",
-    "todo_gate", "empty_final", "goal_gate", "verifier_evidence", "convergence_nudge",
+    "todo_gate", "empty_final", "goal_gate", "autonomous_gate", "verifier_evidence", "convergence_nudge",
     "transport_retry", "context_retry", "provider_pause", "fallback", "title", "suggestion",
     "handoff",
     "compaction", "mcp_sampling", "subagent", "unattributed", "other",
@@ -380,9 +380,9 @@ def _is_verification_command(command: str, configured: str = "") -> bool:
 
     segments = _and_segments(actual)
     return bool(segments and any(_looks_like_test_invocation(segment) for segment in segments))
-from .tools import TOOL_SCHEMAS, bash_handle_tools, execute
+from .tools import TOOL_SCHEMAS, bash_handle_tools, execute, shutdown_python_kernels
 
-THINK_LEVELS = ("off", "low", "medium", "high")
+THINK_LEVELS = ("off", "low", "medium", "high", "xhigh")
 THINK_INSTRUCTIONS = {
     "off": "",
     "low": "Think briefly before acting; keep your reasoning short and focused.",
@@ -390,12 +390,29 @@ THINK_INSTRUCTIONS = {
     "high": ("Engage maximum reasoning depth (ultrathink). Analyze the problem thoroughly, "
              "explore alternative approaches, verify assumptions against the actual code, "
              "and double-check every action before taking it."),
+    "xhigh": ("Engage the deepest reasoning budget. Exhaustively analyze the problem, enumerate "
+              "and weigh alternative approaches, verify every assumption against the actual code, "
+              "and re-check each action before and after taking it."),
 }
 # prompt keywords bump the thinking level for that turn
 THINK_KEYWORDS = [
     ("ultrathink", "high"), ("think harder", "high"),
     ("think hard", "medium"), ("think", "low"),
 ]
+
+
+def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
+    """Content persisted to history for one assistant turn.
+
+    With ``preserve_thinking`` on, re-embed the reasoning that the chat_completions/generic
+    transport would otherwise strip (Anthropic and Ollama round-trip their own reasoning through
+    ``provider_message``, so those paths are left untouched). Prepending a ``<think>`` block keeps
+    the model's prior reasoning in the context sent back next turn."""
+    content = result.content or ""
+    if (preserve_thinking and not getattr(result, "provider_message", None)
+            and (getattr(result, "thinking", "") or "").strip()):
+        return "<think>\n" + result.thinking.strip() + "\n</think>\n" + content
+    return content
 
 COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
@@ -826,6 +843,9 @@ class Agent:
         self._last_turn_error = ""
         self.goal = ""            # standing /goal objective, kept in context until met/cleared
         self.goal_status = "none"  # none | active | completed | blocked
+        # autonomous gate: an external check command that must exit 0 before a turn may stop ("" = off)
+        self.autonomous_gate = str(config.get("autonomous_gate", "") or "")
+        self.autonomous_max_turns = int(config.get("autonomous_max_turns", 30) or 30)
         self._session_started = False       # SessionStart hook fires once per session
         from collections import deque
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
@@ -1156,6 +1176,12 @@ class Agent:
             else:  # compatibility for injected/third-party manager shims
                 mcp_schemas = self.mcp.tool_schemas()
         schemas = TOOL_SCHEMAS + (_MCP_BROKER_SCHEMAS if lazy_mcp else []) + mcp_schemas
+        if not self.config.get("code_action", False):
+            # The persistent Python "code action" interpreter runs arbitrary code; keep it out of the
+            # advertised catalog entirely unless the user opted in. (When on, it is still gated by the
+            # same permission path as bash — asked in default/acceptEdits, denied in plan.)
+            schemas = [tool for tool in schemas
+                       if tool.get("function", {}).get("name") != "python"]
         if self.mode == "plan":
             allowed = set(_PLAN_TOOLS)
             if self.config.get("artifact_in_plan", False):
@@ -1407,6 +1433,9 @@ class Agent:
         return target
 
     def reset(self) -> None:
+        # A persistent Python "code action" interpreter belongs to the session being torn down; its
+        # in-memory namespace must not leak into the new session, so kill it here (lazily restarted).
+        shutdown_python_kernels(getattr(self.ctx, "tool_owner", None))
         self.goal = ""                                   # clear BEFORE building the prompt (no stale goal)
         self.goal_status = "none"
         self._goal_elapsed_seconds = 0.0
@@ -2307,6 +2336,79 @@ class Agent:
         self.ui.error(self._last_turn_error)
         return False
 
+    def _run_autonomous_gate(self) -> tuple[int, str]:
+        """Run the configured autonomous gate command; return (returncode, bounded output).
+
+        Mirrors the bash tool's isolation: its own session/process group so a timeout kills the
+        whole tree, streaming credential redaction, and a bounded head/tail capture. A timeout
+        yields a nonzero return code + a short note so the caller treats it as a failing gate.
+        """
+        import subprocess
+        from .tools import _BoundedCommandCapture, _terminate_background
+        cmd = self.autonomous_gate
+        try:
+            timeout = max(1, int(self.config.get("bash_timeout", 120) or 120))
+        except (TypeError, ValueError):
+            timeout = 120
+        try:
+            proc = subprocess.Popen(
+                ["/bin/bash", "-lc", cmd], cwd=str(self.ctx.project_root),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", start_new_session=True)
+        except OSError as exc:
+            return 1, self._safe_text(f"error: {type(exc).__name__}: {exc}")
+        capture = _BoundedCommandCapture(self.ctx)
+
+        def read_output() -> None:
+            try:
+                if proc.stdout is not None:
+                    while True:
+                        chunk = proc.stdout.read(16_384)
+                        if not chunk:
+                            break
+                        capture.feed(chunk)
+            except (OSError, ValueError):
+                pass
+            finally:
+                capture.finish()
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        deadline = time.monotonic() + timeout
+        timed_out = False
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                if proc.poll() is None:
+                    try:
+                        proc.wait(timeout=min(0.05, remaining))
+                    except subprocess.TimeoutExpired:
+                        continue
+                if not reader.is_alive():
+                    break
+                reader.join(timeout=min(0.05, remaining))
+        finally:
+            # Kill the WHOLE process group even on a clean exit so a daemonized grandchild
+            # cannot keep the workspace busy after the gate returns.
+            _terminate_background(proc, sweep_exited_group=True)
+        reader.join(timeout=5)
+        if reader.is_alive() and proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except (OSError, ValueError):
+                pass
+            reader.join(timeout=1)
+        out, _source_chars, _omitted = capture.result()
+        out = self._safe_text(out).strip()
+        if timed_out:
+            note = f"error: the autonomous gate did NOT finish within {timeout}s and was killed"
+            return 124, (note + (f"\n--- output before it was killed ---\n{out}" if out else ""))
+        rc = proc.returncode if proc.returncode is not None else 1
+        return rc, (out or "(no output)")
+
     def _run_turn(self, user_text: str) -> bool:
         self._refresh_system()
         if self.depth == 0:                        # checkpoints + prompt hooks: top-level only
@@ -2367,6 +2469,7 @@ class Agent:
         did_tools = False           # did the model actually call any tools this turn?
         summary_nudged = False      # so the "give a closing summary" nudge fires at most once
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
+        autonomous_gate_tries = 0   # failed autonomous-gate attempts this turn (bounded by autonomous_max_turns)
         overflow_retried = False    # context-overflow → compact-and-retry fires at most once
         # Why the next completed foreground provider request exists. This private controller state
         # never derives a label from transcript text, so a repository/user/model cannot forge
@@ -2665,7 +2768,9 @@ class Agent:
 
             native = (bool(result.tool_calls)
                       and not result.tool_calls[0].id.startswith("textcall_"))
-            assistant: dict = {"role": "assistant", "content": result.content}
+            assistant: dict = {"role": "assistant",
+                               "content": _assistant_content_with_thinking(
+                                   result, bool(self.config.get("preserve_thinking", False)))}
             if result.provider_items:
                 assistant["_responses_output"] = result.provider_items
             if result.provider_message:
@@ -2790,6 +2895,28 @@ class Agent:
                             "completion withheld — checking the active standing goal")
                     next_request_reason = "goal_gate"
                     continue
+                if self.autonomous_gate and autonomous_gate_tries < self.autonomous_max_turns:
+                    # Autonomous gate: bound the run by a real check command. The model may not end the
+                    # turn until it exits 0; a nonzero exit feeds its output back and continues. This is
+                    # the LAST gate before stopping, so a passing gate falls through to the final stop.
+                    rc, gate_out = self._run_autonomous_gate()
+                    if rc != 0:
+                        autonomous_gate_tries += 1
+                        self.messages.append({"role": "user", "content":
+                            "<system-reminder>\nThe autonomous gate `" + self.autonomous_gate +
+                            f"` exited {rc} (attempt {autonomous_gate_tries}/{self.autonomous_max_turns}). "
+                            "Its output:\n" + gate_out[-3000:] + "\nKeep working until it exits 0 — do not "
+                            "stop until the gate passes.\n</system-reminder>"})
+                        if defer_completion:
+                            withhold_final(
+                                "[Completion withheld by DGC: the autonomous gate has not passed.]",
+                                "completion withheld — autonomous gate not yet passing")
+                        next_request_reason = "autonomous_gate"
+                        self.ui.info(
+                            f"↻ autonomous gate `{self.autonomous_gate}` failed (exit {rc}) — continuing")
+                        continue
+                    self.ui.info(f"✓ autonomous gate passed: {self.autonomous_gate}")
+                    # fall through to stop
                 # A successful exact verifier remains authoritative until a later mutation-capable
                 # action invalidates ``verified``.  The assistant's no-tools closing response cannot
                 # change the checkout, so rerunning the same command here adds latency and can turn a
