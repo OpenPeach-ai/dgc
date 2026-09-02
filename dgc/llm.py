@@ -999,12 +999,6 @@ class LLMClient:
         self.think_budget_chars = max(0, think_budget_tokens) * 4   # F4 over-thinking watchdog (0=off)
         self.max_tokens = max(0, max_tokens)            # F3 output backstop per request (0=don't send)
         self.context_size = max(0, int(context_size or 0))
-        # chars//4 under-counts code-heavy transcripts (real tokenizers land nearer 3.4-3.6
-        # chars/token on source, diffs and tool JSON), so the raw estimate reads low and
-        # compaction stops reclaiming while the true prompt is still filling the window.
-        # Learn the real ratio from the provider's own usage counts instead of guessing.
-        self._token_scale = 1.0
-        self._last_input_estimate = 0
         self.keep_alive = ollama_keep_alive             # D2: keep Ollama model resident between turns
         self.sampling = dict(sampling or {})            # optional temperature/top_p/top_k/min_p overrides
         requested_mode = str(api_mode or "auto").lower()
@@ -1319,28 +1313,7 @@ class LLMClient:
         chars = len(json.dumps(wire, default=str))
         if wire_tools and self.tools_supported:
             chars += len(json.dumps(wire_tools, default=str))
-        estimate = int((chars // 4) * self._token_scale) + image_tokens + compaction_tokens
-        self._last_input_estimate = estimate
-        return estimate
-
-    def calibrate_input_estimate(self, real_input_tokens: int) -> None:
-        """Teach this client how far its char-based estimate sits from the provider's count.
-
-        The estimate only has to be SAFE, never exact — it decides when to compact. Keep the
-        worst (largest) ratio seen so the trigger fires early rather than late, and clamp it so
-        one anomalous response cannot collapse the usable window.
-        """
-        try:
-            real = int(real_input_tokens or 0)
-        except (TypeError, ValueError):
-            return
-        estimated = int(self._last_input_estimate or 0)
-        if real <= 0 or estimated <= 0:
-            return
-        observed = real / estimated
-        if observed <= 1.0 or observed > 3.0:   # already safe, or an outlier worth ignoring
-            return
-        self._token_scale = min(2.0, max(self._token_scale, self._token_scale * observed))
+        return chars // 4 + image_tokens + compaction_tokens
 
     def _reset_response_state(self) -> None:
         self._response_id = ""
