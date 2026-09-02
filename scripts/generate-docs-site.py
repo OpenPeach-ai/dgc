@@ -284,7 +284,7 @@ def build_index(order, group_of) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=str(ROOT / "site-v2" / "docs"))
+    ap.add_argument("--out", default=str(ROOT / "site" / "docs"))
     ap.add_argument("--check", action="store_true",
                     help="exit non-zero if the rendered site differs from what is on disk")
     a = ap.parse_args()
