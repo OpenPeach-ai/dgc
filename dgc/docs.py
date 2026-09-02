@@ -47,6 +47,32 @@ native and compatible endpoints** — Ollama, Anthropic Messages, OpenAI Respons
 LM Studio, llama.cpp, vLLM, and cloud providers — so your code and prompts go only
 where you choose.
 
+## Install
+
+Requires **Python 3.10+**. The installer creates its own virtualenv under
+`~/dgc` and links the launcher into `~/.local/bin`, so it never touches your
+system Python:
+
+```
+curl -fsSL https://vibedgc.com/install.sh | bash
+```
+
+Then confirm it is on your PATH:
+
+```
+dgc --version
+```
+
+If that reports `command not found`, add the bin directory to your PATH:
+
+```
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+```
+
+Two environment variables let you override where things land: `DGC_DIR` (the
+install directory, default `~/dgc`) and `DGC_BIN` (the launcher directory,
+default `~/.local/bin`).
+
 ## First launch
 
 ```
@@ -92,6 +118,74 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 """.strip()),
 
     ("Slash commands", "the full / command reference", _slash_command_doc()),
+
+    ("Command line", "flags, subcommands, and one-shot runs", """
+# Command line
+
+`dgc help` prints a short version of this page in the terminal.
+
+## Starting a session
+
+- `dgc` — the full-screen app, rooted at the current directory.
+- `dgc --classic` — the classic inline REPL instead of the full-screen app.
+- `dgc -p "fix the failing test"` — run one prompt non-interactively and exit.
+  Add `--mode auto` for a hands-off run.
+- `dgc -c` (`--continue`) — resume the most recent session in this directory.
+- `dgc --resume <id>` — resume a past session by id; `dgc --resume` with no id
+  opens a picker.
+
+## Per-session flags
+
+- `--mode MODE` — permission mode for this session: `default`, `acceptEdits`,
+  `plan`, or `auto`. See **Permission modes**.
+- `--think LEVEL` — thinking level for this session: `off`, `low`, `medium`,
+  `high`, or `xhigh`. See **Thinking & reasoning**.
+- `--trust` — trust this workspace for a non-interactive `acceptEdits`/`auto`
+  run. Without it, an unattended run in an untrusted directory will not edit.
+- `--engine NAME` — run the turn through a subscription CLI instead of the
+  configured endpoint. See **Subscriptions**.
+
+## Model and endpoint
+
+These persist to `config.json`, so you only pass them once:
+
+- `--model NAME` — the model to use.
+- `--base-url URL` — an OpenAI-compatible endpoint.
+- `--api-key-env NAME` — read the endpoint key from environment variable `NAME`
+  **without persisting it**. Prefer this to pasting a key anywhere.
+
+## Unattended runs
+
+- `--autonomous-gate "CMD"` — a check command that must exit `0` before the
+  agent is allowed to stop a turn. A failing check is fed back and the agent
+  keeps going.
+- `--autonomous-max-turns N` — bound on failed gate retries before the turn
+  stops anyway (default `30`).
+
+## Subcommands
+
+- `dgc setup` — configure provider / model / context.
+- `dgc doctor` — check that the endpoint and model are reachable.
+- `dgc update` — update DGC to the latest version.
+- `dgc export-training` — export sessions as scrubbed fine-tuning JSONL.
+- `dgc protocol describe` — print the installed headless/editor contract as JSON.
+- `dgc serve` — the headless JSON backend the VS Code extension drives. Stdout is
+  protocol-only.
+- `dgc acp` — the agent-client-protocol surface.
+- `dgc bug` — print the issue tracker URL.
+- `dgc help`, `dgc --version`.
+
+## dgc export-training
+
+- `--out PATH` — output path (default `./dgc-training.jsonl`).
+- `--all` — every project, not just the current one.
+- `--session ID` — a single session; a unique id prefix is accepted.
+- `--successful-only` — keep only sessions that show successful work (an edit
+  landed, no edit failures).
+- `--min-turns N` — drop sessions with fewer than N user turns (default `1`).
+
+Secrets are scrubbed on the way out. See **Training export**.
+"""),
 
     ("Permission modes", "default · acceptEdits · plan · auto", """
 # Permission modes
@@ -618,6 +712,73 @@ Useful keys:
   DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle,
   and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set
   `code_intel_lsp_idle_s` to `0` for one-shot isolation everywhere.
+
+## Credentials
+
+Keys never live in `config.json`. `api_key`, `search_api_key`, `subagent_api_key` and
+`fallback_api_key` are written to `~/.dgc/secrets.json` with owner-only permissions, and each can
+be supplied by environment variable instead (`DGC_API_KEY`, `DGC_SEARCH_API_KEY`, …). On the
+command line, `--api-key-env NAME` reads a key from the environment **without persisting it at
+all**. `fallback_base_url` and `subagent_base_url` point the fallback and sub-agent at their own
+endpoints.
+
+## Sampling and limits
+
+Sampling keys are empty by default, which means *use the endpoint's own defaults* — set one only
+when you want to override it.
+
+- `temperature`, `top_p`, `top_k`, `min_p` — sampling parameters, passed through when set.
+- `max_turns` (default `80`) — tool-use iterations the agent may take in one turn.
+- `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
+  reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
+- `request_timeout` (default `1800`) — seconds to wait on a single provider response.
+- `bash_timeout` (default `120`) — per-command shell timeout.
+- `approval_timeout_s` (default `300`) — how long a permission prompt waits before giving up.
+- `ollama_keep_alive` (default `30m`) — how long Ollama keeps the model resident between turns.
+- `prompt_cache_key` — an explicit cache key for providers that support prompt caching.
+
+## Web search
+
+- `search_provider` (default `duckduckgo`) — which backend answers the agent's web searches.
+- `search_url` — a custom endpoint for a self-hosted search backend; empty uses the provider's own.
+- `search_timeout` bounds every query, and `search_api_key` lives in `secrets.json` (above).
+
+## Sandbox
+
+- `sandbox` (default `false`) — run shell commands inside the sandbox.
+- `sandbox_network` (default `false`) — allow network access from sandboxed commands.
+- `sandbox_env_allow` (default `[]`) — environment variable names to pass through to sandboxed
+  commands. Everything else is withheld.
+
+## Artifacts
+
+- `artifact_autostart` (default `true`) — serve artifacts automatically as they are produced.
+- `artifact_port` (default `45000`) — the single localhost port every artifact shares.
+- `artifact_bind` (default `localhost`) — the bind address. Set it to a LAN address to preview
+  from another device on your own network.
+- `artifact_hostname` — the hostname used when building the printed URL, if it differs from the
+  bind address.
+- `plan_artifact` (default `true`) — render proposed plans as an artifact page.
+- `artifact_in_plan` (default `false`) — also serve artifacts while in plan mode.
+
+## Unattended runs
+
+- `autonomous_gate` — a check command that must exit `0` before the agent may stop a turn.
+- `autonomous_max_turns` (default `30`) — bound on failed gate retries.
+- `verify_before_done` (default `false`) and `verify_command` — run a command and feed a failure
+  back before allowing the turn to end.
+
+Each has a command-line equivalent; see **Command line**.
+
+## Subscriptions
+
+- `subscription_engine` — which vendor CLI drives the turn.
+- `subscription_model`, `subscription_effort` — model and effort passed through to that CLI.
+
+## Appearance
+
+- `logo_animation` (default `true`) — the animated mark on the welcome screen. Turn it off for a
+  static logo.
 """.strip()),
 ]
 

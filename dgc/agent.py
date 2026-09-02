@@ -50,6 +50,8 @@ _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery p
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
+_INPUT_BOUND_RATIO = 0.90  # a `length` stop with the prompt this full of the window is input-bound:
+                           # continuing only grows the prompt, so reclaim room instead
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
@@ -1007,8 +1009,21 @@ class Agent:
             raise MCPInputError("sampled response cancelled before disclosure")
         return response
 
+    @staticmethod
+    def _is_main_request(reason: object) -> bool:
+        """Only the main conversation drives compaction, so only it should calibrate."""
+        return not (isinstance(reason, str) and reason in (
+            "title", "suggestion", "handoff", "compaction", "subagent", "mcp_sampling"))
+
     def _record_usage(self, raw_usage: dict | None, request_reason: object = "other") -> None:
         usage = normalize_usage(raw_usage)
+        # Feed the real prompt count back to the client so its compaction estimate self-corrects.
+        calibrate = getattr(self.client, "calibrate_input_estimate", None)
+        if callable(calibrate) and self._is_main_request(request_reason):
+            try:
+                calibrate(usage.get("input_tokens", 0))
+            except Exception:
+                pass
         reason = (request_reason if isinstance(request_reason, str)
                   and request_reason in _REQUEST_REASON_LABELS else "other")
         with self._usage_lock:
@@ -2471,6 +2486,7 @@ class Agent:
         goal_nudged = False         # standing-goal check fires at most once per turn before stopping
         autonomous_gate_tries = 0   # failed autonomous-gate attempts this turn (bounded by autonomous_max_turns)
         overflow_retried = False    # context-overflow → compact-and-retry fires at most once
+        truncation_relieved = False # length-truncation → compact-and-retry fires at most once
         # Why the next completed foreground provider request exists. This private controller state
         # never derives a label from transcript text, so a repository/user/model cannot forge
         # benchmark attribution by echoing reminder tags or tool arguments.
@@ -2816,6 +2832,20 @@ class Agent:
                     return self._fail_turn(
                         "stopped — the response awaiting verification exceeded the bounded display limit")
                 if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
+                    # A "length" stop whose prompt already fills the window is INPUT-bound, not
+                    # output-bound: appending another "continue where you left off" makes the next
+                    # prompt strictly larger and guarantees the same truncation, so all
+                    # _MAX_CONTINUE attempts drain without a single token of progress. Reclaim room
+                    # instead — once per turn, and without spending a continuation on it.
+                    if (result.finish_reason == "length" and not truncation_relieved
+                            and not held_final_messages
+                            and self.estimate_tokens(tools=tools)
+                            >= _INPUT_BOUND_RATIO * self.context_size()):
+                        truncation_relieved = True
+                        self.ui.info("↻ no room left to answer — compacting and retrying")
+                        if self.maybe_compact(force=True, deadline=compact_deadline, tools=tools):
+                            next_request_reason = "truncation_relief"
+                            continue
                     if continues < _MAX_CONTINUE:
                         continues += 1
                         interrupted = result.finish_reason == "incomplete"

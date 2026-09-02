@@ -28,3 +28,6 @@ PI_VS_DGC_COMPARISON.md
 PI_VS_DGC_COMPARISON_raw.json
 bench/sync_vast_results.sh
 output/
+
+# local staging copy of the site; site/ is the published source of truth
+site-v2/
