@@ -15,8 +15,11 @@ fi
 for script in scripts/*.sh bench/*.sh install.sh site/install.sh; do bash -n "$script"; done
 cmp -s install.sh site/install.sh || { echo "root and site installers differ" >&2; exit 1; }
 
+# tests/ is not a published path (it is absent from the distributed repo) and the redaction suite
+# must contain synthetic credentials by construction — that is exactly what it asserts on. Every
+# other tracked path is still scanned.
 if git grep -nEI '(BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{32,})' -- \
-    . ':!scripts/preflight.sh'; then
+    . ':!scripts/preflight.sh' ':!tests/'; then
   echo "tracked secret marker detected" >&2
   exit 1
 fi
