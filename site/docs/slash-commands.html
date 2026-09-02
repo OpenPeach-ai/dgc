@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slash commands · DGC Docs</title>
+<meta name="description" content="the full / command reference">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body data-page="slash-commands">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
+  <a class="brand" href="../index.html" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
+  <div class="topspacer"></div>
+  <div class="search" role="search">
+    <span class="ico">/</span>
+    <input id="docsearch" type="search" placeholder="Search docs…"
+           aria-label="Search documentation" autocomplete="off" spellcheck="false">
+    <span class="kbd">/</span>
+  </div>
+  <div class="toplinks">
+    <a href="../index.html">Home</a>
+  </div>
+</header>
+
+<div class="scrim" aria-hidden="true"></div>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
+<div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" aria-current="page" class="active" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div>
+</nav>
+  <main class="content" id="content">
+    <article class="doc">
+      <div class="crumb">Getting started<span class="sep">/</span>Slash commands</div>
+      <p class="lead">the full / command reference</p>
+<h1 id="slash-commands">Slash commands<a class="anchor" href="#slash-commands" aria-label="Link to this section">#</a></h1>
+<p>Type <strong>/</strong> on an empty composer to open the live command palette; filter as you type, ↑/↓ to select, Enter to run. This list is the complete full-screen TUI surface; classic and editor clients advertise only the commands they can execute.</p>
+<ul>
+<li><strong>/help</strong> — list every command. Aliases: <code>/?</code>, <code>/commands</code>.</li>
+<li><strong>/keys</strong> — keyboard shortcuts cheatsheet. Aliases: <code>/shortcuts</code>, <code>/cheatsheet</code>.</li>
+<li><strong>/docs</strong> — in-app how-to guides. Aliases: <code>/doc</code>, <code>/guide</code>.</li>
+<li><strong>/new</strong> — start a new session. Aliases: <code>/session</code>.</li>
+<li><strong>/resume</strong> — reopen a past session · ^D deletes one.</li>
+<li><strong>/history</strong> — search &amp; recall a past prompt. Aliases: <code>/hist</code>.</li>
+<li><strong>/jump</strong> — jump the transcript to a past turn.</li>
+<li><strong>/rewind</strong> — restore code + conversation to a past turn.</li>
+<li><strong>/model [NAME]</strong> — switch the model.</li>
+<li><strong>/connect [ENGINE|PRESET|URL]</strong> — pick a subscription, a provider, or a custom host.</li>
+<li><strong>/subagent [SETTING…]</strong> — configure sub-agent model, host, transport, or inheritance.</li>
+<li><strong>/mode [MODE]</strong> — permission mode: default · acceptEdits · plan · auto.</li>
+<li><strong>/view-plan</strong> — reopen the plan saved in plan mode. Aliases: <code>/plan-view</code>, <code>/viewplan</code>.</li>
+<li><strong>/think [LEVEL]</strong> — how hard the model reasons: off · low · medium · high · xhigh.</li>
+<li><strong>/thoughts</strong> — show or hide the model's thinking in the transcript. Aliases: <code>/reasoning</code>, <code>/reason</code>.</li>
+<li><strong>/preserve-thinking [on|off]</strong> — keep prior-turn reasoning in context (compatible hosts). Aliases: <code>/preserve-reasoning</code>.</li>
+<li><strong>/code-action [on|off]</strong> — persistent <code>python</code> power tool: run code across calls. Aliases: <code>/codeaction</code>, <code>/python-tool</code>.</li>
+<li><strong>/autonomous-gate [CMD|off]</strong> — a check command a turn must pass (exit 0) before it may stop. Aliases: <code>/auto-gate</code>.</li>
+<li><strong>/expand</strong> — expand the last collapsed tool output.</li>
+<li><strong>/expandall</strong> — expand every collapsed tool output.</li>
+<li><strong>/copy</strong> — select &amp; copy text — releases the mouse to your terminal. Aliases: <code>/select</code>, <code>/selection</code>.</li>
+<li><strong>/worktree [NAME]</strong> — list or switch to a named git worktree.</li>
+<li><strong>/tasks [ACTION…]</strong> — list, show, apply, or drop retained sub-agent work.</li>
+<li><strong>/sandbox</strong> — confine bash with the supported host OS boundary.</li>
+<li><strong>/bg</strong> — terminal background: auto · dark · inherit. Aliases: <code>/background</code>.</li>
+<li><strong>/theme [NAME]</strong> — colour theme: auto · dark · light.</li>
+<li><strong>/context</strong> — context-window usage.</li>
+<li><strong>/artifact [stop ID]</strong> — open / stop localhost artifact previews. Aliases: <code>/artifacts</code>.</li>
+<li><strong>/compact</strong> — summarise the older turns now.</li>
+<li><strong>/status</strong> — model · host · mode · context.</li>
+<li><strong>/dashboard</strong> — session roster — open, switch, start, or delete sessions. Aliases: <code>/dash</code>, <code>/home</code>.</li>
+<li><strong>/name [NAME]</strong> — name this session.</li>
+<li><strong>/goal [TEXT|STATE]</strong> — inspect, set, complete, pause, resume, or clear the objective.</li>
+<li><strong>/set [KEY [VALUE]]</strong> — tune a scalar setting live.</li>
+<li><strong>/settings</strong> — browse &amp; edit all settings. Aliases: <code>/config</code>, <code>/prefs</code>, <code>/preferences</code>.</li>
+<li><strong>/handoff</strong> — generate a complete continuation handoff. Aliases: <code>/handover</code>.</li>
+<li><strong>/export-training [FILE]</strong> — export this project's sessions as scrubbed fine-tuning JSONL. Aliases: <code>/export-jsonl</code>.</li>
+<li><strong>/hooks</strong> — inspect configured lifecycle hooks. Aliases: <code>/hook</code>.</li>
+<li><strong>/mcp</strong> — inspect and manage MCP servers.</li>
+<li><strong>/agents</strong> — sub-agent configuration.</li>
+<li><strong>/skills</strong> — installed skills. Aliases: <code>/extensions</code>, <code>/ext</code>.</li>
+<li><strong>/memory [ACTION…]</strong> — show or add project/user memory.</li>
+<li><strong>/permissions [RULE…]</strong> — list or add allow · ask · deny rules.</li>
+<li><strong>/bug</strong> — report a bug / request a feature. Aliases: <code>/feedback</code>, <code>/report</code>, <code>/issue</code>.</li>
+<li><strong>/update</strong> — update DGC to the latest version.</li>
+<li><strong>/clear</strong> — clear the transcript.</li>
+<li><strong>/quit</strong> — exit dgc. Aliases: <code>/exit</code>, <code>/q</code>.</li>
+</ul>
+<h2 id="project-commands">Project commands<a class="anchor" href="#project-commands" aria-label="Link to this section">#</a></h2>
+<p>Add a custom prompt command at <code>.dgc/commands/&lt;name&gt;.md</code> (or <code>~/.dgc/commands/&lt;name&gt;.md</code>). Use <code>$ARGUMENTS</code> or <code>{{args}}</code> in the template, then run <code>/name optional arguments</code>. Project commands override personal commands and appear in the classic/TUI/editor/ACP catalogs automatically. Names begin with a lowercase letter or digit, then use lowercase letters, digits, <code>.</code>, <code>_</code>, or <code>-</code> (1–64 characters). Built-in names and aliases are reserved. DGC bounds the catalog and each template, and rejects symlinked command directories or files.</p>
+      <nav class="pager" aria-label="Pagination">
+<a class="prev" href="keyboard-shortcuts.html"><div class="k">← Previous</div><div class="t">Keyboard shortcuts</div></a>
+<a class="next" href="command-line.html"><div class="k">Next →</div><div class="t">Command line</div></a>
+</nav>
+    </article>
+  </main>
+  <aside class="toc" aria-label="On this page">
+<div class="h">On this page</div>
+<a href="#project-commands" data-id="project-commands" class="lvl2">Project commands</a>
+</aside>
+</div>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

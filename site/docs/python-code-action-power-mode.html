@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python code-action (power mode) · DGC Docs</title>
+<meta name="description" content="a persistent Python interpreter for token-efficient work">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body data-page="python-code-action-power-mode">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
+  <a class="brand" href="../index.html" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
+  <div class="topspacer"></div>
+  <div class="search" role="search">
+    <span class="ico">/</span>
+    <input id="docsearch" type="search" placeholder="Search docs…"
+           aria-label="Search documentation" autocomplete="off" spellcheck="false">
+    <span class="kbd">/</span>
+  </div>
+  <div class="toplinks">
+    <a href="../index.html">Home</a>
+  </div>
+</header>
+
+<div class="scrim" aria-hidden="true"></div>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
+<div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" aria-current="page" class="active" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div>
+</nav>
+  <main class="content" id="content">
+    <article class="doc">
+      <div class="crumb">Features<span class="sep">/</span>Python code-action (power mode)</div>
+      <p class="lead">a persistent Python interpreter for token-efficient work</p>
+<h1 id="python-code-action-power-mode">Python code-action (power mode)<a class="anchor" href="#python-code-action-power-mode" aria-label="Link to this section">#</a></h1>
+<p>An <strong>optional</strong> power tool, <strong>off by default</strong>. Turn it on with <code>code_action: true</code> in <code>~/.dgc/config.json</code> (or a project <code>.dgc/</code>), with <code>/code-action on</code> in the classic or full-screen TUI (a row in the TUI settings screen and a toggle in the VS Code panel do the same), or <code>/code-action off</code> to disable it. When on, DGC advertises a <strong><code>python</code></strong> tool.</p>
+<h2 id="what-it-is">What it is<a class="anchor" href="#what-it-is" aria-label="Link to this section">#</a></h2>
+<p><code>python</code> runs code in a <strong>persistent interpreter tied to your session</strong>. Variables, imports, and function definitions <strong>persist across tool calls</strong> — the model can load data into a variable <strong>once</strong> and then run computations over it across many turns.</p>
+<h2 id="why-it-saves-tokens">Why it saves tokens<a class="anchor" href="#why-it-saves-tokens" aria-label="Link to this section">#</a></h2>
+<p>The usual loop re-reads data into the context on every step. With a persistent interpreter the model loads a file/dataset into a variable one time, then each later call is just a small snippet of code that operates on the already-loaded state. The bulky data never re-enters the prompt — only the code and its (bounded) output do. This is the "code action" / CodeAct pattern.</p>
+<h2 id="behavior">Behavior<a class="anchor" href="#behavior" aria-label="Link to this section">#</a></h2>
+<ul>
+<li>The last statement, if it is a bare expression, has its <code>repr()</code> shown (REPL-style).</li>
+<li><code>stdout</code>/<code>stderr</code> printed during a call are captured and returned, redacted and length-bounded like</li>
+</ul>
+<p><code>bash</code>.</p>
+<ul>
+<li>An exception returns a clean traceback and the interpreter <strong>stays alive</strong> for the next call.</li>
+<li>Pass <code>reset: true</code> to restart with a fresh, empty namespace.</li>
+<li>State also resets when the session ends (or on <code>/new</code>).</li>
+</ul>
+<h2 id="safety">Safety<a class="anchor" href="#safety" aria-label="Link to this section">#</a></h2>
+<p>It executes arbitrary code on your machine — identical risk to <code>bash</code> — so it is gated by the <strong>same permission path</strong>: it asks in <code>default</code>/<code>acceptEdits</code> mode and is <strong>denied in plan mode</strong>. Because it is off by default, ordinary users never see it until they explicitly opt in.</p>
+      <nav class="pager" aria-label="Pagination">
+<a class="prev" href="training-export.html"><div class="k">← Previous</div><div class="t">Training export</div></a>
+<a class="next" href="configuration.html"><div class="k">Next →</div><div class="t">Configuration</div></a>
+</nav>
+    </article>
+  </main>
+  <aside class="toc" aria-label="On this page">
+<div class="h">On this page</div>
+<a href="#what-it-is" data-id="what-it-is" class="lvl2">What it is</a>
+<a href="#why-it-saves-tokens" data-id="why-it-saves-tokens" class="lvl2">Why it saves tokens</a>
+<a href="#behavior" data-id="behavior" class="lvl2">Behavior</a>
+<a href="#safety" data-id="safety" class="lvl2">Safety</a>
+</aside>
+</div>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

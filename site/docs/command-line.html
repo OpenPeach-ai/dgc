@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command line · DGC Docs</title>
+<meta name="description" content="flags, subcommands, and one-shot runs">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/docs.css">
+</head>
+<body data-page="command-line">
+<a class="skip" href="#content">Skip to content</a>
+
+<header class="topbar">
+  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
+  <a class="brand" href="../index.html" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
+  <div class="topspacer"></div>
+  <div class="search" role="search">
+    <span class="ico">/</span>
+    <input id="docsearch" type="search" placeholder="Search docs…"
+           aria-label="Search documentation" autocomplete="off" spellcheck="false">
+    <span class="kbd">/</span>
+  </div>
+  <div class="toplinks">
+    <a href="../index.html">Home</a>
+  </div>
+</header>
+
+<div class="scrim" aria-hidden="true"></div>
+<div class="shell">
+  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
+<div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" aria-current="page" class="active" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div>
+</nav>
+  <main class="content" id="content">
+    <article class="doc">
+      <div class="crumb">Getting started<span class="sep">/</span>Command line</div>
+      <p class="lead">flags, subcommands, and one-shot runs</p>
+<h1 id="command-line">Command line<a class="anchor" href="#command-line" aria-label="Link to this section">#</a></h1>
+<p><code>dgc help</code> prints a short version of this page in the terminal.</p>
+<h2 id="starting-a-session">Starting a session<a class="anchor" href="#starting-a-session" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><code>dgc</code> — the full-screen app, rooted at the current directory.</li>
+<li><code>dgc --classic</code> — the classic inline REPL instead of the full-screen app.</li>
+<li><code>dgc -p "fix the failing test"</code> — run one prompt non-interactively and exit.</li>
+</ul>
+<p>Add <code>--mode auto</code> for a hands-off run.</p>
+<ul>
+<li><code>dgc -c</code> (<code>--continue</code>) — resume the most recent session in this directory.</li>
+<li><code>dgc --resume &lt;id&gt;</code> — resume a past session by id; <code>dgc --resume</code> with no id</li>
+</ul>
+<p>opens a picker.</p>
+<h2 id="per-session-flags">Per-session flags<a class="anchor" href="#per-session-flags" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><code>--mode MODE</code> — permission mode for this session: <code>default</code>, <code>acceptEdits</code>,</li>
+</ul>
+<p><code>plan</code>, or <code>auto</code>. See <strong>Permission modes</strong>.</p>
+<ul>
+<li><code>--think LEVEL</code> — thinking level for this session: <code>off</code>, <code>low</code>, <code>medium</code>,</li>
+</ul>
+<p><code>high</code>, or <code>xhigh</code>. See <strong>Thinking &amp; reasoning</strong>.</p>
+<ul>
+<li><code>--trust</code> — trust this workspace for a non-interactive <code>acceptEdits</code>/<code>auto</code></li>
+</ul>
+<p>run. Without it, an unattended run in an untrusted directory will not edit.</p>
+<ul>
+<li><code>--engine NAME</code> — run the turn through a subscription CLI instead of the</li>
+</ul>
+<p>configured endpoint. See <strong>Subscriptions</strong>.</p>
+<h2 id="model-and-endpoint">Model and endpoint<a class="anchor" href="#model-and-endpoint" aria-label="Link to this section">#</a></h2>
+<p>These persist to <code>config.json</code>, so you only pass them once:</p>
+<ul>
+<li><code>--model NAME</code> — the model to use.</li>
+<li><code>--base-url URL</code> — an OpenAI-compatible endpoint.</li>
+<li><code>--api-key-env NAME</code> — read the endpoint key from environment variable <code>NAME</code></li>
+</ul>
+<p><strong>without persisting it</strong>. Prefer this to pasting a key anywhere.</p>
+<h2 id="unattended-runs">Unattended runs<a class="anchor" href="#unattended-runs" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><code>--autonomous-gate "CMD"</code> — a check command that must exit <code>0</code> before the</li>
+</ul>
+<p>agent is allowed to stop a turn. A failing check is fed back and the agent keeps going.</p>
+<ul>
+<li><code>--autonomous-max-turns N</code> — bound on failed gate retries before the turn</li>
+</ul>
+<p>stops anyway (default <code>30</code>).</p>
+<h2 id="subcommands">Subcommands<a class="anchor" href="#subcommands" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><code>dgc setup</code> — configure provider / model / context.</li>
+<li><code>dgc doctor</code> — check that the endpoint and model are reachable.</li>
+<li><code>dgc update</code> — update DGC to the latest version.</li>
+<li><code>dgc export-training</code> — export sessions as scrubbed fine-tuning JSONL.</li>
+<li><code>dgc protocol describe</code> — print the installed headless/editor contract as JSON.</li>
+<li><code>dgc serve</code> — the headless JSON backend the VS Code extension drives. Stdout is</li>
+</ul>
+<p>protocol-only.</p>
+<ul>
+<li><code>dgc acp</code> — the agent-client-protocol surface.</li>
+<li><code>dgc bug</code> — print the issue tracker URL.</li>
+<li><code>dgc help</code>, <code>dgc --version</code>.</li>
+</ul>
+<h2 id="dgc-export-training">dgc export-training<a class="anchor" href="#dgc-export-training" aria-label="Link to this section">#</a></h2>
+<ul>
+<li><code>--out PATH</code> — output path (default <code>./dgc-training.jsonl</code>).</li>
+<li><code>--all</code> — every project, not just the current one.</li>
+<li><code>--session ID</code> — a single session; a unique id prefix is accepted.</li>
+<li><code>--successful-only</code> — keep only sessions that show successful work (an edit</li>
+</ul>
+<p>landed, no edit failures).</p>
+<ul>
+<li><code>--min-turns N</code> — drop sessions with fewer than N user turns (default <code>1</code>).</li>
+</ul>
+<p>Secrets are scrubbed on the way out. See <strong>Training export</strong>.</p>
+      <nav class="pager" aria-label="Pagination">
+<a class="prev" href="slash-commands.html"><div class="k">← Previous</div><div class="t">Slash commands</div></a>
+<a class="next" href="permission-modes.html"><div class="k">Next →</div><div class="t">Permission modes</div></a>
+</nav>
+    </article>
+  </main>
+  <aside class="toc" aria-label="On this page">
+<div class="h">On this page</div>
+<a href="#starting-a-session" data-id="starting-a-session" class="lvl2">Starting a session</a>
+<a href="#per-session-flags" data-id="per-session-flags" class="lvl2">Per-session flags</a>
+<a href="#model-and-endpoint" data-id="model-and-endpoint" class="lvl2">Model and endpoint</a>
+<a href="#unattended-runs" data-id="unattended-runs" class="lvl2">Unattended runs</a>
+<a href="#subcommands" data-id="subcommands" class="lvl2">Subcommands</a>
+<a href="#dgc-export-training" data-id="dgc-export-training" class="lvl2">dgc export-training</a>
+</aside>
+</div>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

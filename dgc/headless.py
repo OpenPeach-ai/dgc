@@ -1012,6 +1012,8 @@ class Backend:
                      sandbox=bool(c.get("sandbox", False)),
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
+                     preserve_thinking=bool(c.get("preserve_thinking", False)),
+                     code_action=bool(c.get("code_action", False)),
                      suggest=bool(c.get("suggest", True)),
                      plan_artifact=bool(c.get("plan_artifact", True)),
                      artifact_autostart=bool(c.get("artifact_autostart", True)),
@@ -1550,8 +1552,10 @@ class Backend:
                        "fallback_model", "fallback_base_url", "fallback_api_key",
                        "fallback_api_mode",
                        "context_size", "search_provider", "sandbox", "sandbox_network",
-                       "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+                       "show_reasoning", "preserve_thinking", "code_action", "suggest",
+                       "plan_artifact", "artifact_autostart",
                        "artifact_in_plan", "tool_profile", "max_parallel_tasks",
+                       "autonomous_gate", "autonomous_max_turns",
                        "subscription_engine", "subscription_model", "subscription_effort")
             refresh = False
             raw_values = cmd.get("values") or {}
@@ -1562,7 +1566,8 @@ class Backend:
                 return
             values = {k: v for k, v in raw_values.items() if k in allowed}
             boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
-                            "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"}
+                            "preserve_thinking", "code_action", "suggest", "plan_artifact",
+                            "artifact_autostart", "artifact_in_plan"}
             if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
                              message="boolean settings require true or false",
@@ -1628,6 +1633,23 @@ class Backend:
                              message="max_parallel_tasks must be an integer from 1 to 8",
                              **_request_fields(request_id))
                 return
+            if ("autonomous_gate" in values
+                    and (not isinstance(values["autonomous_gate"], str)
+                         or len(values["autonomous_gate"]) > 512
+                         or any(ord(char) < 32 and char not in "\t"
+                                for char in values["autonomous_gate"]))):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="autonomous_gate must be a single-line command string (≤512 chars)",
+                             **_request_fields(request_id))
+                return
+            if ("autonomous_max_turns" in values
+                    and (isinstance(values["autonomous_max_turns"], bool)
+                         or not isinstance(values["autonomous_max_turns"], int)
+                         or not 1 <= values["autonomous_max_turns"] <= 1000)):
+                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                             message="autonomous_max_turns must be an integer from 1 to 1000",
+                             **_request_fields(request_id))
+                return
             if values.get("sandbox") is True:
                 from . import sandbox
                 if not sandbox.available():
@@ -1649,6 +1671,11 @@ class Backend:
                 if k in values:
                     self.config.data[k] = str(values[k] or "")
                     self.config._env_secret_keys.add(k)
+            # autonomous-gate settings are cached on the agent at construction — re-sync live.
+            if "autonomous_gate" in values:
+                self.agent.autonomous_gate = str(self.config.get("autonomous_gate", "") or "")
+            if "autonomous_max_turns" in values:
+                self.agent.autonomous_max_turns = int(self.config.get("autonomous_max_turns", 30) or 30)
             if refresh:
                 self.agent.refresh_client()
             self._emit_config(request_id)

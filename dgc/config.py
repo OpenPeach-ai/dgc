@@ -81,11 +81,22 @@ DEFAULTS: dict = {
                                                 #   the fix as the clock runs down and preserves the last
                                                 #   test-passing files if it runs out of time (no 0-credit).
     "tool_profile": "adaptive",                 # adaptive intent-aware catalog | full catalog every round
+    "code_action": False,                       # optional "code action" power tool: advertise a `python`
+                                                #   tool that runs code in a PERSISTENT per-session
+                                                #   interpreter (variables/imports persist across calls, so
+                                                #   the model loads data once and computes over it across
+                                                #   turns instead of re-reading it every call). Off by
+                                                #   default: it executes arbitrary code and is gated by the
+                                                #   same approval path as `bash` (asks in default/acceptEdits,
+                                                #   denied in plan).
     "ollama_keep_alive": "30m",                 # keep an Ollama model resident between turns (D2 speedup;
                                                 #   only sent to the ollama provider; "" = don't send)
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
     "verify_command": "",                       #   timed auto runs it after edit-only batches so red evidence
                                                 #   skips a model round. e.g. "npm test" / "pytest -q"
+    "autonomous_gate": "",                      # "" = OFF. A check command that must exit 0 before the model may
+                                                #   stop; a nonzero exit feeds its output back and continues.
+    "autonomous_max_turns": 30,                 # bound on failed autonomous_gate retries before the turn stops
     "bash_timeout": 120,
     "search_timeout": 15,                       # bounded internal grep/glob helper lifetime (1-60s)
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
@@ -129,6 +140,10 @@ DEFAULTS: dict = {
     "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
     "sandbox_env_allow": [],                    # extra parent env names; runtime injection vars stay blocked
     "show_reasoning": True,                      # show the model's thinking (muted) in the chat
+    "preserve_thinking": False,                  # keep the model's prior-turn reasoning in the context sent
+                                                #   back (helps multi-turn coherence, costs tokens; only
+                                                #   affects OpenAI-compatible/chat_completions — Anthropic/
+                                                #   Ollama already round-trip their own reasoning)
 }
 
 # Web-search providers — DuckDuckGo is keyless (the default floor); the rest need a key or a URL.
@@ -143,7 +158,7 @@ SEARCH_PROVIDERS: dict[str, dict] = {
 # Local presets need no real key; cloud presets prompt and use their provider-native auth contract.
 PROVIDERS: dict[str, dict] = {
     "ollama":     {"base_url": "http://localhost:11434/v1",      "api_key": "ollama",    "needs_key": False, "label": "Ollama (local)"},
-    "llamacpp":   {"base_url": "http://localhost:8080/v1",       "api_key": "sk-local",  "needs_key": False, "label": "llama.cpp / llama-server (local)"},
+    "llamacpp":   {"base_url": "http://localhost:8080/v1",       "api_key": "sk-local",  "needs_key": False, "label": "llama.cpp / llama-server — also serves unsloth GGUFs (local)"},
     "lmstudio":   {"base_url": "http://localhost:1234/v1",       "api_key": "lm-studio", "needs_key": False, "label": "LM Studio (local)"},
     "vllm":       {"base_url": "http://localhost:8000/v1",       "api_key": "sk-local",  "needs_key": False, "label": "vLLM (local)"},
     "openai":     {"base_url": "https://api.openai.com/v1",      "api_key": "",          "needs_key": True,  "label": "OpenAI (cloud)"},
@@ -154,6 +169,39 @@ PROVIDERS: dict[str, dict] = {
     "together":   {"base_url": "https://api.together.xyz/v1",    "api_key": "",          "needs_key": True,  "label": "Together AI (cloud)"},
     "mistral":    {"base_url": "https://api.mistral.ai/v1",      "api_key": "",          "needs_key": True,  "label": "Mistral (cloud)"},
 }
+
+
+def normalize_custom_base_url(url: str) -> tuple[str, bool]:
+    """Best-effort `/v1` completion for a MANUALLY entered OpenAI-compatible endpoint.
+
+    A user who types a bare host (`http://localhost:8080`) for llama.cpp `llama-server`, vLLM, or
+    LM Studio almost always means the OpenAI-compatible `/v1` path; without it the chat-completions
+    calls 404. Append `/v1` and report the change so the caller can tell the user.
+
+    Left untouched (returns the input with only its trailing slash trimmed): Anthropic hosts (own
+    Messages wire shape, not `/v1` chat completions), native Ollama (`:11434` serves its own API
+    without `/v1`), any URL that already ends in a `/vN` path segment, and unparseable input. Only
+    the custom/manual connect path calls this — the built-in presets already carry `/v1`.
+    """
+    import re
+    from urllib.parse import urlparse
+    raw = str(url or "").strip()
+    if not raw:
+        return raw, False
+    trimmed = raw.rstrip("/")
+    low = trimmed.lower()
+    if "anthropic" in low or "11434" in low or "ollama" in low:
+        return trimmed, False
+    try:
+        parsed = urlparse(trimmed if "://" in trimmed else "http://" + trimmed)
+    except ValueError:
+        return trimmed, False
+    if not parsed.netloc:                       # not a host-shaped URL — leave it alone
+        return trimmed, False
+    segments = [seg for seg in parsed.path.split("/") if seg]
+    if segments and re.fullmatch(r"v\d+", segments[-1]):
+        return trimmed, False                   # already a versioned OpenAI path (…/v1, …/v2)
+    return trimmed + "/v1", True
 
 
 # Recommended operating windows (tokens) by model-name substring. For local models this may be

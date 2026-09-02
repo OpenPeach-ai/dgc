@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -196,6 +196,11 @@
         "category": "DGC"
       },
       {
+        "command": "dgc.exportTraining",
+        "title": "DGC: Export Training Data",
+        "category": "DGC"
+      },
+      {
         "command": "dgc.settings",
         "title": "DGC: Settings",
         "category": "DGC",
@@ -324,6 +329,16 @@
           "type": "number",
           "default": 0,
           "description": "Context window (tokens) used for compaction budgeting. 0 = use the CLI's config."
+        },
+        "dgc.autonomousGate": {
+          "type": "string",
+          "default": "",
+          "description": "A check command the agent must pass (exit 0) before it may stop a turn; a nonzero exit feeds its output back and continues (e.g. \"npm run check\"). Blank = off."
+        },
+        "dgc.autonomousMaxTurns": {
+          "type": "number",
+          "default": 0,
+          "description": "Bound on failed autonomous-gate retries before the turn stops. 0 = use the CLI's config (default 30)."
         }
       }
     },
@@ -380,5 +395,8 @@
     "jsdom": "^30.0.1",
     "ovsx": "1.1.1",
     "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }

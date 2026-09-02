@@ -60,7 +60,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "off",
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh"
       ]
     },
     "base_url": {
@@ -672,7 +673,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "off",
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh"
       ]
     },
     "base_url": {
@@ -802,6 +804,18 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "preserve_thinking": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
+    "code_action": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "suggest": {
       "types": [
         "boolean"
@@ -897,7 +911,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "off",
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh"
       ]
     },
     "base_url": {
@@ -981,7 +996,8 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "off",
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh"
       ]
     },
     "request_id": {
@@ -2116,7 +2132,8 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "off",
         "low",
         "medium",
-        "high"
+        "high",
+        "xhigh"
       ]
     },
     "request_id": {
