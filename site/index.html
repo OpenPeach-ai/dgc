@@ -600,7 +600,7 @@
   </div></div>
   <div class="statbar"><div class="wrap">
     <div class="s"><div class="v"><b>94.4%</b></div><div class="k">DGC · Aider polyglot (27B)</div></div>
-    <div class="s"><div class="v">61.3%*</div><div class="k">SWE-bench Lite · provisional</div></div>
+    <div class="s"><div class="v">61.3%</div><div class="k">SWE-bench Lite</div></div>
     <div class="s"><div class="v">11</div><div class="k">Providers in /connect</div></div>
     <div class="s"><div class="v">5</div><div class="k">Subscriptions</div></div>
     <div class="s"><div class="v">100%</div><div class="k">Local · on your machine</div></div>
@@ -824,7 +824,7 @@
         <div class="spec-list"><div class="spec-row"><span class="sk">local model</span><span class="sv">Qwen3.8-27B</span></div><div class="spec-row"><span class="sk">scoring</span><span class="sv">pass@2</span></div><div class="spec-row"><span class="sk">suite</span><span class="sv">Aider polyglot · 90</span></div><div class="spec-row"><span class="sk">languages</span><span class="sv">py js java go c++ rs</span></div><div class="spec-row"><span class="sk">endpoint</span><span class="sv">identical</span></div><div class="spec-row"><span class="sk">raw traces</span><span class="sv">saved</span></div></div>
       </div>
     </div>
-    <div class="proof-strip"><div class="proof"><div class="pv">184 / 300*</div><div class="pk">SWE-bench Lite · 61.3% · provisional</div></div><div class="proof"><div class="pv">1 endpoint</div><div class="pk">same weights · every harness</div></div><div class="proof"><div class="pv">3 commands</div><div class="pk">re-run it yourself · raw traces saved</div></div></div>
+    <div class="proof-strip"><div class="proof"><div class="pv">184 / 300</div><div class="pk">SWE-bench Lite · 61.3%</div></div><div class="proof"><div class="pv">1 endpoint</div><div class="pk">same weights · every harness</div></div><div class="proof"><div class="pv">3 commands</div><div class="pk">re-run it yourself · raw traces saved</div></div></div>
   </figure>
   <div class="runbench reveal">
     <div class="rb-h">Run it yourself — same 27B, your machine</div>
@@ -836,7 +836,7 @@ bash install_harnesses.sh
 python3 run_bench.py <span class="k">--engine</span> dgc <span class="k">--model</span> qwen3.8:27b-bf16 \
     <span class="k">--base-url</span> http://localhost:11434/v1 <span class="k">--limit</span> 15 <span class="k">--rounds</span> 2</pre>
   </div>
-  <div class="provisional"><b>* Benchmark note</b><span>Every harness ran the same model build on the same endpoint — identical digest, 600 s cap, 32,768-token window, pass@2 over the same 90 problems. Raw per-problem traces are saved. Aider is absent because it did not complete a valid run in this configuration; SWE-bench Lite remains provisional.</span></div>
+  <div class="provisional"><b>* Benchmark note</b><span>Every harness ran the same model build on the same endpoint — identical digest, 600 s cap, 32,768-token window, pass@2 over the same 90 problems. Raw per-problem traces are saved. Aider is absent because it did not complete a valid run in this configuration.</span></div>
 </div></section>
 
 <!-- ===== FOUNDER QUOTE ===== -->
