@@ -41,7 +41,8 @@ from . import (__version__, attachments as attachments_mod, glyphs, logo as logo
                render as render_mod, style as style_mod)
 from .update import cached_update
 from .agent import Agent
-from .commands import canonical_command_name, command_pairs, command_pairs_with_custom
+from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
+                       resolve_command)
 from .redaction import redact_text, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -271,6 +272,7 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
+        self._bored = None                 # process-local arcade controller; never enters a session
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
@@ -751,6 +753,7 @@ class TUI:
         return ANSI(self._rich(Padding(panel, (0, 0, 0, lpad))))
 
     def _ask_input(self, prompt: str, cb, secret: bool = False) -> None:
+        self._pause_bored("DGC NEEDS INPUT")
         self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
@@ -759,6 +762,121 @@ class TUI:
         self._flash_msg = msg
         self._flash_until = time.monotonic() + secs
         self._invalidate()
+
+    # ------------------------------------------------------- hidden arcade ---
+    def _open_bored_menu(self) -> None:
+        """Open the private game selector. The command is routable but omitted from discovery."""
+        from .bored import game_choices
+        rows = [{"label": choice.title, "desc": choice.description, "value": choice.key}
+                for choice in game_choices()]
+        self._open_overlay(
+            rows, on_pick=lambda row: self._start_bored(row["value"]),
+            title="Take five", accent=True,
+            footer="↑↓ move · Enter play · Esc return  ·  the agent keeps working")
+
+    def _start_bored(self, game: str) -> None:
+        from .bored import BoredController
+        try:
+            self._bored = BoredController(game)
+        except ValueError:
+            self._flash("that diversion is unavailable")
+            return
+        self.input_buf.reset()
+        self._flash("game on · Q returns to DGC; Ctrl+C still stops the agent")
+        self._invalidate()
+
+    def _close_bored(self) -> None:
+        if self._bored is not None:
+            self._bored = None
+            self._flash("back to work")
+            self._invalidate()
+
+    def _pause_bored(self, reason: str) -> None:
+        controller = getattr(self, "_bored", None)
+        if controller is not None and controller.pause(reason):
+            self._invalidate()
+
+    def _bored_visible(self) -> bool:
+        return (getattr(self, "_bored", None) is not None
+                and self._overlay is None and self._req is None
+                and self._input is None and not self._naming)
+
+    def _bored_height(self) -> int:
+        if not self._bored_visible():
+            return 0
+        self._sync_width()
+        target = min(12, max(8, self._height // 2))
+        # Preserve a real transcript viewport even when the live task pane is also present.
+        available = self._height - self._chrome_below() - 1 - self._todo_pane_height() - 3
+        return max(4, min(target, available))
+
+    def _bored_agent_state(self) -> str:
+        if self._req is not None:
+            return "NEEDS INPUT"
+        if not self._turn.is_set():
+            return "IDLE"
+        if self._cancel.is_set():
+            return "STOPPING"
+        if self._streaming:
+            return "RESPONDING"
+        if self._cur_tool:
+            return "USING TOOLS"
+        if self._thinking:
+            return "THINKING"
+        return "WORKING"
+
+    def _render_bored(self):
+        from .bored.render import render_frame
+        controller = getattr(self, "_bored", None)
+        if controller is None:
+            return ANSI("")
+        self._sync_width()
+        height = max(4, self._bored_height())
+        width = max(20, self._width - 2)
+        frame = controller.frame(width - 2, height - 2)
+        return ANSI(self._rich(render_frame(
+            frame, width, height, agent_state=self._bored_agent_state(),
+            theme=style_mod.theme())))
+
+    def _bored_key(self, key: str) -> None:
+        controller = getattr(self, "_bored", None)
+        if controller is None:
+            return
+        if controller.handle_key(key) == "exit":
+            self._close_bored()
+        else:
+            self._invalidate()
+
+    def _handle_running_local_command(self, text: str) -> bool:
+        """Run explicitly safe local commands before active-turn steering sees the text."""
+        if not text.startswith("/"):
+            return False
+        name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+        spec = resolve_command(name, "tui")
+        if spec is None or not spec.available_while_running:
+            return False
+        self._run_command(text)
+        return True
+
+    def _dispatch_composer_text(self, text: str) -> str:
+        """Route a completed composer value, with local mid-turn commands taking priority."""
+        if not text:
+            return "empty"
+        if self._turn.is_set():
+            if self._handle_running_local_command(text):
+                return "local-command"
+            self._route_followup(text)
+            return "follow-up"
+        if text.startswith("/") and self._handle_slash(text):
+            return "command"
+        if text.startswith("#"):
+            self._save_memory_direct(text[1:])
+            return "memory"
+        if text.startswith("!"):
+            self._submit_shell(text[1:])
+            return "shell"
+        self._submit(text)
+        return "prompt"
 
     # ------------------------------------------------------------ rendering ---
     def _sync_width(self) -> None:
@@ -1040,6 +1158,10 @@ class TUI:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
             chips = [("↑↓", "move"), ("Enter", "select"), ("Esc", "close")]
+        elif self._bored_visible():
+            chips = [("Arrows/WASD", "move"), ("P", "pause"), ("Q/Esc", "return")]
+            if self._turn.is_set():
+                chips.append(("Ctrl+C", "stop agent"))
         elif self._turn.is_set():
             chips = [("Esc", "stop"), ("Enter", "follow up")]
         else:
@@ -2024,6 +2146,8 @@ class TUI:
         thread answers via on_pick / number keys / Esc. If the session is on screen the card opens
         now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
         sess = self._cur_session()
+        if sess is self.active:
+            self._pause_bored("DGC NEEDS INPUT")
         sess._req = req
         sess._req_event.clear()
 
@@ -2072,6 +2196,7 @@ class TUI:
 
     def _ask_text(self, prompt: str, cancel=None) -> str:
         """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
+        self._pause_bored("DGC NEEDS INPUT")
         result = {"v": ""}
         self._req_event.clear()
 
@@ -2294,13 +2419,20 @@ class TUI:
                    height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
+        # An in-process game shares the layout instead of taking over the terminal. The transcript
+        # remains the weighted region above it and therefore continues to show live agent output.
+        bored_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._render_bored), height=self._bored_height,
+                   dont_extend_height=True),
+            filter=Condition(self._bored_visible))
         # A live task list pinned just above the composer  — shows while a turn
         # runs or any task is still open, then folds away.
         todo_panel = ConditionalContainer(
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
             filter=Condition(self._todos_visible))
-        root = HSplit([header, transcript, overlay_panel, todo_panel, status, composer_box, shortcut_bar])
+        root = HSplit([header, transcript, bored_panel, overlay_panel, todo_panel,
+                       status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
@@ -2668,6 +2800,7 @@ class TUI:
         if self.active.draft:
             self.input_buf.insert_text(self.active.draft)
         if self.active._req is not None:                 # this agent was waiting on you → show its card
+            self._pause_bored("DGC NEEDS INPUT")
             self._show_req_overlay(self.active)
         self._invalidate()
 
@@ -2856,6 +2989,8 @@ class TUI:
                 self._open_doc_reader(rest)
             else:
                 self._open_docs()
+        elif cmd == "bored":
+            self._open_bored_menu()
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
@@ -3903,6 +4038,20 @@ class TUI:
         kb = KeyBindings()
 
         ov_open = Condition(lambda: self._overlay is not None)
+        game_active = Condition(self._bored_visible)
+
+        # Game controls are eager so Escape/arrows never fall through to agent cancellation or
+        # transcript scrolling. Ctrl+C/Ctrl+Q remain deliberately untouched: they still stop the
+        # active agent, which is the safety invariant shown in the game-on confirmation.
+        for _key, _game_key in (
+                ("up", "up"), ("down", "down"), ("left", "left"), ("right", "right"),
+                ("w", "w"), ("a", "a"), ("s", "s"), ("d", "d"),
+                ("W", "w"), ("A", "a"), ("S", "s"), ("D", "d"),
+                ("p", "p"), ("P", "p"), ("r", "r"), ("R", "r"),
+                ("q", "q"), ("Q", "q"), ("escape", "escape")):
+            @kb.add(_key, filter=game_active, eager=True)
+            def _(ev, _game_key=_game_key):
+                self._bored_key(_game_key)
 
         @kb.add("/")
         def _(ev):
@@ -4023,20 +4172,7 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            if not text:
-                return
-            if self._turn.is_set():
-                self._route_followup(text)
-                return
-            if text.startswith("/") and self._handle_slash(text):
-                return
-            if text.startswith("#"):
-                self._save_memory_direct(text[1:])
-                return
-            if text.startswith("!"):
-                self._submit_shell(text[1:])
-                return
-            self._submit(text)
+            self._dispatch_composer_text(text)
 
         @kb.add("escape")
         def _(ev):
@@ -4138,6 +4274,7 @@ class TUI:
         # Arrow Up/Down scroll the transcript while the input is empty (browsing the chat); once you
         # start typing, arrows edit the prompt as usual. Overlay/completion nav is handled above.
         scroll_idle = Condition(lambda: self._overlay is None
+                                and getattr(self, "_bored", None) is None
                                 and self.input_buf.complete_state is None
                                 and not self.input_buf.text)
 
@@ -4444,6 +4581,8 @@ class TUI:
                     queued_text, shown = queued
                     self._submit(queued_text, echo=not shown)
                     return
+                if sess is self.active:
+                    self._pause_bored(f"DGC {verb.upper()}")
                 if not succeeded:
                     sess._worker_thread = None
                     return
@@ -4551,6 +4690,8 @@ class TUI:
                     queued_text, shown = queued
                     self._submit(queued_text, echo=not shown)
                     return
+                if sess is self.active:
+                    self._pause_bored(f"DGC {verb.upper()}")
                 sess._worker_thread = None
 
         sess._worker_thread = threading.Thread(
@@ -4559,6 +4700,7 @@ class TUI:
 
     def _shutdown_fleet(self) -> None:
         """Cancel all workers and preserve every managed checkout before the TUI process exits."""
+        self._bored = None  # no external resources, but make the process-local lifetime explicit
         fleet = list(getattr(self, "_sessions", ()))
         for sess in fleet:
             sess._closing = True

@@ -32,6 +32,8 @@ class CommandSpec:
     accepts_args: bool = False
     usage: str = ""
     aliases: tuple[str, ...] = ()
+    discoverable: bool = True
+    available_while_running: bool = False
 
 
 _T = frozenset({"tui"})
@@ -131,6 +133,10 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("update", "update DGC to the latest version",
                 frozenset({"tui", "classic", "editor"}), "update"),
     CommandSpec("clear", "clear the transcript", _TCE, "clear"),
+    # A private TUI easter egg: reserved and routable, but intentionally absent from command
+    # palettes, completions, help, editor metadata, and every non-interactive surface.
+    CommandSpec("bored", "open a private terminal diversion", _T,
+                discoverable=False, available_while_running=True),
     CommandSpec("quit", "exit dgc", _TC, aliases=("exit", "q")),
 )
 
@@ -140,8 +146,9 @@ def _reserved_command_names() -> set[str]:
             for name in (spec.name, *spec.aliases)}
 
 
-def command_specs(surface: str) -> list[CommandSpec]:
-    return [spec for spec in BUILTIN_COMMANDS if surface in spec.surfaces]
+def command_specs(surface: str, *, include_hidden: bool = False) -> list[CommandSpec]:
+    return [spec for spec in BUILTIN_COMMANDS
+            if surface in spec.surfaces and (include_hidden or spec.discoverable)]
 
 
 def resolve_command(name: str, surface: str) -> CommandSpec | None:
