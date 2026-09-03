@@ -438,6 +438,12 @@
   .sub-bg video{width:100%;height:100%;object-fit:cover;opacity:.72}
   .sub-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,var(--surface-3) 0%,rgba(12,12,14,.42) 30%,rgba(12,12,14,.58) 100%)}
   @media (prefers-reduced-motion:reduce){.sub-bg{background:linear-gradient(rgba(10,10,11,.28),rgba(10,10,11,.28)),url(assets/sub-poster.jpg) center/cover no-repeat}.sub-bg video{display:none}}
+  /* Autoplay refused (iOS Low Power Mode, data saver, a stalled decode): show the poster the
+     same way reduced-motion does, rather than leaving a play-button overlay on the page. */
+  .stills.sub-bg{background:linear-gradient(rgba(10,10,11,.28),rgba(10,10,11,.28)),url(assets/sub-poster.jpg) center/cover no-repeat}
+  .stills.power-bg{background:linear-gradient(rgba(10,10,11,.42),rgba(10,10,11,.42)),url(assets/power-poster.jpg) center/cover no-repeat}
+  .hero .bg.stills{background:url(assets/hero-poster.jpg) center 42%/cover no-repeat}
+  .stills video{display:none}
   .sub-grid{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:clamp(18px,2.6vw,34px);margin-top:var(--s-block);align-items:stretch}
   .sub-clis{display:flex;flex-direction:column;gap:10px}
   /* Same thin glass as the Power tools cards — these sit over the cave video, so the blur (not
@@ -764,7 +770,7 @@
 
 <!-- ===== BENCHMARK ===== -->
 <!-- ===== BRING YOUR OWN SUBSCRIPTION ===== -->
-<section class="band sub-band" id="subscription"><div class="sub-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata" poster="assets/sub-poster.jpg"><source src="assets/sub.mp4" type="video/mp4"></video></div><div class="wrap">
+<section class="band sub-band" id="subscription"><div class="sub-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="auto" poster="assets/sub-poster.jpg"><source src="assets/sub.mp4" type="video/mp4"></video></div><div class="wrap">
   <div class="sechead"><div class="lab">Bring your own subscription.</div><h2>Already pay for Claude, ChatGPT, or Copilot? Run it here.</h2><div class="tag">Pick your vendor in <code style="color:var(--lav)">/connect</code> and DGC drives each turn through the official CLI — your login, your plan, your terms, no extra API bill. <b style="color:var(--text)">DGC never handles the vendor’s tokens.</b></div></div>
   <div class="sub-grid reveal">
     <div class="sub-clis">
@@ -834,7 +840,7 @@ python3 run_bench.py <span class="k">--engine</span> dgc <span class="k">--model
 </div></section>
 
 <!-- ===== POWER TOOLS ===== -->
-<section class="band alt power-band" id="power"><div class="power-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata" poster="assets/power-poster.jpg"><source src="assets/power.mp4" type="video/mp4"></video></div><div class="wrap">
+<section class="band alt power-band" id="power"><div class="power-bg" aria-hidden="true"><video autoplay muted loop playsinline preload="auto" poster="assets/power-poster.jpg"><source src="assets/power.mp4" type="video/mp4"></video></div><div class="wrap">
   <div class="sechead"><div class="lab">Power tools.</div><h2>Built for real, long, autonomous work.</h2><div class="tag">Optional power-modes for data-heavy tasks, unattended runs, and closing the loop back to your own model.</div></div>
   <div class="feat3 reveal">
     <div class="fcard"><div class="fi">Code action · persistent state</div><h3>A persistent Python REPL</h3><p>Load a dataset into a variable once, then run functions over it across turns — instead of re-reading data into context. Token-efficient by design.</p><div class="cmd">/code-action on</div><div class="ftrace">dataset → python variable · turn 08 → <span class="pass">state retained</span></div></div>
@@ -935,6 +941,31 @@ python3 run_bench.py <span class="k">--engine</span> dgc <span class="k">--model
     function draw(){gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.uniform2f(uRes,cv.width,cv.height);gl.uniform1f(uTime,t);gl.drawArrays(gl.TRIANGLES,0,3);}
     function loop(ts){ if(ts-last>=33){ t+=0.02; last=ts; draw(); } requestAnimationFrame(loop); }
     if(reduce){ draw(); } else { requestAnimationFrame(loop); }
+  })();
+
+  /* Background clips: `autoplay muted playsinline` is necessary but not sufficient on mobile —
+     iOS refuses it in Low Power Mode, and a preload="metadata" element may never start on its own.
+     Kick each one when it scrolls into view, and if the browser still refuses, present the poster
+     instead of leaving its play-button overlay sitting on the page. */
+  (function(){
+    var vids = document.querySelectorAll('.hero .bg video, .power-bg video, .sub-bg video');
+    if (!vids.length || matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    function stills(v){ var p = v.parentElement; if (p) p.classList.add('stills'); }
+    function kick(v){
+      v.muted = true; v.playsInline = true;          // properties, not just attributes
+      if (v.preload === 'metadata' || v.preload === 'none') { v.preload = 'auto'; try { v.load(); } catch(e){} }
+      var play = v.play();
+      // Only a REJECTION is a reliable "autoplay refused". A timeout would strip the clip from
+      // anyone whose connection is merely slow, so there deliberately isn't one.
+      if (play && play.catch) play.catch(function(){ stills(v); });
+    }
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if (e.isIntersecting){ kick(e.target); io.unobserve(e.target); } });
+    }, {rootMargin: '200px'});
+    vids.forEach(function(v){
+      v.addEventListener('error', function(){ stills(v); });
+      io.observe(v);
+    });
   })();
 
   /* localhost-artifact preview: cycle the 3 proposals (matches the live CLI’s dropdown) */
