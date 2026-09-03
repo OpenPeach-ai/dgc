@@ -41,6 +41,8 @@ FAVICON = ("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20vie
            "d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066"
            "%20L69%2060%20Z'/%3E%3C/svg%3E")
 
+SITE = "https://vibedgc.com"
+
 MARK_SVG = ('<svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true">'
             '<path d="M32 24 L20 30 L13 72 L25 66 Z"/>'
             '<path d="M54 18 L42 24 L35 72 L47 66 Z"/>'
@@ -154,6 +156,7 @@ def shell(title: str, description: str, page: str, side: str, body: str, toc_htm
 <title>{html.escape(title)} · DGC Docs</title>
 <meta name="description" content="{html.escape(description, quote=True)}">
 <link rel="icon" href="{FAVICON}">
+<link rel="canonical" href="{SITE}/docs/{page}.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -164,7 +167,7 @@ def shell(title: str, description: str, page: str, side: str, body: str, toc_htm
 
 <header class="topbar">
   <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
-  <a class="brand" href="../index.html" title="DGC landing">{MARK_SVG}DGC<span class="tag">Docs</span></a>
+  <a class="brand" href="{SITE}/" title="DGC landing">{MARK_SVG}DGC<span class="tag">Docs</span></a>
   <div class="topspacer"></div>
   <div class="search" role="search">
     <span class="ico">/</span>
@@ -173,7 +176,7 @@ def shell(title: str, description: str, page: str, side: str, body: str, toc_htm
     <span class="kbd">/</span>
   </div>
   <div class="toplinks">
-    <a href="../index.html">Home</a>
+    <a href="{SITE}/">Home</a>
   </div>
 </header>
 
