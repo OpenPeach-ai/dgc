@@ -1750,6 +1750,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+            cli.agent.compact_resumed_session()
         else:
             cli.ui.info("no previous session here — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -1758,6 +1759,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
+            cli.agent.compact_resumed_session()
         else:
             cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -1771,6 +1773,7 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
+                cli.agent.compact_resumed_session()
             else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)
         else:

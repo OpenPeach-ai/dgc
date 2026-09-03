@@ -50,6 +50,8 @@ _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery p
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
+_RESUME_COMPACT_RATIO = 0.5  # a restored transcript filling this much of the window is compacted
+                             # before the next prompt is appended, so there is room to answer
 _MAX_TOOL_OUT = 30000   # hard ceiling on any tool result fed back (esp. chatty MCP tools)
 _MAX_PARALLEL_TASK_BATCH = 16  # bound private checkouts even if a model emits a pathological batch
 _SERIAL_MUTATIONS = {"write_file", "edit_file", "multi_edit", "apply_patch", "bash",
@@ -1124,8 +1126,12 @@ class Agent:
             configured = max(2_048, int(self.config.get("context_size", 32_768)))
         except (TypeError, ValueError):
             configured = 32_768
-        if configured == 32_768:                       # user left the default → use the model's recommended window
-            from .config import context_for_model      # (qwen3.8 → 65536); early compaction otherwise drops the failing test
+        # Only upgrade to the model's recommended window when the user genuinely left this unset.
+        # Treating a *stored* 32768 as "unset" made every budget (compaction above all) measure
+        # against 65536 while the transport still sent num_ctx=32768 — so the compaction trigger sat
+        # above the entire real window and could never fire.
+        if configured == 32_768 and not self.config.is_explicit("context_size"):
+            from .config import context_for_model      # (qwen3.8 → 65536)
             rec = context_for_model(str(self.config.model))
             if rec and rec > configured:
                 configured = rec
@@ -4039,6 +4045,34 @@ class Agent:
                                 + "\n… [older tool output pruned] …" + suffix)
                 changed = True
         return changed
+
+    def compact_resumed_session(self) -> None:
+        """Shrink a just-restored transcript BEFORE the next prompt is appended.
+
+        A resumed session inherits the whole of the previous run's history, so its first request can
+        start at the top of the window with nothing left to answer with — measured at 31,740-32,703
+        input tokens against a 32,768 window, which truncates every response.
+
+        Compacting *here* is safe in a way that compacting inside the turn is not: the incoming
+        instruction does not exist in `self.messages` yet, so no summariser can reach it. Compaction
+        during the turn keeps only the last KEEP_RECENT messages verbatim, so once a few tool cycles
+        accumulate the instruction falls out of the protected tail and is paraphrased away — that is
+        exactly how an earlier attempt at this bug destroyed the retry.
+
+        Runs with an already-expired deadline so `_compact` takes its mechanical path: no provider
+        call, no model summary, nothing spent on resuming.
+        """
+        window = self.context_size()
+        if window <= 0:
+            return
+        before = self.estimate_tokens()
+        if before < _RESUME_COMPACT_RATIO * window:
+            return
+        self.maybe_compact(force=True, deadline=time.monotonic())
+        after = self.estimate_tokens()
+        if after < before:
+            self.ui.info(f"compacted the resumed session to fit the window "
+                         f"(~{before:,} → ~{after:,} tokens of {window:,})")
 
     def maybe_compact(self, force: bool = False, *, deadline: float | None = None,
                       tools=_AUTO_CONTEXT_TOOLS) -> bool:

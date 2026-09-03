@@ -275,6 +275,9 @@ class Config:
                 secrets[key] = raw.pop(key)
                 migrated = True
         perms = raw.pop("permissions", {})
+        # Remember which keys the user actually wrote, so a stored value that happens to equal a
+        # default is never mistaken for "unset".
+        self._explicit_keys = set(raw)
         self.data.update(raw)
         self._stored_secrets = {k: secrets[k] for k in SECRET_KEYS if k in secrets}
         self.data.update(self._stored_secrets)
@@ -331,6 +334,10 @@ class Config:
 
     def get(self, key: str, default=None):
         return self.data.get(key, default)
+
+    def is_explicit(self, key: str) -> bool:
+        """True when `key` was present in the user's config.json rather than inherited."""
+        return key in getattr(self, "_explicit_keys", set())
 
     def set(self, key: str, value) -> None:
         # Provider credentials are endpoint-scoped. Reusing an old key after a host change can
