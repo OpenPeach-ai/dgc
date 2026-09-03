@@ -11,6 +11,7 @@ the composer via a cross-thread request + event.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import math
@@ -273,6 +274,9 @@ class TUI:
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
         self._bored = None                 # process-local arcade controller; never enters a session
+        self._bored_render_cache = None    # ((controller/revision/geometry/theme/state), ANSI text)
+        self._arcade_scores = None          # lazy owner-private high scores; never enters a session
+        self._refresh_task = None           # adaptive 12.5/20 FPS asyncio UI pulse
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
@@ -661,7 +665,18 @@ class TUI:
         inner = W - 4
         lpad = max(0, (avail - W) // 2)                  # center within the ACTUAL console width
         rows = self._overlay_rows()
-        sel, cap = ov["sel"], self._OVERLAY_CAP
+        # The backing Window can be shorter than the catalog on split terminals. Derive the real
+        # row capacity from its allocated height so the selected item always scrolls on-screen.
+        panel_height = self._overlay_height()
+        show_footer = bool(ov.get("footer")) and panel_height >= 8
+        title_rows = 2 if ov.get("tabs") else (1 if ov.get("title") else 0)
+        header_rows = len(ov["header"]) + 1 if ov.get("header") else 0
+        footer_rows = 2 if show_footer else 0
+        cap = min(self._OVERLAY_CAP,
+                  max(1, panel_height - 2 - title_rows - header_rows - footer_rows))
+        if len(rows) > cap and cap > 1:                 # leave one line for the scroll indicator
+            cap -= 1
+        sel = ov["sel"]
         scroll = ov.get("scroll", 0)
         if ov.get("reader"):                            # a scrollable doc — scroll is independent of sel
             scroll = max(0, min(scroll, len(rows) - cap)) if len(rows) > cap else 0
@@ -744,7 +759,7 @@ class TUI:
             lines.append(line)
         if len(rows) > cap:                             # scroll indicator
             emit(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
-        if ov.get("footer"):
+        if show_footer:
             lines.append(Text(""))
             emit(Text(style_mod.terminal_safe_text(ov["footer"]), style=th.faint))
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
@@ -764,30 +779,63 @@ class TUI:
         self._invalidate()
 
     # ------------------------------------------------------- hidden arcade ---
+    def _arcade_score_store(self):
+        store = getattr(self, "_arcade_scores", None)
+        if store is None:
+            from .arcade_scores import ArcadeScoreStore
+            store = self._arcade_scores = ArcadeScoreStore()
+        return store
+
     def _open_bored_menu(self) -> None:
         """Open the private game selector. The command is routable but omitted from discovery."""
-        from .bored import game_choices
-        rows = [{"label": choice.title, "desc": choice.description, "value": choice.key}
-                for choice in game_choices()]
+        from .bored import game_choices, tracks_high_score
+        scores = self._arcade_score_store()
+        scores.refresh()
+        rows = []
+        for choice in game_choices():
+            description = choice.description
+            if tracks_high_score(choice.key):
+                description += f" · best {scores.best(choice.key):,}"
+            rows.append({"label": choice.title, "desc": description, "value": choice.key})
         self._open_overlay(
             rows, on_pick=lambda row: self._start_bored(row["value"]),
-            title="Take five", accent=True,
-            footer="↑↓ move · Enter play · Esc return  ·  the agent keeps working")
+            title="Take five · DGC arcade", accent=True,
+            footer="↑↓ move · type to filter · Enter play · Esc return  ·  agent stays live")
 
     def _start_bored(self, game: str) -> None:
         from .bored import BoredController
         try:
-            self._bored = BoredController(game)
+            self._bored = BoredController(game, scores=self._arcade_score_store())
         except ValueError:
             self._flash("that diversion is unavailable")
             return
+        self._bored_render_cache = None
         self.input_buf.reset()
         self._flash("game on · Q returns to DGC; Ctrl+C still stops the agent")
         self._invalidate()
 
+    def _ensure_refresh_task(self, app) -> None:
+        """Start one adaptive redraw pulse after prompt_toolkit's event loop is running."""
+        current = getattr(self, "_refresh_task", None)
+        if current is not None and not current.done():
+            return
+
+        async def pulse() -> None:
+            while True:
+                controller = getattr(self, "_bored", None)
+                interval = 0.08
+                if controller is not None and not controller.paused:
+                    interval = min(interval, float(getattr(controller.game,
+                                                           "redraw_interval", interval)))
+                await asyncio.sleep(max(0.04, interval))
+                app.invalidate()
+
+        self._refresh_task = app.create_background_task(pulse())
+
     def _close_bored(self) -> None:
         if self._bored is not None:
             self._bored = None
+            self._bored_render_cache = None
             self._flash("back to work")
             self._invalidate()
 
@@ -805,9 +853,10 @@ class TUI:
         if not self._bored_visible():
             return 0
         self._sync_width()
-        target = min(12, max(8, self._height // 2))
-        # Preserve a real transcript viewport even when the live task pane is also present.
-        available = self._height - self._chrome_below() - 1 - self._todo_pane_height() - 3
+        target = min(16, max(10, (self._height * 3) // 5))
+        # The game temporarily folds the task pane, so reserve header/chrome + four real transcript
+        # rows. Tasks remain live in memory and reappear unchanged when the game closes.
+        available = self._height - self._chrome_below() - 1 - 4
         return max(4, min(target, available))
 
     def _bored_agent_state(self) -> str:
@@ -833,10 +882,18 @@ class TUI:
         self._sync_width()
         height = max(4, self._bored_height())
         width = max(20, self._width - 2)
-        frame = controller.frame(width - 2, height - 2)
-        return ANSI(self._rich(render_frame(
-            frame, width, height, agent_state=self._bored_agent_state(),
-            theme=style_mod.theme())))
+        agent_state = self._bored_agent_state()
+        th = style_mod.theme()
+        revision = controller.advance()
+        cache_key = (id(controller), revision, width, height, agent_state, th.name)
+        cached = getattr(self, "_bored_render_cache", None)
+        if cached is not None and cached[0] == cache_key:
+            return ANSI(cached[1])
+        frame = controller.snapshot(width - 2, height - 2)
+        rendered = self._rich(render_frame(
+            frame, width, height, agent_state=agent_state, theme=th))
+        self._bored_render_cache = (cache_key, rendered)
+        return ANSI(rendered)
 
     def _bored_key(self, key: str) -> None:
         controller = getattr(self, "_bored", None)
@@ -938,7 +995,7 @@ class TUI:
     def _rail_frag(self, running: bool, row: int, error: bool = False):
         """A left accent-bar fragment (a block rail), grouping a tool/reasoning block off the
         page. While it runs the bar is an animated downward traveling wave in the accent; on finish
-        it settles to a static faint rail (red on error). refresh_interval=0.08 animates it for free."""
+        it settles to a static faint rail (red on error). The adaptive UI pulse animates it."""
         import math
         th = style_mod.theme()
         if not running:
@@ -1135,7 +1192,8 @@ class TUI:
 
     def _tip(self):
         th = style_mod.theme()
-        if self.blocks or self._buf or self._overlay or self._welcome_metrics()[2] == "compact":
+        if (self.blocks or self._buf or self._overlay or getattr(self, "_bored", None) is not None
+                or self._welcome_metrics()[2] == "compact"):
             return ANSI("")
         upd = cached_update()
         if upd:                                            # echo the update CTA in the tip, like 
@@ -1191,7 +1249,8 @@ class TUI:
     def _header(self):
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
-        if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
+        if (self.blocks or self._buf or self._overlay
+                or getattr(self, "_bored", None) is not None):  # active surface → slim line
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             branch = getattr(self.active, "workspace_branch", "")
             ws = f" · {branch}" if branch else ""
@@ -1941,6 +2000,10 @@ class TUI:
         return bool(self._todos) and (self._turn.is_set()
                                       or any(t.get("status") not in ("done", "cancelled") for t in self._todos))
 
+    def _todo_panel_visible(self) -> bool:
+        """The arcade borrows the task pane's rows; task state itself continues updating."""
+        return getattr(self, "_bored", None) is None and self._todos_visible()
+
     def _todo_pane_height(self) -> int:
         return (len(self._todos) + 1) if self._todos_visible() else 0   # title row + one per task
 
@@ -2430,7 +2493,7 @@ class TUI:
         todo_panel = ConditionalContainer(
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
-            filter=Condition(self._todos_visible))
+            filter=Condition(self._todo_panel_visible))
         root = HSplit([header, transcript, bored_panel, overlay_panel, todo_panel,
                        status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
@@ -2440,14 +2503,15 @@ class TUI:
         self.app = Application(layout=Layout(root, focused_element=composer),
                                key_bindings=self._keys(), full_screen=True,
                                mouse_support=Condition(lambda: self._mouse_on),
-                               style=self._pt_style(), refresh_interval=0.08,
+                               style=self._pt_style(), refresh_interval=None,
+                               before_render=self._ensure_refresh_task,
                                # NOT erase_when_done: full-screen uses the alternate screen, which the
                                # terminal restores on exit. erase_when_done ALSO erases on top of that
                                # and, with the tall centered header, left ~a screen of blank lines.
                                color_depth=style_mod.detect_color_depth())
 
     def _header_height(self) -> int:
-        if self.blocks or self._buf or self._overlay:
+        if self.blocks or self._buf or self._overlay or getattr(self, "_bored", None) is not None:
             return 1
         self._sync_width()
         _, _, mode, card_h, _ = self._welcome_metrics()
@@ -4040,15 +4104,18 @@ class TUI:
         ov_open = Condition(lambda: self._overlay is not None)
         game_active = Condition(self._bored_visible)
 
-        # Game controls are eager so Escape/arrows never fall through to agent cancellation or
-        # transcript scrolling. Ctrl+C/Ctrl+Q remain deliberately untouched: they still stop the
-        # active agent, which is the safety invariant shown in the game-on confirmation.
-        for _key, _game_key in (
-                ("up", "up"), ("down", "down"), ("left", "left"), ("right", "right"),
-                ("w", "w"), ("a", "a"), ("s", "s"), ("d", "d"),
-                ("W", "w"), ("A", "a"), ("S", "s"), ("D", "d"),
-                ("p", "p"), ("P", "p"), ("r", "r"), ("R", "r"),
-                ("q", "q"), ("Q", "q"), ("escape", "escape")):
+        # Game controls are eager so input never leaks into the composer or transcript. Ctrl+C and
+        # Ctrl+Q remain deliberately untouched: they still stop the active agent. Capturing the
+        # complete printable alphabet lets WORD GRID behave like a real text game.
+        _game_keys = [
+            ("up", "up"), ("down", "down"), ("left", "left"), ("right", "right"),
+            ("enter", "enter"), ("backspace", "backspace"), ("delete", "delete"),
+            (" ", "space"), ("escape", "escape"),
+            *((str(number), str(number)) for number in range(10)),
+            *((letter, letter) for letter in "abcdefghijklmnopqrstuvwxyz"),
+            *((letter.upper(), letter) for letter in "abcdefghijklmnopqrstuvwxyz"),
+        ]
+        for _key, _game_key in _game_keys:
             @kb.add(_key, filter=game_active, eager=True)
             def _(ev, _game_key=_game_key):
                 self._bored_key(_game_key)
@@ -4701,6 +4768,11 @@ class TUI:
     def _shutdown_fleet(self) -> None:
         """Cancel all workers and preserve every managed checkout before the TUI process exits."""
         self._bored = None  # no external resources, but make the process-local lifetime explicit
+        task = getattr(self, "_refresh_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._refresh_task = None
+        self._bored_render_cache = None
         fleet = list(getattr(self, "_sessions", ()))
         for sess in fleet:
             sess._closing = True

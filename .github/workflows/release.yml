@@ -20,17 +20,96 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: editors/vscode/package-lock.json
       - run: python -m pip install build
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
-      - run: bash scripts/preflight.sh
+      - run: python -m pip check
+      - run: python -m compileall -q dgc
+      - run: python -m dgc --version
       - run: python -m build
-      - run: bash scripts/build-release.sh
+      - name: Build minimal runtime release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python -c 'from dgc import __version__; print(__version__)')
+          test "v$version" = "$GITHUB_REF_NAME"
+          epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          mkdir -p dist/release
+          git archive --format=tar --prefix=dgc/ "$GITHUB_SHA" -- \
+            LICENSE README.md pyproject.toml requirements.lock dgc \
+            | gzip -n -9 > dist/release/dgc.tar.gz
+          sha256sum dist/release/dgc.tar.gz \
+            | awk '{print $1"  dgc.tar.gz"}' > dist/release/dgc.tar.gz.sha256
+          python - "$version" "$epoch" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import re
+          import sys
+          from urllib.parse import quote
+
+          version, epoch = sys.argv[1], int(sys.argv[2])
+          out = pathlib.Path("dist/release")
+          artifact = out / "dgc.tar.gz"
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          metadata = {
+              "artifact": "dgc.tar.gz",
+              "commit": __import__("os").environ["GITHUB_SHA"],
+              "install": "https://vibedgc.com/install.sh",
+              "provenance": "provenance.json",
+              "sbom": "dgc.cdx.json",
+              "schema_version": 1,
+              "sha256": digest,
+              "source_date_epoch": epoch,
+              "version": version,
+          }
+          (out / "version.json").write_text(
+              json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\n")
+          (out / "provenance.json").write_text(json.dumps({
+              "schema_version": 1,
+              "subject": {"name": "dgc.tar.gz", "sha256": digest,
+                          "bytes": artifact.stat().st_size},
+              "source": {"repository": "https://github.com/OpenPeach-ai/dgc",
+                         "commit": metadata["commit"]},
+              "build": {"source_date_epoch": epoch, "runner": "github-actions"},
+          }, sort_keys=True, indent=2) + "\n")
+
+          components = []
+          for raw in pathlib.Path("requirements.lock").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([^\s]+)", line)
+              if not match:
+                  raise SystemExit(f"non-exact dependency: {line}")
+              name, dependency_version = match.groups()
+              normalized = name.lower().replace("_", "-")
+              purl = f"pkg:pypi/{quote(normalized)}@{quote(dependency_version)}"
+              components.append({"type": "library", "name": name,
+                                 "version": dependency_version, "purl": purl,
+                                 "bom-ref": purl, "scope": "required"})
+          root_ref = f"pkg:pypi/dgc@{quote(version)}"
+          bom = {
+              "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
+              "metadata": {"component": {"type": "application", "name": "dgc",
+                                           "version": version, "purl": root_ref,
+                                           "bom-ref": root_ref}},
+              "components": sorted(components, key=lambda item: item["bom-ref"]),
+              "dependencies": [{"ref": root_ref,
+                                "dependsOn": sorted(item["bom-ref"] for item in components)}],
+          }
+          (out / "dgc.cdx.json").write_text(
+              json.dumps(bom, sort_keys=True, separators=(",", ":")) + "\n")
+          PY
+          (cd dist/release && sha256sum -c dgc.tar.gz.sha256)
+          tar -tzf dist/release/dgc.tar.gz > dist/release/archive-files.txt
+          grep -Fx 'dgc/dgc/__init__.py' dist/release/archive-files.txt
+          grep -Fx 'dgc/pyproject.toml' dist/release/archive-files.txt
+          if grep -E '^dgc/(docs|scripts|tests|bench|site|\.git|\.github|AGENTS\.md)(/|$)' \
+              dist/release/archive-files.txt; then
+            echo "release archive contains a non-runtime path" >&2
+            exit 1
+          fi
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -49,4 +128,6 @@ jobs:
           dist/release/dgc.cdx.json
           dist/*.whl
           dist/dgc-*.tar.gz
-          --verify-tag --generate-notes --title "DGC ${GITHUB_REF_NAME}"
+          --verify-tag
+          --notes "DGC ${GITHUB_REF_NAME#v} release."
+          --title "DGC ${GITHUB_REF_NAME#v}"

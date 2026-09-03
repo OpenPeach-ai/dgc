@@ -4,6 +4,8 @@ The games deliberately own no terminal, process, filesystem, network, or model r
 prompt_toolkit application remains the sole renderer/input owner, so agent output can continue
 streaming while a game is visible.
 """
-from .base import BoredController, GameChoice, GameFrame, Segment, game_choices
+from .base import (BoredController, GameChoice, GameFrame, Segment, game_choices,
+                   tracks_high_score)
 
-__all__ = ["BoredController", "GameChoice", "GameFrame", "Segment", "game_choices"]
+__all__ = ["BoredController", "GameChoice", "GameFrame", "Segment", "game_choices",
+           "tracks_high_score"]

@@ -16,6 +16,46 @@ def _style(role: str, theme) -> str:
         "good": f"bold {theme.ok}",
         "warn": f"bold {theme.warn}",
         "error": f"bold {theme.err}",
+        "snake-floor": f"{theme.faint} on {theme.surface}",
+        "snake-grid": f"{theme.border_strong} on {theme.surface}",
+        "snake-body": f"bold {theme.accent} on {theme.surface}",
+        "snake-head": f"bold {theme.ok} on {theme.surface}",
+        "snake-food": f"bold {theme.accent_bright} on {theme.surface}",
+        "snake-dead": f"bold {theme.err} on {theme.surface}",
+        "game-floor": f"{theme.faint} on {theme.surface}",
+        "board-cursor": f"bold {theme.text_strong} on {theme.accent_dim}",
+        "mine-hidden": f"{theme.border_strong} on {theme.surface2}",
+        "mine-open": f"{theme.faint} on {theme.surface}",
+        "mine-1": f"bold {theme.accent_bright} on {theme.surface}",
+        "mine-2": f"bold {theme.ok} on {theme.surface}",
+        "mine-3": f"bold {theme.warn} on {theme.surface}",
+        "mine-4": f"bold {theme.err} on {theme.surface}",
+        "maze-wall": f"{theme.border_strong} on {theme.surface2}",
+        "maze-floor": f"{theme.faint} on {theme.surface}",
+        "sudoku-given": f"bold {theme.text_strong} on {theme.surface2}",
+        "sudoku-user": f"bold {theme.accent_bright} on {theme.surface}",
+        "word-empty": f"{theme.faint} on {theme.surface}",
+        "word-input": f"bold {theme.text_strong} on {theme.surface2}",
+        "word-absent": f"bold {theme.muted} on {theme.border_strong}",
+        "word-present": f"bold {theme.bg} on {theme.warn}",
+        "word-exact": f"bold {theme.bg} on {theme.ok}",
+        "life-empty": f"{theme.border_strong} on {theme.surface}",
+        "life-cell": f"bold {theme.accent_bright} on {theme.surface}",
+        "muted-data": theme.muted,
+        "process-cool": f"bold {theme.ok} on {theme.surface}",
+        "process-hot": f"bold {theme.err} on {theme.surface}",
+        "stack-ghost": f"{theme.border_strong} on {theme.surface}",
+        "stack-1": f"bold {theme.text_strong} on {theme.accent_dim}",
+        "stack-2": f"bold {theme.bg} on {theme.accent_bright}",
+        "stack-3": f"bold {theme.bg} on {theme.ok}",
+        "stack-4": f"bold {theme.bg} on {theme.warn}",
+        "stack-5": f"bold {theme.text_strong} on {theme.border_strong}",
+        "stack-6": f"bold {theme.text_strong} on {theme.accent}",
+        "stack-7": f"bold {theme.text_strong} on {theme.surface2}",
+        "chess-light": f"bold {theme.text_strong} on {theme.surface2}",
+        "chess-dark": f"bold {theme.text} on {theme.border_strong}",
+        "chess-target": f"bold {theme.bg} on {theme.ok}",
+        "chess-selected": f"bold {theme.text_strong} on {theme.accent}",
         "empty-tile": f"{theme.faint} on {theme.surface}",
         "tile-1": f"bold {theme.text} on {theme.surface2}",
         "tile-2": f"bold {theme.text_strong} on {theme.border_strong}",
@@ -38,7 +78,10 @@ def _fit(line: Text, width: int) -> Text:
 def _header(frame: GameFrame, width: int, agent_state: str, theme) -> Text:
     inner = max(1, width - 2)
     left = f"─ {frame.title} "
-    right = f" {frame.score} · DGC: {agent_state} ─"
+    state = f" · DGC: {agent_state} ─"
+    right = f" {frame.score}{f' · {frame.best}' if frame.best else ''}{state}"
+    if len(left) + len(right) > inner and frame.best:
+        right = f" {frame.score}{state}"
     if len(left) + len(right) > inner:
         right = f" {frame.score} ─"
     if len(left) + len(right) > inner:
@@ -54,9 +97,18 @@ def _header(frame: GameFrame, width: int, agent_state: str, theme) -> Text:
 
 def _footer(frame: GameFrame, width: int, theme) -> Text:
     inner = max(1, width - 2)
-    label = (f" {frame.status} · P RESUME · Q/ESC RETURN " if frame.paused else
-             f" {frame.status} · R RESTART · Q/ESC RETURN " if frame.status else
-             f" {frame.footer} ")
+    if frame.paused:
+        label = f" {frame.status} · P RESUME · Q/ESC RETURN "
+    elif frame.status:
+        # Terminal states already advertise their recovery key.  Transient states (a conflict,
+        # selection, milestone, and so on) keep the game's real controls visible instead of
+        # replacing them with a misleading generic restart action.
+        has_recovery = any(token in frame.status for token in
+                           ("· R RESTART", "· R RETRY", "· R REMATCH", "· ENTER AGAIN"))
+        label = (f" {frame.status} · Q/ESC RETURN " if has_recovery else
+                 f" {frame.status} · {frame.footer} ")
+    else:
+        label = f" {frame.footer} "
     text = Text(label, style=(f"bold {theme.warn}" if frame.status else theme.faint))
     text.truncate(max(1, inner - 2), overflow="ellipsis")
     line = Text("╰─", style=theme.border_strong)
