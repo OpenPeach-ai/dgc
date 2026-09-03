@@ -42,6 +42,8 @@
     --gutter:24px;     /* grid gap between sibling cards */
     /* ONE radius scale. 14 ad-hoc values collapsed to 4; pills keep 99px, FIG panels 2px. */
     --r-xs:4px; --r-sm:8px; --r-md:11px; --r-lg:14px;
+  
+    --on-media:#A3A3A8;  /* body copy over video or glass — lifted off --muted to hold AA */
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
@@ -77,7 +79,7 @@
   /* the five section links collect into one floating pill, pushed right by order (no DOM move) */
   .navlinks{order:3;display:flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--border);border-radius:99px;background:rgba(9,9,12,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
   .navlinks a{display:inline-flex;align-items:center;padding:8px 13px;border:0;border-radius:99px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text);background:transparent;transition:border-color .18s ease,background-color .18s ease,color .18s ease}
-  .navlinks a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}
+  @media (hover:hover){.navlinks a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}}
   /* the 01..05 index repeats the FIG.N motif where it earns least — markup kept, cost removed */
   .navlinks a .n{display:none}
   /* over the hero video the nav is transparent → brighten links so they stay legible */
@@ -91,12 +93,12 @@
   .ann b{padding:4px 8px;border-radius:99px;background:var(--accent);color:#fff;font-weight:500;letter-spacing:.06em;text-transform:uppercase;font-size:10px}
   .ann i{font-style:normal;color:var(--lav)}
   .ann:hover{border-color:var(--border-strong);color:var(--text-strong)}
-  /* over the hero video the nav is transparent, and --border (#212124) vanishes against a bright
+  /* over the hero video the nav is transparent, and --border (var(--border)) vanishes against a bright
      frame — give both pills a visible edge and a darker ground until the nav goes solid. */
   nav:not(.solid) .navlinks,nav:not(.solid) .ann{border-color:rgba(255,255,255,.16);background:rgba(9,9,12,.62)}
   .navright{order:4;display:flex;align-items:center;gap:2px;margin-left:8px}
   .navright a{padding:8px 12px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text);border-radius:99px;transition:color .18s ease,background-color .18s ease,border-color .18s ease}
-  .navright a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}
+  @media (hover:hover){.navright a:hover{color:var(--text-strong);background:rgba(255,255,255,.07)}}
   .navright a.ext{margin-left:6px;padding:10px 15px;border:1px solid var(--accent);background:var(--accent);color:var(--text-strong)}
   .navright a.ext:hover{background:var(--accent-2);border-color:var(--accent-2)}
 
@@ -120,8 +122,8 @@
   .statbar{position:relative;z-index:2;border-top:1px solid var(--border);background:rgba(10,10,11,.42);backdrop-filter:saturate(1.2)}
   .statbar .wrap{display:grid;grid-template-columns:repeat(5,1fr)}
   .statbar .s{padding:20px 22px;border-left:1px solid var(--border)} .statbar .s:first-child{border-left:none}
-  .statbar .s .v{font:500 24px/1 var(--mono);color:var(--text-strong);font-variant-numeric:tabular-nums;letter-spacing:-.02em} .statbar .s .v b{color:var(--lav)}
-  .statbar .s .k{margin-top:8px;font:500 10px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#96969B}
+  .statbar .s .v{font:500 24px/1 var(--mono);color:var(--text-strong);font-variant-numeric:tabular-nums} .statbar .s .v b{color:var(--lav)}
+  .statbar .s .k{margin-top:8px;font:500 10px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 
   /* Flat padding, and no full-bleed rule: 8 of the 9 seams already change ground
      (.alt tint, video, stripe), so the hairline was drawn on top of a change that already reads. */
@@ -151,7 +153,7 @@
   .ceo-quote .qt::before{content:"·";margin-right:12px;color:var(--faint)}
   .sechead{margin-bottom:14px}
   .sechead .lab{display:inline-flex;align-items:center;gap:9px;font:500 13px/1 var(--mono);color:var(--lav)}
-  .sechead .lab::before{content:"";width:2px;height:13px;background:var(--accent);flex:none}
+  .sechead .lab::before{content:"";width:2px;height:10px;background:var(--accent);flex:none}
   .nb{white-space:nowrap}
   .sechead h2{font:400 clamp(26px,2.9vw,40px)/1.14 var(--sans);letter-spacing:-.02em;margin-top:14px;max-width:24ch;text-wrap:balance}
   .sechead .tag{margin-top:13px;color:var(--muted);font-size:16px;max-width:60ch}
@@ -220,7 +222,7 @@
   .swecard .stat2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}
   .swecard .stat2 .c{border:1px solid var(--border);border-radius:var(--r-md);padding:11px 12px}
   .swecard .stat2 .cv{font:500 18px/1 var(--sans);color:var(--text-strong)} .swecard .stat2 .ck{font:500 9.5px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-top:6px}
-  .bmnote{margin:24px auto 0;color:#A3A3A8;font-size:13.5px;max-width:66ch;text-align:center}
+  .bmnote{margin:24px auto 0;color:var(--on-media);font-size:13.5px;max-width:66ch;text-align:center}
 
   /* providers matrix (clean static) */
   .prov{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:var(--s-block)}
@@ -245,13 +247,13 @@
   .feat3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gutter);margin-top:var(--s-block)}
   /* Deliberately thin glass so the video reads through the cards; the heavier blur is what
      keeps the copy legible at this opacity. */
-  .fcard{border:1px solid rgba(255,255,255,.11);border-radius:var(--r-lg);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 52px -30px rgba(0,0,0,.7);padding:24px;transition:border-color .18s ease,background-color .18s ease} .fcard:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}
+  .fcard{border:1px solid rgba(255,255,255,.11);border-radius:var(--r-lg);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 52px -30px rgba(0,0,0,.7);padding:24px;transition:border-color .18s ease,background-color .18s ease} @media (hover:hover){.fcard:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}}
   /* These two sit over video, not a flat surface — lifted off --muted/--faint to hold AA contrast
      against the brightest frames now that the glass is thin. */
-  .fcard .ftrace{margin-top:14px;padding-top:13px;border-top:1px solid var(--border);font:400 11px/1.7 var(--mono);color:#A3A3A8} .fcard .ftrace .pass{color:var(--lav)}
-  .fcard .fi{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#A3A3A8}
+  .fcard .ftrace{margin-top:14px;padding-top:13px;border-top:1px solid var(--border);font:400 11px/1.7 var(--mono);color:var(--on-media)} .fcard .ftrace .pass{color:var(--lav)}
+  .fcard .fi{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--on-media)}
   .fcard h3{font:500 18px/1.2 var(--sans);margin:14px 0 8px;color:var(--text-strong)}
-  .fcard p{margin:0;color:#A3A3A8;font-size:14px;line-height:1.55}
+  .fcard p{margin:0;color:var(--on-media);font-size:14px;line-height:1.55}
   .fcard .cmd{margin-top:16px;font:500 12px/1.5 var(--mono);color:var(--lav);background:rgba(6,6,9,.55);border:1px solid rgba(255,255,255,.07);border-radius:var(--r-sm);padding:9px 11px;overflow-x:auto;white-space:nowrap}
 
   /* capability map — one compact figure for the whole harness (replaces 12 cards) */
@@ -341,7 +343,8 @@
   .field-band::after{content:"";position:absolute;z-index:-1;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:screen;mask-image:linear-gradient(180deg,transparent,#000 15%,#000 85%,transparent);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   @keyframes grain-drift{0%{transform:translate3d(-3%,-2%,0) scale(1.05)}50%{transform:translate3d(3%,3%,0) scale(1.13)}100%{transform:translate3d(2%,-2%,0) scale(1.05)}}
   .editor-figure{background:var(--term)}
-  .editor-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  .editor-scroll,.runbench pre,.fcard .cmd{overscroll-behavior-inline:contain;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+  .editor-scroll{overflow-x:auto}
   .editor-shell{display:grid;grid-template-columns:46px 188px minmax(430px,1fr) 336px;grid-template-rows:35px 430px 23px;min-width:1000px;background:var(--term);font:400 10.5px/1.5 var(--mono)}
   .ed-titlebar{grid-column:1/-1;display:grid;grid-template-columns:auto 1fr auto;align-items:center;padding:0 12px;border-bottom:1px solid var(--border);background:var(--surface);color:var(--faint)}
   .ed-dots{display:flex;gap:6px}.ed-dots i{display:block;width:7px;height:7px;border-radius:50%;background:var(--border-strong)}
@@ -449,22 +452,22 @@
   /* Same thin glass as the Power tools cards — these sit over the cave video, so the blur (not
      opacity) is what keeps them readable, and the dimmer type is lifted off --muted/--faint. */
   .scli{display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:15px 18px;border:1px solid rgba(255,255,255,.11);border-radius:var(--r-md);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07);transition:border-color .18s ease,background-color .18s ease}
-  .scli:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}
+  @media (hover:hover){.scli:hover{border-color:rgba(167,139,250,.42);background:rgba(20,20,26,.5)}}
   .scli .sn{font:500 15px/1 var(--sans);color:var(--text-strong)}
-  .scli .sp{font:500 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#A3A3A8}
+  .scli .sp{font:500 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--on-media)}
   .sub-flow{border:1px solid rgba(255,255,255,.11);border-radius:var(--r-lg);background:rgba(13,13,17,.40);backdrop-filter:saturate(1.35);-webkit-backdrop-filter:saturate(1.35);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 24px 52px -30px rgba(0,0,0,.7);padding:clamp(22px,2.6vw,30px);display:flex;flex-direction:column;justify-content:center}
-  .sub-flow .fh{font:500 10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#A3A3A8;display:flex;align-items:center;gap:9px;margin-bottom:20px}
+  .sub-flow .fh{font:500 10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--on-media);display:flex;align-items:center;gap:9px;margin-bottom:20px}
   .sub-flow .fh::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent)}
   .dstep{display:grid;grid-template-columns:132px 1fr;align-items:center;gap:16px}
   .dstep .db{font:500 13px/1 var(--mono);color:var(--text-strong);border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:11px 13px;text-align:center;background:var(--surface)}
-  .dstep .dn{font:400 12.5px/1.5 var(--sans);color:#A3A3A8}
+  .dstep .dn{font:400 12.5px/1.5 var(--sans);color:var(--on-media)}
   .darrow{margin:7px 0 7px 65px;color:var(--faint);font:400 15px/1 var(--mono)}
 
   /* ===== Localhost artifacts (browser mockup) ===== */
   .art-mock{margin-top:var(--s-block);max-width:820px}
   .bw{border:1px solid var(--border-strong);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);box-shadow:0 50px 110px -55px rgba(0,0,0,.9),0 0 0 1px rgba(124,92,255,.05)}
-  .bw-bar{display:flex;align-items:center;gap:8px;padding:11px 15px;background:#0f0f12;border-bottom:1px solid var(--border)}
-  .bw-bar i{width:11px;height:11px;border-radius:50%;background:#26262b}
+  .bw-bar{display:flex;align-items:center;gap:8px;padding:11px 15px;background:var(--chrome);border-bottom:1px solid var(--border)}
+  .bw-bar i{width:11px;height:11px;border-radius:50%;background:var(--chrome-dot)}
   .bw-url{margin-left:10px;flex:1;font:400 12px/1 var(--mono);color:var(--muted);background:var(--surface-3);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px}
   /* min-width reserves the longest label so the chip doesn't resize as the names cycle */
   .bw-drop{font:500 11px/1 var(--mono);color:var(--lav);border:1px solid var(--accent);border-radius:var(--r-sm);padding:8px 11px;min-width:calc(16ch + 24px);text-align:center}
@@ -536,6 +539,9 @@
   /* Keyboard focus: the page had no :focus rule at all and fell back to the UA outline. */
   /* The ring follows each element's OWN radius — setting one here reshaped the components. */
   :focus-visible{outline:2px solid var(--lav);outline-offset:3px}
+  /* A tap had no feedback of any kind; this is the whole affordance on touch. */
+  .btn:active,.navlinks a:active,.navright a:active,.ann:active,
+  .hero .install button:active,footer .col a:active{transform:translateY(1px);opacity:.85}
   .brand:focus-visible,footer .col a:focus-visible{border-radius:var(--r-xs)}
   /* These scrollers sit inside overflow:hidden parents, so an offset ring is clipped away.
      Draw it inside the box instead — always painted, never clipped. */
@@ -549,8 +555,11 @@
   .eff{background:var(--surface-3);padding:15px 16px}
   .eff .ev{font:500 21px/1 var(--mono);color:var(--text-strong);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
   .eff .ek{margin-top:7px;font:500 9.5px/1.4 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
-  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease} .reveal.in{opacity:1;transform:none}
-  @media (prefers-reduced-motion:reduce){.hero .bg{background:url(assets/hero-poster.jpg) center 42%/cover no-repeat}.hero .bg video{display:none}.reveal{opacity:1;transform:none;transition:none}.brand svg path{animation:none;opacity:1}.brand .cur{animation:none}.lrow .track i{transition:none}}
+  /* Opt IN to the reveal: without JS the page is simply visible, not a column of invisible
+     blocks. `.js` is added by the first inline script. */
+  .js .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+  .js .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.field-band::before,.stripe-band::before,.pipe-flow,.prov-flow,[class*="flow-current"],.bar-pulse,.pulse-dot,.quote-shader,.prov-bg{animation:none!important}.hero .bg{background:url(assets/hero-poster.jpg) center 42%/cover no-repeat}.hero .bg video{display:none}.reveal{opacity:1;transform:none;transition:none}.brand svg path{animation:none;opacity:1}.brand .cur{animation:none}.lrow .track i{transition:none}}
   @media(max-width:1040px){:root{--band-pad:72px;--s-block:32px;--gutter:20px}}
   @media(max-width:640px){:root{--band-pad:56px;--s-block:28px;--s-sub:16px;--gutter:16px}}
   @media (max-width:1240px){.ann{display:none}}
@@ -749,7 +758,7 @@
       <ul class="plist">
         <li><span class="pn">OpenAI</span><span class="pm">api key</span></li>
         <li><span class="pn">Anthropic</span><span class="pm">api key</span></li>
-        <li><span class="pn">OpenRouter</span><span class="pm">100s of models</span></li>
+        <li><span class="pn">OpenRouter</span><span class="pm">Hundreds of models</span></li>
         <li><span class="pn">Groq · DeepSeek · more</span><span class="pm">openai /v1</span></li>
       </ul>
       <div class="pf">Native or OpenAI-compatible transport.</div>
@@ -892,8 +901,26 @@ python3 run_bench.py <span class="k">--engine</span> dgc <span class="k">--model
 </div></footer>
 
 <script>
+  document.documentElement.classList.add('js');   /* the reveal animation opts in on this */
+
   var c=document.getElementById('copy');
-  if(c) c.addEventListener('click',function(){navigator.clipboard.writeText(document.getElementById('inst').textContent).then(function(){c.textContent='copied';setTimeout(function(){c.textContent='copy';},1400);}).catch(function(){});});
+  if(c) c.addEventListener('click',function(){
+    var text=document.getElementById('inst').textContent, done=function(ok){
+      c.textContent = ok ? 'copied' : 'copy failed';
+      c.setAttribute('aria-live','polite');
+      setTimeout(function(){ c.textContent='copy'; },1400);
+    };
+    // navigator.clipboard is undefined on a non-secure origin, so fall back rather than throw
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){done(true);},function(){done(false);});
+    } else {
+      try {
+        var t=document.createElement('textarea'); t.value=text; t.setAttribute('readonly','');
+        t.style.position='fixed'; t.style.opacity='0'; document.body.appendChild(t);
+        t.select(); var ok=document.execCommand('copy'); document.body.removeChild(t); done(ok);
+      } catch(e){ done(false); }
+    }
+  });
   var nv=document.querySelector('nav');
   function syncNav(){if(window.scrollY>60){nv.classList.add('solid');}else{nv.classList.remove('solid');}}
   addEventListener('scroll',syncNav,{passive:true});syncNav();

@@ -94,6 +94,35 @@
 <ul>
 <li>ACP represents configured hook runs as ordinary command-free tool-call lifecycle updates.</li>
 </ul>
+<h2 id="configuring-one">Configuring one<a class="anchor" href="#configuring-one" aria-label="Link to this section">#</a></h2>
+<p>Each event takes a list of entries. <code>command</code> is required; <code>matcher</code> is optional and narrows a tool event to one tool:</p>
+<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>{
+  "hooks": {
+    "PreToolUse":       [{"matcher": "bash", "command": "./scripts/guard.sh"}],
+    "PostToolUse":      [{"command": "./scripts/format.sh"}],
+    "UserPromptSubmit": [{"command": "./scripts/log-prompt.sh"}]
+  }
+}</code></pre></div>
+<p>The event payload arrives on <strong>stdin as JSON</strong>, so a hook reads it rather than taking arguments:</p>
+<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>#!/usr/bin/env bash
+# ./scripts/guard.sh — refuse a bash command that touches the release directory
+payload=$(cat)
+case "$payload" in
+  *dist/release*) echo "release artifacts are off limits to the agent"; exit 1 ;;
+esac</code></pre></div>
+<p>Exit status is the control surface:</p>
+<ul>
+<li>a <strong><code>PreToolUse</code></strong> or <strong><code>UserPromptSubmit</code></strong> hook that exits non-zero **blocks</li>
+</ul>
+<p>the action**, and its output becomes the reason the agent is shown;</p>
+<ul>
+<li>a <strong><code>PostToolUse</code></strong> hook's output is appended to the tool result as feedback,</li>
+</ul>
+<p>so the agent reads it and can react;</p>
+<ul>
+<li>every other event ignores the exit status.</li>
+</ul>
+<p>Use <code>/hooks</code> to confirm what DGC actually loaded — it reports the configured count and redacted matchers per event without echoing your commands.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="mcp-servers.html"><div class="k">← Previous</div><div class="t">MCP servers</div></a>
 <a class="next" href="skills.html"><div class="k">Next →</div><div class="t">Skills</div></a>
@@ -102,7 +131,7 @@
   </main>
   <aside class="toc" aria-label="On this page">
 <div class="h">On this page</div>
-<a href="#content" data-id="content" class="lvl2">Top</a>
+<a href="#configuring-one" data-id="configuring-one" class="lvl2">Configuring one</a>
 </aside>
 </div>
 

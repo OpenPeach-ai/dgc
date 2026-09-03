@@ -80,6 +80,9 @@
 <li><strong>Approve</strong> — DGC drops back to your previous edit mode and executes the plan.</li>
 <li><strong>Keep planning</strong> — give feedback, stay read-only, and receive a revised plan.</li>
 </ul>
+<h2 id="what-read-only-means">What read-only means<a class="anchor" href="#what-read-only-means" aria-label="Link to this section">#</a></h2>
+<p>Plan mode is enforced in the permission layer, not by instruction. While it is active the agent may use only the read-only tools — reading files, <code>grep</code>, <code>glob</code>, code intelligence, web search — plus the one tool that presents a plan. Every mutation is denied outright: no file writes, no edits, no shell commands. Two further limits apply only in this mode: paths outside the project are refused, and MCP discovery and execution are not exposed at all.</p>
+<p>That is why plan mode is safe to point at unfamiliar code — the agent physically cannot change anything before you have read what it intends to do.</p>
 <p>DGC keeps the plan inline in the transcript, saves a <code>plan.md</code> beside the session, and (by default) renders a self-contained preview on loopback. <code>/view-plan</code> reopens the saved copy. The preview never inherits LAN sharing; arbitrary project previews remain disabled in plan mode unless <code>artifact_in_plan</code> is explicitly enabled.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="permission-modes.html"><div class="k">← Previous</div><div class="t">Permission modes</div></a>
@@ -89,7 +92,7 @@
   </main>
   <aside class="toc" aria-label="On this page">
 <div class="h">On this page</div>
-<a href="#content" data-id="content" class="lvl2">Top</a>
+<a href="#what-read-only-means" data-id="what-read-only-means" class="lvl2">What read-only means</a>
 </aside>
 </div>
 

@@ -223,6 +223,18 @@ When the plan lands you get an approval prompt:
 - **Approve** — DGC drops back to your previous edit mode and executes the plan.
 - **Keep planning** — give feedback, stay read-only, and receive a revised plan.
 
+## What read-only means
+
+Plan mode is enforced in the permission layer, not by instruction. While it is
+active the agent may use only the read-only tools — reading files, `grep`,
+`glob`, code intelligence, web search — plus the one tool that presents a plan.
+Every mutation is denied outright: no file writes, no edits, no shell commands.
+Two further limits apply only in this mode: paths outside the project are
+refused, and MCP discovery and execution are not exposed at all.
+
+That is why plan mode is safe to point at unfamiliar code — the agent physically
+cannot change anything before you have read what it intends to do.
+
 DGC keeps the plan inline in the transcript, saves a `plan.md` beside the session,
 and (by default) renders a self-contained preview on loopback. `/view-plan` reopens
 the saved copy. The preview never inherits LAN sharing; arbitrary project previews
@@ -313,6 +325,44 @@ Configure hook commands under `hooks` in `~/.dgc/config.json`. DGC calls six lif
   `hook_catalog`. Natural execution emits `hook_activity` with `started` and exactly one terminal
   status; there is deliberately no command that executes a hook outside its lifecycle boundary.
 - ACP represents configured hook runs as ordinary command-free tool-call lifecycle updates.
+
+## Configuring one
+
+Each event takes a list of entries. `command` is required; `matcher` is optional
+and narrows a tool event to one tool:
+
+```
+{
+  "hooks": {
+    "PreToolUse":       [{"matcher": "bash", "command": "./scripts/guard.sh"}],
+    "PostToolUse":      [{"command": "./scripts/format.sh"}],
+    "UserPromptSubmit": [{"command": "./scripts/log-prompt.sh"}]
+  }
+}
+```
+
+The event payload arrives on **stdin as JSON**, so a hook reads it rather than
+taking arguments:
+
+```
+#!/usr/bin/env bash
+# ./scripts/guard.sh — refuse a bash command that touches the release directory
+payload=$(cat)
+case "$payload" in
+  *dist/release*) echo "release artifacts are off limits to the agent"; exit 1 ;;
+esac
+```
+
+Exit status is the control surface:
+
+- a **`PreToolUse`** or **`UserPromptSubmit`** hook that exits non-zero **blocks
+  the action**, and its output becomes the reason the agent is shown;
+- a **`PostToolUse`** hook's output is appended to the tool result as feedback,
+  so the agent reads it and can react;
+- every other event ignores the exit status.
+
+Use `/hooks` to confirm what DGC actually loaded — it reports the configured
+count and redacted matchers per event without echoing your commands.
 """.strip()),
 
     ("Skills", "reusable instruction packages", """
@@ -331,6 +381,40 @@ few built in and you can add your own under `~/.dgc/skills/` or a project's
   headless/editor listings report that source layer without exposing host paths.
 - **dgc-design** ships by default but stays dormant for normal coding — artifact
   frontend work activates it automatically.
+
+## Writing one
+
+A skill is a directory containing a `SKILL.md`: YAML frontmatter, then the
+instructions themselves.
+
+```
+~/.dgc/skills/commit/SKILL.md
+```
+
+```
+---
+name: commit
+description: Write a conventional commit message for the staged changes
+---
+
+Read the staged diff with `git diff --staged` and write a single conventional
+commit message for it. Focus (optional): $ARGUMENTS
+
+Describe what changed and why, never how. No trailing period on the subject.
+```
+
+`name` is how you invoke it, `description` is what the agent matches against
+when deciding whether the skill applies, and the optional `when` field narrows
+that further. `$ARGUMENTS` is replaced with whatever you pass at invocation.
+
+Discovery is project-first, so a repo can override a personal skill of the same
+name:
+
+- `<project>/.dgc/skills/<name>/SKILL.md`
+- `~/.dgc/skills/<name>/SKILL.md`
+
+The sixteen built-in skills are worth reading as examples — `/skills` lists them,
+and each is a plain directory you can copy and edit.
 """.strip()),
 
     ("Multiple agents", "run a fleet of agents at once + the dashboard", """
