@@ -13,10 +13,12 @@ class ByteSnake:
     title = "BYTE SNAKE"
     description = "real-time · arrows or WASD"
     minimum_width = 48
-    minimum_height = 9
-    board_width = 42
-    board_height = 7
-    _BASE_INTERVAL = 0.13
+    minimum_height = 12
+    # Terminal cells are roughly twice as tall as they are wide. A smaller logical board rendered
+    # with two terminal columns per cell makes horizontal and vertical travel feel equally fast.
+    board_width = 26
+    board_height = 12
+    _BASE_INTERVAL = 0.16
 
     _DIRECTIONS = {
         "up": (0, -1), "w": (0, -1),
@@ -46,7 +48,8 @@ class ByteSnake:
         self._next_tick = float(now) + self._interval()
 
     def _interval(self) -> float:
-        return max(0.075, self._BASE_INTERVAL - min(self.score, 180) * 0.00025)
+        # Start deliberately readable and only add a gentle difficulty curve after food is eaten.
+        return max(0.10, self._BASE_INTERVAL - min(self.score, 300) * 0.0002)
 
     def _spawn_food(self) -> tuple[int, int] | None:
         occupied = set(self.snake)
@@ -102,33 +105,40 @@ class ByteSnake:
         return tuple(result)
 
     def frame(self, width: int, height: int) -> GameFrame:
-        footer = "ARROWS/WASD MOVE · P PAUSE · R RESTART · Q/ESC RETURN"
-        if width < self.board_width or height < self.board_height:
-            message = "TERMINAL TOO SMALL — RESIZE OR Q TO RETURN"
-            pad_y = max(0, (height - 1) // 2)
-            lines = [tuple()] * pad_y + [(Segment(message[:width].center(width), "warn"),)]
-            return GameFrame(self.title, f"SCORE {self.score:04d}", tuple(lines), footer,
-                             status="WAITING FOR SPACE")
+        footer = "WASD/ARROWS MOVE · P PAUSE · R RESET · Q/ESC BACK"
         snake = set(self.snake)
         head = self.snake[0]
-        left = max(0, (width - self.board_width) // 2)
-        top = max(0, (height - self.board_height) // 2)
+        # Two terminal columns make one logical cell approximately square. Very narrow terminals
+        # retain the one-column compact fallback; cropped views follow the head in either mode.
+        cell_width = 2 if width >= 32 else 1
+        view_width = min(self.board_width, max(1, width // cell_width))
+        view_height = min(self.board_height, max(1, height))
+        x0 = max(0, min(head[0] - view_width // 2, self.board_width - view_width))
+        y0 = max(0, min(head[1] - view_height // 2, self.board_height - view_height))
+        left = max(0, (width - view_width * cell_width) // 2)
+        top = max(0, (height - view_height) // 2)
         lines: list[tuple[Segment, ...]] = [tuple() for _ in range(top)]
-        for y in range(self.board_height):
+        food_marker = None
+        if self.food is not None:
+            food_marker = (max(x0, min(self.food[0], x0 + view_width - 1)),
+                           max(y0, min(self.food[1], y0 + view_height - 1)))
+        for y in range(y0, y0 + view_height):
             cells: list[tuple[str, str]] = [(" " * left, "text")]
-            for x in range(self.board_width):
+            for x in range(x0, x0 + view_width):
                 pos = (x, y)
                 if pos == head:
-                    cells.append(("◆", "good" if not self.over else "error"))
+                    glyph, role = "◆", "snake-head" if not self.over else "snake-dead"
                 elif pos in snake:
-                    cells.append(("●", "accent"))
-                elif pos == self.food:
-                    cells.append(("◇", "bright"))
-                elif x % 6 == 0 and y % 2 == 0:
-                    cells.append(("·", "grid"))
+                    glyph, role = "●", "snake-body"
+                elif pos == food_marker:
+                    glyph, role = "◇", "snake-food"
+                elif (x + y) % 4 == 0:
+                    glyph, role = "·", "snake-grid"
                 else:
-                    cells.append((" ", "text"))
+                    glyph, role = " ", "snake-floor"
+                cells.append((glyph + " " * (cell_width - 1), role))
             lines.append(self._runs(cells))
         status = "GAME OVER · R RESTART" if self.over else ""
-        return GameFrame(self.title, f"SCORE {self.score:04d}", tuple(lines), footer,
+        level = 1 + self.score // 50
+        return GameFrame(self.title, f"SCORE {self.score:04d} · LV {level:02d}", tuple(lines), footer,
                          status=status)

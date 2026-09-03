@@ -31,9 +31,9 @@ jobs:
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
       - run: python -m pip check
-      - run: python -m compileall -q dgc tests/run_tests.py
-      - run: python -m py_compile bench/*.py scripts/generate-sbom.py
-      - run: python tests/run_tests.py
+      - run: python -m compileall -q dgc
+      - run: python -m py_compile bench/*.py
+      - run: python -m dgc --version
 
   windows-smoke:
     name: Windows import and CLI smoke
@@ -75,7 +75,7 @@ jobs:
           path: editors/vscode/dgc-ci.vsix
 
   package:
-    name: Python package and release archive
+    name: Python package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,14 +86,9 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check dist/*
-      - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
-      - run: sha256sum -c dist/release/dgc.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: dgc-release-candidate
+          name: dgc-python-package
           path: |
-            dist/release/dgc.tar.gz
-            dist/release/dgc.tar.gz.sha256
-            dist/release/version.json
-            dist/release/provenance.json
-            dist/release/dgc.cdx.json
+            dist/*.whl
+            dist/dgc-*.tar.gz

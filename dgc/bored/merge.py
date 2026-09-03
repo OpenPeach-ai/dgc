@@ -113,28 +113,74 @@ class Merge:
         direction = self._DIRECTIONS.get(key)
         return self.move(direction) if direction and not self.over else False
 
+    @staticmethod
+    def _tile_label(value: int, width: int) -> str:
+        if not value:
+            return "·"
+        label = str(value)
+        if len(label) <= width:
+            return label
+        if value >= 1024 and width >= 2:
+            compact = f"{value // 1024}K"
+            if len(compact) <= width:
+                return compact
+        exponent = value.bit_length() - 1
+        return (f"^{exponent}" if width >= 2 else str(exponent)[-1])[-width:]
+
+    def _row_spans(self, row: list[int], tile_width: int, *, labels: bool = True) -> list[Segment]:
+        spans: list[Segment] = []
+        for index, value in enumerate(row):
+            if index:
+                spans.append(Segment(" ", "grid"))
+            label = self._tile_label(value, tile_width) if labels else ""
+            role = f"tile-{min(7, value.bit_length() - 1)}" if value else "empty-tile"
+            spans.append(Segment(f"{label:^{tile_width}}", role))
+        return spans
+
     def frame(self, width: int, height: int) -> GameFrame:
-        footer = "ARROWS/WASD MOVE · P PAUSE · R RESTART · Q/ESC RETURN"
-        tile_width = 7
+        footer = "WASD/ARROWS MOVE · P PAUSE · R RESET · Q/ESC BACK"
+        # With enough vertical room, tiles get a real two-row surface instead of looking like a
+        # coloured spreadsheet. Short split terminals retain the compact row-grouping fallback.
+        if height >= 11:
+            tile_width = max(3, min(11, (width - (self.size - 1)) // self.size))
+            board_width = tile_width * self.size + (self.size - 1)
+            left = max(0, (width - board_width) // 2)
+            pad = Segment(" " * left)
+            board_height = self.size * 2 + (self.size - 1)
+            top = max(0, (height - board_height) // 2)
+            lines: list[tuple[Segment, ...]] = [tuple() for _ in range(top)]
+            for row_index, row in enumerate(self.board):
+                lines.append(tuple([pad, *self._row_spans(row, tile_width, labels=False)]))
+                lines.append(tuple([pad, *self._row_spans(row, tile_width)]))
+                if row_index + 1 < self.size:
+                    lines.append(tuple())
+            maximum = max(value for row in self.board for value in row)
+            status = ("NO MOVES · R RESTART" if self.over else
+                      "2048 REACHED" if self.won else "")
+            return GameFrame(self.title, f"SCORE {self.score:05d} · MAX {maximum}",
+                             tuple(lines), footer, status=status)
+
+        visible_rows = max(1, min(self.size, height))
+        base, extra = divmod(self.size, visible_rows)
+        group_sizes = [base + (1 if i < extra else 0) for i in range(visible_rows)]
+        largest_group = max(group_sizes)
+        separator_width = 3 * (largest_group - 1)       # ` │ ` between logical rows
+        per_board = max(7, (width - separator_width) // largest_group)
+        tile_width = max(1, min(7, (per_board - (self.size - 1)) // self.size))
         board_width = tile_width * self.size + (self.size - 1)
-        if width < board_width or height < self.size:
-            message = "TERMINAL TOO SMALL — RESIZE OR Q TO RETURN"
-            pad_y = max(0, (height - 1) // 2)
-            lines = [tuple()] * pad_y + [(Segment(message[:width].center(width), "warn"),)]
-            return GameFrame(self.title, f"SCORE {self.score:05d}", tuple(lines), footer,
-                             status="WAITING FOR SPACE")
-        left = max(0, (width - board_width) // 2)
-        top = max(0, (height - self.size) // 2)
+        top = max(0, (height - len(group_sizes)) // 2)
         lines: list[tuple[Segment, ...]] = [tuple() for _ in range(top)]
-        for row in self.board:
-            spans: list[Segment] = [Segment(" " * left)]
-            for index, value in enumerate(row):
-                if index:
-                    spans.append(Segment(" ", "grid"))
-                label = str(value) if value else "·"
-                role = f"tile-{min(7, value.bit_length() - 1)}" if value else "empty-tile"
-                spans.append(Segment(f"{label:^{tile_width}}", role))
+        row_index = 0
+        for group_size in group_sizes:
+            total_width = board_width * group_size + 3 * (group_size - 1)
+            spans: list[Segment] = [Segment(" " * max(0, (width - total_width) // 2))]
+            for group_index in range(group_size):
+                if group_index:
+                    spans.append(Segment(" │ ", "grid"))
+                spans.extend(self._row_spans(self.board[row_index], tile_width))
+                row_index += 1
             lines.append(tuple(spans))
         status = "NO MOVES · R RESTART" if self.over else ("2048 REACHED" if self.won else "")
-        return GameFrame(self.title, f"SCORE {self.score:05d}", tuple(lines), footer,
+        maximum = max(value for row in self.board for value in row)
+        return GameFrame(self.title, f"SCORE {self.score:05d} · MAX {maximum}", tuple(lines), footer,
                          status=status)
