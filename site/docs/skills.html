@@ -91,6 +91,25 @@
 <li><strong>dgc-design</strong> ships by default but stays dormant for normal coding — artifact</li>
 </ul>
 <p>frontend work activates it automatically.</p>
+<h2 id="writing-one">Writing one<a class="anchor" href="#writing-one" aria-label="Link to this section">#</a></h2>
+<p>A skill is a directory containing a <code>SKILL.md</code>: YAML frontmatter, then the instructions themselves.</p>
+<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>~/.dgc/skills/commit/SKILL.md</code></pre></div>
+<div class="codeblock"><button class="copy-btn" type="button" aria-label="Copy code">Copy</button><pre><code>---
+name: commit
+description: Write a conventional commit message for the staged changes
+---
+
+Read the staged diff with `git diff --staged` and write a single conventional
+commit message for it. Focus (optional): $ARGUMENTS
+
+Describe what changed and why, never how. No trailing period on the subject.</code></pre></div>
+<p><code>name</code> is how you invoke it, <code>description</code> is what the agent matches against when deciding whether the skill applies, and the optional <code>when</code> field narrows that further. <code>$ARGUMENTS</code> is replaced with whatever you pass at invocation.</p>
+<p>Discovery is project-first, so a repo can override a personal skill of the same name:</p>
+<ul>
+<li><code>&lt;project&gt;/.dgc/skills/&lt;name&gt;/SKILL.md</code></li>
+<li><code>~/.dgc/skills/&lt;name&gt;/SKILL.md</code></li>
+</ul>
+<p>The sixteen built-in skills are worth reading as examples — <code>/skills</code> lists them, and each is a plain directory you can copy and edit.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="lifecycle-hooks.html"><div class="k">← Previous</div><div class="t">Lifecycle hooks</div></a>
 <a class="next" href="multiple-agents.html"><div class="k">Next →</div><div class="t">Multiple agents</div></a>
@@ -99,7 +118,7 @@
   </main>
   <aside class="toc" aria-label="On this page">
 <div class="h">On this page</div>
-<a href="#content" data-id="content" class="lvl2">Top</a>
+<a href="#writing-one" data-id="writing-one" class="lvl2">Writing one</a>
 </aside>
 </div>
 
