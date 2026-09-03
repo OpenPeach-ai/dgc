@@ -12,7 +12,20 @@ export default {
       if (!url.pathname.startsWith("/docs")) {
         url.pathname = url.pathname === "/" ? "/docs/" : "/docs" + url.pathname;
       }
-      return env.ASSETS.fetch(new Request(url.toString(), request));
+      const res = await env.ASSETS.fetch(new Request(url.toString(), request));
+      // Pages does its own .html -> clean-URL redirect, and its Location carries the internal
+      // /docs prefix. Strip it so the visitor never sees docs.vibedgc.com/docs/... .
+      const loc = res.headers.get("location");
+      if (loc) {
+        const to = new URL(loc, url);
+        if (/^docs\.vibedgc\.com$/i.test(to.hostname) && to.pathname.startsWith("/docs")) {
+          to.pathname = to.pathname.slice("/docs".length) || "/";
+          const out = new Response(res.body, res);
+          out.headers.set("location", to.toString());
+          return out;
+        }
+      }
+      return res;
     }
     if (!/(^|\.)vibedgc\.com$/i.test(h) && !/\.pages\.dev$/i.test(h)) {
       url.protocol = "https:"; url.hostname = "vibedgc.com";
