@@ -15,12 +15,15 @@ surfaces move together.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
+import shutil
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+ASSETS_SRC = Path(__file__).resolve().parent / "docs-assets"
 sys.path.insert(0, str(ROOT))
 
 from dgc.docs import DOCS  # noqa: E402  (needs the path above)
@@ -297,6 +300,14 @@ def main() -> int:
     if a.check:
         stale = [n for n, html_text in pages.items()
                  if not (out / n).exists() or (out / n).read_text() != html_text]
+        # every page links assets/docs.css and assets/docs.js — a site without them is broken,
+        # so treat a missing or divergent asset as stale too.
+        for asset in sorted(ASSETS_SRC.iterdir()):
+            if not asset.is_file():
+                continue
+            dst = out / "assets" / asset.name
+            if not dst.exists() or dst.read_bytes() != asset.read_bytes():
+                stale.append(f"assets/{asset.name}")
         orphan = sorted(p.name for p in out.glob("*.html") if p.name not in pages)
         if stale or orphan:
             print(f"docs site is stale: differs={stale} orphaned={orphan}", file=sys.stderr)
@@ -305,12 +316,16 @@ def main() -> int:
         return 0
 
     out.mkdir(parents=True, exist_ok=True)
+    (out / "assets").mkdir(exist_ok=True)
+    for asset in sorted(ASSETS_SRC.iterdir()):
+        if asset.is_file():
+            shutil.copy2(asset, out / "assets" / asset.name)
     for name, html_text in pages.items():
         (out / name).write_text(html_text)
     for p in sorted(out.glob("*.html")):
         if p.name not in pages:
             print(f"  note: {p.name} is no longer generated (left in place)")
-    print(f"wrote {len(pages)} pages to {out}")
+    print(f"wrote {len(pages)} pages + {len(list(ASSETS_SRC.iterdir()))} assets to {out}")
     return 0
 
 
