@@ -36,6 +36,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install capture inspection dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
       - run: python scripts/build-site.py --check
       - run: python scripts/check-site.py --allow-unpublished-source-tag
       - run: node --no-warnings scripts/check-site-worker.mjs
