@@ -1,37 +1,37 @@
 <header class="page-hero field field-2">
   <div class="container">
     <div class="eyebrow"><b>Benchmark</b> Same declared model · same endpoint URL · real tests</div>
-    <h1>94.4% on a 27B model you can run.</h1>
-    <p class="lede">DGC solved 85 of 90 tasks at pass@2 on a deterministic six-language slice. This page keeps the result, its limits, and the evidence in one place.</p>
-    <div class="page-meta"><span class="status-pill live">measured</span><span class="status-pill">run: DGC {{BENCH_VERSION}}</span><span class="status-pill">{{MODEL}}</span><span class="status-pill">600 s per round</span></div>
+    <h1>{{BENCH_DGC_SCORE}}% on a {{BENCH_MODEL_SIZE}} model you can run.</h1>
+    <p class="lede">{{BENCH_DGC_NAME}} solved {{BENCH_DGC_SOLVED}} of {{BENCH_PROBLEMS}} tasks at {{BENCH_METRIC}} on a deterministic {{BENCH_LANGUAGE_COUNT_WORD}}-language slice. This page keeps the result, its limits, and the evidence in one place.</p>
+    <div class="page-meta"><span class="status-pill live">{{BENCH_PUBLICATION_BADGE}}</span><span class="status-pill">run: {{BENCH_DGC_NAME}} {{BENCH_VERSION}}</span><span class="status-pill">{{BENCH_MODEL}}</span><span class="status-pill">{{BENCH_CAP_SECONDS}} s per round</span></div>
   </div>
 </header>
 
 <section class="section">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>01</b> Harness field</div><h2>One endpoint. Five harnesses.</h2><p class="lede">Dots use an honest 80–100% axis. DGC is the only coloured series. The table beneath is the accessible twin and records whether each count is directly measured.</p></header>
+    <header class="section-copy reveal"><div class="eyebrow"><b>01</b> Harness field</div><h2>One endpoint. {{BENCH_HARNESS_COUNT_WORD}} harnesses.</h2><p class="lede">Dots use the disclosed chart axis. {{BENCH_DGC_NAME}} is the only coloured series. The table beneath is the accessible twin and records whether each count is directly measured.</p></header>
     {{FIG4}}
   </div>
 </section>
 
 <section class="section field field-2">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>02</b> Language profile</div><h2>The total, accounted for.</h2><p class="lede">Every tile comes from the same 90 result rows. Together they sum to DGC’s published 85 solved tasks—no decorative rounding.</p></header>
+    <header class="section-copy reveal"><div class="eyebrow"><b>02</b> Language profile</div><h2>The total, accounted for.</h2><p class="lede">Every tile comes from the same {{BENCH_PROBLEMS}} result rows. Together they sum to {{BENCH_DGC_NAME}}’s published {{BENCH_DGC_SOLVED}} solved tasks—no decorative rounding.</p></header>
     {{LANGUAGE_GRID}}
   </div>
 </section>
 
 <section class="section" id="methodology">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Method</div><h2>What the manifests record.</h2><p class="lede">Each harness records the same model alias, caller-declared digest, endpoint URL, hardware, context, task order and grader. The runner verified context size, not the endpoint’s model weights.</p></header>
-    <div class="benchmark-meta reveal" style="margin-top:38px"><div><b>MODEL</b><span>{{MODEL}}<br><code>{{MODEL_DIGEST_SHORT}}</code></span></div><div><b>DATASET</b><span>15 sorted tasks × 6 languages<br><code>{{DATASET_SHORT}}</code></span></div><div><b>ALLOWANCE</b><span>2 rounds · 600 s each<br>400 s grader timeout</span></div><div><b>TRANSPORT</b><span>32,768 context<br>reasoning disabled</span></div></div>
+    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Method</div><h2>What the manifests record.</h2><p class="lede">Each harness records the same model alias, caller-declared digest, endpoint URL, hardware, context, task order and grader. The runner verified context size; {{BENCH_WEIGHTS_CLAUSE}}.</p></header>
+    <div class="benchmark-meta reveal" style="margin-top:38px"><div><b>MODEL</b><span>{{BENCH_MODEL}}<br><code>{{BENCH_MODEL_DIGEST_SHORT}}</code></span></div><div><b>DATASET</b><span>{{BENCH_TASKS_PER_LANGUAGE}} {{BENCH_TASK_ORDER}} tasks × {{BENCH_LANGUAGE_COUNT}} languages<br><code>{{BENCH_DATASET_SHORT}}</code></span></div><div><b>ALLOWANCE</b><span>{{BENCH_ROUNDS}} rounds · {{BENCH_CAP_SECONDS}} s each<br>{{BENCH_GRADER_TIMEOUT_SECONDS}} s grader timeout</span></div><div><b>TRANSPORT</b><span>{{BENCH_CONTEXT_TOKENS_FORMATTED}} context<br>reasoning {{BENCH_REASONING_MODE}}</span></div></div>
     <div class="content-grid" style="margin-top:48px">
       <div class="prose">
         <h2>How it was scored</h2>
-        <p>Each harness received the same task checkout and the same endpoint. The project’s unmodified test command graded each submitted patch in isolation. A task counts at pass@1 if round one passes. After a failure, round two continues the same session with a bounded failure tail; this measured slice calls a task pass@2 when it passes by the end of that separately timed recovery round.</p>
-        <p>The comparison is a measured 90-task slice, not DGC’s stricter publication gate: Aider is absent, the run contains 90 rather than 225 tasks, and the runner commit was not recorded in the manifests. Those limitations are preserved here because evidence is more useful than a cleaner story.</p>
+        <p>Each harness received the same task checkout and the same endpoint. The project’s unmodified test command graded each submitted patch in isolation. A task counts at {{BENCH_FIRST_METRIC}} if the first round passes. After a failure, the final recovery round continues the same session with a bounded failure tail; this {{BENCH_PUBLICATION_LABEL}} calls a task {{BENCH_METRIC}} when it passes by the end of that separately timed recovery round.</p>
+        <p>The comparison is a {{BENCH_PUBLICATION_LABEL}} of {{BENCH_PROBLEMS}} tasks, not DGC’s stricter publication gate: Aider is absent, the run contains {{BENCH_PROBLEMS}} rather than {{BENCH_GATE_PROBLEMS}} tasks, and {{BENCH_RUNNER_CLAUSE}} in the manifests. Those limitations are preserved here because evidence is more useful than a cleaner story.</p>
         <h2>Why there is no completion-profile curve</h2>
-        <p>The saved runner grants 600 seconds to each round. A pass@2 curve ending at 600 seconds per problem would therefore be false. We are holding FIG.4b back until a new league run uses one shared per-problem deadline.</p>
+        <p>The saved runner grants {{BENCH_CAP_SECONDS}} seconds to each round. A {{BENCH_METRIC}} curve ending at {{BENCH_CAP_SECONDS}} seconds per problem would therefore be false. We are holding FIG.4b back until a new league run uses one shared per-problem deadline.</p>
       </div>
       <aside class="card side-card"><span class="micro">Read the source</span><h3>Reproduce the harness</h3><p>The runner, adapters and scoring code ship in the repository.</p><a href="{{GITHUB_URL}}/tree/main/bench">Browse <code>bench/</code> →</a><a href="#reproduce">Run commands →</a><a href="#evidence">Download evidence →</a></aside>
     </div>
@@ -40,8 +40,8 @@
 
 <section class="section field field-2" id="reproduce">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>04</b> Reproduce</div><h2>Run the same slice.</h2><p class="lede">The saved manifest did not record its runner revision, so exact byte-for-byte recreation is not possible. This recipe uses the latest public runner on <code>main</code> with the pinned dataset, declared model digest, context and time limits; record and pin the DGC commit for your own stable rerun. Confirm the endpoint’s model digest separately because the runner records that value but does not verify the weights.</p></header>
-    <div class="terminal-window reveal" style="margin-top:38px"><div class="terminal-bar"><i></i><i></i><i></i><span>shell · reproduction</span></div><div class="terminal-body" style="min-height:0"><div><span class="prompt">$</span> git clone {{GITHUB_URL}} &amp;&amp; cd dgc</div><div><span class="prompt">$</span> git rev-parse HEAD  <span class="comment"># record this; checkout it on every rerun</span></div><div><span class="prompt">$</span> python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.lock</div><div><span class="prompt">$</span> .venv/bin/pip install --no-deps -e .</div><div><span class="prompt">$</span> git clone https://github.com/Aider-AI/polyglot-benchmark.git bench/data/polyglot-benchmark</div><div><span class="prompt">$</span> git -C bench/data/polyglot-benchmark checkout {{DATASET_COMMIT}}</div><div><span class="prompt">$</span> bash bench/install_harnesses.sh</div><div><span class="prompt">$</span> PATH="$PWD/.venv/bin:$PATH" .venv/bin/python bench/run_bench.py \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--engine dgc --model {{MODEL}} --model-digest {{MODEL_DIGEST}} \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--base-url http://localhost:11434/v1 --context-size 32768 --limit 15 \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--rounds 2 --dgc-timeout 600 --test-timeout 400 \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--out bench/results/reproduction</div></div></div>
+    <header class="section-copy reveal"><div class="eyebrow"><b>04</b> Reproduce</div><h2>Run the same slice.</h2><p class="lede">{{BENCH_RUNNER_REPRODUCTION}} This recipe uses the latest public runner on <code>main</code> with the pinned dataset, declared model digest, context and time limits; record and pin the DGC commit for your own stable rerun. {{BENCH_WEIGHTS_REPRODUCTION_NOTE}}</p></header>
+    <div class="terminal-window reveal" style="margin-top:38px"><div class="terminal-bar"><i></i><i></i><i></i><span>shell · reproduction</span></div><div class="terminal-body" style="min-height:0"><div><span class="prompt">$</span> git clone {{GITHUB_URL}} &amp;&amp; cd dgc</div><div><span class="prompt">$</span> git rev-parse HEAD  <span class="comment"># record this; checkout it on every rerun</span></div><div><span class="prompt">$</span> python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r requirements.lock</div><div><span class="prompt">$</span> .venv/bin/pip install --no-deps -e .</div><div><span class="prompt">$</span> git clone https://github.com/Aider-AI/polyglot-benchmark.git bench/data/polyglot-benchmark</div><div><span class="prompt">$</span> git -C bench/data/polyglot-benchmark checkout {{BENCH_DATASET_COMMIT}}</div><div><span class="prompt">$</span> bash bench/install_harnesses.sh</div><div><span class="prompt">$</span> PATH="$PWD/.venv/bin:$PATH" .venv/bin/python bench/run_bench.py \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--engine dgc --model {{BENCH_MODEL}} --model-digest {{BENCH_MODEL_DIGEST}} \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--base-url {{BENCH_BASE_URL}} --context-size {{BENCH_CONTEXT_TOKENS}} --limit {{BENCH_TASKS_PER_LANGUAGE}} \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--rounds {{BENCH_ROUNDS}} --dgc-timeout {{BENCH_CAP_SECONDS}} --test-timeout {{BENCH_GRADER_TIMEOUT_SECONDS}} \</div><div>&nbsp;&nbsp;&nbsp;&nbsp;--out bench/results/reproduction</div></div></div>
   </div>
 </section>
 
@@ -54,7 +54,7 @@
 
 <section class="section field field-2" id="swe-bench">
   <div class="container content-grid">
-    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> SWE-bench Lite</div><h2>184 / 300, founder-published.</h2><p class="lede">The published headline remains, with its evidence boundary visible: local files preserve 300 predictions, 292 with non-empty patches, but no grading artifact, resolved-instance list, or full evaluator report. The retained files cannot reproduce 184 / 300 end to end, so we do not offer a traces download.</p></header>
-    <aside class="card reveal"><span class="micro">Evidence status</span><span class="price" style="display:block;margin:20px 0;color:#fff;font:500 34px/1 var(--sans)">61.3%</span><p>Founder-published result · full evaluator artifact pending.</p><a class="button" href="{{GITHUB_URL}}/commit/607be39" style="margin-top:24px">Publication record ↗</a></aside>
+    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> SWE-bench Lite</div><h2>{{BENCH_SWE_SOLVED}} / {{BENCH_SWE_TOTAL}}, {{BENCH_SWE_CLAIM_SOURCE}}.</h2><p class="lede">The published headline remains, with its evidence boundary visible: local files preserve {{BENCH_SWE_PREDICTIONS_RETAINED}} predictions, {{BENCH_SWE_NON_EMPTY_PATCHES}} with non-empty patches, but no grading artifact, resolved-instance list, or full evaluator report. The retained files cannot reproduce {{BENCH_SWE_SOLVED}} / {{BENCH_SWE_TOTAL}} end to end, so we do not offer a traces download.</p></header>
+    <aside class="card reveal"><span class="micro">Evidence status</span><span class="price" style="display:block;margin:20px 0;color:#fff;font:500 34px/1 var(--sans)">{{BENCH_SWE_PERCENT}}%</span><p>{{BENCH_SWE_CLAIM_SOURCE_TITLE}} · full evaluator artifact pending.</p><a class="button" href="{{GITHUB_URL}}/commit/{{BENCH_SWE_PUBLICATION_COMMIT}}" style="margin-top:24px">Publication record ↗</a></aside>
   </div>
 </section>

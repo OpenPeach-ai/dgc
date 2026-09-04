@@ -23,7 +23,21 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from site_common import SRC, SITE, load_json, render_shell, site_context, substitute  # noqa: E402
+from benchmark_site import (  # noqa: E402
+    benchmark_context,
+    ranked_harnesses,
+    subject_harness,
+    validate_benchmark,
+)
+from site_common import (  # noqa: E402
+    SRC,
+    SITE,
+    load_json,
+    minify_css,
+    render_shell,
+    site_context,
+    substitute,
+)
 
 DATA = SRC / "data"
 CONTENT = SRC / "content"
@@ -110,28 +124,72 @@ def markdown_html(markdown: str, *, drop_first_h1: bool = False) -> str:
     return "\n".join(out)
 
 
-def partial(name: str) -> str:
-    return (PARTIALS / name).read_text(encoding="utf-8")
+def partial(name: str, context: dict[str, Any] | None = None) -> str:
+    source = (PARTIALS / name).read_text(encoding="utf-8")
+    return substitute(source, context) if context is not None else source
+
+
+def capture_context(data: dict[str, Any]) -> dict[str, str]:
+    """Expose reviewed capture labels without duplicating claims in templates."""
+    if data.get("schema_version") != 1 or not isinstance(data.get("captures"), dict):
+        raise ValueError("capture-media.json has an unsupported schema")
+    context: dict[str, str] = {}
+    for name in ("cli", "editor"):
+        capture = data["captures"].get(name)
+        if not isinstance(capture, dict):
+            raise ValueError(f"capture-media.json is missing {name}")
+        duration = capture.get("duration_label")
+        provenance = capture.get("provenance")
+        if not isinstance(duration, str) or not re.fullmatch(r"\d+:[0-5]\d", duration):
+            raise ValueError(f"capture-media.json has an invalid {name} duration label")
+        if not isinstance(provenance, str) or not provenance.strip():
+            raise ValueError(f"capture-media.json has invalid {name} provenance")
+        prefix = f"CAPTURE_{name.upper()}"
+        context[f"{prefix}_DURATION_LABEL"] = html.escape(duration, quote=True)
+        context[f"{prefix}_PROVENANCE"] = html.escape(provenance.strip(), quote=True)
+    return context
 
 
 def figure4(bench: dict[str, Any]) -> str:
+    validate_benchmark(bench)
+    context = benchmark_context(bench)
+    subject = subject_harness(bench)
+    ranked = ranked_harnesses(bench)
+    axis = bench["chart"]
+    axis_min = float(axis["axis_min_percent"])
+    axis_max = float(axis["axis_max_percent"])
+    axis_width = axis_max - axis_min
     rows = []
     table_rows = []
-    for item in bench["harnesses"]:
-        cls = " dgc" if item["name"] == "DGC" else ""
-        score = item["pass_at_2"]
-        rows.append(f'<div class="plot-row{cls}" style="--score:{score}"><span class="plot-name">{html.escape(item["name"])}</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">{score:.1f}%</span></div>')
+    aria_scores = []
+    for item in ranked:
+        cls = " dgc" if item is subject else ""
+        score = float(item["pass_at_2"])
+        position = 100 * (score - axis_min) / axis_width
+        name = html.escape(str(item["name"]))
+        rows.append(f'<div class="plot-row{cls}"><span class="plot-name">{name}</span><span class="plot-dot" style="left:{position:.3f}%" aria-hidden="true"></span><span class="plot-value" style="left:calc({position:.3f}% + 15px)">{score:.1f}%</span></div>')
+        aria_scores.append(f'{item["name"]} {score:.1f} percent')
         note = "direct result rows"
-        if item["name"] == "DGC":
+        if item is subject:
             note = f'{item["timeouts"]} timeouts · {item["average_round_seconds"]:.1f} s/round · {item["output_tokens"]:,} output tokens'
-        table_rows.append(f'<tr><td>{html.escape(item["name"])}</td><td class="num">{item["solved"]} / {bench["problems"]}</td><td class="num">{score:.1f}%</td><td class="table-note">{note}</td></tr>')
-    cost = bench["dgc_cost"]
+        table_rows.append(f'<tr><td>{name}</td><td class="num">{item["solved"]} / {bench["problems"]}</td><td class="num">{score:.1f}%</td><td class="table-note">{note}</td></tr>')
+    ticks = []
+    tick = axis_min
+    while tick <= axis_max + 1e-9:
+        position = 100 * (tick - axis_min) / axis_width
+        label = f"{tick:g}%"
+        ticks.append(f'<span style="left:{position:.3f}%">{label}</span>')
+        tick += float(axis["tick_step_percent"])
+    aria_label = (
+        f'Harness {str(bench["metric"]).replace("@", " at ")} scores on an axis from '
+        f'{axis_min:g} to {axis_max:g} percent. ' + ", ".join(aria_scores) + "."
+    )
     return f'''<figure class="instrument benchmark-panel reveal" aria-labelledby="fig4-title">
-  <figcaption class="figure-title" id="fig4-title"><span class="figure-id">FIG.4 · Harness evaluation</span><span>{bench["metric"]} · {bench["problems"]} problems · {bench["cap_seconds_per_round"]} s/round</span><span class="figure-state">measured slice</span></figcaption>
-  <div class="dot-plot" role="img" aria-label="Harness pass at two scores on an axis from 80 to 100 percent. Goose 95.6, DGC 94.4, pi 94.4, OpenCode 88.9, and Codex CLI 87.8 percent."><div class="plot-grid">{''.join(rows)}</div><div class="plot-axis"><span style="left:0">80%</span><span style="left:25%">85%</span><span style="left:50%">90%</span><span style="left:75%">95%</span><span style="left:100%">100%</span></div><p class="plot-axis-label">pass@2 · axis runs 80–100%, not from zero</p></div>
-  <div class="cost-grid"><div class="cost-tile"><b>{cost["timeouts"]}</b><small>agent-round timeouts · DGC only</small></div><div class="cost-tile"><b>{cost["average_round_seconds"]:.1f} s</b><small>average round · fastest measured</small></div><div class="cost-tile"><b>{cost["output_tokens_vs_leader_percent"]:.1f}%</b><small>output tokens vs score leader</small></div><div class="cost-tile"><b>85 / 90</b><small>solved · second, level with pi</small></div></div>
-  <details class="table-twin"><summary>Accessible table view</summary><div class="table-scroll"><table><thead><tr><th>Harness</th><th>Solved</th><th>pass@2</th><th>Evidence note</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></div></details>
-  <p class="figure-foot">Every manifest records <code>{html.escape(bench["model"])}</code>, the same caller-declared digest, endpoint URL, and hardware. The runner verified context size but not model weights. The saved manifest reports DGC {bench["run_version"]}; its runner commit was not recorded, so this is labelled a measured slice rather than a release-gating league.</p>
+  <figcaption class="figure-title" id="fig4-title"><span class="figure-id">FIG.4 · Harness evaluation</span><span>{bench["metric"]} · {bench["problems"]} problems · {bench["cap_seconds_per_round"]} s/round</span><span class="figure-state">{html.escape(str(bench["publication_label"]))}</span></figcaption>
+  <div class="dot-plot" role="img" aria-label="{html.escape(aria_label, quote=True)}"><div class="plot-grid">{''.join(rows)}</div><div class="plot-axis">{''.join(ticks)}</div><p class="plot-axis-label">{bench["metric"]} · axis runs {axis_min:g}–{axis_max:g}%, not from zero</p></div>
+  <div class="cost-grid"><div class="cost-tile"><b>{subject["timeouts"]}</b><small>agent-round timeouts · {html.escape(str(subject["name"]))} only</small></div><div class="cost-tile"><b>{subject["average_round_seconds"]:.1f} s</b><small>average round · {context["BENCH_DGC_AVERAGE_LABEL"]}</small></div><div class="cost-tile"><b>{context["BENCH_DGC_TOKEN_DELTA"]}%</b><small>output tokens vs {html.escape(str(context["BENCH_SCORE_LEADER"]))}</small></div><div class="cost-tile"><b>{subject["solved"]} / {bench["problems"]}</b><small>solved · {html.escape(str(context["BENCH_DGC_RANK_LABEL"]))}</small></div></div>
+  <details class="table-twin"><summary>Accessible table view</summary><div class="table-scroll"><table><thead><tr><th>Harness</th><th>Solved</th><th>{bench["metric"]}</th><th>Evidence note</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></div></details>
+  <p class="figure-foot">Every manifest records <code>{html.escape(bench["model"])}</code>, the same caller-declared digest, endpoint URL, and hardware. The runner verified context size; {context["BENCH_WEIGHTS_CLAUSE"]}. The saved manifest reports {html.escape(str(subject["name"]))} {bench["run_version"]}; {context["BENCH_RUNNER_CLAUSE"]}, so this is labelled a {html.escape(str(bench["publication_label"]))} rather than a release-gating league.</p>
 </figure>'''
 
 
@@ -139,15 +197,14 @@ def language_grid(bench: dict[str, Any]) -> str:
     cards = []
     for lang in bench["languages"]:
         meter = "".join('<i class="on"></i>' if i < lang["solved"] else "<i></i>" for i in range(lang["total"]))
-        cards.append(f'<article><b>{lang["solved"]} / {lang["total"]}</b><span>{html.escape(lang["name"])}</span><span class="language-meter" aria-hidden="true">{meter}</span></article>')
+        cards.append(f'<article><b>{lang["solved"]} / {lang["total"]}</b><span>{html.escape(lang["name"])}</span><span class="language-meter" style="grid-template-columns:repeat({lang["total"]},1fr)" aria-hidden="true">{meter}</span></article>')
     return f'<div class="language-grid reveal">{"".join(cards)}</div>'
 
 
 def evidence_rows(bench: dict[str, Any]) -> str:
-    slugs = {"goose": "goose", "DGC": "dgc", "pi": "pi", "OpenCode": "opencode", "Codex CLI": "codex"}
     rows = []
-    for item in bench["harnesses"]:
-        key = slugs[item["name"]]
+    for item in ranked_harnesses(bench):
+        key = item["slug"]
         filename = f"{key}-{bench['run_version']}.tar.gz"
         checksum_path = SITE / "evidence" / f"{filename}.sha256"
         checksum = checksum_path.read_text(encoding="utf-8").split()[0] if checksum_path.exists() else "missing"
@@ -155,8 +212,9 @@ def evidence_rows(bench: dict[str, Any]) -> str:
     return f'<div class="release-list" style="margin-top:38px">{"".join(rows)}</div>'
 
 
-def faq_html() -> str:
+def faq_html(context: dict[str, Any]) -> str:
     _, raw = read_markdown(CONTENT / "faq.md")
+    raw = substitute(raw, context)
     blocks = re.split(r"^##\s+", raw, flags=re.MULTILINE)[1:]
     result = []
     for block in blocks:
@@ -202,6 +260,72 @@ def page_template(name: str, context: dict[str, Any]) -> str:
     return substitute((PAGES / name).read_text(encoding="utf-8"), context)
 
 
+def marketplace_proof(metrics: dict[str, Any]) -> dict[str, str]:
+    """Return an attributed snapshot label, or neutral editor copy when unavailable."""
+    if metrics.get("schema_version") != 1:
+        raise ValueError("site metrics use an unsupported schema")
+    metric = metrics.get("marketplace")
+    if not isinstance(metric, dict):
+        raise ValueError("site metrics omit marketplace state")
+    if metric == {"status": "unavailable"}:
+        return {
+            "MARKETPLACE_PROOF_LABEL": "Editor",
+            "MARKETPLACE_PROOF_VALUE": "VS Code + Cursor",
+        }
+    count = metric.get("install_count")
+    if (metric.get("status") != "available"
+            or metric.get("publisher") != "vibedgc"
+            or metric.get("extension") != "dgc"
+            or isinstance(count, bool) or not isinstance(count, int) or count < 0
+            or metric.get("source") != "visual-studio-marketplace-gallery-api"):
+        raise ValueError("site metrics contain an invalid marketplace snapshot")
+    try:
+        observed = dt.datetime.fromisoformat(str(metric["observed_at"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError) as exc:
+        raise ValueError("marketplace snapshot has an invalid observed_at") from exc
+    if observed.tzinfo is None:
+        raise ValueError("marketplace snapshot observed_at must include a timezone")
+    day = observed.astimezone(dt.timezone.utc).date().isoformat()
+    noun = "install" if count == 1 else "installs"
+    return {
+        "MARKETPLACE_PROOF_LABEL": f"Marketplace · {day} snapshot",
+        "MARKETPLACE_PROOF_VALUE": f"{count:,} reported {noun}",
+    }
+
+
+def social_sources(bench: dict[str, Any]) -> dict[str, str]:
+    """Render benchmark-bearing social sources for review and PNG locking."""
+    context = benchmark_context(bench)
+    axis = bench["chart"]
+    axis_min = float(axis["axis_min_percent"])
+    axis_max = float(axis["axis_max_percent"])
+    plot_width = 980.0
+    plot_left = 110.0
+    circles = []
+    subject = subject_harness(bench)
+    # Paint neutral marks first so the highlighted subject remains visible when
+    # two harnesses tie at the same score.
+    for item in [
+        *(row for row in ranked_harnesses(bench) if row is not subject),
+        subject,
+    ]:
+        x = plot_left + plot_width * (float(item["pass_at_2"]) - axis_min) / (axis_max - axis_min)
+        if item is subject:
+            circles.append(
+                f'<circle cx="{x:.1f}" cy="445" r="12" fill="#7C5CFF" stroke="#A78BFA" stroke-width="2"/>'
+                f'<text x="{x:.1f}" y="490" text-anchor="middle" fill="#A78BFA" font-family="monospace" font-size="17">'
+                f'{html.escape(str(item["name"]))} {item["pass_at_2"]:.1f}</text>'
+                f'<circle cx="{x:.1f}" cy="445" r="5" fill="#fff" opacity=".2"/>'
+            )
+        else:
+            circles.append(f'<circle cx="{x:.1f}" cy="445" r="9" fill="#6B6B78"/>')
+    context["BENCH_OG_PLOT"] = "".join(circles)
+    return {
+        name: substitute((SRC / "social" / name).read_text(encoding="utf-8"), context)
+        for name in ("og-card.svg", "og-benchmark.svg")
+    }
+
+
 def feed(title: str, subtitle: str, entries: list[dict[str, str]], *, base: str) -> str:
     updated = max((entry["date"] for entry in entries), default="2026-09-04") + "T00:00:00Z"
     body = []
@@ -226,6 +350,9 @@ def brand_zip() -> bytes:
 def build_outputs() -> dict[str, str | bytes]:
     ctx: dict[str, Any] = site_context()
     bench = load_json(DATA / "bench.json")
+    ctx.update(benchmark_context(bench))
+    ctx.update(marketplace_proof(load_json(DATA / "site-metrics.json")))
+    ctx.update(capture_context(load_json(DATA / "capture-media.json")))
     releases = load_json(DATA / "releases.json")
     protocol_source = (ROOT / "dgc" / "editor_protocol.py").read_text(encoding="utf-8")
     protocol_match = re.search(r"^PROTOCOL_VERSION\s*=\s*(\d+)\s*$", protocol_source, re.MULTILINE)
@@ -233,16 +360,17 @@ def build_outputs() -> dict[str, str | bytes]:
         raise ValueError("could not read the editor protocol version")
     post_items: list[tuple[Path, dict[str, str], str]] = []
     for path in sorted((CONTENT / "blog").glob("*.md")):
-        meta, raw = read_markdown(path); post_items.append((path, meta, raw))
+        meta, raw = read_markdown(path)
+        post_items.append((path, meta, substitute(raw, ctx)))
     ctx.update({
-        "FIG1": partial("fig1.html"), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html"), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "TERMINAL": partial("terminal.html"),
-        "BENCH_VERSION": bench["run_version"], "MODEL": bench["model"], "MODEL_DIGEST": bench["model_digest"], "MODEL_DIGEST_SHORT": bench["model_digest"][:22] + "…", "DATASET_COMMIT": bench["dataset_commit"], "DATASET_SHORT": bench["dataset_commit"][:16] + "…", "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(),
+        "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "TERMINAL": partial("terminal.html", ctx),
+        "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
         "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"]), "POST_CARDS": post_cards(post_items),
         "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": releases["extension"][0]["notes"][0], "EXT_NOTE_2": releases["extension"][0]["notes"][1], "EXT_NOTE_3": releases["extension"][0]["notes"][2],
     })
     pages: dict[str, tuple[str, str, str, str]] = {
         "index.html": ("Vibe DGC — a coding agent for the models you run", "A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor.", page_template("index.html", ctx), "/og-card.png"),
-        "benchmark.html": ("Benchmark", "A transparent same-model comparison of DGC, goose, pi, OpenCode, and Codex CLI on 90 real polyglot tasks.", page_template("benchmark.html", ctx), "/og-benchmark.png"),
+        "benchmark.html": ("Benchmark", f'A transparent same-model comparison of {ctx["BENCH_HARNESS_NAMES"]} on {ctx["BENCH_PROBLEMS"]} real polyglot tasks.', page_template("benchmark.html", ctx), "/og-benchmark.png"),
         "vscode/index.html": ("DGC for VS Code and Cursor", "The DGC coding harness inside VS Code, Cursor, and VSCodium with structured tools, diffs, plans, and goals.", page_template("vscode.html", ctx), "/og-editor.png"),
         "pricing.html": ("Pricing", "DGC is free for noncommercial use, with a direct route for commercial licensing.", page_template("pricing.html", ctx), "/og-card.png"),
         "changelog.html": ("Changelog", "A build-time record of reviewed DGC CLI and editor releases.", page_template("changelog.html", ctx), "/og-card.png"),
@@ -268,6 +396,7 @@ def build_outputs() -> dict[str, str | bytes]:
             include_announcement=path not in {"404.html", "docs/404.html", "subscription.html"},
             noindex=path in {"404.html", "docs/404.html", "subscription.html"},
             preload_image="/assets/hero-graded-poster.jpg" if path == "index.html" else None,
+            preload_mobile_image="/assets/hero-mobile-poster.webp" if path == "index.html" else None,
         )
     for path, meta, raw in post_items:
         url_path = f"blog/{path.stem}.html"
@@ -293,8 +422,10 @@ def build_outputs() -> dict[str, str | bytes]:
     outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#0B0B0D","theme_color":"#0B0B0D","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
     outputs["routes.json"] = json.dumps({"html": sorted(set(public_paths + docs_paths)), "generated": "build-site.py"}, separators=(",", ":")) + "\n"
     outputs["assets/brand/dgc-brand-kit.zip"] = brand_zip()
-    for name in ("tokens.css", "site.css", "site.js"):
-        outputs[f"assets/{name}"] = (SRC / "assets" / name).read_bytes()
+    for name in ("tokens.css", "site.css"):
+        source = (SRC / "assets" / name).read_text(encoding="utf-8")
+        outputs[f"assets/{name}"] = minify_css(source)
+    outputs["assets/site.js"] = (SRC / "assets" / "site.js").read_bytes()
     return outputs
 
 

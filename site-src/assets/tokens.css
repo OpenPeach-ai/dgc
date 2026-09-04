@@ -1,11 +1,13 @@
 @font-face{font-family:Geist;src:url('/assets/fonts/geist-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
 @font-face{font-family:Geist;src:url('/assets/fonts/geist-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}
+@font-face{font-family:'Geist Fallback';src:local('Arial');font-style:normal;font-weight:400 500;size-adjust:102.21%;ascent-override:98.33%;descent-override:28.86%;line-gap-override:0%}
 @font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
 @font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}
+@font-face{font-family:'JetBrains Mono Fallback';src:local('DejaVu Sans Mono');font-style:normal;font-weight:400 500;size-adjust:99.66%;ascent-override:102.35%;descent-override:30.10%;line-gap-override:0%}
 :root{
   color-scheme:dark;
   --bg:#0b0b0d;--surface:#121215;--raised:#18181d;--overlay:#1d1d22;
-  --line:#26262d;--line-strong:#34343c;--text:#ededf1;--text-2:#a6a6b0;--muted:#7c7c88;
+  --line:#26262d;--line-strong:#34343c;--text:#ededf1;--text-2:#a6a6b0;--text-3:#686874;--muted:#7c7c88;
   --accent:#7c5cff;--lavender:#a78bfa;--accent-soft:rgba(124,92,255,.12);--accent-line:rgba(124,92,255,.35);
   --mark:#7c5cff;--mark-neutral:#6b6b78;--good:#5bcb8b;--warn:#fab219;--fail:#d85b63;
   --sans:Geist,'Geist Fallback',system-ui,-apple-system,'Segoe UI',sans-serif;

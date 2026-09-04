@@ -8,6 +8,37 @@ derived from `dgc.__version__` and projected into the core release/site manifest
 derived from `editors/vscode/package.json` and must agree with its package lock and editor manifest.
 The two channel versions do not need to be numerically equal.
 
+## Marketplace proof snapshot
+
+The scheduled `Site metrics snapshot` workflow is deliberately read-only: it preserves a validated
+candidate as the `dgc-site-metrics-<run-id>-<run-attempt>` artifact, but it cannot silently change
+the public claim in Git. Before a site release, select the newest successful scheduled or manually
+dispatched run on public `main`, download that exact artifact, and promote it through the merge
+validator:
+
+```bash
+RUN_ID=$(gh run list --workflow site-metrics.yml --branch main --status success --limit 30 \
+  --json databaseId,event \
+  --jq '[.[] | select(.event == "schedule" or .event == "workflow_dispatch")][0].databaseId')
+test -n "$RUN_ID"
+RUN_ATTEMPT=$(gh api "repos/{owner}/{repo}/actions/runs/$RUN_ID" --jq .run_attempt)
+test -n "$RUN_ATTEMPT"
+METRICS_STAGE=$(mktemp -d)
+gh run download "$RUN_ID" --name "dgc-site-metrics-$RUN_ID-$RUN_ATTEMPT" --dir "$METRICS_STAGE"
+METRICS_JSON="$METRICS_STAGE/site-src/data/site-metrics.json"
+test -f "$METRICS_JSON"
+python3 scripts/site-measurement.py promote-marketplace \
+  --input "$METRICS_JSON" --max-age-hours 48
+python3 scripts/build-site.py
+python3 scripts/site-measurement.py check-marketplace --max-age-hours 48
+python3 scripts/build-site.py --check
+git diff -- site-src/data/site-metrics.json site/index.html
+```
+
+The promotion refuses stale candidates, count regressions, conflicting observations, and history
+rewinds. Review and commit the snapshot plus its generated site projection together. If the selected
+artifact is already older than 48 hours, dispatch the workflow again instead of weakening the gate.
+
 1. Make version and release-note changes in a pull request. Never reuse a published CLI or extension
    version. Ensure required CI and CodeQL checks are green and the source branch is clean. Commit the
    reviewed release sources as commit A and create annotated tag `vX.Y.Z` at A.

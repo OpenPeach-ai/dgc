@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      lighthouse_scope:
+        description: Lighthouse coverage for the site-acceptance job
+        required: true
+        default: representative
+        type: choice
+        options:
+          - representative
+          - all-routes
 
 permissions:
   contents: read
@@ -30,6 +39,37 @@ jobs:
       - run: python scripts/build-site.py --check
       - run: python scripts/check-site.py --allow-unpublished-source-tag
       - run: node --no-warnings scripts/check-site-worker.mjs
+
+  site-acceptance:
+    name: Website browser and Lighthouse acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run qa:site
+      - if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ inputs.lighthouse_scope }}" == "all-routes" ]]; then
+            npm run qa:site:lighthouse:all
+          else
+            npm run qa:site:lighthouse
+          fi
+      - name: Preserve browser QA evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dgc-site-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/site-qa/
+          if-no-files-found: ignore
+          retention-days: 14
 
   python:
     name: Python ${{ matrix.python }} · ${{ matrix.os }}

@@ -1,17 +1,14 @@
 (() => {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const header = document.querySelector('[data-site-header]');
-  const onScroll = () => header?.classList.toggle('scrolled', scrollY > 8);
-  addEventListener('scroll', onScroll, {passive:true}); requestAnimationFrame(onScroll);
-
-  const alignContainedTarget = () => {
-    if (!location.hash) return;
-    let target;
-    try { target = document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch { return; }
-    if (!target?.closest('main>.section')) return;
-    requestAnimationFrame(() => requestAnimationFrame(() => target.scrollIntoView({block:'start', behavior:'instant'})));
-  };
-  alignContainedTarget(); addEventListener('hashchange', alignContainedTarget);
+  const heroVideo = document.querySelector('video[data-hero-video]');
+  if (heroVideo) {
+    if (reduce) heroVideo.pause();
+    else {
+      const showHeroVideo = () => heroVideo.parentElement?.classList.add('video-ready');
+      heroVideo.addEventListener('playing', showHeroVideo, {once:true});
+      if (heroVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !heroVideo.paused) requestAnimationFrame(showHeroVideo);
+    }
+  }
 
   const announcement = document.querySelector('[data-announcement]');
   if (announcement) {
@@ -24,6 +21,27 @@
       try { localStorage.setItem(key, 'dismissed'); } catch {}
     });
   }
+
+  const initialize = () => {
+  const header = document.querySelector('[data-site-header]');
+  const onScroll = () => header?.classList.toggle('scrolled', scrollY > 8);
+  addEventListener('scroll', onScroll, {passive:true}); requestAnimationFrame(onScroll);
+
+  const alignContainedTarget = () => {
+    if (!location.hash) return;
+    let target;
+    try { target = document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch { return; }
+    if (!target?.closest('main,footer')) return;
+    const align = () => requestAnimationFrame(() => requestAnimationFrame(() => target.scrollIntoView({block:'start', behavior:'instant'})));
+    const root = document.documentElement;
+    if (root.dataset.stylesReady === 'true') align();
+    else {
+      addEventListener('dgc:styles-ready', align, {once:true});
+      if (root.dataset.stylesFailOpen === 'true') align();
+      else addEventListener('dgc:styles-fail-open', align, {once:true});
+    }
+  };
+  alignContainedTarget(); addEventListener('hashchange', alignContainedTarget);
 
   const bindDialog = (dialog, openers, closers) => {
     if (!dialog) return;
@@ -72,8 +90,15 @@
   document.querySelectorAll('[data-count]').forEach(el => {
     const target = Number(el.dataset.count); const decimals = Number(el.dataset.decimals || 0);
     const suffix = el.dataset.suffix || ''; const prefix = el.dataset.prefix || '';
-    const finish = () => { el.textContent = `${prefix}${formatCount(target, decimals)}${suffix}`; };
+    const finalText = `${prefix}${formatCount(target, decimals)}${suffix}`;
+    // Keep the measured value stable for assistive technology while only the visual text counts up.
+    // Otherwise an off-screen statistic reads as zero until a sighted user happens to scroll to it.
+    el.setAttribute('aria-label', finalText);
+    const finish = () => { el.textContent = finalText; };
     if (reduce || matchMedia('(max-width:760px)').matches || !('IntersectionObserver' in window)) { finish(); return; }
+    const rect = el.getBoundingClientRect();
+    if (rect.top < innerHeight && rect.bottom > 0) { finish(); return; }
+    el.textContent = `${prefix}${formatCount(0, decimals)}${suffix}`;
     const io = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return;
       const start = performance.now(); const duration = 820;
@@ -118,9 +143,10 @@
   const emit = name => {
     if (!name || navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.globalPrivacyControl === true) return;
     const body = JSON.stringify({event:name,path:location.pathname});
-    if (navigator.sendBeacon) navigator.sendBeacon('/api/event', new Blob([body], {type:'application/json'}));
-    else fetch('/api/event', {method:'POST',headers:{'content-type':'application/json'},body,keepalive:true}).catch(() => {});
+    const queued = navigator.sendBeacon?.('/api/event', new Blob([body], {type:'application/json'})) || false;
+    if (!queued) fetch('/api/event', {method:'POST',headers:{'content-type':'application/json'},body,keepalive:true}).catch(() => {});
   };
+  document.querySelectorAll('[data-page-event]').forEach(el => emit(el.dataset.pageEvent));
   document.querySelectorAll('[data-event]:not([data-copy])').forEach(el => el.addEventListener('click', () => emit(el.dataset.event)));
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     const selector = button.dataset.copyTarget; const source = selector ? document.querySelector(selector) : button.closest('[data-copy-scope]')?.querySelector('code');
@@ -133,20 +159,6 @@
   document.querySelectorAll('.spotlight').forEach(card => card.addEventListener('pointermove', event => {
     const rect = card.getBoundingClientRect(); card.style.setProperty('--mx', `${event.clientX - rect.left}px`); card.style.setProperty('--my', `${event.clientY - rect.top}px`);
   }));
-
-  const heroVideo = document.querySelector('video[data-hero-video]');
-  if (heroVideo && !reduce) {
-    let hydrated = false;
-    const hydrateHero = () => {
-      if (hydrated) return; hydrated = true;
-      heroVideo.querySelectorAll('source[data-src]').forEach(source => { source.src = source.dataset.src; source.removeAttribute('data-src'); });
-      heroVideo.load(); heroVideo.play().catch(() => {});
-    };
-    addEventListener('pointermove', hydrateHero, {once:true, passive:true});
-    addEventListener('pointerdown', hydrateHero, {once:true, passive:true});
-    addEventListener('scroll', hydrateHero, {once:true, passive:true});
-    addEventListener('keydown', hydrateHero, {once:true});
-  }
 
   const videos = [...document.querySelectorAll('video[data-lazy-video]')];
   const hydrateVideo = video => {
@@ -161,11 +173,69 @@
     }), {rootMargin:'200px 0px'}); videos.forEach(video => vio.observe(video));
   } else videos.forEach(hydrateVideo);
 
+  const images = [...document.querySelectorAll('img[data-lazy-image]')];
+  const hydrateImage = image => {
+    if (image.dataset.sizes) { image.sizes = image.dataset.sizes; delete image.dataset.sizes; }
+    if (image.dataset.srcset) { image.srcset = image.dataset.srcset; delete image.dataset.srcset; }
+    if (image.dataset.src) { image.src = image.dataset.src; delete image.dataset.src; }
+    image.removeAttribute('data-lazy-image');
+  };
+  if ('IntersectionObserver' in window) {
+    const iio = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (!entry.isIntersecting) return; const image = entry.target;
+      hydrateImage(image); iio.unobserve(image);
+    }), {rootMargin:'0px'}); images.forEach(image => iio.observe(image));
+  } else images.forEach(hydrateImage);
+
   document.querySelectorAll('[data-artifact-tabs]').forEach(browser => {
     const tabs = [...browser.querySelectorAll('[role=tab]')]; const panes = [...browser.querySelectorAll('[role=tabpanel]')];
-    const show = index => { tabs.forEach((tab,i) => tab.setAttribute('aria-selected', String(i === index))); panes.forEach((pane,i) => pane.hidden = i !== index); };
-    tabs.forEach((tab,index) => tab.addEventListener('click', () => show(index)));
-    if (!reduce && tabs.length > 1) { let index=0; setInterval(() => { if (!browser.matches(':hover')) show(index = (index+1)%tabs.length); }, 5200); }
+    const address = browser.querySelector('[data-artifact-address]'); const cycle = browser.querySelector('[data-artifact-cycle]');
+    let index = 0, paused = false;
+    const setPaused = value => {
+      paused = value;
+      if (!cycle) return;
+      cycle.setAttribute('aria-pressed', String(paused)); cycle.textContent = paused ? '▶' : 'Ⅱ';
+      cycle.setAttribute('aria-label', paused ? 'Resume automatic artifact views' : 'Pause automatic artifact views');
+    };
+    const show = next => {
+      index = next;
+      tabs.forEach((tab,i) => { const selected = i === index; tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1; });
+      panes.forEach((pane,i) => pane.hidden = i !== index);
+      if (address && tabs[index]?.dataset.address) address.textContent = tabs[index].dataset.address;
+    };
+    tabs.forEach((tab,tabIndex) => {
+      tab.addEventListener('click', () => { setPaused(true); show(tabIndex); });
+      tab.addEventListener('keydown', event => {
+        const target = event.key === 'ArrowLeft' ? index - 1 : event.key === 'ArrowRight' ? index + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
+        if (target === null) return;
+        event.preventDefault(); setPaused(true); show((target + tabs.length) % tabs.length); tabs[index].focus();
+      });
+    });
+    cycle?.addEventListener('click', () => setPaused(!paused));
+    show(0); setPaused(false);
+    if (reduce && cycle) cycle.hidden = true;
+    if (!reduce && tabs.length > 1) setInterval(() => {
+      if (!paused && !document.hidden && !browser.matches(':hover') && !browser.contains(document.activeElement)) show((index + 1) % tabs.length);
+    }, 5200);
+  });
+
+  document.querySelectorAll('[data-command-demo]').forEach(card => {
+    const output = card.querySelector('[data-command-text]');
+    if (!output) return;
+    const command = output.dataset.command || output.textContent || '';
+    if (reduce) { output.textContent = command; return; }
+    output.textContent = ''; card.classList.add('command-ready');
+    const type = () => {
+      if (card.classList.contains('command-complete') || card.classList.contains('command-typing')) return;
+      let cursor = 0; card.classList.add('command-typing');
+      const delay = Math.max(22, Math.min(36, Math.floor(840 / Math.max(command.length, 1))));
+      const timer = setInterval(() => {
+        cursor += 1; output.textContent = command.slice(0, cursor);
+        if (cursor >= command.length) { clearInterval(timer); card.classList.remove('command-typing'); card.classList.add('command-complete'); }
+      }, delay);
+    };
+    card.addEventListener('pointerenter', type, {once:true});
+    card.addEventListener('focus', type, {once:true});
   });
 
   document.querySelectorAll('[data-pipeline]').forEach(panel => {
@@ -181,42 +251,7 @@
   const actionPanel = document.querySelector('[data-subscription-panel]');
   if (actionPanel) {
     const title = actionPanel.querySelector('[data-subscription-title]');
-    const label = actionPanel.querySelector('[data-subscription-label]');
-    const copy = actionPanel.querySelector('[data-subscription-copy]');
-    const form = actionPanel.querySelector('[data-subscription-action]');
-    const tokenInput = form?.querySelector('[name=token]');
-    const submit = form?.querySelector('[data-subscription-submit]');
-    const status = new URLSearchParams(location.search).get('status');
-    const outcomes = {
-      confirmed: ['Confirmed', 'Release notes are on.', 'Your address is confirmed. Every release email must carry an unsubscribe link.'],
-      removed: ['Removed', 'You are unsubscribed.', 'This address is no longer on the DGC release-notes list.'],
-      complete: ['Complete', 'The request is complete.', 'No further action is needed.'],
-    };
-    if (outcomes[status]) {
-      [label.textContent, title.textContent, copy.textContent] = outcomes[status];
-    } else {
-      const raw = location.hash.slice(1);
-      const match = raw.match(/^(confirm|unsubscribe)=([A-Za-z0-9_-]{40,64})$/);
-      if (match && form && tokenInput && submit) {
-        const confirming = match[1] === 'confirm';
-        label.textContent = confirming ? 'Confirm subscription' : 'Unsubscribe';
-        title.textContent = confirming ? 'Receive DGC release notes?' : 'Stop DGC release notes?';
-        copy.textContent = confirming
-          ? 'Confirm only if you requested occasional DGC release email at this address.'
-          : 'This removes the address associated with the private link. It does not affect DGC itself.';
-        form.action = confirming ? '/api/subscribe/confirm' : '/api/unsubscribe';
-        tokenInput.value = match[2];
-        submit.textContent = confirming ? 'Confirm subscription' : 'Unsubscribe';
-        submit.disabled = false;
-        form.hidden = false;
-        history.replaceState(null, '', location.pathname + location.search);
-      } else {
-        label.textContent = 'Invalid link';
-        title.textContent = 'This link is invalid or expired.';
-        copy.textContent = 'No subscription state changed. Request a new confirmation link from the release-notes form.';
-      }
-    }
-    title.focus({preventScroll:true});
+    title?.focus({preventScroll:true});
   }
 
   document.querySelectorAll('form[data-async-form]').forEach(form => form.addEventListener('submit', async event => {
@@ -237,18 +272,46 @@
     finally { button.disabled = button.dataset.complete === 'true'; }
   }));
 
-  const capture = document.getElementById('product-capture');
-  bindDialog(capture, [...document.querySelectorAll('[data-open-capture]')], [...document.querySelectorAll('[data-close-capture]')]);
-  document.querySelectorAll('[data-open-capture]').forEach(opener => opener.addEventListener('click', () => {
-    const video = capture?.querySelector('video');
-    if (video?.dataset.poster) { video.poster = video.dataset.poster; delete video.dataset.poster; }
-    video?.play().catch(() => {});
-  }));
-  capture?.addEventListener('close', () => capture.querySelector('video')?.pause());
+  document.querySelectorAll('dialog[data-capture-dialog]').forEach(capture => {
+    const openers = [...document.querySelectorAll(`[data-open-capture="${capture.id}"]`)];
+    bindDialog(capture, openers, [...capture.querySelectorAll('[data-close-capture]')]);
+    openers.forEach(opener => opener.addEventListener('click', () => {
+      const video = capture.querySelector('video[data-capture-video]');
+      if (video?.dataset.poster) { video.poster = video.dataset.poster; delete video.dataset.poster; }
+      if (video && !video.dataset.hydrated) {
+        video.querySelectorAll('source[data-src]').forEach(source => { source.src = source.dataset.src; source.removeAttribute('data-src'); });
+        video.dataset.hydrated = 'true'; video.load();
+      }
+      video?.play().catch(() => {});
+    }));
+    capture.addEventListener('close', () => capture.querySelector('video[data-capture-video]')?.pause());
+  });
 
   const subscription = new URLSearchParams(location.search).get('subscription');
   const releaseStatus = document.querySelector('#release-notes .form-status');
   if (releaseStatus && subscription) {
     releaseStatus.textContent = ({pending:'Check your inbox to confirm.',confirmed:'Subscription confirmed.',removed:'You have been unsubscribed.',invalid:'That subscription link is invalid or expired.'})[subscription] || '';
+  }
+  };
+
+  if (document.body.classList.contains('page-home') && !location.hash) {
+    const events = ['wheel','touchstart','pointerdown','keydown','dgc:load-styles'];
+    let started = false;
+    const start = event => {
+      if (started) return;
+      started = true;
+      clearTimeout(timer);
+      events.forEach(name => removeEventListener(name, start));
+      removeEventListener('click', start, true);
+      if (event) initialize();
+      else requestAnimationFrame(() => requestAnimationFrame(initialize));
+    };
+    events.forEach(name => addEventListener(name, start, {once:true,passive:true}));
+    addEventListener('click', start, {once:true,passive:true,capture:true});
+    const timer = setTimeout(start, 3600);
+  } else {
+    // Full styles are eager off the landing page. Bind enhancements in the
+    // parser-complete task so their first style pass is not deferred past FCP.
+    initialize();
   }
 })();

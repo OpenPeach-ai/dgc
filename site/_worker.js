@@ -1,5 +1,6 @@
 const EVENTS = new Set([
-  "install_copy", "marketplace", "get_started", "capture_play", "benchmark_traces",
+  "install_copy", "marketplace", "get_started", "docs_getting_started_reached",
+  "capture_play", "benchmark_traces",
 ]);
 const FORM_ORIGINS = new Set([
   "https://vibedgc.com", "https://www.vibedgc.com", "https://docs.vibedgc.com",
@@ -764,6 +765,7 @@ async function notFound(env, url, docs = false) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const requestedPath = cleanPath(url.pathname);
     const hostname = url.hostname;
     const localDev = env.DGC_ENVIRONMENT !== "production"
       && (hostname === "127.0.0.1" || hostname === "localhost");
@@ -849,6 +851,11 @@ export default {
       }
     } catch {
       response = json({error: "Service temporarily unavailable"}, 503);
+    }
+    if (request.method === "GET"
+        && [200, 304].includes(response.status)
+        && isHtmlPath(new URL(request.url).pathname)) {
+      measure(env, "page_view", request, requestedPath);
     }
     return harden(applyResponsePolicy(response, new URL(request.url).pathname), hostname);
   },
