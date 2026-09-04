@@ -4564,9 +4564,10 @@ def unit_tests(tmp: Path):
     _txn_a.write_bytes(b"good-a"); _txn_b.write_bytes(b"good-b")
     _txn_good = _txn_agent._capture_good_snapshot(_tm.monotonic() + 5)
     _txn_a.write_bytes(b"bad-a"); _txn_b.write_bytes(b"bad-b")
+    _txn_b_canonical = _txn_b.resolve(strict=False)
     _real_restore = _checkpoint_mod._restore
     def _fail_second_restore(path, state):
-        if path == _txn_b and path.read_bytes() == b"bad-b":
+        if path == _txn_b_canonical and path.read_bytes() == b"bad-b":
             return False
         return _real_restore(path, state)
     _checkpoint_mod._restore = _fail_second_restore
@@ -6227,9 +6228,11 @@ def test_mcp_protocol():
         progress, logs = [], []
         out = mgr.call(routes[0], {}, on_progress=progress.append, on_log=logs.append,
                        input_handler=input_handler)
+        canonical_root_uri = root.resolve(strict=False).as_uri()
         check("MCP completes modern roots MRTR and preserves typed content without credential leakage",
               "hello" in out and "guide" in out and "note text" in out and '"token": "explicit"' in out
-              and '"parent": null' in out and root.as_uri() in out and "opaque-state" in out, out)
+              and '"parent": null' in out and canonical_root_uri in out
+              and "opaque-state" in out, out)
         check("modern MCP MRTR fulfills consent-gated elicitation and sampling through one handler",
               '"nickname": "Ada"' in out and '"sampled": "Hello"' in out
               and [event[1] for event in input_events] == ["elicitation/create", "sampling/createMessage"],
@@ -6428,7 +6431,7 @@ def test_mcp_protocol():
                       for msg in legacy_messages if msg.get("method") != "server/discover"))
         check("legacy MCP serves roots after negotiation without requiring an unrelated tool call",
               any(msg.get("id") == 698 and (msg.get("result") or {}).get("roots", [{}])[0].get(
-                  "uri") == root.as_uri() for msg in legacy_messages), repr(legacy_messages))
+                  "uri") == canonical_root_uri for msg in legacy_messages), repr(legacy_messages))
         check("legacy MCP never discloses callback content after its origin lifecycle ends",
               any(msg.get("id") == 702 and "error" in msg and "result" not in msg
                   for msg in legacy_messages), repr(legacy_messages))
@@ -6678,8 +6681,10 @@ def test_mcp_protocol():
     workspace_backend = unavailable_root / "bwrap"
     workspace_backend.write_text("#!/bin/sh\nexit 1\n")
     workspace_backend.chmod(0o700)
+    backend_alias = unavailable_root.parent / f"{unavailable_root.name}-backend-alias"
+    backend_alias.symlink_to(unavailable_root, target_is_directory=True)
     try:
-        sandbox._backend = lambda: ("bwrap", workspace_backend)
+        sandbox._backend = lambda: ("bwrap", backend_alias / workspace_backend.name)
         workspace_backend_rejected = sandbox.wrap(":", unavailable_root, _SCfg()) is None
         pinned_backend = Path("/opt/dgc-test/bwrap")
         sandbox._backend = lambda: ("bwrap", pinned_backend)
@@ -7159,7 +7164,8 @@ def test_code_intel_lsp_pool():
     from types import SimpleNamespace
     import time as _time
     from dgc.codeintel import (
-        _LSPClient, _MAX_LSP_DOCUMENTS, _MAX_RESULTS, run_code_intel, stop_lsp_sessions,
+        _LSPClient, _MAX_LSP_DOCUMENTS, _MAX_RESULTS, _frozen_absolute,
+        run_code_intel, stop_lsp_sessions,
     )
 
     root = Path(tempfile.mkdtemp())
@@ -7276,15 +7282,15 @@ finally:
 
     tracker.notify = track_notification
     tracked_paths = [root / f"tracked-{index}.py" for index in range(_MAX_LSP_DOCUMENTS + 1)]
-    for tracked in tracked_paths:
-        tracker.sync_document(tracked, "value = 1\n")
+    tracked_uris = [tracker.sync_document(tracked, "value = 1\n")
+                    for tracked in tracked_paths]
     check("code_intel bounds the persistent open-document set with LRU close",
           len(tracker._documents) == _MAX_LSP_DOCUMENTS
-          and tracked_paths[0].as_uri() not in tracker._documents
+          and tracked_uris[0] not in tracker._documents
           and notifications.count("textDocument/didClose") == 1,
           f"documents={len(tracker._documents)} closes={notifications.count('textDocument/didClose')}")
-    active_uri = tracked_paths[-1].as_uri()
-    unsolicited_uri = (root / "never-opened.py").as_uri()
+    active_uri = tracked_uris[-1]
+    unsolicited_uri = _frozen_absolute(root / "never-opened.py").as_uri()
     accepted = tracker._record_diagnostics(
         active_uri, [{"message": "current"}] * (_MAX_RESULTS + 1))
     rejected = tracker._record_diagnostics(unsolicited_uri, [{"message": "stale"}])
@@ -7386,6 +7392,7 @@ def test_trusted_os_alias_consistency():
     import dgc.codeintel as _codeintel
     import dgc.tools as _tools
     import dgc.workspace as _workspace
+    from dgc.checkpoints import CheckpointManager as _AliasCheckpoints
     from dgc import sessions as _sessions
 
     print("trusted operating-system path aliases:")
@@ -7442,14 +7449,21 @@ def test_trusted_os_alias_consistency():
             relative = _codeintel._rel(canonical_root / "alpha.py", alias_root)
             display_relative = _tools._display_search_path(
                 canonical_root / "alpha.py", Ctx(alias_root))
+            checkpoint_manager = _AliasCheckpoints(canonical_root)
+            checkpoint_relative = checkpoint_manager._lexical_project_path(
+                str(alias_root / "alpha.py"))
+            untrusted_checkpoint = checkpoint_manager._lexical_project_path(
+                str(user_alias / "alpha.py"))
         finally:
             path_type.stat, path_type.lstat, _os.readlink = real_stat, real_lstat, real_readlink
         check("trusted root aliases canonicalize code-intelligence comparisons consistently",
               trusted == canonical_root and relative == "alpha.py"
-              and display_relative == "alpha.py",
-              repr((trusted, canonical_root, relative, display_relative)))
+              and display_relative == "alpha.py" and checkpoint_relative == "alpha.py",
+              repr((trusted, canonical_root, relative, display_relative,
+                    checkpoint_relative)))
         check("user-owned and descendant aliases are never promoted to OS-root aliases",
-              user_unchanged == user_alias and descendant_unchanged == descendant_alias)
+              user_unchanged == user_alias and descendant_unchanged == descendant_alias
+              and untrusted_checkpoint is None)
     else:
         check("trusted root aliases canonicalize code-intelligence comparisons consistently", True)
         check("user-owned and descendant aliases are never promoted to OS-root aliases", True)
@@ -7720,9 +7734,27 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
     privacy_listing = sessions.listing(d, redact_secrets=(privacy_secret,))
     privacy_resumed = _PrivacyCheckpoints.from_state(
         privacy_record.get("checkpoints"), d, max_message_count=2)
-    privacy_conversation = privacy_resumed._conversation(privacy_resumed.points[0])
-    privacy_snapshot = privacy_record["checkpoints"]["points"][0]["files"][
-        "privacy-snapshot.txt"]["data"]
+    privacy_resume_point = (privacy_resumed.points[0]
+                            if privacy_resumed.points
+                            and isinstance(privacy_resumed.points[0], dict) else None)
+    privacy_conversation = (privacy_resumed._conversation(privacy_resume_point)
+                            if privacy_resume_point is not None else None)
+    privacy_checkpoints = privacy_record.get("checkpoints")
+    privacy_point_rows = (privacy_checkpoints.get("points")
+                          if isinstance(privacy_checkpoints, dict) else None)
+    privacy_point = (privacy_point_rows[0]
+                     if isinstance(privacy_point_rows, list) and privacy_point_rows
+                     and isinstance(privacy_point_rows[0], dict) else {})
+    privacy_files = privacy_point.get("files")
+    privacy_snapshot_row = (privacy_files.get("privacy-snapshot.txt")
+                            if isinstance(privacy_files, dict) else None)
+    privacy_snapshot = (privacy_snapshot_row.get("data")
+                        if isinstance(privacy_snapshot_row, dict) else None)
+    try:
+        privacy_snapshot_bytes = (_base64.b64decode(privacy_snapshot, validate=True)
+                                  if isinstance(privacy_snapshot, str) else b"")
+    except (TypeError, ValueError):
+        privacy_snapshot_bytes = b""
     check("session redaction rebuilds checkpoint hashes and removes transcript credentials",
           privacy_saved and privacy_secret not in json.dumps(privacy_record)
           and privacy_record.get("name") == "session [REDACTED]"
@@ -7732,7 +7764,7 @@ sessions.save(path, [{"role": "user", "content": "never committed"}], root,
           and privacy_secret not in json.dumps(privacy_conversation)
           and "[REDACTED]" in json.dumps(privacy_conversation))
     check("session redaction preserves exact private file rewind snapshots",
-          _base64.b64decode(privacy_snapshot) == privacy_secret.encode())
+          privacy_snapshot_bytes == privacy_secret.encode())
     sessions.save_plan(
         privacy_session, f"# Plan\n\nAuthorization: Bearer {privacy_secret}", d,
         redact_secrets=(privacy_secret,))
