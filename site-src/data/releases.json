@@ -1,13 +1,24 @@
 {
   "refreshed_at": "2026-09-04T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 14,
+  "cli_releases_last_14_days": 15,
   "cli": [
+    {
+      "version": "0.26.3",
+      "date": "2026-09-04",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.3",
+      "status": "current",
+      "notes": [
+        "macOS code intelligence and session resume now share one protected system-alias identity.",
+        "Repository-controlled and user-owned symlink paths remain outside that narrow compatibility rule.",
+        "Package CI verifies the release archive beside its basename-scoped checksum file."
+      ]
+    },
     {
       "version": "0.26.2",
       "date": "2026-09-04",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.2",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "macOS workspaces now accept protected system path aliases while repository-controlled symlinks remain blocked.",
         "Clean source checkouts generate deterministic runtime SBOMs without importing or executing package code.",

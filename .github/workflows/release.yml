@@ -4,14 +4,39 @@ on:
   push:
     tags: ["v[0-9]*"]
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+permissions: {}
 
 jobs:
+  source-python:
+    name: Source Python ${{ matrix.python }} · ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: python -m pip check
+      - run: python -m compileall -q dgc tests/run_tests.py
+      - run: python -m py_compile bench/*.py scripts/generate-sbom.py
+      - run: python tests/run_tests.py
+
   release:
+    needs: source-python
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:

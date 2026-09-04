@@ -107,7 +107,7 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
-      - run: sha256sum -c dist/release/dgc.tar.gz.sha256
+      - run: (cd dist/release && sha256sum -c dgc.tar.gz.sha256)
       - uses: actions/upload-artifact@v4
         with:
           name: dgc-release-candidate

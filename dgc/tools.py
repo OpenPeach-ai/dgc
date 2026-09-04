@@ -33,6 +33,7 @@ from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
     WorkspaceBoundaryError,
     atomic_write_bytes as _atomic_write_bytes,
+    canonicalize_trusted_os_alias,
     list_directory,
     read_regular_bytes,
     resolve_path,
@@ -2203,7 +2204,14 @@ def _prepare_search_target(target: Path) -> tuple[str, Path] | None:
 
 
 def _display_search_path(path: Path, ctx) -> str:
-    relative = _safe_output(os.path.relpath(path, ctx.project_root), ctx)
+    # Descriptor-backed workspace reads canonicalize protected Darwin aliases such as
+    # /var -> /private/var. Use the same spelling for output only, without resolving a mutable
+    # repository descendant, so relative search paths do not leak as ../../private/var/....
+    candidate = canonicalize_trusted_os_alias(
+        Path(os.path.normpath(os.path.abspath(str(path)))))
+    project = canonicalize_trusted_os_alias(
+        Path(os.path.normpath(os.path.abspath(str(ctx.project_root)))))
+    relative = _safe_output(os.path.relpath(candidate, project), ctx)
     escaped = []
     for character in relative:
         code = ord(character)
@@ -2732,7 +2740,7 @@ def repo_map(args: dict, ctx) -> str:
             continue
         text = raw.decode("utf-8", errors="replace")
         digest = hashlib.sha256(raw).hexdigest()[:12]
-        rel = os.path.relpath(path, ctx.project_root)
+        rel = _display_search_path(path, ctx)
         symbols = _symbol_lines(path, text)
         suffix = " · " + ", ".join(symbols) if symbols else ""
         rows.append(f"{rel}  [{len(raw)} B · {digest}]{suffix}")
