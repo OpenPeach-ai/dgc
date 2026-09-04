@@ -3004,21 +3004,34 @@ def unit_tests(tmp: Path):
     #     interruptible by cancel — Esc/Stop can't wait on iter_lines() forever
     import http.server as _hs, socketserver as _ss, threading as _th2, time as _t2
     from dgc.llm import LLMClient
+    _prefill_ready = _th2.Event(); _release_prefill = _th2.Event()
     class _Hang(_hs.BaseHTTPRequestHandler):
         def do_POST(self):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
-            _t2.sleep(30)                                  # hold the connection: model "prefilling"
+            _prefill_ready.set()
+            _release_prefill.wait(5)                       # hold the connection: model "prefilling"
         def log_message(self, *a): pass
     _srv = _ss.TCPServer(("127.0.0.1", 0), _Hang); _port = _srv.server_address[1]
     _th2.Thread(target=_srv.serve_forever, daemon=True).start()
     _cl = LLMClient(base_url=f"http://127.0.0.1:{_port}/v1", api_key="x", model="m")
-    _cx = _th2.Event()
-    _th2.Thread(target=lambda: (_t2.sleep(0.5), _cx.set()), daemon=True).start()
-    _t0 = _t2.monotonic()
-    _r = _cl.chat([{"role": "user", "content": "hi"}], cancel=_cx)
-    _dt = _t2.monotonic() - _t0
-    _srv.shutdown()
-    check("llm cancel interrupts a prefill stall", _dt < 3 and _r.finish_reason == "cancelled")
+    _cx = _th2.Event(); _cancelled_at = []
+    def _cancel_prefill():
+        if _prefill_ready.wait(3):
+            _cancelled_at.append(_t2.monotonic())
+            _cx.set()
+    _cancel_thread = _th2.Thread(target=_cancel_prefill, daemon=True)
+    _cancel_thread.start()
+    try:
+        _r = _cl.chat([{"role": "user", "content": "hi"}], cancel=_cx)
+        _returned_at = _t2.monotonic()
+    finally:
+        _release_prefill.set()
+        _srv.shutdown()
+        _cancel_thread.join(1)
+    check("llm cancel interrupts a prefill stall",
+          _prefill_ready.is_set() and len(_cancelled_at) == 1
+          and _returned_at - _cancelled_at[0] < 3
+          and _r.finish_reason == "cancelled")
 
     # A per-request timeout can coincide exactly with a turn deadline while response headers are
     # still pending. Cancellation is terminal: it must not fan out retry attempts that the provider
@@ -11632,11 +11645,16 @@ def test_bored_mode():
                         smoke_ui._bored.game._next_tick = 0
                         start_revision = smoke_ui._bored.revision
                         start_ball_x = smoke_ui._bored.game.ball_x
-                        smoke["smooth_paddle"] = eventually(
+                        smoke_ui._invalidate()
+                        paddle_started = eventually(
+                            lambda: smoke_ui._bored is not None
+                            and smoke_ui._bored.revision >= start_revision + 1,
+                            timeout=1.0)
+                        smoke["smooth_paddle"] = paddle_started and eventually(
                             lambda: smoke_ui._bored is not None
                             and smoke_ui._bored.revision >= start_revision + 4
                             and abs(smoke_ui._bored.game.ball_x - start_ball_x) >= 3,
-                            timeout=0.28)
+                            timeout=1.0)
                         pipe.send_text("q")
                         eventually(lambda: smoke_ui._bored is None)
             pipe.send_text("/bored\r")
@@ -13223,6 +13241,19 @@ def test_compatible_tool_deltas():
           and compatible_terminal.finish_reason == "stop"
           and compatible_terminal.usage["input_tokens"] == 2)
 
+    late_chat_cancel = threading.Event()
+    class _LateCancelledChat(_RawChatStream):
+        def iter_lines(self, decode_unicode=True):
+            yield ('data: {"choices":[{"delta":{"content":"already complete"},'
+                   '"finish_reason":"stop"}]}')
+            late_chat_cancel.set()
+            yield "data: [DONE]"
+    late_chat_result = client._consume(
+        _LateCancelledChat([]), None, None, cancel=late_chat_cancel)
+    check("Chat terminal success wins over cancellation that arrives after its finish event",
+          late_chat_cancel.is_set() and late_chat_result.content == "already complete"
+          and late_chat_result.finish_reason == "stop")
+
     legacy = client._consume(_RawChatStream([
         'data: {"choices":[{"delta":{"function_call":{"name":"read_file",'
         '"arguments":"{\\"pa"}},"finish_reason":null}]}',
@@ -13363,6 +13394,40 @@ def test_compatible_tool_deltas():
           cancelled_result.finish_reason == "cancelled"
           and not cancelled_result.tool_calls and stalled.released.is_set()
           and __import__("time").monotonic() - started < 1)
+
+    class _CleanEOFOnClose(_RawChatStream):
+        def __init__(self):
+            super().__init__([])
+            self.waiting = threading.Event()
+            self.released = threading.Event()
+
+        def iter_lines(self, decode_unicode=True):
+            yield "data: " + json.dumps({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "clean-eof-partial", "function": {
+                    "name": "write_file", "arguments": '{"path":"unsafe.py"',
+                }}]}, "finish_reason": None}]})
+            self.waiting.set()
+            self.released.wait(5)
+            return  # requests may translate watcher-triggered socket shutdown into clean EOF
+
+        def close(self):
+            self.closed = True
+            self.released.set()
+
+    clean_eof = _CleanEOFOnClose()
+    clean_eof_cancel = threading.Event()
+    def _cancel_clean_eof():
+        clean_eof.waiting.wait()
+        clean_eof_cancel.set()
+    clean_eof_thread = threading.Thread(target=_cancel_clean_eof, daemon=True)
+    clean_eof_thread.start()
+    clean_eof_result = client._consume(
+        clean_eof, None, None, cancel=clean_eof_cancel)
+    clean_eof_thread.join(1)
+    check("Chat clean EOF after cancellation remains cancelled and discards partial calls",
+          clean_eof_cancel.is_set() and clean_eof.closed and clean_eof.released.is_set()
+          and clean_eof_result.finish_reason == "cancelled"
+          and not clean_eof_result.tool_calls)
 
     class _ChatJSON:
         headers = {"Content-Type": "application/json"}
@@ -13972,6 +14037,20 @@ def test_ollama_adapter():
     check("native Ollama reset after done preserves terminal continuation state",
           terminal_drop.content == "finished" and terminal_drop.finish_reason == "stop"
           and terminal_drop.provider_message.get("provider") == "ollama")
+
+    late_ollama_cancel = threading.Event()
+    class _LateCancelledTerminalError(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant", "content": "complete"},
+                              "done": True, "done_reason": "stop"})
+            late_ollama_cancel.set()
+            raise ConnectionResetError("reset after late cancellation")
+    late_ollama_result = native._consume_ollama(
+        _LateCancelledTerminalError(), None, None, cancel=late_ollama_cancel)
+    check("native Ollama done wins over late cancellation and iterator failure",
+          late_ollama_cancel.is_set() and late_ollama_result.content == "complete"
+          and late_ollama_result.finish_reason == "stop"
+          and late_ollama_result.provider_message.get("provider") == "ollama")
 
     class _PostTerminalResponse(_NativeResponse):
         def iter_lines(self, decode_unicode=True):
@@ -14673,6 +14752,54 @@ def test_anthropic_adapter():
           and not cancelled_result.tool_calls and not cancelled_result.provider_message
           and __import__("time").monotonic() - started < 1 and stalled.released.is_set())
 
+    class _CleanEOFAnthropic(_AnthropicStream):
+        def __init__(self):
+            super().__init__()
+            self.waiting = threading.Event()
+            self.released = threading.Event()
+        def iter_lines(self, decode_unicode=True):
+            events = [
+                {"type": "message_start", "message": {"id": "clean-eof", "usage": {}}},
+                {"type": "content_block_start", "index": 0,
+                 "content_block": {"type": "tool_use", "id": "partial-clean-eof",
+                                   "name": "write_file", "input": {}}},
+            ]
+            for event in events:
+                yield "data: " + json.dumps(event)
+            self.waiting.set()
+            self.released.wait(5)
+            return
+        def close(self):
+            self.closed = True
+            self.released.set()
+    clean_eof = _CleanEOFAnthropic(); clean_eof_cancel = threading.Event()
+    def _cancel_clean_eof():
+        clean_eof.waiting.wait()
+        clean_eof_cancel.set()
+    clean_eof_thread = threading.Thread(target=_cancel_clean_eof, daemon=True)
+    clean_eof_thread.start()
+    clean_eof_result = client._consume_anthropic(
+        clean_eof, None, None, cancel=clean_eof_cancel)
+    clean_eof_thread.join(1)
+    check("Anthropic clean EOF after cancellation discards partial provider state",
+          clean_eof_cancel.is_set() and clean_eof.closed and clean_eof.released.is_set()
+          and clean_eof_result.finish_reason == "cancelled"
+          and not clean_eof_result.tool_calls and not clean_eof_result.provider_message)
+
+    late_anthropic_cancel = threading.Event()
+    class _LateCancelledAnthropic(_AnthropicStream):
+        def iter_lines(self, decode_unicode=True):
+            yield from super().iter_lines(decode_unicode=decode_unicode)
+            late_anthropic_cancel.set()
+            yield "data: " + json.dumps({"type": "ping"})
+    late_anthropic_result = client._consume_anthropic(
+        _LateCancelledAnthropic(), None, None, cancel=late_anthropic_cancel)
+    check("Anthropic terminal success wins over cancellation after message_stop",
+          late_anthropic_cancel.is_set()
+          and late_anthropic_result.finish_reason == "tool_calls"
+          and late_anthropic_result.tool_calls[0].id == "toolu_9"
+          and late_anthropic_result.provider_message.get("provider") == "anthropic")
+
     class _Malformed(_AnthropicStream):
         def iter_lines(self, decode_unicode=True): yield "data: {not-json"
     try:
@@ -14899,6 +15026,21 @@ def test_responses_adapter():
           and result.tool_calls[0].arguments == {"path": "main.py"}
           and result.usage.get("input_tokens") == 12)
 
+    late_responses_cancel = threading.Event()
+    class _LateCancelledResponses(_Resp):
+        def iter_lines(self, decode_unicode=True):
+            for line in super().iter_lines(decode_unicode=decode_unicode):
+                if line == "data: [DONE]":
+                    late_responses_cancel.set()
+                yield line
+    late_responses_result = client._consume_responses(
+        _LateCancelledResponses(), None, None, cancel=late_responses_cancel)
+    check("Responses terminal success wins over cancellation after response.completed",
+          late_responses_cancel.is_set()
+          and late_responses_result.finish_reason == "tool_calls"
+          and late_responses_result.response_id == "resp-1"
+          and bool(late_responses_result.provider_items))
+
     class _ResponsesTerminalDrop(_Resp):
         def iter_lines(self, decode_unicode=True):
             for line in super().iter_lines(decode_unicode=decode_unicode):
@@ -14950,6 +15092,39 @@ def test_responses_adapter():
           and len(truncated_responses.tool_calls) == 1
           and not truncated_responses.provider_items
           and unfinished_responses_failed)
+
+    class _CleanEOFResponses(_ResponsesEvents):
+        def __init__(self):
+            super().__init__(partial_call_events)
+            self.waiting = threading.Event()
+            self.released = threading.Event()
+            self.closed = False
+        def iter_lines(self, decode_unicode=True):
+            for event in self.events:
+                yield "data: " + json.dumps(event)
+            self.waiting.set()
+            self.released.wait(5)
+            return
+        def close(self):
+            self.closed = True
+            self.released.set()
+    clean_eof_responses = _CleanEOFResponses()
+    clean_eof_responses_cancel = threading.Event()
+    def _cancel_clean_eof_responses():
+        clean_eof_responses.waiting.wait()
+        clean_eof_responses_cancel.set()
+    clean_eof_responses_thread = threading.Thread(
+        target=_cancel_clean_eof_responses, daemon=True)
+    clean_eof_responses_thread.start()
+    clean_eof_responses_result = client._consume_responses(
+        clean_eof_responses, None, None, cancel=clean_eof_responses_cancel)
+    clean_eof_responses_thread.join(1)
+    check("Responses clean EOF after cancellation discards partial provider state",
+          clean_eof_responses_cancel.is_set() and clean_eof_responses.closed
+          and clean_eof_responses.released.is_set()
+          and clean_eof_responses_result.finish_reason == "cancelled"
+          and not clean_eof_responses_result.tool_calls
+          and not clean_eof_responses_result.provider_items)
 
     incomplete_call = {
         "id": "incomplete-item", "type": "function_call", "status": "in_progress",

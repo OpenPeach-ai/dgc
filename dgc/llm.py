@@ -1745,6 +1745,11 @@ class LLMClient:
         message_stopped = False
         stop_reason_seen = False
         active_blocks: set[int] = set()
+
+        def terminal_received() -> bool:
+            return (message_started and message_stopped
+                    and not active_blocks and stop_reason_seen)
+
         stop_watch = threading.Event()
         if cancel is not None:
             def _watch(resp=response, ev=stop_watch, cx=cancel):
@@ -1770,7 +1775,8 @@ class LLMClient:
             for line in _bounded_stream_lines(
                     response, _MAX_ANTHROPIC_STREAM_BYTES, "Anthropic Messages stream"):
                 if cancel is not None and cancel.is_set():
-                    result.finish_reason = "cancelled"
+                    if not terminal_received():
+                        result.finish_reason = "cancelled"
                     break
                 if not line.startswith("data:"):
                     continue
@@ -1916,23 +1922,27 @@ class LLMClient:
                     response.close()
                     break
         except Exception as exc:
-            if cancel is not None and cancel.is_set():
+            if (cancel is not None and cancel.is_set()
+                    and not terminal_received()):
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
-                if not (message_started and message_stopped
-                        and not active_blocks and stop_reason_seen):
+                if not terminal_received():
                     result.finish_reason = "incomplete"
             else:
                 raise
         finally:
             stop_watch.set()
+        terminal = terminal_received()
+        if (not terminal and cancel is not None and cancel.is_set()
+                and result.finish_reason != "overthink"):
+            # A socket shutdown can be reported as clean EOF, so classify from the cancellation
+            # lifecycle before falling into the nonterminal-recovery path.
+            result.finish_reason = "cancelled"
         if result.finish_reason in ("cancelled", "overthink"):
             # Never turn a partially received tool block into an executable call. A watchdog retry
             # also must not retain an unsigned partial thinking block as continuation state.
             result.usage = self._anthropic_usage(result.usage)
             return result
-        terminal = (message_started and message_stopped
-                    and not active_blocks and stop_reason_seen)
         if not terminal:
             result.finish_reason = "incomplete"
         return self._anthropic_result_from_blocks(
@@ -2285,11 +2295,13 @@ class LLMClient:
                         break
                     except Exception:
                         if cancel is not None and cancel.is_set():
-                            result.finish_reason = "cancelled"
+                            if not terminal_done:
+                                result.finish_reason = "cancelled"
                             break
                         raise
                     if cancel is not None and cancel.is_set():
-                        result.finish_reason = "cancelled"
+                        if not terminal_done:
+                            result.finish_reason = "cancelled"
                         break
                     if isinstance(line, bytes):
                         line = line.decode("utf-8", "replace")
@@ -2311,7 +2323,7 @@ class LLMClient:
                             pass
                         break
         except Exception as exc:
-            if cancel is not None and cancel.is_set():
+            if cancel is not None and cancel.is_set() and not terminal_done:
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
                 if not terminal_done:
@@ -3105,7 +3117,9 @@ class LLMClient:
             for line in _bounded_stream_lines(
                     response, _MAX_RESPONSES_STREAM_BYTES, "Responses API stream"):
                 if cancel is not None and cancel.is_set():
-                    result.finish_reason = "cancelled"; break
+                    if not terminal:
+                        result.finish_reason = "cancelled"
+                    break
                 if not line or not line.startswith("data:"):
                     continue
                 data = line[5:].strip()
@@ -3201,7 +3215,7 @@ class LLMClient:
                     err = event.get("error") or (event.get("response") or {}).get("error") or {}
                     raise LLMError(str(err.get("message") or err or "Responses API stream failed"))
         except Exception as exc:
-            if cancel is not None and cancel.is_set():
+            if cancel is not None and cancel.is_set() and not terminal:
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
                 if not terminal:
@@ -3210,6 +3224,9 @@ class LLMClient:
                 raise
         finally:
             stop_watch.set()
+        if not terminal and cancel is not None and cancel.is_set():
+            # requests may turn the watcher's socket shutdown into ordinary iterator exhaustion.
+            result.finish_reason = "cancelled"
         if result.finish_reason == "cancelled":
             return result
         if not terminal:
@@ -3402,7 +3419,8 @@ class LLMClient:
             for line in _bounded_stream_lines(
                     r, _MAX_CHAT_STREAM_BYTES, "Chat Completions stream"):
                 if cancel is not None and cancel.is_set():
-                    result.finish_reason = "cancelled"
+                    if not (saw_done or saw_finish):
+                        result.finish_reason = "cancelled"
                     break
                 if not line or not line.startswith("data:"):
                     continue
@@ -3522,7 +3540,8 @@ class LLMClient:
         except Exception as exc:
             # Socket errors caused by cancellation are terminal; other transport interruptions
             # retain only non-executable partial state for the Agent's bounded recovery path.
-            if cancel is not None and cancel.is_set():
+            if (cancel is not None and cancel.is_set()
+                    and not (saw_done or saw_finish)):
                 result.finish_reason = "cancelled"
             elif _is_transport_interruption(exc):
                 if not saw_finish:
@@ -3532,6 +3551,12 @@ class LLMClient:
         finally:
             stop_watch.set()
 
+        if (not saw_done and not saw_finish and cancel is not None and cancel.is_set()
+                and result.finish_reason != "overthink"):
+            # A watcher-triggered socket shutdown may surface as clean EOF rather than an
+            # exception.  Cancellation still wins over the recoverable-incomplete EOF path,
+            # matching the native Ollama lifecycle and discarding partial executable state.
+            result.finish_reason = "cancelled"
         if result.finish_reason in ("cancelled", "overthink"):
             # Neither partial native calls nor text-shaped calls may survive an aborted generation.
             return result
