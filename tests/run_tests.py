@@ -740,7 +740,10 @@ def unit_tests(tmp: Path):
     check("non-dirfd repository discovery remains bounded and functional",
           len(_portable_entries[0]) == 2 and _portable_entries[1]
           and _portable_entries[2] == 2
-          and "portable_symbol@1" in _portable_map
+          and any(line.startswith("portable-discovery/portable.py  [")
+                  and "portable_symbol@1" in line
+                  for line in _portable_map.splitlines())
+          and not any(line.startswith("..") for line in _portable_map.splitlines())
           and "function portable_symbol" in _portable_intel,
           repr((_portable_entries, _portable_map, _portable_intel)))
 
@@ -7373,6 +7376,118 @@ finally:
         stop_lsp_sessions(root)
 
 
+def test_trusted_os_alias_consistency():
+    """Darwin root aliases share identity without trusting mutable descendant links."""
+    import os as _os
+    import stat as _stat
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from types import SimpleNamespace as _Info
+    import dgc.codeintel as _codeintel
+    import dgc.tools as _tools
+    import dgc.workspace as _workspace
+    from dgc import sessions as _sessions
+
+    print("trusted operating-system path aliases:")
+
+    # Model /var -> /private/var without depending on the host OS layout. The production helper
+    # must inspect only the first component beneath the filesystem anchor, require an immutable
+    # root-owned chain, and leave any lower/user-owned link spelling untouched.
+    if _os.name == "posix":
+        path_type = type(_P("/"))
+        real_stat, real_lstat, real_readlink = path_type.stat, path_type.lstat, _os.readlink
+
+        def info(mode, inode, uid=0):
+            return _Info(st_dev=7, st_ino=inode, st_mode=mode, st_size=0,
+                         st_mtime_ns=1, st_ctime_ns=1, st_mtime=0, st_ctime=0,
+                         st_uid=uid)
+
+        root_info = info(_stat.S_IFDIR | 0o755, 1)
+        trusted_alias_info = info(_stat.S_IFLNK | 0o777, 2)
+        user_alias_info = info(_stat.S_IFLNK | 0o777, 3, uid=501)
+        protected_info = info(_stat.S_IFDIR | 0o755, 4)
+        writable_final_info = info(_stat.S_IFDIR | 0o1777, 5)
+
+        def fake_stat(path, *args, **kwargs):
+            if str(path) == "/":
+                return root_info
+            return real_stat(path, *args, **kwargs)
+
+        def fake_lstat(path, *args, **kwargs):
+            values = {
+                "/dgc-os-alias": trusted_alias_info,
+                "/dgc-user-alias": user_alias_info,
+                "/dgc-real": protected_info,
+                "/dgc-protected": protected_info,
+                "/dgc-protected/var": writable_final_info,
+            }
+            if str(path) in values:
+                return values[str(path)]
+            return real_lstat(path, *args, **kwargs)
+
+        def fake_readlink(path, *args, **kwargs):
+            if str(path) == "/dgc-os-alias":
+                return "/dgc-protected/var"
+            return real_readlink(path, *args, **kwargs)
+
+        path_type.stat, path_type.lstat, _os.readlink = fake_stat, fake_lstat, fake_readlink
+        try:
+            alias_root = _P("/dgc-os-alias/work/project")
+            canonical_root = _P("/dgc-protected/var/work/project")
+            trusted = _workspace.canonicalize_trusted_os_alias(alias_root)
+            user_alias = _P("/dgc-user-alias/work/project")
+            descendant_alias = _P("/dgc-real/user-link/project")
+            user_unchanged = _workspace.canonicalize_trusted_os_alias(user_alias)
+            descendant_unchanged = _workspace.canonicalize_trusted_os_alias(descendant_alias)
+            relative = _codeintel._rel(canonical_root / "alpha.py", alias_root)
+            display_relative = _tools._display_search_path(
+                canonical_root / "alpha.py", Ctx(alias_root))
+        finally:
+            path_type.stat, path_type.lstat, _os.readlink = real_stat, real_lstat, real_readlink
+        check("trusted root aliases canonicalize code-intelligence comparisons consistently",
+              trusted == canonical_root and relative == "alpha.py"
+              and display_relative == "alpha.py",
+              repr((trusted, canonical_root, relative, display_relative)))
+        check("user-owned and descendant aliases are never promoted to OS-root aliases",
+              user_unchanged == user_alias and descendant_unchanged == descendant_alias)
+    else:
+        check("trusted root aliases canonicalize code-intelligence comparisons consistently", True)
+        check("user-owned and descendant aliases are never promoted to OS-root aliases", True)
+
+    # Session project roots are storage identities and intentionally match Agent.session_root's
+    # canonical spelling. The transcript path still cannot follow a link out of its private bucket.
+    old_sessions_dir = _sessions.SESSIONS_DIR
+    with _tf.TemporaryDirectory() as td:
+        base = _P(td)
+        project = base / "project"
+        project.mkdir()
+        alias = base / "launch-alias"
+        alias.symlink_to(project, target_is_directory=True)
+        _sessions.SESSIONS_DIR = base / "sessions"
+        try:
+            session = _sessions.new_path(alias)
+            canonical_session_dir = _sessions.project_dir(project)
+            saved = _sessions.save(
+                session, [{"role": "user", "content": "alias identity"}], alias)
+            loaded = _sessions.load(session, project)
+            outside = base / "outside.json"
+            outside.write_text('{"messages": []}')
+            escape = session.parent / "escape.json"
+            escape.symlink_to(outside)
+            try:
+                _sessions.resolve_path(project, escape, must_exist=True)
+                escape_rejected = False
+            except ValueError:
+                escape_rejected = True
+        finally:
+            _sessions.SESSIONS_DIR = old_sessions_dir
+    check("canonical launch aliases share one resumable private session bucket",
+          saved and loaded == [{"role": "user", "content": "alias identity"}]
+          and session.parent == canonical_session_dir)
+    check("session paths still reject a symlink escape from the private project bucket",
+          escape_rejected)
+
+
 def test_sessions_and_worktree():
     """Sessions are private/scoped/atomic; git worktrees are created/listed/removed."""
     import os as _os
@@ -9311,6 +9426,13 @@ def test_release_script_contract():
               "site/vscode/dgc-999.999.999.vsix")))
     site_gate = (PROJECT / "scripts" / "check-site.py").read_text()
     ci = (PROJECT / ".github" / "workflows" / "ci.yml").read_text()
+    release_workflow = (PROJECT / ".github" / "workflows" / "release.yml").read_text()
+    check("package CI verifies the release checksum beside its basename-only sidecar",
+          "(cd dist/release && sha256sum -c dgc.tar.gz.sha256)" in ci)
+    check("an immutable tag cannot publish before the full source Python matrix passes",
+          "needs: source-python" in release_workflow
+          and "os: [ubuntu-latest, macos-latest]" in release_workflow
+          and 'python: ["3.10", "3.13"]' in release_workflow)
     check("pre-publication site CI waives only the unpublished tag, never artifact bytes",
           "--allow-missing-release-artifacts" not in site_gate + ci
           and "--allow-unpublished-source-tag" in site_gate
@@ -16167,6 +16289,7 @@ def main():
         test_cross_process_workspace_leases()
         test_code_intel_lsp()
         test_code_intel_lsp_pool()
+        test_trusted_os_alias_consistency()
         test_sessions_and_worktree()
         test_durable_checkpoints()
         test_isolated_subagents()

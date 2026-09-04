@@ -183,7 +183,11 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def _slug(project_root) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "-", str(project_root)).strip("-").lower()
+    # This is a storage identity, not an execution-time filesystem grant. Match Agent.session_root
+    # so Darwin's /var -> /private/var spelling and an explicitly selected launch-root symlink use
+    # one transcript bucket. Session paths themselves remain confined to that private bucket.
+    project = Path(project_root).expanduser().resolve(strict=False)
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", str(project)).strip("-").lower()
     return (s[-70:] or "root")
 
 

@@ -41,7 +41,7 @@ def _version(info: os.stat_result) -> FileVersion:
     )
 
 
-def _canonicalize_os_alias(path: Path) -> Path:
+def canonicalize_trusted_os_alias(path: Path | str) -> Path:
     """Rewrite one immutable, OS-owned alias directly below the filesystem anchor.
 
     Darwin deliberately exposes roots such as ``/var`` and ``/tmp`` as root-owned links into
@@ -50,6 +50,10 @@ def _canonicalize_os_alias(path: Path) -> Path:
     protected filesystem anchor is eligible; links anywhere below it remain untouched and are
     rejected by the descriptor walk or fallback validation.
     """
+    value = Path(path)
+    if not value.is_absolute() or "\x00" in str(value):
+        raise WorkspaceBoundaryError("a canonical absolute path is required")
+    path = Path(os.path.normpath(str(value)))
     if os.name != "posix" or not path.anchor or len(path.parts) < 2:
         return path
     anchor = Path(path.anchor)
@@ -104,13 +108,18 @@ def _canonicalize_os_alias(path: Path) -> Path:
     return canonical_target.joinpath(*suffix)
 
 
+# Internal compatibility for callers/tests developed while the helper was private.  New consumers
+# should use the deliberately narrow public name, which makes clear that this is not a general
+# symlink resolver.
+_canonicalize_os_alias = canonicalize_trusted_os_alias
+
+
 def _absolute_frozen(path: Path | str) -> Path:
     """Normalize spelling without following a component that may have changed since approval."""
     value = Path(path)
     if not value.is_absolute() or "\x00" in str(value) or ".." in value.parts:
         raise WorkspaceBoundaryError("a canonical absolute path is required")
-    normalized = Path(os.path.normpath(str(value)))
-    return _canonicalize_os_alias(normalized)
+    return canonicalize_trusted_os_alias(value)
 
 
 def _dirfd_supported() -> bool:
