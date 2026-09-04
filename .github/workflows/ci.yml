@@ -64,7 +64,7 @@ jobs:
           fi
       - name: Preserve browser QA evidence
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dgc-site-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
           path: output/site-qa/
@@ -129,7 +129,7 @@ jobs:
           DGC_VSCODE_EXECUTABLE: ${{ runner.temp }}/dgc-vscode-host/code
           DGC_EXPECT_VSCODE_VERSION: 1.107.1
         run: xvfb-run -a bash ../../scripts/release-extension.sh --build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dgc-extension-ci
           path: ${{ runner.temp }}/dgc-extension-release/*
@@ -148,7 +148,7 @@ jobs:
       - run: python -m twine check dist/*
       - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
       - run: (cd dist/release && sha256sum -c dgc.tar.gz.sha256)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dgc-release-candidate
           path: |

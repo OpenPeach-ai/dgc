@@ -90,7 +90,7 @@ jobs:
           python scripts/build-site.py
           python scripts/build-site.py --check
       - name: Preserve reviewable snapshot and generated proof
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dgc-site-metrics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
