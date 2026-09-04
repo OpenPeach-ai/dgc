@@ -1,10 +1,11 @@
 <section class="hero" id="top">
   <div class="hero-media" aria-hidden="true">
-    <video autoplay muted loop playsinline preload="none" fetchpriority="high" poster="/assets/hero-graded-poster.jpg" data-hero-video>
-      <source data-src="/assets/hero-mobile.webm" type="video/webm" media="(max-width:760px)">
-      <source data-src="/assets/hero-mobile.mp4" type="video/mp4" media="(max-width:760px)">
-      <source data-src="/assets/hero-graded.webm" type="video/webm">
-      <source data-src="/assets/hero-graded.mp4" type="video/mp4">
+    <picture class="hero-poster"><source srcset="/assets/hero-mobile-poster.webp" media="(max-width:800px)" type="image/webp"><img src="/assets/hero-graded-poster.jpg" width="1920" height="1080" fetchpriority="high" alt=""></picture>
+    <video autoplay muted loop playsinline preload="auto" data-hero-video>
+      <source src="/assets/hero-mobile.webm" type="video/webm" media="(max-width:800px)">
+      <source src="/assets/hero-mobile.mp4" type="video/mp4" media="(max-width:800px)">
+      <source src="/assets/hero-graded.webm" type="video/webm">
+      <source src="/assets/hero-graded.mp4" type="video/mp4">
     </video>
   </div>
   <div class="container">
@@ -15,7 +16,7 @@
       <div class="hero-actions">
         <a class="button button-primary" href="https://docs.vibedgc.com/getting-started" data-event="get_started">Get started <span aria-hidden="true">→</span></a>
         <a class="button" href="/benchmark">See the benchmark</a>
-        <a class="quiet-link" href="#product-capture" data-open-capture>Watch it work · 0:52 <span aria-hidden="true">↗</span></a>
+        <a class="quiet-link" href="#product-capture" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Watch it work · {{CAPTURE_CLI_DURATION_LABEL}} <span aria-hidden="true">↗</span></a>
       </div>
       <div class="install-panel" data-install-tabs data-copy-scope>
         <div class="install-inner">
@@ -26,10 +27,10 @@
       </div>
     </div>
     <div class="stat-grid reveal" aria-label="DGC measured results">
-      <div class="stat"><span class="stat-value" data-count="94.4" data-decimals="1" data-suffix="%">94.4%</span><span class="stat-label">Aider polyglot · pass@2</span></div>
-      <div class="stat"><span class="stat-value" data-count="184" data-suffix=" / 300">184 / 300</span><span class="stat-label"><a href="/benchmark#swe-bench">SWE-bench Lite · published</a></span></div>
-      <div class="stat"><span class="stat-value" data-count="0">0</span><span class="stat-label">agent-round timeouts · DGC</span></div>
-      <div class="stat"><span class="stat-value" data-count="121.7" data-decimals="1" data-suffix=" s">121.7 s</span><span class="stat-label">average measured round</span></div>
+      <div class="stat"><span class="stat-value" data-count="{{BENCH_DGC_SCORE}}" data-decimals="1" data-suffix="%">{{BENCH_DGC_SCORE}}%</span><span class="stat-label">{{BENCH_SUITE}} · {{BENCH_METRIC}}</span></div>
+      <div class="stat"><span class="stat-value" data-count="{{BENCH_SWE_SOLVED}}" data-suffix=" / {{BENCH_SWE_TOTAL}}">{{BENCH_SWE_SOLVED}} / {{BENCH_SWE_TOTAL}}</span><span class="stat-label"><a href="/benchmark#swe-bench">SWE-bench Lite · published</a></span></div>
+      <div class="stat"><span class="stat-value" data-count="{{BENCH_DGC_TIMEOUTS}}">{{BENCH_DGC_TIMEOUTS}}</span><span class="stat-label">agent-round timeouts · {{BENCH_DGC_NAME}}</span></div>
+      <div class="stat"><span class="stat-value" data-count="{{BENCH_DGC_AVERAGE_ROUND_SECONDS}}" data-decimals="1" data-suffix=" s">{{BENCH_DGC_AVERAGE_ROUND_SECONDS}} s</span><span class="stat-label">average measured round</span></div>
       <div class="stat"><span class="stat-value" data-count="{{RELEASE_COUNT}}">{{RELEASE_COUNT}}</span><span class="stat-label">GitHub releases · Aug 21–Sep 4</span></div>
     </div>
   </div>
@@ -40,7 +41,7 @@
     <div class="marquee-set"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
     <div class="marquee-set" aria-hidden="true"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
   </div>
-  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="{{MARKETPLACE_URL}}" data-event="marketplace"><span>Editor</span>VS Code + Cursor <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>Five harness run summaries <b aria-hidden="true">→</b></a></div>
+  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="{{MARKETPLACE_URL}}" data-event="marketplace"><span>{{MARKETPLACE_PROOF_LABEL}}</span>{{MARKETPLACE_PROOF_VALUE}} <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>{{BENCH_HARNESS_COUNT_WORD}} harness run summaries <b aria-hidden="true">→</b></a></div>
 </section>
 
 <section class="section field field-2" id="cli">
@@ -65,8 +66,10 @@
   <div class="container artifact-layout">
     <header class="artifact-copy reveal"><div class="eyebrow"><b>03</b> Native plan artifacts</div><h2>Review the plan as a real page.</h2><p class="lede">On local/API routes during the current process, a DGC plan can open as a clean page on a private loopback port—not raw Markdown racing past your terminal. The plan text saves with the session, so you can reopen it in DGC after a restart.</p><p class="artifact-note">NATIVE ROUTES · PRIVATE LOOPBACK PREVIEW · PLAN TEXT SAVED WITH THE SESSION</p></header>
     <div class="browser reveal" data-artifact-tabs>
-      <div class="browser-bar"><span class="browser-dots"><i></i><i></i><i></i></span><span class="browser-address">127.0.0.1:45000/plan/refactor-auth</span><span class="browser-select" role="tablist"><button role="tab" aria-selected="true">PLAN</button></span></div>
-      <article class="artifact-page" role="tabpanel"><span class="artifact-kicker">/// PROPOSED PLAN</span><h3>Refactor auth into its own package</h3><p>Move token and verification helpers into one package and update the callers, without changing behavior.</p><ol class="artifact-steps"><li>Create the package and move the helpers.<code>2 files</code></li><li>Re-export the public surface.<code>1 file</code></li><li>Update callers and run the suite.<code>7 imports</code></li></ol><div class="artifact-approval"><span>Approve in terminal</span><span>3 steps · plan text saved</span></div></article>
+      <div class="browser-bar"><span class="browser-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="browser-address" data-artifact-address>127.0.0.1:45000/plan/refactor-auth</span><span class="browser-controls"><span class="browser-select" role="tablist" aria-label="Plan artifact views"><button id="artifact-tab-plan" type="button" role="tab" aria-controls="artifact-panel-plan" aria-selected="true" data-address="127.0.0.1:45000/plan/refactor-auth">PLAN</button><button id="artifact-tab-files" type="button" role="tab" aria-controls="artifact-panel-files" aria-selected="false" tabindex="-1" data-address="127.0.0.1:45000/plan/refactor-auth/files">FILES</button><button id="artifact-tab-verify" type="button" role="tab" aria-controls="artifact-panel-verify" aria-selected="false" tabindex="-1" data-address="127.0.0.1:45000/plan/refactor-auth/verify">VERIFY</button></span><button class="browser-cycle" type="button" data-artifact-cycle aria-pressed="false" aria-label="Pause automatic artifact views">Ⅱ</button></span></div>
+      <article class="artifact-page" id="artifact-panel-plan" role="tabpanel" aria-labelledby="artifact-tab-plan"><span class="artifact-kicker">/// PROPOSED PLAN</span><h3>Refactor auth into its own package</h3><p>Move token and verification helpers into one package and update the callers, without changing behavior.</p><ol class="artifact-steps"><li>Create the package and move the helpers.<code>2 files</code></li><li>Re-export the public surface.<code>1 file</code></li><li>Update callers and run the suite.<code>7 imports</code></li></ol><div class="artifact-approval"><span>Approve in terminal</span><span><kbd>←</kbd> <kbd>→</kbd> views · plan text saved</span></div></article>
+      <article class="artifact-page" id="artifact-panel-files" role="tabpanel" aria-labelledby="artifact-tab-files" hidden><span class="artifact-kicker">/// FILE IMPACT</span><h3>Bound the change before editing</h3><p>The proposed surface stays inside the auth package and its direct callers. No migration or public API change is planned.</p><ol class="artifact-steps"><li><span>src/auth/token.ts · verification helpers</span><code>move</code></li><li><span>src/auth/index.ts · stable re-exports</span><code>create</code></li><li><span>7 direct imports · preserve behavior</span><code>update</code></li></ol><div class="artifact-approval"><span>Review in terminal</span><span><kbd>←</kbd> <kbd>→</kbd> views · 3 change groups</span></div></article>
+      <article class="artifact-page" id="artifact-panel-verify" role="tabpanel" aria-labelledby="artifact-tab-verify" hidden><span class="artifact-kicker">/// VERIFICATION GATES</span><h3>Define done before execution</h3><p>Approval starts the implementation. The proposed definition of done requires every listed check to return a real successful exit code.</p><ol class="artifact-steps artifact-checks"><li><span>Auth unit and regression suite</span><code>npm test -- auth</code></li><li><span>Static contract check</span><code>npm run typecheck</code></li><li><span>Patch hygiene</span><code>git diff --check</code></li></ol><div class="artifact-approval"><span>Execution after approval</span><span><kbd>←</kbd> <kbd>→</kbd> views · 3 required gates</span></div></article>
     </div>
   </div>
 </section>
@@ -93,7 +96,7 @@
 
 <section class="section field field-2" id="benchmark">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> Benchmark</div><h2>Measured on a model you run yourself.</h2><p class="lede">A measured 90-task, six-language slice. Every manifest records the same model alias, caller-declared digest, endpoint URL, hardware, and 600-second allowance per round; model weights were not independently verified.</p></header>
+    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> Benchmark</div><h2>Measured on a model you run yourself.</h2><p class="lede">A {{BENCH_PUBLICATION_LABEL}} of {{BENCH_PROBLEMS}} tasks across {{BENCH_LANGUAGE_COUNT_WORD}} languages. Every manifest records the same model alias, caller-declared digest, endpoint URL, hardware, and {{BENCH_CAP_SECONDS}}-second allowance per round; {{BENCH_WEIGHTS_CLAUSE}}.</p></header>
     {{FIG4}}
     <p class="figure-foot">Method, caveats, raw-source checksums and reproducible commands live on the <a href="/benchmark">full benchmark page →</a></p>
   </div>
@@ -107,7 +110,7 @@
   <video muted loop playsinline preload="none" data-poster="/assets/power-graded-poster.jpg" data-lazy-video aria-hidden="true"><source data-src="/assets/power-graded.webm" type="video/webm"><source data-src="/assets/power-graded.mp4" type="video/mp4"></video>
   <div class="container">
     <header class="video-copy reveal"><div class="eyebrow"><b>07</b> Power tools</div><h2>Built for real, long, autonomous work.</h2><p class="lede">Optional modes for data-heavy tasks, verified unattended native-model runs, and turning your own sessions into scrubbed training data.</p></header>
-    <div class="glass-grid"><article class="glass reveal"><span class="micro">Persistent state</span><h3>A Python workspace across turns</h3><p>Load a dataset once, then operate on variables without repeating it into context.</p><code>/code-action on</code></article><article class="glass reveal"><span class="micro">Native autonomous gate</span><h3>Run until the check passes</h3><p>On local/API routes, failures return to the next turn and completion waits for a real exit code. Delegated vendor turns bypass this gate.</p><code>dgc --autonomous-gate "npm run check"</code></article><article class="glass reveal"><span class="micro">Trace → training</span><h3>Your usage becomes your data</h3><p>Export heuristic-filtered sessions as bounded, credential-scrubbed JSONL; review them before training.</p><code>dgc export-training --successful-only</code></article></div>
+    <div class="glass-grid"><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Persistent state</span><h3>A Python workspace across turns</h3><p>Load a dataset once, then operate on variables without repeating it into context.</p><code class="power-command"><span class="sr-only">Command: /code-action on</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="/code-action on" aria-hidden="true">/code-action on</span><i class="power-caret" aria-hidden="true"></i></code></article><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Native autonomous gate</span><h3>Run until the check passes</h3><p>On local/API routes, failures return to the next turn and completion waits for a real exit code. Delegated vendor turns bypass this gate.</p><code class="power-command"><span class="sr-only">Command: dgc --autonomous-gate &quot;npm run check&quot;</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="dgc --autonomous-gate &quot;npm run check&quot;" aria-hidden="true">dgc --autonomous-gate "npm run check"</span><i class="power-caret" aria-hidden="true"></i></code></article><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Trace → training</span><h3>Your usage becomes your data</h3><p>Export heuristic-filtered sessions as bounded, credential-scrubbed JSONL; review them before training.</p><code class="power-command"><span class="sr-only">Command: dgc export-training --successful-only</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="dgc export-training --successful-only" aria-hidden="true">dgc export-training --successful-only</span><i class="power-caret" aria-hidden="true"></i></code></article></div>
   </div>
 </section>
 
@@ -120,8 +123,8 @@
   </div>
 </section>
 
-<dialog class="capture-dialog" id="product-capture" aria-label="DGC product capture">
-  <div class="capture-head"><span class="micro">DGC · illustrative trace replay · 0:52</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
-  <video controls playsinline preload="metadata" data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play"><source src="/assets/cli-capture.webm" type="video/webm"><source src="/assets/cli-capture.mp4" type="video/mp4"></video>
-  <p>Illustrative reconstruction based on the retained <code>go/alphametics</code> result. Recorded rounds and pass state are real; prose, diff selection, and timing are condensed.</p>
+<dialog class="capture-dialog" id="product-capture" data-capture-dialog aria-labelledby="product-capture-title" aria-describedby="product-capture-note">
+  <div class="capture-head"><span class="micro" id="product-capture-title">DGC · real local-model capture · {{CAPTURE_CLI_DURATION_LABEL}}</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play" aria-describedby="product-capture-note"><source data-src="/assets/cli-capture.webm" type="video/webm"><source data-src="/assets/cli-capture.mp4" type="video/mp4"></video>
+  <p id="product-capture-note">{{CAPTURE_CLI_PROVENANCE}}</p>
 </dialog>

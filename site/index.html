@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
+<script>document.documentElement.classList.add('defer-styles');if(location.hash)document.documentElement.classList.add('fh');try{if(localStorage.getItem("dgc-announcement-0.26.4")==='dismissed')document.documentElement.classList.add('announcement-dismissed')}catch{}if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
 <title>Vibe DGC — a coding agent for the models you run</title>
 <meta name="description" content="A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor.">
 
@@ -19,9 +19,11 @@
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Vibe DGC — a coding agent for the models you run"><meta name="twitter:description" content="A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor."><meta name="twitter:image" content="https://vibedgc.com/og-card.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
 <link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
-<link rel="preload" href="/assets/hero-graded-poster.jpg" as="image" fetchpriority="high">
+<link rel="preload" href="/assets/hero-mobile-poster.webp" as="image" fetchpriority="high" media="(max-width:800px)">
+<link rel="preload" href="/assets/hero-graded-poster.jpg" as="image" fetchpriority="high" media="(min-width:801px)">
 <link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<style data-critical-revision="2a40022334ee">@font-face{font-family:Geist;src:url('/assets/fonts/geist-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}@font-face{font-family:Geist;src:url('/assets/fonts/geist-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}@font-face{font-family:'Geist Fallback';src:local('Arial');font-style:normal;font-weight:400 500;size-adjust:102.21%;ascent-override:98.33%;descent-override:28.86%;line-gap-override:0%}@font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}@font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}@font-face{font-family:'JetBrains Mono Fallback';src:local('DejaVu Sans Mono');font-style:normal;font-weight:400 500;size-adjust:99.66%;ascent-override:102.35%;descent-override:30.10%;line-gap-override:0%}:root{color-scheme:dark;--bg:#0b0b0d;--surface:#121215;--raised:#18181d;--overlay:#1d1d22;--line:#26262d;--line-strong:#34343c;--text:#ededf1;--text-2:#a6a6b0;--text-3:#686874;--muted:#7c7c88;--accent:#7c5cff;--lavender:#a78bfa;--accent-soft:rgba(124,92,255,.12);--accent-line:rgba(124,92,255,.35);--mark:#7c5cff;--mark-neutral:#6b6b78;--good:#5bcb8b;--warn:#fab219;--fail:#d85b63;--sans:Geist,'Geist Fallback',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono','JetBrains Mono Fallback','SFMono-Regular',Consolas,monospace;--e0:none;--e1:inset 0 1px rgba(255,255,255,.025);--e2:0 24px 70px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.05);--e3:0 40px 100px rgba(0,0,0,.58),inset 0 1px rgba(255,255,255,.06);--radius:8px;--radius-lg:14px;--max:1240px;--gutter:clamp(20px,4vw,48px);--section:112px;--t-fast:160ms;--t-med:280ms;--t-slow:600ms;--ease:cubic-bezier(.22,1,.36,1)}@media(max-width:1040px){:root{--section:80px}}@media(max-width:760px){:root{--section:64px;--gutter:20px}}@media(prefers-reduced-motion:reduce){:root{--t-fast:0ms;--t-med:0ms;--t-slow:0ms}}*,*::before,*::after{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--text);font:400 15.5px/1.6 var(--sans);-webkit-font-smoothing:antialiased}button,input,textarea,select{font:inherit}button,a{touch-action:manipulation}a{color:inherit;text-decoration:none}img,svg,video{display:block;max-width:100%}figure,blockquote,p,h1,h2,h3,h4,ul,ol{margin:0}ul,ol{padding:0}code,kbd,.mono{font-family:var(--mono)}code{font-size:.9em;color:var(--lavender)}:focus-visible{outline:2px solid var(--lavender);outline-offset:3px;border-radius:3px}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip-link{position:fixed;left:16px;top:-80px;z-index:1000;padding:10px 14px;background:#fff;color:#000;border-radius:6px}.skip-link:focus{top:16px;color:#000}.container{width:min(var(--max),calc(100% - (var(--gutter)*2)));margin-inline:auto}.micro,.eyebrow{font:500 11px/1.35 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}.eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:22px;color:var(--text-2)}.eyebrow::before{content:"";width:2px;height:14px;background:var(--accent)}.eyebrow b{font-weight:500;color:var(--lavender)}.lede{max-width:52ch;color:var(--text-2);font-size:15px;line-height:1.55}h1,h2,h3,h4{color:#fff;font-weight:500;text-wrap:balance}h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.035em}.announcement{height:32px;display:flex;align-items:center;justify-content:center;gap:12px;border-bottom:1px solid var(--line);background:#101013;font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-2);position:relative;z-index:80}.announcement[hidden],.announcement-dismissed .announcement{display:none}.fh body{display:none}.defer-styles .site-footer{display:none}.announcement a{display:flex;align-items:center;gap:8px}.announcement button{position:absolute;right:14px;top:2px;width:28px;height:28px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:18px}.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 12px rgba(91,203,139,.55)}.site-header{position:sticky;top:0;z-index:70;height:72px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;width:min(var(--max),calc(100% - (var(--gutter)*2)));margin-inline:auto;background:linear-gradient(to bottom,rgba(11,11,13,.94),rgba(11,11,13,.8));backdrop-filter:blur(18px);border-bottom:1px solid transparent}.brand{display:inline-flex;align-items:center;gap:10px;width:max-content;color:#fff;font:500 14px/1 var(--mono);letter-spacing:.08em}.brand svg{width:26px;height:26px;fill:var(--accent)}.nav-pill{justify-self:center;display:flex;align-items:center;padding:4px;border:1px solid var(--line);border-radius:999px;background:rgba(18,18,21,.8);box-shadow:var(--e1)}.nav-pill a{padding:8px 12px;border-radius:999px;color:var(--text-2);font:500 11px/1 var(--mono)}.nav-pill a[aria-current=page]{background:var(--raised);color:#fff}.nav-pill .nav-github{border-left:1px solid var(--line);border-radius:0 999px 999px 0;margin-left:3px}.button{min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 17px;border:1px solid var(--line-strong);border-radius:7px;color:#fff;font:500 12px/1 var(--mono);cursor:pointer}.button-primary{background:var(--accent);border-color:var(--accent);color:#09090b}.nav-install{justify-self:end}.nav-toggle{display:none;justify-self:end;width:44px;height:44px;border:1px solid var(--line);border-radius:7px;background:var(--surface);cursor:pointer;padding:13px 11px}.nav-toggle span[aria-hidden]{display:block;height:1px;background:var(--text);margin:5px 0}@media(max-width:1040px){.site-header{grid-template-columns:1fr auto}.nav-pill,.nav-install{display:none}.nav-toggle{display:block}}@media(max-width:760px){body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;backdrop-filter:none}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}.reveal-ready .hero .reveal{opacity:1;transform:none}.defer-styles .hero~*,.defer-styles footer{display:none}.hero{position:relative;min-height:min(860px,calc(100svh - 104px));display:flex;align-items:flex-end;overflow:hidden;background:#08080a}.hero-media{position:absolute;inset:0}.hero-poster,.hero-media video{position:absolute;inset:0;width:100%;height:100%}.hero-media video{opacity:0}.hero-media.video-ready video{opacity:1}.hero-media video,.hero-media img{width:100%;height:100%;object-fit:cover;object-position:center 48%}.hero-media::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(8,8,10,.88) 0%,rgba(8,8,10,.55) 46%,rgba(8,8,10,.2) 75%),linear-gradient(0deg,var(--bg) 0%,transparent 35%,rgba(8,8,10,.18) 100%),rgba(124,92,255,.1)}.hero .container{position:relative;z-index:2;padding-top:100px;padding-bottom:58px}.hero-copy{max-width:810px}.hero-copy h1{max-width:12ch}.hero-copy>.lede{margin-top:24px;max-width:62ch;font-size:17px;color:#c8c8d0}.hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:30px}.quiet-link{min-height:42px;display:inline-flex;align-items:center;padding:0 10px;color:var(--text-2);font:500 11px/1 var(--mono)}.install-panel{position:relative;max-width:650px;margin-top:26px;padding:1px;border-radius:10px;background:var(--line-strong);overflow:hidden}.install-inner{position:relative;border-radius:9px;background:rgba(15,15,18,.92);overflow:hidden}.os-tabs{display:flex;border-bottom:1px solid var(--line)}.os-tabs button{appearance:none;border:0;border-right:1px solid var(--line);background:transparent;color:var(--muted);padding:10px 13px;font:500 10px/1 var(--mono)}.install-command{min-height:55px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:0 15px;color:var(--text);font:500 13px/1.45 var(--mono)}.install-command .prompt{color:var(--lavender)}.install-command code{color:var(--text);white-space:nowrap;overflow:auto;scrollbar-width:none}.copy-button{border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text-2);padding:7px 9px;font:500 10px/1 var(--mono)}.requirements{padding:9px 14px;border-top:1px solid var(--line);color:var(--muted);font:500 10px/1.4 var(--mono);letter-spacing:.04em}.stat-grid{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);border-radius:8px;overflow:hidden;background:rgba(14,14,17,.76);backdrop-filter:blur(16px);margin-top:44px}.stat{min-height:104px;padding:18px;border-left:1px solid var(--line)}.stat:first-child{border-left:0}.stat-value{display:block;color:#fff;font:500 27px/1 var(--sans);font-variant-numeric:tabular-nums;letter-spacing:-.025em}.stat-label{display:block;margin-top:12px;color:var(--muted);font:500 10px/1.45 var(--mono);letter-spacing:.07em;text-transform:uppercase}.proof-facts a{min-height:24px}.site-footer a{display:inline-block}@media(max-width:1040px){.stat-grid{grid-template-columns:repeat(3,1fr)}.stat{border-top:1px solid var(--line)}.stat:nth-child(-n+3){border-top:0}.stat:nth-child(4){border-left:0}.stat:last-child{grid-column:span 2}}@media(max-width:760px){.hero{min-height:780px}.hero .container{padding-top:68px;padding-bottom:30px}.hero-copy>.lede{font-size:15.5px}.hero-media::after{background:linear-gradient(90deg,rgba(8,8,10,.85),rgba(8,8,10,.45)),linear-gradient(0deg,var(--bg),transparent 45%),rgba(124,92,255,.08)}.install-inner,.stat-grid{backdrop-filter:none}.install-command{font-size:11px}.install-command code{white-space:normal}.requirements{font-size:9px}.stat-grid{grid-template-columns:repeat(2,1fr);margin-top:28px}.stat{min-height:92px}.stat:nth-child(3){border-top:1px solid var(--line);border-left:0}.stat:nth-child(4){border-left:1px solid var(--line)}.stat:last-child{grid-column:1/-1;border-left:0}.stat-value{font-size:23px}}@media(max-width:480px){.hero-actions .button{flex:1}.hero-actions .quiet-link{width:100%;padding-left:0}}</style>
+<link rel="stylesheet" href="/assets/site.css?v=2a40022334ee" media="print" id="site-styles"><script>(()=>{const l=document.getElementById('site-styles'),r=document.documentElement,events=['wheel','touchstart','pointerdown','keydown','click','dgc:load-styles'];let ready=false,wanted=Boolean(location.hash),applied=false,failed=false,timer,guard;const cleanup=()=>events.forEach(n=>removeEventListener(n,want,true)),reveal=()=>r.classList.remove('defer-styles','fh'),fail=()=>{if(failed||applied)return;failed=true;clearTimeout(timer);r.dataset.stylesFailOpen='true';reveal();dispatchEvent(new Event('dgc:styles-fail-open'))},done=()=>{if(applied)return;applied=true;clearTimeout(timer);clearTimeout(guard);cleanup();l.media='all';delete r.dataset.stylesFailOpen;r.dataset.stylesReady='true';reveal();dispatchEvent(new Event('dgc:styles-ready'))},markReady=()=>{if(ready)return;ready=true;clearTimeout(guard);guard=undefined;if(wanted)done();else timer=setTimeout(done,3600)},want=()=>{wanted=true;l.media='all';if(ready)done();else if(!guard)guard=setTimeout(fail,3000)};guard=setTimeout(fail,3000);if(wanted)l.media='all';events.forEach(n=>addEventListener(n,want,{once:true,passive:true,capture:true}));l.addEventListener('load',markReady,{once:true});l.addEventListener('error',fail,{once:true});if(l.sheet)markReady()})()</script><noscript><link rel="stylesheet" href="/assets/site.css?v=2a40022334ee"></noscript>
 <script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.4","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}}]</script>
 </head>
 <body class="page-home">
@@ -65,11 +67,12 @@
 <main id="content">
 <section class="hero" id="top">
   <div class="hero-media" aria-hidden="true">
-    <video autoplay muted loop playsinline preload="none" fetchpriority="high" poster="/assets/hero-graded-poster.jpg" data-hero-video>
-      <source data-src="/assets/hero-mobile.webm" type="video/webm" media="(max-width:760px)">
-      <source data-src="/assets/hero-mobile.mp4" type="video/mp4" media="(max-width:760px)">
-      <source data-src="/assets/hero-graded.webm" type="video/webm">
-      <source data-src="/assets/hero-graded.mp4" type="video/mp4">
+    <picture class="hero-poster"><source srcset="/assets/hero-mobile-poster.webp" media="(max-width:800px)" type="image/webp"><img src="/assets/hero-graded-poster.jpg" width="1920" height="1080" fetchpriority="high" alt=""></picture>
+    <video autoplay muted loop playsinline preload="auto" data-hero-video>
+      <source src="/assets/hero-mobile.webm" type="video/webm" media="(max-width:800px)">
+      <source src="/assets/hero-mobile.mp4" type="video/mp4" media="(max-width:800px)">
+      <source src="/assets/hero-graded.webm" type="video/webm">
+      <source src="/assets/hero-graded.mp4" type="video/mp4">
     </video>
   </div>
   <div class="container">
@@ -80,7 +83,7 @@
       <div class="hero-actions">
         <a class="button button-primary" href="https://docs.vibedgc.com/getting-started" data-event="get_started">Get started <span aria-hidden="true">→</span></a>
         <a class="button" href="/benchmark">See the benchmark</a>
-        <a class="quiet-link" href="#product-capture" data-open-capture>Watch it work · 0:52 <span aria-hidden="true">↗</span></a>
+        <a class="quiet-link" href="#product-capture" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Watch it work · 0:47 <span aria-hidden="true">↗</span></a>
       </div>
       <div class="install-panel" data-install-tabs data-copy-scope>
         <div class="install-inner">
@@ -105,7 +108,7 @@
     <div class="marquee-set"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
     <div class="marquee-set" aria-hidden="true"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
   </div>
-  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc" data-event="marketplace"><span>Editor</span>VS Code + Cursor <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>Five harness run summaries <b aria-hidden="true">→</b></a></div>
+  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc" data-event="marketplace"><span>Marketplace · 2026-09-04 snapshot</span>2 reported installs <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>five harness run summaries <b aria-hidden="true">→</b></a></div>
 </section>
 
 <section class="section field field-2" id="cli">
@@ -113,11 +116,11 @@
     <div class="section-split">
       <header class="section-copy reveal"><div class="eyebrow"><b>01</b> The CLI</div><h2>A real agentic loop, in your terminal.</h2><p class="lede">Reads, edits, runs the tests and self-corrects. Permission modes, plans, skills, hooks and a multi-agent fleet in one focused TUI.</p></header>
       <figure class="instrument field field-1 reveal" aria-labelledby="fig1-title">
-  <figcaption class="figure-title" id="fig1-title"><span class="figure-id">FIG.1 · Agentic loop</span><span>read → edit → run → verify · until the tests pass</span><span class="figure-state">measured result</span></figcaption>
+  <figcaption class="figure-title" id="fig1-title"><span class="figure-id">FIG.1 · Agentic loop</span><span>read → edit → run → verify · until the tests pass</span><span class="figure-state">measured slice</span></figcaption>
   <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
   <div class="loop-layout">
     <div class="loop-dial">
-      <svg class="loop-svg" viewBox="0 0 520 420" role="img" aria-label="An illustrative reconstruction of a measured DGC result circles through read, edit, run and verify, then returns after a failed first round and passes on round two.">
+      <svg class="loop-svg" viewBox="0 0 520 420" role="img" aria-label="An illustrative reconstruction of a measured DGC result circles through read, edit, run and verify, then returns after a failed first round and passes on its final recovery round.">
         <defs>
           <marker id="loop-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#9a9aa6"/></marker>
           <marker id="loop-arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#a78bfa"/></marker>
@@ -131,7 +134,7 @@
         <text class="label" x="420" y="206">EDIT</text><text class="sub" x="420" y="222">write · patch</text>
         <text class="label" x="260" y="385" text-anchor="middle">RUN</text><text class="sub" x="260" y="401" text-anchor="middle">go test ./...</text>
         <text class="label" x="100" y="206" text-anchor="end">VERIFY</text><text class="sub" x="100" y="222" text-anchor="end">real exit code</text>
-        <text class="center" x="260" y="204" text-anchor="middle">ROUND 02</text><text class="note" x="260" y="226" text-anchor="middle">1 recovery · suite passed</text>
+        <text class="center" x="260" y="204" text-anchor="middle">ROUND 2</text><text class="note" x="260" y="226" text-anchor="middle">1 recovery round · suite passed</text>
         <circle class="loop-packet" r="4.5"/><circle class="loop-packet p2" r="4.5"/><circle class="loop-packet p3" r="4.5"/>
       </svg>
     </div>
@@ -139,8 +142,8 @@
       <div class="trace-heading">saved run · Go · alphametics</div>
       <ol class="trace-list">
         <li><span class="n">01</span><span class="kind">read</span><span class="work">alphametics.go · tests</span><span class="result">2 files</span></li>
-        <li><span class="n">02</span><span class="kind">edit</span><span class="work">column backtracking solver</span><span class="result">round 1</span></li>
-        <li><span class="n">03</span><span class="kind">run</span><span class="work">illustrative in-session test</span><span class="result">round 1</span></li>
+        <li><span class="n">02</span><span class="kind">edit</span><span class="work">column backtracking solver</span><span class="result">first round</span></li>
+        <li><span class="n">03</span><span class="kind">run</span><span class="work">illustrative in-session test</span><span class="result">first round</span></li>
         <li><span class="n">04</span><span class="kind">verify</span><span class="work">suite still failing</span><span class="result fail">self-correct</span></li>
         <li><span class="n">05</span><span class="kind">read</span><span class="work">resume · inspect rollback</span><span class="result">line 137</span></li>
         <li><span class="n">06</span><span class="kind">edit</span><span class="work">preserve winning assignment</span><span class="result">focused fix</span></li>
@@ -152,20 +155,22 @@
 </figure>
 
     </div>
-    <div class="cli-evidence"><div class="terminal-window reveal" aria-label="An illustrative reconstruction of a DGC benchmark session">
-  <div class="terminal-bar"><i></i><i></i><i></i><span>dgc · go/alphametics · illustrative replay</span></div>
+    <div class="cli-evidence"><div class="terminal-window reveal" aria-label="Scripted illustration of the DGC terminal interface">
+  <div class="terminal-bar"><i></i><i></i><i></i><span>dgc · scripted interface sequence</span></div>
   <div class="terminal-body">
-    <div class="terminal-line" style="--delay:.2s"><span class="prompt">❯</span> fix the alphametics solver and run the real tests</div>
-    <div class="terminal-line" style="--delay:1s"><span class="agent">I’ll inspect the implementation and its cases first.</span></div>
-    <div class="terminal-line" style="--delay:1.8s"><span class="tool">→ read_file</span> alphametics.go · alphametics_test.go</div>
-    <div class="terminal-line" style="--delay:2.6s"><span class="tool">← edit_file</span> preserve winning assignment on success</div>
-    <div class="terminal-line diff-del" style="--delay:3.2s">− assignment[letter] = -1 &nbsp; // unconditional rollback</div>
-    <div class="terminal-line diff-add" style="--delay:3.8s">+ if !solve(next) { rollback() } &nbsp; // failure only</div>
-    <div class="terminal-line" style="--delay:4.6s"><span class="tool">$ bash</span> go test ./...</div>
-    <div class="terminal-line" style="--delay:5.5s"><span class="success">✓ scored pass</span> · isolated grader 0.4 s</div>
-    <div class="terminal-line" style="--delay:6.2s"><span class="agent">Fixed the success-path rollback and verified the full package.</span></div>
+    <div class="terminal-line" style="--delay:.2s"><span class="prompt">·</span> controlled fixture · default permissions</div>
+    <div class="terminal-line" style="--delay:1s"><span class="agent">I’ll inspect the implementation and its tests first.</span></div>
+    <div class="terminal-line" style="--delay:1.8s"><span class="tool">→ read_file</span> clamp.py</div>
+    <div class="terminal-line" style="--delay:2.4s"><span class="tool">→ read_file</span> test_clamp.py</div>
+    <div class="terminal-line" style="--delay:3s"><span class="tool">✎ edit_file</span> clamp.py</div>
+    <div class="terminal-line diff-del" style="--delay:3.6s">− return min(lower, max(upper, value))</div>
+    <div class="terminal-line diff-add" style="--delay:4.2s">+ return max(lower, min(upper, value))</div>
+    <div class="terminal-line" style="--delay:4.9s"><span class="tool">$ bash</span> python3 -m unittest -v</div>
+    <div class="terminal-line" style="--delay:5.6s"><span class="success">✓ 3 tests passed</span></div>
+    <div class="terminal-line" style="--delay:6.3s"><span class="agent">Fixed the clamp bounds and verified the full test module.</span></div>
     <div class="terminal-line" style="--delay:7s"><span class="prompt">❯</span> <span class="caret" aria-hidden="true"></span></div>
   </div>
+  <div class="terminal-proof"><span>Illustrative UI sequence—not a transcript.</span><button type="button" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Play real local-model capture · 0:47 <span aria-hidden="true">↗</span></button></div>
 </div>
 </div>
   </div>
@@ -174,39 +179,22 @@
 <section class="section section-bleed" id="extension">
   <div class="container">
     <header class="section-copy reveal"><div class="eyebrow"><b>02</b> The extension</div><h2>The same harness, native to your editor.</h2><p class="lede">On native local/API routes: structured tools, readable diffs, goal-aware turns, permission decisions, and plan feedback. Subscription routes retain DGC's local goal record and presentation while the vendor owns its turn.</p></header>
-    <div style="margin-top:44px"><figure class="instrument reveal" aria-labelledby="fig3-title">
-  <figcaption class="figure-title" id="fig3-title"><span class="figure-id">FIG.3 · Editor surface</span><span>the same harness · native to the editor</span><span class="figure-state">VS Code · Cursor</span></figcaption>
-  <div class="editor-shell" role="img" aria-label="DGC inside an editor: a focused code diff beside an agent panel with a standing goal, structured tool calls and passing tests.">
-    <div class="editor-top">acme-api — Visual Studio Code</div>
-    <aside class="editor-rail" aria-hidden="true"><span>◇</span><span>⌕</span><span>///</span><span>⑂</span><span>⚙</span></aside>
-    <aside class="editor-tree"><strong>EXPLORER · ACME-API</strong><div class="tree-row">⌄ src</div><div class="tree-row indent">◇ index.ts</div><div class="tree-row indent">◇ login.ts</div><div class="tree-row indent">◇ rateLimit.ts</div><div class="tree-row">⌄ tests</div><div class="tree-row indent">◇ login.test.ts</div><div class="tree-row">› package.json</div></aside>
-    <div class="editor-code">
-      <div class="editor-tabs"><span>◇ login.ts &nbsp; M</span><span>◇ login.test.ts &nbsp; M</span></div>
-      <div class="code-lines">
-        <div class="code-row"><span class="ln">1</span><span></span><span>import { Router } from 'express'</span></div>
-        <div class="code-row add"><span class="ln">2</span><span class="sign">+</span><span>import { rateLimit } from '../mw/rateLimit'</span></div>
-        <div class="code-row"><span class="ln">3</span><span></span><span></span></div>
-        <div class="code-row"><span class="ln">4</span><span></span><span>const router = Router()</span></div>
-        <div class="code-row del"><span class="ln">5</span><span class="sign">−</span><span>router.post('/login', loginHandler)</span></div>
-        <div class="code-row add"><span class="ln">5</span><span class="sign">+</span><span>router.post('/login', rateLimit(5, '1m'), loginHandler)</span></div>
-        <div class="code-row"><span class="ln">6</span><span></span><span></span></div>
-        <div class="code-row"><span class="ln">7</span><span></span><span>export default router</span></div>
-      </div>
-      <div class="editor-status">login.ts &nbsp; +2 −1 · staged · <span data-editor-test>npm test</span></div>
-    </div>
-    <aside class="agent-panel">
-      <div class="agent-head"><span>/// DGC · Agent</span><span>32k · 41%</span></div>
-      <div class="goal-chip">Goal · ship verified login hardening &nbsp; <span>08:42</span></div>
-      <p>Add rate limiting to <code>/api/login</code> and cover it with a test.</p>
-      <div class="agent-step" style="--delay:1.2s"><b>→ Read</b> &nbsp; src/routes/login.ts<br><span>42 lines · symbols indexed</span></div>
-      <div class="agent-step" style="--delay:2.9s"><b>✎ Edit</b> &nbsp; 2 files<br><span>+ limiter middleware · + regression case</span></div>
-      <div class="agent-step" style="--delay:4.7s"><b>$ Bash</b> &nbsp; npm test -- login<br><span>12 passed · 2.4 s</span></div>
-      <p class="agent-final">Implemented a per-IP sliding window and verified rejection and recovery paths.</p>
-      <div class="editor-composer"><span>❯</span> Ask DGC to keep going…</div>
-    </aside>
-    <div class="editor-bottom"><span>⑂ main*</span><span>✓ 12 passed · UTF-8 · DGC · qwen3.8:27b</span></div>
-  </div>
+    <div style="margin-top:44px"><figure class="instrument capture-figure reveal" aria-labelledby="fig3-title">
+  <figcaption class="figure-title" id="fig3-title"><span class="figure-id">FIG.3 · Editor surface</span><span>Actual extension · 0:31 · real time</span><span class="figure-state">VS Code · Cursor</span></figcaption>
+  <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
+  <button class="capture-card" type="button" data-open-capture="editor-capture" aria-controls="editor-capture" aria-haspopup="dialog" aria-expanded="false" aria-label="Play the 0:31 DGC editor capture">
+    <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" data-src="/assets/editor-capture-poster.jpg" data-srcset="/assets/editor-capture-poster-720.jpg 720w, /assets/editor-capture-poster.jpg 1440w" data-sizes="(max-width:1040px) calc(100vw - 64px), 1240px" data-lazy-image width="1440" height="900" loading="lazy" decoding="async" alt="">
+    <span class="capture-shade" aria-hidden="true"></span>
+    <span class="capture-play" aria-hidden="true"><i>▶</i><b>Play editor capture</b><small>0:31 · real time</small></span>
+  </button>
+  <p class="capture-caption">Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.</p>
 </figure>
+
+<dialog class="capture-dialog" id="editor-capture" data-capture-dialog aria-labelledby="editor-capture-title" aria-describedby="editor-capture-note">
+  <div class="capture-head"><span class="micro" id="editor-capture-title">DGC · actual extension surface · 0:31</span><button type="button" data-close-capture aria-label="Close editor capture">×</button></div>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/editor-capture-poster.jpg" data-event-play="capture_play" aria-describedby="editor-capture-note"><source data-src="/assets/editor-capture.webm" type="video/webm"><source data-src="/assets/editor-capture.mp4" type="video/mp4"></video>
+  <p id="editor-capture-note">Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.</p>
+</dialog>
 </div>
     <div class="feature-grid extension-features"><article><h3>Structured tools</h3><p>Native-loop intent, target and result stay scannable.</p></article><article><h3>Reviewable diffs</h3><p>Additions and removals remain first-class.</p></article><article><h3>Goal controls</h3><p>Local record, timer, progress, pause and cancel at hand.</p></article><article><h3>Native plan review</h3><p>Approve, revise, or keep researching on local/API routes.</p></article></div>
   </div>
@@ -216,8 +204,10 @@
   <div class="container artifact-layout">
     <header class="artifact-copy reveal"><div class="eyebrow"><b>03</b> Native plan artifacts</div><h2>Review the plan as a real page.</h2><p class="lede">On local/API routes during the current process, a DGC plan can open as a clean page on a private loopback port—not raw Markdown racing past your terminal. The plan text saves with the session, so you can reopen it in DGC after a restart.</p><p class="artifact-note">NATIVE ROUTES · PRIVATE LOOPBACK PREVIEW · PLAN TEXT SAVED WITH THE SESSION</p></header>
     <div class="browser reveal" data-artifact-tabs>
-      <div class="browser-bar"><span class="browser-dots"><i></i><i></i><i></i></span><span class="browser-address">127.0.0.1:45000/plan/refactor-auth</span><span class="browser-select" role="tablist"><button role="tab" aria-selected="true">PLAN</button></span></div>
-      <article class="artifact-page" role="tabpanel"><span class="artifact-kicker">/// PROPOSED PLAN</span><h3>Refactor auth into its own package</h3><p>Move token and verification helpers into one package and update the callers, without changing behavior.</p><ol class="artifact-steps"><li>Create the package and move the helpers.<code>2 files</code></li><li>Re-export the public surface.<code>1 file</code></li><li>Update callers and run the suite.<code>7 imports</code></li></ol><div class="artifact-approval"><span>Approve in terminal</span><span>3 steps · plan text saved</span></div></article>
+      <div class="browser-bar"><span class="browser-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="browser-address" data-artifact-address>127.0.0.1:45000/plan/refactor-auth</span><span class="browser-controls"><span class="browser-select" role="tablist" aria-label="Plan artifact views"><button id="artifact-tab-plan" type="button" role="tab" aria-controls="artifact-panel-plan" aria-selected="true" data-address="127.0.0.1:45000/plan/refactor-auth">PLAN</button><button id="artifact-tab-files" type="button" role="tab" aria-controls="artifact-panel-files" aria-selected="false" tabindex="-1" data-address="127.0.0.1:45000/plan/refactor-auth/files">FILES</button><button id="artifact-tab-verify" type="button" role="tab" aria-controls="artifact-panel-verify" aria-selected="false" tabindex="-1" data-address="127.0.0.1:45000/plan/refactor-auth/verify">VERIFY</button></span><button class="browser-cycle" type="button" data-artifact-cycle aria-pressed="false" aria-label="Pause automatic artifact views">Ⅱ</button></span></div>
+      <article class="artifact-page" id="artifact-panel-plan" role="tabpanel" aria-labelledby="artifact-tab-plan"><span class="artifact-kicker">/// PROPOSED PLAN</span><h3>Refactor auth into its own package</h3><p>Move token and verification helpers into one package and update the callers, without changing behavior.</p><ol class="artifact-steps"><li>Create the package and move the helpers.<code>2 files</code></li><li>Re-export the public surface.<code>1 file</code></li><li>Update callers and run the suite.<code>7 imports</code></li></ol><div class="artifact-approval"><span>Approve in terminal</span><span><kbd>←</kbd> <kbd>→</kbd> views · plan text saved</span></div></article>
+      <article class="artifact-page" id="artifact-panel-files" role="tabpanel" aria-labelledby="artifact-tab-files" hidden><span class="artifact-kicker">/// FILE IMPACT</span><h3>Bound the change before editing</h3><p>The proposed surface stays inside the auth package and its direct callers. No migration or public API change is planned.</p><ol class="artifact-steps"><li><span>src/auth/token.ts · verification helpers</span><code>move</code></li><li><span>src/auth/index.ts · stable re-exports</span><code>create</code></li><li><span>7 direct imports · preserve behavior</span><code>update</code></li></ol><div class="artifact-approval"><span>Review in terminal</span><span><kbd>←</kbd> <kbd>→</kbd> views · 3 change groups</span></div></article>
+      <article class="artifact-page" id="artifact-panel-verify" role="tabpanel" aria-labelledby="artifact-tab-verify" hidden><span class="artifact-kicker">/// VERIFICATION GATES</span><h3>Define done before execution</h3><p>Approval starts the implementation. The proposed definition of done requires every listed check to return a real successful exit code.</p><ol class="artifact-steps artifact-checks"><li><span>Auth unit and regression suite</span><code>npm test -- auth</code></li><li><span>Static contract check</span><code>npm run typecheck</code></li><li><span>Patch hygiene</span><code>git diff --check</code></li></ol><div class="artifact-approval"><span>Execution after approval</span><span><kbd>←</kbd> <kbd>→</kbd> views · 3 required gates</span></div></article>
     </div>
   </div>
 </section>
@@ -244,13 +234,13 @@
 
 <section class="section field field-2" id="benchmark">
   <div class="container">
-    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> Benchmark</div><h2>Measured on a model you run yourself.</h2><p class="lede">A measured 90-task, six-language slice. Every manifest records the same model alias, caller-declared digest, endpoint URL, hardware, and 600-second allowance per round; model weights were not independently verified.</p></header>
+    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> Benchmark</div><h2>Measured on a model you run yourself.</h2><p class="lede">A measured slice of 90 tasks across six languages. Every manifest records the same model alias, caller-declared digest, endpoint URL, hardware, and 600-second allowance per round; model weights were not independently verified.</p></header>
     <figure class="instrument benchmark-panel reveal" aria-labelledby="fig4-title">
   <figcaption class="figure-title" id="fig4-title"><span class="figure-id">FIG.4 · Harness evaluation</span><span>pass@2 · 90 problems · 600 s/round</span><span class="figure-state">measured slice</span></figcaption>
-  <div class="dot-plot" role="img" aria-label="Harness pass at two scores on an axis from 80 to 100 percent. Goose 95.6, DGC 94.4, pi 94.4, OpenCode 88.9, and Codex CLI 87.8 percent."><div class="plot-grid"><div class="plot-row" style="--score:95.6"><span class="plot-name">goose</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">95.6%</span></div><div class="plot-row dgc" style="--score:94.4"><span class="plot-name">DGC</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">94.4%</span></div><div class="plot-row" style="--score:94.4"><span class="plot-name">pi</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">94.4%</span></div><div class="plot-row" style="--score:88.9"><span class="plot-name">OpenCode</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">88.9%</span></div><div class="plot-row" style="--score:87.8"><span class="plot-name">Codex CLI</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">87.8%</span></div></div><div class="plot-axis"><span style="left:0">80%</span><span style="left:25%">85%</span><span style="left:50%">90%</span><span style="left:75%">95%</span><span style="left:100%">100%</span></div><p class="plot-axis-label">pass@2 · axis runs 80–100%, not from zero</p></div>
-  <div class="cost-grid"><div class="cost-tile"><b>0</b><small>agent-round timeouts · DGC only</small></div><div class="cost-tile"><b>121.7 s</b><small>average round · fastest measured</small></div><div class="cost-tile"><b>-24.6%</b><small>output tokens vs score leader</small></div><div class="cost-tile"><b>85 / 90</b><small>solved · second, level with pi</small></div></div>
+  <div class="dot-plot" role="img" aria-label="Harness pass at 2 scores on an axis from 80 to 100 percent. goose 95.6 percent, DGC 94.4 percent, pi 94.4 percent, OpenCode 88.9 percent, Codex CLI 87.8 percent."><div class="plot-grid"><div class="plot-row"><span class="plot-name">goose</span><span class="plot-dot" style="left:78.000%" aria-hidden="true"></span><span class="plot-value" style="left:calc(78.000% + 15px)">95.6%</span></div><div class="plot-row dgc"><span class="plot-name">DGC</span><span class="plot-dot" style="left:72.000%" aria-hidden="true"></span><span class="plot-value" style="left:calc(72.000% + 15px)">94.4%</span></div><div class="plot-row"><span class="plot-name">pi</span><span class="plot-dot" style="left:72.000%" aria-hidden="true"></span><span class="plot-value" style="left:calc(72.000% + 15px)">94.4%</span></div><div class="plot-row"><span class="plot-name">OpenCode</span><span class="plot-dot" style="left:44.500%" aria-hidden="true"></span><span class="plot-value" style="left:calc(44.500% + 15px)">88.9%</span></div><div class="plot-row"><span class="plot-name">Codex CLI</span><span class="plot-dot" style="left:39.000%" aria-hidden="true"></span><span class="plot-value" style="left:calc(39.000% + 15px)">87.8%</span></div></div><div class="plot-axis"><span style="left:0.000%">80%</span><span style="left:25.000%">85%</span><span style="left:50.000%">90%</span><span style="left:75.000%">95%</span><span style="left:100.000%">100%</span></div><p class="plot-axis-label">pass@2 · axis runs 80–100%, not from zero</p></div>
+  <div class="cost-grid"><div class="cost-tile"><b>0</b><small>agent-round timeouts · DGC only</small></div><div class="cost-tile"><b>121.7 s</b><small>average round · fastest measured</small></div><div class="cost-tile"><b>-24.6%</b><small>output tokens vs goose</small></div><div class="cost-tile"><b>85 / 90</b><small>solved · rank 2, tied with pi</small></div></div>
   <details class="table-twin"><summary>Accessible table view</summary><div class="table-scroll"><table><thead><tr><th>Harness</th><th>Solved</th><th>pass@2</th><th>Evidence note</th></tr></thead><tbody><tr><td>goose</td><td class="num">86 / 90</td><td class="num">95.6%</td><td class="table-note">direct result rows</td></tr><tr><td>DGC</td><td class="num">85 / 90</td><td class="num">94.4%</td><td class="table-note">0 timeouts · 121.7 s/round · 293,675 output tokens</td></tr><tr><td>pi</td><td class="num">85 / 90</td><td class="num">94.4%</td><td class="table-note">direct result rows</td></tr><tr><td>OpenCode</td><td class="num">80 / 90</td><td class="num">88.9%</td><td class="table-note">direct result rows</td></tr><tr><td>Codex CLI</td><td class="num">79 / 90</td><td class="num">87.8%</td><td class="table-note">direct result rows</td></tr></tbody></table></div></details>
-  <p class="figure-foot">Every manifest records <code>qwen3.8:27b-orig</code>, the same caller-declared digest, endpoint URL, and hardware. The runner verified context size but not model weights. The saved manifest reports DGC 0.24.0; its runner commit was not recorded, so this is labelled a measured slice rather than a release-gating league.</p>
+  <p class="figure-foot">Every manifest records <code>qwen3.8:27b-orig</code>, the same caller-declared digest, endpoint URL, and hardware. The runner verified context size; model weights were not independently verified. The saved manifest reports DGC 0.24.0; its runner commit was not recorded, so this is labelled a measured slice rather than a release-gating league.</p>
 </figure>
     <p class="figure-foot">Method, caveats, raw-source checksums and reproducible commands live on the <a href="/benchmark">full benchmark page →</a></p>
   </div>
@@ -264,7 +254,7 @@
   <video muted loop playsinline preload="none" data-poster="/assets/power-graded-poster.jpg" data-lazy-video aria-hidden="true"><source data-src="/assets/power-graded.webm" type="video/webm"><source data-src="/assets/power-graded.mp4" type="video/mp4"></video>
   <div class="container">
     <header class="video-copy reveal"><div class="eyebrow"><b>07</b> Power tools</div><h2>Built for real, long, autonomous work.</h2><p class="lede">Optional modes for data-heavy tasks, verified unattended native-model runs, and turning your own sessions into scrubbed training data.</p></header>
-    <div class="glass-grid"><article class="glass reveal"><span class="micro">Persistent state</span><h3>A Python workspace across turns</h3><p>Load a dataset once, then operate on variables without repeating it into context.</p><code>/code-action on</code></article><article class="glass reveal"><span class="micro">Native autonomous gate</span><h3>Run until the check passes</h3><p>On local/API routes, failures return to the next turn and completion waits for a real exit code. Delegated vendor turns bypass this gate.</p><code>dgc --autonomous-gate "npm run check"</code></article><article class="glass reveal"><span class="micro">Trace → training</span><h3>Your usage becomes your data</h3><p>Export heuristic-filtered sessions as bounded, credential-scrubbed JSONL; review them before training.</p><code>dgc export-training --successful-only</code></article></div>
+    <div class="glass-grid"><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Persistent state</span><h3>A Python workspace across turns</h3><p>Load a dataset once, then operate on variables without repeating it into context.</p><code class="power-command"><span class="sr-only">Command: /code-action on</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="/code-action on" aria-hidden="true">/code-action on</span><i class="power-caret" aria-hidden="true"></i></code></article><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Native autonomous gate</span><h3>Run until the check passes</h3><p>On local/API routes, failures return to the next turn and completion waits for a real exit code. Delegated vendor turns bypass this gate.</p><code class="power-command"><span class="sr-only">Command: dgc --autonomous-gate &quot;npm run check&quot;</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="dgc --autonomous-gate &quot;npm run check&quot;" aria-hidden="true">dgc --autonomous-gate "npm run check"</span><i class="power-caret" aria-hidden="true"></i></code></article><article class="glass reveal command-demo" tabindex="0" data-command-demo><span class="micro">Trace → training</span><h3>Your usage becomes your data</h3><p>Export heuristic-filtered sessions as bounded, credential-scrubbed JSONL; review them before training.</p><code class="power-command"><span class="sr-only">Command: dgc export-training --successful-only</span><span class="power-prompt" aria-hidden="true">$</span><span data-command-text data-command="dgc export-training --successful-only" aria-hidden="true">dgc export-training --successful-only</span><i class="power-caret" aria-hidden="true"></i></code></article></div>
   </div>
 </section>
 
@@ -300,10 +290,10 @@
   </div>
 </section>
 
-<dialog class="capture-dialog" id="product-capture" aria-label="DGC product capture">
-  <div class="capture-head"><span class="micro">DGC · illustrative trace replay · 0:52</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
-  <video controls playsinline preload="metadata" data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play"><source src="/assets/cli-capture.webm" type="video/webm"><source src="/assets/cli-capture.mp4" type="video/mp4"></video>
-  <p>Illustrative reconstruction based on the retained <code>go/alphametics</code> result. Recorded rounds and pass state are real; prose, diff selection, and timing are condensed.</p>
+<dialog class="capture-dialog" id="product-capture" data-capture-dialog aria-labelledby="product-capture-title" aria-describedby="product-capture-note">
+  <div class="capture-head"><span class="micro" id="product-capture-title">DGC · real local-model capture · 0:47</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play" aria-describedby="product-capture-note"><source data-src="/assets/cli-capture.webm" type="video/webm"><source data-src="/assets/cli-capture.mp4" type="video/mp4"></video>
+  <p id="product-capture-note">Actual current DGC 0.26.4 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.</p>
 </dialog>
 
 </main>
@@ -333,15 +323,15 @@
     </nav>
     <nav aria-label="Project">
       <h2>Project</h2>
-      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/discussions">Community <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
     </nav>
   </div>
   <div class="footer-legal">
-    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.4</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/8b8dd26996189aecdf5f456cafef61bbc9977cc3"><code>8b8dd269</code></a></p>
+    <div class="footer-build"><p class="footer-status">Build record · source-linked</p><p>DGC <span class="js-ver">v0.26.4</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/8b8dd26996189aecdf5f456cafef61bbc9977cc3"><code>8b8dd269</code></a></p></div>
     <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
   </div>
 </footer>
 
-<script src="/assets/site.js?v=777bbb86a947" defer></script>
+<script src="/assets/site.js?v=2a40022334ee" defer></script>
 </body>
 </html>

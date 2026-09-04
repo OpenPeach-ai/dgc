@@ -557,6 +557,54 @@ register("mixed-case multipart boundary parses and observed/declared limits hold
   assert.equal(env.DGC_ANALYTICS.points.length, points);
 });
 
+register("canonical HTML GET records one page view and excluded requests record none", async () => {
+  const canonical = environment();
+  const page = await worker.fetch(request("/benchmark?source=qa", {
+    headers: {"user-agent": "Mozilla/5.0"},
+  }), canonical);
+  assert.equal(page.status, 200);
+  assert.equal(canonical.DGC_ANALYTICS.points.length, 1);
+  assert.deepEqual(canonical.DGC_ANALYTICS.points[0], {
+    indexes: ["page_view"],
+    blobs: ["vibedgc.com", "/benchmark", "desktop"],
+    doubles: [1],
+  });
+
+  const revalidated = environment({
+    ASSETS: {
+      async fetch(assetRequest) {
+        const pathname = new URL(assetRequest.url).pathname;
+        if (pathname === "/benchmark") return new Response(null, {status: 304});
+        return sharedAssets.fetch(assetRequest);
+      },
+    },
+  });
+  const notModified = await worker.fetch(request("/benchmark", {
+    headers: {"if-none-match": "\"cached-page\"", "user-agent": "Mozilla/5.0"},
+  }), revalidated);
+  assert.equal(notModified.status, 304);
+  assert.deepEqual(revalidated.DGC_ANALYTICS.points, [{
+    indexes: ["page_view"],
+    blobs: ["vibedgc.com", "/benchmark", "desktop"],
+    doubles: [1],
+  }]);
+
+  const excluded = [
+    ["HEAD", request("/benchmark", {method: "HEAD"}), 200],
+    ["redirect", request("/benchmark", {base: "https://www.vibedgc.com"}), 301],
+    ["404", request("/missing-page", {headers: {accept: "text/html"}}), 404],
+    ["preview", request("/benchmark", {base: "https://branch.pages.dev"}), 200],
+    ["DNT", request("/benchmark", {headers: {dnt: "1"}}), 200],
+    ["GPC", request("/benchmark", {headers: {"sec-gpc": "1"}}), 200],
+  ];
+  for (const [label, excludedRequest, expectedStatus] of excluded) {
+    const env = environment();
+    const response = await worker.fetch(excludedRequest, env);
+    assert.equal(response.status, expectedStatus, label);
+    assert.equal(env.DGC_ANALYTICS.points.length, 0, label);
+  }
+});
+
 register("valid analytics derives path from Referer and honors DNT", async () => {
   const env = environment();
   const eventBody = JSON.stringify({event: "marketplace", path: "/forged"});
@@ -577,6 +625,28 @@ register("valid analytics derives path from Referer and honors DNT", async () =>
   }), env);
   assert.equal(env.DGC_ANALYTICS.points.length, 1);
   assert.equal(env.DGC_SITE_DB.executions, before);
+});
+
+register("docs getting-started beacon derives its path from the docs Referer", async () => {
+  const env = environment();
+  const response = await worker.fetch(browserPost("/api/event", JSON.stringify({
+    event: "docs_getting_started_reached",
+    path: "/forged-client-path",
+  }), {
+    base: "https://docs.vibedgc.com",
+    ip: "203.0.113.34",
+    headers: {
+      "content-type": "application/json",
+      referer: "https://docs.vibedgc.com/getting-started?source=qa",
+    },
+  }), env);
+  assert.equal(response.status, 204);
+  assert.equal(env.DGC_ANALYTICS.points.length, 1);
+  assert.deepEqual(env.DGC_ANALYTICS.points[0], {
+    indexes: ["docs_getting_started_reached"],
+    blobs: ["docs.vibedgc.com", "/getting-started", "desktop"],
+    doubles: [1],
+  });
 });
 
 register("preview and attacker subdomains cannot record analytics", async () => {

@@ -39,6 +39,9 @@ cmp -s install.sh site/install.sh || {
 }
 # Static fallback text is reviewed and committed; deployment may only check it, never mutate it.
 bash "$ROOT/scripts/sync-site-version.sh" --check
+python3 "$ROOT/scripts/site-measurement.py" self-test
+python3 "$ROOT/scripts/site-measurement.py" check-marketplace \
+  --max-age-hours 48 --allow-unavailable
 python3 "$ROOT/scripts/build-site.py" --check
 if [ -d "$ROOT/bench/results-orig" ]; then
   python3 "$ROOT/scripts/export-benchmark-evidence.py" --check
@@ -54,9 +57,10 @@ jq -e '
   and .vars.DGC_ENVIRONMENT == "production"
   and (.vars.DGC_FROM_EMAIL | type == "string" and length > 0)
   and any(.d1_databases[]; .binding == "DGC_SITE_DB" and .database_id != "")
-  and any(.analytics_engine_datasets[]; .binding == "DGC_ANALYTICS")
+  and any(.analytics_engine_datasets[];
+    .binding == "DGC_ANALYTICS" and .dataset == "dgc_site_events")
 ' "$ROOT/wrangler.json" >/dev/null || {
-  echo "wrangler.json does not declare the production D1, analytics, and environment bindings" >&2
+  echo "wrangler.json does not declare production D1, dgc_site_events analytics, and environment bindings" >&2
   exit 1
 }
 secret_list=$(npx --yes "wrangler@$WRANGLER_VERSION" pages secret list \
@@ -68,6 +72,11 @@ for required_secret in RESEND_API_KEY DGC_RATE_LIMIT_SECRET DGC_CONTACT_EMAIL; d
     echo "Cloudflare Pages secret is missing: $required_secret" >&2; exit 1;
   }
 done
+[ -x "$ROOT/node_modules/.bin/playwright" ] && [ -x "$ROOT/node_modules/.bin/lighthouse" ] || {
+  echo "site acceptance dependencies are missing; run npm ci and install pinned Chromium" >&2
+  exit 1
+}
+npm run qa:site:release
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 python3 "$ROOT/scripts/check-site.py" --require-public-release --stage "$STAGE"

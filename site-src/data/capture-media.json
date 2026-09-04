@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "captures": {
+    "cli": {
+      "kind": "real_cli_local_model",
+      "live_model": true,
+      "controlled_fixture": true,
+      "real_time": true,
+      "tool_sequence": [
+        "read_file",
+        "read_file",
+        "edit_file",
+        "bash"
+      ],
+      "duration_seconds": 47.433,
+      "duration_label": "0:47",
+      "provenance": "Actual current DGC 0.26.4 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "model_route": "local Ollama · qwen2.5:14b",
+      "time_compression": 1.0,
+      "sandbox_backend": "bwrap",
+      "files": {
+        "webm": {
+          "path": "assets/cli-capture.webm",
+          "sha256": "77cda1a64fd794a7e242be0a33a070bc8c295e6b59ae6333ef884c62bb68c85e",
+          "bytes": 1954840,
+          "codec": "vp9",
+          "width": 1280,
+          "height": 720,
+          "duration_seconds": 47.433
+        },
+        "mp4": {
+          "path": "assets/cli-capture.mp4",
+          "sha256": "55656dc5809ffa51a09aa6c4177fb8adf636f8b19ca3d21f112f28a2f5b9f55a",
+          "bytes": 472273,
+          "codec": "h264",
+          "width": 1280,
+          "height": 720,
+          "duration_seconds": 47.433333
+        },
+        "poster": {
+          "path": "assets/cli-capture-poster.jpg",
+          "sha256": "cb553e127544d92b3ddffa38bfadc94afd58bcf27836607934b301d8f2f46738",
+          "bytes": 95926,
+          "codec": "mjpeg",
+          "width": 1280,
+          "height": 720
+        }
+      }
+    },
+    "editor": {
+      "kind": "actual_extension_deterministic_fixture",
+      "live_model": false,
+      "controlled_fixture": true,
+      "deterministic_fixture": true,
+      "real_time": true,
+      "tool_sequence": [
+        "read_file",
+        "edit_file",
+        "bash"
+      ],
+      "real_plan_button_click": true,
+      "visible_editor_matches_diff": true,
+      "source_unchanged_through_current_head": true,
+      "duration_seconds": 30.866,
+      "duration_label": "0:31",
+      "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
+      "vscode_version": "1.107.1",
+      "extension_version": "0.12.1",
+      "packaged_extension_source_commit": "90f1ad5d48cb7c07f58138a26a953e405ba34c59",
+      "extension_vsix_sha256": "9cf53b37d2db16376068bb5195908d89666f52576567dc8e8b6cf730daa3b390",
+      "time_compression": 1.0,
+      "files": {
+        "webm": {
+          "path": "assets/editor-capture.webm",
+          "sha256": "30f0eb8a03e2ed03278f56de2f38666699d8a6a409e683acad85d48d9e3f8b85",
+          "bytes": 1433621,
+          "codec": "vp9",
+          "width": 1440,
+          "height": 900,
+          "duration_seconds": 30.866
+        },
+        "mp4": {
+          "path": "assets/editor-capture.mp4",
+          "sha256": "07939f626cbd1a3cf28b21beb85e9d830aa7e1bd9c5ce208a9e9798dfdbf864d",
+          "bytes": 427653,
+          "codec": "h264",
+          "width": 1440,
+          "height": 900,
+          "duration_seconds": 30.866667
+        },
+        "poster": {
+          "path": "assets/editor-capture-poster.jpg",
+          "sha256": "5971e128b2e4ec49ae1a418b26804f2c2a97894587cadba0216000780b02ec0f",
+          "bytes": 172050,
+          "codec": "mjpeg",
+          "width": 1440,
+          "height": 900
+        },
+        "preview": {
+          "path": "assets/editor-capture-poster-720.jpg",
+          "sha256": "3be4970cab1c1cff625f0ac5404c0bf9f17a8ec6bbad647b0ea4cbec678359b8",
+          "bytes": 41327,
+          "codec": "mjpeg",
+          "width": 720,
+          "height": 450
+        }
+      }
+    }
+  }
+}

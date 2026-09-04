@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "assets": {
+    "og-card.svg": {
+      "png": "og-card.png",
+      "rendered_source_sha256": "e6a24747aa10f1aee64b9c51adb6d1d22ddcb8c4c6a98e0b754fe7850d2835ab",
+      "png_sha256": "1ce89b3cac1749341a5cb13255f9e075566fb579502237e4533cfb491734b59f"
+    },
+    "og-benchmark.svg": {
+      "png": "og-benchmark.png",
+      "rendered_source_sha256": "f2939a50e8184055bc9391a0aa2ab156fbf9fac2140cbe23e518a07a8db4485e",
+      "png_sha256": "62e437d2aa6298de26d6762692d5eb4d6d8374eaec9a05d063035e365001e1ee"
+    }
+  }
+}

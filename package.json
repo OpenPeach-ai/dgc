@@ -1,0 +1,21 @@
+{
+  "name": "dgc-site-acceptance",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pinned, local-only acceptance checks for the generated vibedgc.com site",
+  "engines": {
+    "node": ">=22.19 <23"
+  },
+  "scripts": {
+    "qa:site": "playwright test --config qa/site/playwright.config.mjs",
+    "qa:site:update": "playwright test --config qa/site/playwright.config.mjs --update-snapshots",
+    "qa:site:lighthouse": "node qa/site/run-lighthouse.mjs",
+    "qa:site:lighthouse:all": "node qa/site/run-lighthouse.mjs --all-routes",
+    "qa:site:all": "npm run qa:site && npm run qa:site:lighthouse",
+    "qa:site:release": "npm run qa:site && npm run qa:site:lighthouse:all"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "lighthouse": "13.4.1"
+  }
+}

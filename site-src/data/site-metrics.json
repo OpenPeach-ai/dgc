@@ -1,0 +1,27 @@
+{
+  "marketplace": {
+    "extension": "dgc",
+    "history": [
+      {
+        "install_count": 2,
+        "observed_at": "2026-09-04T14:37:43Z"
+      },
+      {
+        "install_count": 2,
+        "observed_at": "2026-09-04T14:44:49Z"
+      },
+      {
+        "install_count": 2,
+        "observed_at": "2026-09-04T17:22:14Z"
+      }
+    ],
+    "install_count": 2,
+    "listing_updated_at": "2026-09-04T13:31:41.323Z",
+    "observed_at": "2026-09-04T17:22:14Z",
+    "publisher": "vibedgc",
+    "source": "visual-studio-marketplace-gallery-api",
+    "source_url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+    "status": "available"
+  },
+  "schema_version": 1
+}

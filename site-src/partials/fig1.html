@@ -1,9 +1,9 @@
 <figure class="instrument field field-1 reveal" aria-labelledby="fig1-title">
-  <figcaption class="figure-title" id="fig1-title"><span class="figure-id">FIG.1 · Agentic loop</span><span>read → edit → run → verify · until the tests pass</span><span class="figure-state">measured result</span></figcaption>
+  <figcaption class="figure-title" id="fig1-title"><span class="figure-id">FIG.1 · Agentic loop</span><span>read → edit → run → verify · until the tests pass</span><span class="figure-state">{{BENCH_PUBLICATION_LABEL}}</span></figcaption>
   <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
   <div class="loop-layout">
     <div class="loop-dial">
-      <svg class="loop-svg" viewBox="0 0 520 420" role="img" aria-label="An illustrative reconstruction of a measured DGC result circles through read, edit, run and verify, then returns after a failed first round and passes on round two.">
+      <svg class="loop-svg" viewBox="0 0 520 420" role="img" aria-label="An illustrative reconstruction of a measured DGC result circles through read, edit, run and verify, then returns after a failed first round and passes on its final recovery round.">
         <defs>
           <marker id="loop-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#9a9aa6"/></marker>
           <marker id="loop-arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#a78bfa"/></marker>
@@ -17,22 +17,22 @@
         <text class="label" x="420" y="206">EDIT</text><text class="sub" x="420" y="222">write · patch</text>
         <text class="label" x="260" y="385" text-anchor="middle">RUN</text><text class="sub" x="260" y="401" text-anchor="middle">go test ./...</text>
         <text class="label" x="100" y="206" text-anchor="end">VERIFY</text><text class="sub" x="100" y="222" text-anchor="end">real exit code</text>
-        <text class="center" x="260" y="204" text-anchor="middle">ROUND 02</text><text class="note" x="260" y="226" text-anchor="middle">1 recovery · suite passed</text>
+        <text class="center" x="260" y="204" text-anchor="middle">ROUND {{BENCH_TRACE_ROUNDS}}</text><text class="note" x="260" y="226" text-anchor="middle">{{BENCH_TRACE_RECOVERY_LABEL}} · suite passed</text>
         <circle class="loop-packet" r="4.5"/><circle class="loop-packet p2" r="4.5"/><circle class="loop-packet p3" r="4.5"/>
       </svg>
     </div>
     <div class="trace-panel">
-      <div class="trace-heading">saved run · Go · alphametics</div>
+      <div class="trace-heading">saved run · {{BENCH_TRACE_LANGUAGE}} · {{BENCH_TRACE_EXERCISE}}</div>
       <ol class="trace-list">
         <li><span class="n">01</span><span class="kind">read</span><span class="work">alphametics.go · tests</span><span class="result">2 files</span></li>
-        <li><span class="n">02</span><span class="kind">edit</span><span class="work">column backtracking solver</span><span class="result">round 1</span></li>
-        <li><span class="n">03</span><span class="kind">run</span><span class="work">illustrative in-session test</span><span class="result">round 1</span></li>
+        <li><span class="n">02</span><span class="kind">edit</span><span class="work">column backtracking solver</span><span class="result">first round</span></li>
+        <li><span class="n">03</span><span class="kind">run</span><span class="work">illustrative in-session test</span><span class="result">first round</span></li>
         <li><span class="n">04</span><span class="kind">verify</span><span class="work">suite still failing</span><span class="result fail">self-correct</span></li>
         <li><span class="n">05</span><span class="kind">read</span><span class="work">resume · inspect rollback</span><span class="result">line 137</span></li>
         <li><span class="n">06</span><span class="kind">edit</span><span class="work">preserve winning assignment</span><span class="result">focused fix</span></li>
-        <li><span class="n">07</span><span class="kind">verify</span><span class="work">isolated grader</span><span class="result ok">passed · 0.4 s</span></li>
+        <li><span class="n">07</span><span class="kind">verify</span><span class="work">{{BENCH_TRACE_ISOLATION_LABEL}} grader</span><span class="result ok">passed · {{BENCH_TRACE_GRADER_SECONDS}} s</span></li>
       </ol>
     </div>
   </div>
-  <p class="figure-foot">Reconstructed from the retained DGC result for <code>go/alphametics</code>. The linked evidence bundle preserves scored rounds, grader and agent timings, usage totals, result hashes, and the input hash; the in-session UI steps, diff prose, and their pacing are illustrative because raw harness output is intentionally omitted.</p>
+  <p class="figure-foot">Reconstructed from the retained DGC result for <code>{{BENCH_TRACE_TASK}}</code>. The linked evidence bundle preserves scored rounds, grader and agent timings, usage totals, result hashes, and the input hash; the in-session UI steps, diff prose, and their pacing are illustrative because raw harness output is intentionally omitted.</p>
 </figure>

@@ -1,0 +1,100 @@
+name: Site metrics snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/site-measurement.py"
+      - "scripts/build-site.py"
+      - "scripts/generate-docs-site.py"
+      - "site/_worker.js"
+      - "site-src/assets/site.js"
+      - "site-src/content/privacy.md"
+      - "site-src/data/site-metrics.json"
+      - "site-src/pages/index.html"
+      - ".github/workflows/site-metrics.yml"
+  pull_request:
+    paths:
+      - "scripts/site-measurement.py"
+      - "scripts/build-site.py"
+      - "scripts/generate-docs-site.py"
+      - "site/_worker.js"
+      - "site-src/assets/site.js"
+      - "site-src/content/privacy.md"
+      - "site-src/data/site-metrics.json"
+      - "site-src/pages/index.html"
+      - ".github/workflows/site-metrics.yml"
+  schedule:
+    - cron: "19 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: site-metrics-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Measurement contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python scripts/site-measurement.py self-test
+      - run: python scripts/site-measurement.py check-marketplace --allow-unavailable
+      - run: python scripts/build-site.py --check
+
+  marketplace:
+    name: Marketplace proof candidate
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Merge validated scheduled and manual history, then refresh
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          history_args=()
+          for event in schedule workflow_dispatch; do
+            previous_run=$(gh run list --workflow site-metrics.yml --branch main --status success --limit 100 --json databaseId,event --jq "[.[] | select(.event == \"$event\")][0].databaseId // empty")
+            if [[ -z "$previous_run" ]]; then
+              continue
+            fi
+            previous_attempt=$(gh api "repos/{owner}/{repo}/actions/runs/$previous_run" --jq .run_attempt)
+            [[ "$previous_attempt" =~ ^[1-9][0-9]*$ ]] || { echo "$event run attempt is invalid" >&2; exit 1; }
+            restore="$RUNNER_TEMP/dgc-site-metrics-$event"
+            mkdir -p "$restore"
+            gh run download "$previous_run" \
+              --name "dgc-site-metrics-$previous_run-$previous_attempt" --dir "$restore"
+            mapfile -d '' candidates < <(find "$restore" -type f -path '*/site-src/data/site-metrics.json' -print0)
+            [[ ${#candidates[@]} -eq 1 ]] || { echo "$event metrics artifact is ambiguous" >&2; exit 1; }
+            python scripts/site-measurement.py check-marketplace --input "${candidates[0]}"
+            history_args+=(--history-input "${candidates[0]}")
+          done
+          python scripts/site-measurement.py refresh-marketplace "${history_args[@]}"
+          python scripts/site-measurement.py check-marketplace --max-age-hours 1
+      - name: Generate the proof-strip candidate
+        run: |
+          python scripts/build-site.py
+          python scripts/build-site.py --check
+      - name: Preserve reviewable snapshot and generated proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: dgc-site-metrics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            site-src/data/site-metrics.json
+            site/index.html
+          if-no-files-found: error
+          retention-days: 90

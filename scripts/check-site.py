@@ -15,6 +15,7 @@ import math
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import tarfile
 import zipfile
@@ -22,7 +23,9 @@ from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urljoin, urlparse
 
+from benchmark_site import BenchmarkDataError, benchmark_context, subject_harness, validate_benchmark
 from release_bundle import validate_bundle
+from site_common import emitted_asset_revision, minify_css, site_asset_revision
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
@@ -37,7 +40,9 @@ LEAK_PATTERNS = {
         r"FRONTIER_AUDIT|FRONTIER[_ -]ROADMAP|frontier[- ]hardening", re.I,
     ),
     "machine-local path": re.compile(
-        r"/(?:home|Users)/[^/\s]+|/tmp/(?:claude|dgc)-|results-orig", re.I,
+        r"/(?:home|Users|root)/[^/\s]+|[A-Za-z]:\\+Users\\+[^\\\s]+"
+        r"|/tmp/(?:claude|dgc)-|results-orig",
+        re.I,
     ),
     "hidden command": re.compile(r"(?:/bored\b|process defender|terminal arcade|snake game)", re.I),
 }
@@ -52,7 +57,9 @@ STATIC_PUBLIC_FILES = {
     "icon-512.png", "og-card.png", "og-benchmark.png", "og-docs.png", "og-editor.png",
     "dgc-mark.svg", "dgc-mark-mono.svg",
     "assets/cli-capture-poster.jpg", "assets/cli-capture.mp4", "assets/cli-capture.webm",
-    "assets/hero-graded-poster.jpg", "assets/hero-graded.mp4", "assets/hero-graded.webm",
+    "assets/editor-capture-poster.jpg", "assets/editor-capture-poster-720.jpg",
+    "assets/editor-capture.mp4", "assets/editor-capture.webm",
+    "assets/hero-graded-poster.jpg", "assets/hero-mobile-poster.webp", "assets/hero-graded.mp4", "assets/hero-graded.webm",
     "assets/hero-mobile.mp4", "assets/hero-mobile.webm",
     "assets/power-graded-poster.jpg", "assets/power-graded.mp4", "assets/power-graded.webm",
     "assets/sub-graded-poster.jpg", "assets/sub-graded.mp4", "assets/sub-graded.webm",
@@ -63,6 +70,30 @@ STATIC_PUBLIC_FILES = {
     "version.json", "provenance.json", "dgc.cdx.json", "dgc.tar.gz", "dgc.tar.gz.sha256",
     "vscode/version.json", "vscode/dgc.vsix", "vscode/dgc.vsix.sha256",
 }
+
+BENCHMARK_TEMPLATE_FILES = (
+    "pages/index.html",
+    "pages/benchmark.html",
+    "partials/fig1.html",
+    "partials/terminal.html",
+    "content/faq.md",
+    "content/blog/benchmark-methodology.md",
+    "social/og-card.svg",
+    "social/og-benchmark.svg",
+)
+BENCHMARK_LITERAL_PATTERNS = (
+    re.compile(r"(?<!\{)\b\d+(?:\.\d+)?%(?![\"'])"),
+    re.compile(r"(?<!\{)\b\d+\s*/\s*\d+\b"),
+    re.compile(r"(?<!\{)\bpass@\d+\b", re.I),
+    re.compile(
+        r"(?<!\{)\b\d[\d,]*(?:\.\d+)?(?:-task|-second| tasks?\b| problems?\b|"
+        r" seconds?\b| s(?:/round| per round| each| grader timeout)| timeouts?\b|"
+        r" predictions?\b| patches?\b|[BM] model\b| context\b)",
+        re.I,
+    ),
+    re.compile(r"\b(?:three|four|five|six|seven|eight|nine|ten|eleven|twelve)[- ](?:harnesses|languages)\b", re.I),
+    re.compile(r"--(?:context-size|limit|rounds|dgc-timeout|test-timeout)\s+\d+"),
+)
 
 
 def _load_script(name: str, path: Path):
@@ -81,8 +112,8 @@ def public_file_inventory() -> set[str]:
     expected = set(builder.build_outputs()) | STATIC_PUBLIC_FILES
     expected.update(f"docs/{name}" for name in docs.build())
     expected.update(f"docs/assets/{name}" for name in docs.DOCS_ASSETS)
-    for harness in ("goose", "dgc", "pi", "opencode", "codex"):
-        name = f"evidence/{harness}-{BENCH['run_version']}.tar.gz"
+    for harness in BENCH["harnesses"]:
+        name = f"evidence/{harness['slug']}-{BENCH['run_version']}.tar.gz"
         expected.update((name, name + ".sha256"))
     editor_version = json.loads((SITE / "vscode" / "version.json").read_text(encoding="utf-8"))
     version = str(editor_version.get("version") or "")
@@ -101,6 +132,7 @@ class PageParser(HTMLParser):
         self.descriptions = 0
         self.og_images: list[str] = []
         self.videos: list[dict[str, str]] = []
+        self.events: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         data = {name: value or "" for name, value in attrs}
@@ -109,9 +141,10 @@ class PageParser(HTMLParser):
         for attr in ("href", "src", "poster", "data-src"):
             if data.get(attr):
                 self.refs.append((tag, attr, data[attr]))
-        if data.get("srcset"):
-            for candidate in data["srcset"].split(","):
-                self.refs.append((tag, "srcset", candidate.strip().split()[0]))
+        for attr in ("srcset", "data-srcset"):
+            if data.get(attr):
+                for candidate in data[attr].split(","):
+                    self.refs.append((tag, attr, candidate.strip().split()[0]))
         if tag == "link" and data.get("rel") == "canonical":
             self.canonical.append(data.get("href", ""))
         if tag == "meta" and data.get("name") == "description" and data.get("content"):
@@ -120,6 +153,9 @@ class PageParser(HTMLParser):
             self.og_images.append(data.get("content", ""))
         if tag == "video":
             self.videos.append(data)
+        for attr in ("data-event", "data-event-play", "data-page-event"):
+            if data.get(attr):
+                self.events.add(data[attr])
 
 
 def served_page(path: str) -> Path | None:
@@ -169,6 +205,15 @@ def check_pages(errors: list[str]) -> dict[Path, PageParser]:
             errors.append(f"{label}: unresolved template marker")
         if label.startswith("docs/") and "**" in source:
             errors.append(f"{label}: raw Markdown emphasis marker")
+        critical = re.findall(
+            r'<style data-critical-revision="[0-9a-f]{12}">(.*?)</style>',
+            source,
+            flags=re.DOTALL,
+        )
+        if len(critical) != 1:
+            errors.append(f"{label}: expected one revisioned inline critical stylesheet")
+        elif len(critical[0].encode("utf-8")) > 10 * 1024:
+            errors.append(f"{label}: inline critical CSS exceeds 10 KiB")
 
     for page, parser in parsed.items():
         base = page_url(page)
@@ -207,6 +252,8 @@ def check_css(errors: list[str]) -> None:
             errors.append(f"{name}: font weight above 500")
         if "fonts.googleapis" in text or "fonts.gstatic" in text:
             errors.append(f"{name}: remote font origin")
+        if "/*" in text or "\n" in text:
+            errors.append(f"{name}: public CSS is not build-minified")
         for raw in re.findall(r"url\((?:['\"])?([^)'\"]+)", text):
             if raw.startswith(("data:", "http:", "https:", "#", "%23")):
                 continue
@@ -214,6 +261,113 @@ def check_css(errors: list[str]) -> None:
             target = (SITE / clean.lstrip("/")) if clean.startswith("/") else (path.parent / clean).resolve()
             if not target.is_file():
                 errors.append(f"{name}: broken CSS url {raw}")
+
+
+def check_analytics_event_contract(parsed: dict[Path, PageParser], errors: list[str]) -> None:
+    """Keep every browser-emitted event synchronized with the Worker allowlist."""
+    used = {event for parser in parsed.values() for event in parser.events}
+    worker = (SITE / "_worker.js").read_text(encoding="utf-8")
+    match = re.search(r"const EVENTS = new Set\(\[(.*?)\]\);", worker, re.DOTALL)
+    if not match:
+        errors.append("_worker.js: could not read the analytics event allowlist")
+        return
+    allowed = set(re.findall(r'"([a-z][a-z0-9_]*)"', match.group(1)))
+    if used != allowed:
+        missing = sorted(used - allowed)
+        dead = sorted(allowed - used)
+        errors.append(
+            "analytics event contract disagrees between HTML and Worker"
+            f" (unhandled={missing}, unused={dead})"
+        )
+
+
+def check_css_minifier(errors: list[str]) -> None:
+    """Pin the string, comment, escape, and selector-safety contract."""
+    cases = (
+        (
+            "descendant pseudo-classes",
+            ".a :is(.b, .c), .d ::before { color: red; }",
+            ".a :is(.b,.c),.d ::before{color: red}",
+        ),
+        (
+            "quoted comment-like text and escapes",
+            r'''.x::before { content: "/* literal */ ; } >"; note: 'it\'s C:\\tmp'; } /* remove */''',
+            r'''.x::before{content: "/* literal */ ; } >";note: 'it\'s C:\\tmp'}''',
+        ),
+        (
+            "comments preserve surrounding selector whitespace",
+            ".a/**/:hover, .b /**/:focus { color: red; /* declaration */ margin: 0; }",
+            ".a:hover,.b :focus{color: red;margin: 0}",
+        ),
+        (
+            "declarations and media features",
+            "@media (max-width : 760px) { .x { color : red ; transform: translate(1px, 2px); } }",
+            "@media (max-width : 760px){.x{color : red;transform: translate(1px,2px)}}",
+        ),
+        (
+            "custom-property leading value whitespace",
+            ':root { --raw: foo ; --quoted:" bar"; color: red; }',
+            ':root{--raw: foo;--quoted:" bar";color: red}',
+        ),
+    )
+    for label, source, expected in cases:
+        actual = minify_css(source)
+        if actual != expected:
+            errors.append(f"CSS minifier {label}: expected {expected!r}, found {actual!r}")
+        elif minify_css(actual) != actual:
+            errors.append(f"CSS minifier {label}: output is not idempotent")
+
+
+def check_asset_revision_contract(errors: list[str]) -> None:
+    """Pin revisions to emitted bytes, including changes caused only by the transformer."""
+    source = ".sample { color: red; }"
+    script = b"const sample = true;"
+    baseline = emitted_asset_revision((source,), (script,), css_minifier=minify_css)
+    comment_only = emitted_asset_revision(
+        ("/* build note */ " + source,), (script,), css_minifier=minify_css,
+    )
+    implementation_change = emitted_asset_revision(
+        (source,), (script,),
+        css_minifier=lambda value: minify_css(value).replace("red", "blue"),
+    )
+    script_change = emitted_asset_revision(
+        (source,), (script + b"\n",), css_minifier=minify_css,
+    )
+    actual = site_asset_revision()
+    unchanged_implementation = site_asset_revision(css_minifier=lambda value: minify_css(value))
+    changed_implementation = site_asset_revision(
+        css_minifier=lambda value: minify_css(value) + "\n",
+    )
+    if comment_only != baseline:
+        errors.append("asset revision changed even though emitted CSS bytes were identical")
+    if implementation_change == baseline:
+        errors.append("asset revision ignored a minifier-only emitted CSS change")
+    if script_change == baseline:
+        errors.append("asset revision ignored an emitted script change")
+    if unchanged_implementation != actual:
+        errors.append("asset revision changed for a byte-identical minifier implementation")
+    if changed_implementation == actual:
+        errors.append("site asset revision ignored minifier-only emitted CSS changes")
+
+
+def check_leak_pattern_contract(errors: list[str]) -> None:
+    """Exercise machine-path coverage without embedding publishable fixture paths."""
+    separator = chr(92)
+    fixtures = (
+        ("root POSIX home", "/".join(("", "root", "private-work", "trace.json"))),
+        ("Windows user home", "C:" + separator + separator.join(("Users", "builder", "trace.json"))),
+        (
+            "JSON-escaped Windows user home",
+            "D:" + separator * 2 + (separator * 2).join(("Users", "builder", "trace.json")),
+        ),
+    )
+    pattern = LEAK_PATTERNS["machine-local path"]
+    for label, fixture in fixtures:
+        if not pattern.search(fixture):
+            errors.append(f"machine-local path leak pattern missed its {label} fixture")
+    for fixture in ("/rooted/public/path", "Users/builder/project", "roots/private-work"):
+        if pattern.search(fixture):
+            errors.append(f"machine-local path leak pattern rejected benign text {fixture!r}")
 
 
 def check_routes(parsed: dict[Path, PageParser], errors: list[str]) -> None:
@@ -237,7 +391,9 @@ def check_routes(parsed: dict[Path, PageParser], errors: list[str]) -> None:
 
 def check_asset_revisions(parsed: dict[Path, PageParser], errors: list[str]) -> None:
     """Keep HTML and mutable shared assets in lockstep across deployments."""
-    expected = {"/assets/tokens.css", "/assets/site.css", "/assets/site.js"}
+    # Tokens and route-specific critical CSS are inlined. Their bytes participate in the
+    # shared revision emitted on the deferred full stylesheet and site script.
+    expected = {"/assets/site.css", "/assets/site.js"}
     for page, parser in parsed.items():
         found: dict[str, str] = {}
         docs_revision = ""
@@ -267,8 +423,10 @@ def check_media(parsed: dict[Path, PageParser], errors: list[str]) -> None:
         errors.append("index.html: missing")
         return
     autoplay = [video for video in home.videos if "autoplay" in video]
-    if len(autoplay) != 1 or "data-hero-video" not in autoplay[0] or not all(key in autoplay[0] for key in ("muted", "loop", "playsinline")):
-        errors.append("index.html: deferred hero must be the sole muted, looping, inline autoplay video")
+    if (len(autoplay) != 1 or "data-hero-video" not in autoplay[0]
+            or autoplay[0].get("preload") != "auto"
+            or not all(key in autoplay[0] for key in ("muted", "loop", "playsinline"))):
+        errors.append("index.html: hero must be the sole muted, looping, inline autoplay video with preload=auto")
     lazy = [video for video in home.videos if "data-lazy-video" in video]
     if len(lazy) != 2 or any(video.get("preload") != "none" for video in lazy):
         errors.append("index.html: both ambient section videos must lazy-load with preload=none")
@@ -288,6 +446,224 @@ def check_media(parsed: dict[Path, PageParser], errors: list[str]) -> None:
                 errors.append(f"{name}: expected {expected[0]}x{expected[1]}, found {actual[0]}x{actual[1]}")
         except ValueError as exc:
             errors.append(f"{name}: {exc}")
+
+
+CAPTURE_MEDIA_FILES = {
+    "cli": {
+        "prefix": "cli-capture",
+        "width": 1280,
+        "height": 720,
+        "min_duration": 46.0,
+        "kind": "real_cli_local_model",
+        "required": {
+            "live_model": True,
+            "controlled_fixture": True,
+            "real_time": True,
+            "tool_sequence": ["read_file", "read_file", "edit_file", "bash"],
+            "sandbox_backend": "bwrap",
+            "model_route": "local Ollama · qwen2.5:14b",
+        },
+        "provenance_terms": (
+            "Actual current DGC ", "real local Ollama run", "qwen2.5:14b",
+            "disposable controlled fixture", "python3 -m unittest -v passed 3/3",
+            "real time, no speed adjustment", "no user config or session persisted",
+        ),
+    },
+    "editor": {
+        "prefix": "editor-capture",
+        "width": 1440,
+        "height": 900,
+        "min_duration": 30.0,
+        "kind": "actual_extension_deterministic_fixture",
+        "required": {
+            "live_model": False,
+            "controlled_fixture": True,
+            "deterministic_fixture": True,
+            "real_time": True,
+            "tool_sequence": ["read_file", "edit_file", "bash"],
+            "real_plan_button_click": True,
+            "visible_editor_matches_diff": True,
+            "source_unchanged_through_current_head": True,
+        },
+        "provenance_terms": (
+            "Actual extension surface", "deterministic protocol fixture",
+            "real disposable-file edit and unittest run", "not a live model session",
+            "real time, no speed adjustment",
+        ),
+    },
+}
+CAPTURE_RECORD_KEYS = {"path", "sha256", "bytes", "codec", "width", "height"}
+CAPTURE_VIDEO_RECORD_KEYS = CAPTURE_RECORD_KEYS | {"duration_seconds"}
+CAPTURE_KEYS = {
+    "cli": {
+        "kind", "live_model", "controlled_fixture", "real_time", "tool_sequence",
+        "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
+        "sandbox_backend", "files",
+    },
+    "editor": {
+        "kind", "live_model", "controlled_fixture", "deterministic_fixture", "real_time",
+        "tool_sequence", "real_plan_button_click", "visible_editor_matches_diff",
+        "source_unchanged_through_current_head", "duration_seconds", "duration_label", "provenance",
+        "vscode_version", "extension_version", "packaged_extension_source_commit",
+        "extension_vsix_sha256", "time_compression", "files",
+    },
+}
+
+
+def _capture_probe(path: Path) -> dict:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries",
+         "format=duration:stream=codec_name,width,height", "-of", "json", str(path)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30,
+    )
+    return json.loads(result.stdout)
+
+
+def check_capture_manifest(errors: list[str]) -> None:
+    """Fail closed on capture provenance and on any media/manifest byte mismatch."""
+    manifest_path = ROOT / "site-src" / "data" / "capture-media.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        errors.append(f"capture-media.json: could not read structured manifest ({exc})")
+        return
+    if set(manifest) != {"schema_version", "captures"} or manifest.get("schema_version") != 1:
+        errors.append("capture-media.json: expected schema_version=1 and only captures")
+        return
+    captures = manifest.get("captures")
+    if not isinstance(captures, dict) or set(captures) != set(CAPTURE_MEDIA_FILES):
+        errors.append("capture-media.json: CLI and editor capture sets must both be declared")
+        return
+
+    declared: dict[str, str] = {}
+    for slug, spec in CAPTURE_MEDIA_FILES.items():
+        capture = captures.get(slug)
+        if not isinstance(capture, dict):
+            errors.append(f"capture-media.json: {slug} record is not an object")
+            continue
+        if set(capture) != CAPTURE_KEYS[slug]:
+            errors.append(f"capture-media.json: {slug} has an invalid structured schema")
+        for key, expected in spec["required"].items():
+            if capture.get(key) != expected:
+                errors.append(f"capture-media.json: {slug}.{key} disagrees with capture provenance")
+        if capture.get("kind") != spec["kind"]:
+            errors.append(f"capture-media.json: {slug}.kind is invalid")
+        provenance = capture.get("provenance")
+        if not isinstance(provenance, str) or any(term not in provenance for term in spec["provenance_terms"]):
+            errors.append(f"capture-media.json: {slug}.provenance is incomplete")
+        if slug == "cli" and isinstance(provenance, str) \
+                and f"Actual current DGC {VERSION}" not in provenance:
+            errors.append("capture-media.json: CLI provenance is not for the current release")
+        if not isinstance(provenance, str) or re.search(r"permission denied|denied|loop|retry", provenance, re.I):
+            errors.append(f"capture-media.json: {slug}.provenance contains denied/retry evidence")
+        factor = capture.get("time_compression")
+        if (capture.get("real_time") is not True or factor != 1
+                or isinstance(factor, bool) or not isinstance(factor, (int, float))):
+            errors.append(f"capture-media.json: {slug} must be an uncompressed real-time capture")
+        duration = capture.get("duration_seconds")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) \
+                or not math.isfinite(float(duration)) or float(duration) < spec["min_duration"]:
+            errors.append(f"capture-media.json: {slug} duration is below the publication gate")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+            rounded = int(float(duration) + 0.5)
+            expected_label = f"{rounded // 60}:{rounded % 60:02d}"
+            if capture.get("duration_label") != expected_label:
+                errors.append(f"capture-media.json: {slug}.duration_label disagrees")
+        if slug == "editor":
+            try:
+                public_editor = json.loads((SITE / "vscode" / "version.json").read_text(encoding="utf-8"))
+                actual_vsix_sha = hashlib.sha256((SITE / "vscode" / "dgc.vsix").read_bytes()).hexdigest()
+                if capture.get("vscode_version") != "1.107.1":
+                    errors.append("capture-media.json: editor VS Code provenance is invalid")
+                if capture.get("extension_version") != public_editor.get("version"):
+                    errors.append("capture-media.json: editor extension version disagrees")
+                if capture.get("extension_vsix_sha256") != actual_vsix_sha:
+                    errors.append("capture-media.json: editor VSIX provenance disagrees")
+                with zipfile.ZipFile(SITE / "vscode" / "dgc.vsix") as package:
+                    build = json.loads(package.read("extension/dist/build.json"))
+                if (capture.get("packaged_extension_source_commit") != build.get("source_commit")
+                        or build.get("flavor") != "selfhost"):
+                    errors.append("capture-media.json: editor packaged-source provenance disagrees")
+            except (OSError, KeyError, TypeError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+                errors.append(f"capture-media.json: editor package provenance is invalid ({exc})")
+        files = capture.get("files")
+        expected_kinds = {"webm", "mp4", "poster"}
+        if slug == "editor":
+            expected_kinds.add("preview")
+        if not isinstance(files, dict) or set(files) != expected_kinds:
+            errors.append(
+                f"capture-media.json: {slug} must declare exactly "
+                + ", ".join(sorted(expected_kinds))
+            )
+            continue
+        observed_duration: dict[str, float] = {}
+        file_specs = [
+            ("webm", f"assets/{spec['prefix']}.webm", "vp9", spec["width"], spec["height"], True),
+            ("mp4", f"assets/{spec['prefix']}.mp4", "h264", spec["width"], spec["height"], True),
+            ("poster", f"assets/{spec['prefix']}-poster.jpg", "mjpeg", spec["width"], spec["height"], False),
+        ]
+        if slug == "editor":
+            file_specs.append(
+                ("preview", "assets/editor-capture-poster-720.jpg", "mjpeg", 720, 450, False)
+            )
+        for kind, expected_path, codec, width, height, is_video in file_specs:
+            record = files.get(kind)
+            if not isinstance(record, dict):
+                errors.append(f"capture-media.json: {slug}.{kind} is not an object")
+                continue
+            expected_keys = CAPTURE_VIDEO_RECORD_KEYS if is_video else CAPTURE_RECORD_KEYS
+            if set(record) != expected_keys:
+                errors.append(f"capture-media.json: {slug}.{kind} has an invalid schema")
+                continue
+            relative = record.get("path")
+            if relative != expected_path:
+                errors.append(f"capture-media.json: {slug}.{kind} path is not source-owned")
+                continue
+            if relative in declared:
+                errors.append(f"capture-media.json: duplicate media path {relative}")
+            declared[relative] = slug
+            path = SITE / relative
+            if not path.is_file() or path.is_symlink():
+                errors.append(f"capture-media.json: declared media is missing {relative}")
+                continue
+            try:
+                raw = path.read_bytes()
+                actual_sha = hashlib.sha256(raw).hexdigest()
+                if record.get("sha256") != actual_sha:
+                    errors.append(f"capture-media.json: {relative} sha256 disagrees with bytes")
+                if record.get("bytes") != len(raw):
+                    errors.append(f"capture-media.json: {relative} byte count disagrees with bytes")
+                metadata = _capture_probe(path)
+                stream = (metadata.get("streams") or [{}])[0]
+                if (record.get("codec") != codec or record.get("codec") != stream.get("codec_name")
+                        or record.get("width") != width or record.get("height") != height
+                        or stream.get("width") != width or stream.get("height") != height):
+                    errors.append(f"capture-media.json: {relative} codec or dimensions disagree")
+                if kind == "preview" and len(raw) > 50 * 1024:
+                    errors.append("capture-media.json: editor preview exceeds its 50 KiB budget")
+                if is_video:
+                    media_duration = float((metadata.get("format") or {}).get("duration", 0))
+                    declared_duration = record.get("duration_seconds")
+                    observed_duration[kind] = media_duration
+                    if (not isinstance(declared_duration, (int, float))
+                            or isinstance(declared_duration, bool)
+                            or not math.isfinite(float(declared_duration))
+                            or abs(float(declared_duration) - media_duration) > 0.05
+                            or abs(float(declared_duration) - float(duration)) > 0.05):
+                        errors.append(f"capture-media.json: {relative} duration disagrees")
+            except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+                errors.append(f"capture-media.json: could not validate {relative} ({exc})")
+        if len(observed_duration) == 2 and abs(observed_duration["webm"] - observed_duration["mp4"]) > 0.05:
+            errors.append(f"capture-media.json: {slug} webm/mp4 durations are a mixed set")
+
+    expected_declared = {
+        f"assets/{spec['prefix']}{extension}"
+        for spec in CAPTURE_MEDIA_FILES.values()
+        for extension in (".webm", ".mp4", "-poster.jpg")
+    }
+    expected_declared.add("assets/editor-capture-poster-720.jpg")
+    if set(declared) != expected_declared:
+        errors.append("capture-media.json: declared media inventory is incomplete or mixed")
 
 
 def _benchmark_path(value: object) -> str:
@@ -315,6 +691,58 @@ def _benchmark_seconds(value: object, *, maximum: float) -> float:
     return result
 
 
+def check_benchmark_single_source(errors: list[str]) -> None:
+    """Keep every public benchmark literal bound to bench.json."""
+    try:
+        validate_benchmark(BENCH)
+        context = benchmark_context(BENCH)
+    except (BenchmarkDataError, KeyError, TypeError, ValueError) as exc:
+        errors.append(f"bench.json: invalid authoritative data ({exc})")
+        return
+
+    for relative in BENCHMARK_TEMPLATE_FILES:
+        source = ROOT / "site-src" / relative
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"benchmark source: could not read {relative} ({exc})")
+            continue
+        for pattern in BENCHMARK_LITERAL_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                line = text.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"benchmark source: {relative}:{line} contains literal {match.group(0)!r}; "
+                    "publish it through a BENCH_* placeholder"
+                )
+
+    try:
+        builder = _load_script("dgc_site_benchmark_sources", ROOT / "scripts" / "build-site.py")
+        rendered = builder.social_sources(BENCH)
+        lock = json.loads((ROOT / "site-src" / "social" / "benchmark-png-lock.json").read_text(
+            encoding="utf-8",
+        ))
+        locked = lock["assets"]
+        if lock.get("schema_version") != 1 or set(locked) != set(rendered):
+            raise ValueError("lock inventory/schema disagrees with rendered social sources")
+        for source_name, svg in rendered.items():
+            item = locked[source_name]
+            png_name = item["png"]
+            if not isinstance(png_name, str) or not re.fullmatch(r"og-[a-z-]+\.png", png_name):
+                raise ValueError(f"invalid PNG target for {source_name}")
+            source_sha = hashlib.sha256(svg.encode("utf-8")).hexdigest()
+            png_path = SITE / png_name
+            png_sha = hashlib.sha256(png_path.read_bytes()).hexdigest()
+            if item.get("rendered_source_sha256") != source_sha:
+                errors.append(
+                    f"social benchmark source changed for {source_name}; rerender and review {png_name}, "
+                    "then update benchmark-png-lock.json"
+                )
+            if item.get("png_sha256") != png_sha:
+                errors.append(f"social benchmark PNG bytes changed without a lock update: {png_name}")
+    except (OSError, KeyError, TypeError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        errors.append(f"social benchmark lock is invalid ({exc})")
+
 def _check_benchmark_evidence(
     slug: str,
     members: dict[str, bytes],
@@ -339,7 +767,7 @@ def _check_benchmark_evidence(
         errors.append(f"evidence: malformed benchmark facts for {slug}")
         return None
 
-    expected_engine = {"opencode": "opencode", "codex": "codex"}.get(slug, slug)
+    expected_engine = slug
     if summary.get("engine") != expected_engine or any(row.get("engine") != expected_engine for row in rows):
         errors.append(f"evidence: engine identity disagrees for {slug}")
     if summary.get("model") != BENCH["model"] or any(row.get("model") != BENCH["model"] for row in rows):
@@ -354,6 +782,27 @@ def _check_benchmark_evidence(
     identities = [(row.get("lang"), row.get("ex")) for row in rows]
     if len(rows) != BENCH["problems"] or len(set(identities)) != len(rows):
         errors.append(f"evidence: task count/identity disagrees for {slug}")
+    subject = subject_harness(BENCH)
+    if slug == subject["slug"]:
+        trace = BENCH["featured_trace"]
+        trace_rows = [
+            row for row in rows
+            if row.get("lang") == trace["language_slug"] and row.get("ex") == trace["exercise"]
+        ]
+        try:
+            trace_row = trace_rows[0]
+            solved_round = trace_row["solved_round"]
+            graded_round = trace_row["rounds"][solved_round - 1]
+            if len(trace_rows) != 1 or trace_row.get("run_id") != trace["run_id"] \
+                    or solved_round != trace["solved_round"] \
+                    or graded_round.get("grader_isolated") is not trace["isolated"] \
+                    or not math.isclose(
+                        float(graded_round.get("test_time")), float(trace["grader_seconds"]),
+                        rel_tol=0.0, abs_tol=0.05,
+                    ):
+                raise ValueError("retained trace fields disagree")
+        except (IndexError, KeyError, TypeError, ValueError, OverflowError) as exc:
+            errors.append(f"bench.json: featured_trace disagrees with DGC evidence ({exc})")
 
     computed: dict[str, dict[str, int | float]] = {}
     canonical_tasks: list[dict[str, object]] = []
@@ -520,32 +969,43 @@ def _check_benchmark_evidence(
 
 
 def check_benchmark(errors: list[str]) -> None:
+    try:
+        validate_benchmark(BENCH)
+        context = benchmark_context(BENCH)
+    except (BenchmarkDataError, KeyError, TypeError, ValueError) as exc:
+        errors.append(f"bench.json: invalid authoritative data ({exc})")
+        return
     home = (SITE / "index.html").read_text(encoding="utf-8")
     page = (SITE / "benchmark.html").read_text(encoding="utf-8")
-    dgc = next(row for row in BENCH["harnesses"] if row["name"] == "DGC")
-    if sum(item["solved"] for item in BENCH["languages"]) != dgc["solved"]:
-        errors.append("bench.json: DGC language totals do not equal solved total")
-    for needle in (f'{dgc["pass_at_2"]:.1f}%', f'{dgc["solved"]} / {BENCH["problems"]}', BENCH["model"], str(BENCH["cap_seconds_per_round"])):
+    dgc = subject_harness(BENCH)
+    for needle in (
+        f'{dgc["pass_at_2"]:.1f}%', f'{dgc["solved"]} / {BENCH["problems"]}',
+        BENCH["model"], BENCH["model_digest"][:22] + "…", BENCH["dataset_commit"][:16] + "…",
+        str(BENCH["cap_seconds_per_round"]), str(BENCH["grader_timeout_seconds"]),
+        f'{BENCH["context_tokens"]:,}', str(BENCH["rounds"]),
+        f'{dgc["average_round_seconds"]:.1f} s', str(context["BENCH_DGC_RANK_LABEL"]),
+    ):
         if needle not in page:
             errors.append(f"benchmark.html: missing authoritative value {needle!r}")
-    for needle in (f'{dgc["pass_at_2"]:.1f}%', BENCH["model"]):
+    for needle in (
+        f'{dgc["pass_at_2"]:.1f}%', BENCH["model"], str(BENCH["problems"]),
+        str(BENCH["cap_seconds_per_round"]), f'{dgc["average_round_seconds"]:.1f} s',
+    ):
         if needle not in home:
             errors.append(f"index.html: missing authoritative benchmark value {needle!r}")
     if BENCH.get("completion_profile") is None and "Why there is no completion-profile curve" not in page:
         errors.append("benchmark.html: missing completion-curve evidence boundary")
-    if any(needle not in page for needle in ("founder-published", "300 predictions", "292", "cannot reproduce")):
+    swe = BENCH["swe_bench_lite"]
+    if any(needle not in page for needle in (
+        str(swe["claim_source"]), f'{swe["predictions_retained"]} predictions',
+        str(swe["non_empty_patches"]), "cannot reproduce",
+    )):
         errors.append("benchmark.html: incomplete SWE-bench evidence disclosure")
 
-    claims = {
-        "goose": next(item for item in BENCH["harnesses"] if item["name"] == "goose"),
-        "dgc": next(item for item in BENCH["harnesses"] if item["name"] == "DGC"),
-        "pi": next(item for item in BENCH["harnesses"] if item["name"] == "pi"),
-        "opencode": next(item for item in BENCH["harnesses"] if item["name"] == "OpenCode"),
-        "codex": next(item for item in BENCH["harnesses"] if item["name"] == "Codex CLI"),
-    }
+    claims = {str(item["slug"]): item for item in BENCH["harnesses"]}
     shared_execution: tuple | None = None
     shared_task_set: str | None = None
-    for harness in ("goose", "dgc", "pi", "opencode", "codex"):
+    for harness in claims:
         archive = SITE / "evidence" / f"{harness}-{BENCH['run_version']}.tar.gz"
         checksum = Path(str(archive) + ".sha256")
         if not archive.is_file() or not checksum.is_file():
@@ -768,10 +1228,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--require-public-release requires the public source tag")
     errors: list[str] = []
     parsed = check_pages(errors)
+    check_analytics_event_contract(parsed, errors)
+    check_css_minifier(errors)
+    check_asset_revision_contract(errors)
+    check_leak_pattern_contract(errors)
     check_css(errors)
     check_routes(parsed, errors)
     check_asset_revisions(parsed, errors)
     check_media(parsed, errors)
+    check_capture_manifest(errors)
+    check_benchmark_single_source(errors)
     check_benchmark(errors)
     check_release_metadata(errors)
     expected = check_public_tree(errors)
