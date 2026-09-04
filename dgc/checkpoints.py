@@ -20,7 +20,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .workspace import capture_file_state, restore_file_state
+from .workspace import (
+    canonicalize_trusted_os_alias,
+    capture_file_state,
+    restore_file_state,
+)
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -135,7 +139,12 @@ class CheckpointManager:
         if self.project_root is None:
             return None
         try:
-            candidate = Path(os.path.abspath(os.path.expanduser(path)))
+            # Checkpoint roots are canonical storage identities. On Darwin, tempfile paths may
+            # retain the protected /var spelling while project_root is /private/var. Normalize
+            # only that OS-owned anchor alias here; descendant links are deliberately left for
+            # _relative_project_path's parent-resolution confinement check.
+            candidate = canonicalize_trusted_os_alias(
+                Path(os.path.abspath(os.path.expanduser(path))))
             if os.path.commonpath((str(self.project_root), str(candidate))) != str(self.project_root):
                 return None
             return candidate.relative_to(self.project_root).as_posix()
