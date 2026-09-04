@@ -42,7 +42,7 @@ _TCE = frozenset({"tui", "classic", "editor"})
 
 # Order is the terminal palette order. A surface only advertises entries whose route it implements.
 BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
-    CommandSpec("help", "list every command", frozenset({"tui", "classic", "editor"}),
+    CommandSpec("help", "list available commands", frozenset({"tui", "classic", "editor"}),
                 "commandMenu", aliases=("?", "commands")),
     CommandSpec("keys", "keyboard shortcuts cheatsheet", _T,
                 aliases=("shortcuts", "cheatsheet")),
@@ -75,7 +75,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("code-action", "persistent `python` power tool: run code across calls",
                 _TCE, "toggleCodeAction", usage="code-action [on|off]",
                 aliases=("codeaction", "python-tool")),
-    CommandSpec("autonomous-gate", "a check command a turn must pass (exit 0) before it may stop",
+    CommandSpec("autonomous-gate", "a check command a native turn must pass (exit 0) before it may stop",
                 _TC, usage="autonomous-gate [CMD|off]", aliases=("auto-gate",)),
     CommandSpec("expand", "expand the last collapsed tool output", _T),
     CommandSpec("expandall", "expand every collapsed tool output", _T),

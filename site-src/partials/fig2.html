@@ -1,0 +1,15 @@
+<figure class="instrument reveal" aria-labelledby="fig2-title">
+  <figcaption class="figure-title" id="fig2-title"><span class="figure-id">FIG.2 · Permission matrix</span><span><kbd>Shift</kbd> + <kbd>Tab</kbd> cycles · <code>/mode</code> sets</span><span class="figure-state">actual contract</span></figcaption>
+  <div class="permission-wrap">
+    <table class="permission-table">
+      <thead><tr><th>Mode</th><th>Read files</th><th>Edit files</th><th>Shell</th><th>Use it for</th></tr></thead>
+      <tbody>
+        <tr><td class="mode-name">plan<small>read-only · proposes a plan</small></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate" aria-label="never in this mode">—</span></td><td><span class="gate" aria-label="never in this mode">—</span></td><td>Understand a codebase and review the proposal before model-requested edits or shell commands.</td></tr>
+        <tr><td class="mode-name">default<small>asks before writes and shell</small></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate ask" aria-label="asks first">?</span></td><td><span class="gate ask" aria-label="asks first">?</span></td><td>Everyday work on a repository you care about.</td></tr>
+        <tr><td class="mode-name">acceptEdits<small>edits apply · shell still asks</small></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate ask" aria-label="asks first">?</span></td><td>Long edit sessions where the diff is the review.</td></tr>
+        <tr><td class="mode-name">auto<small>model tool actions auto-approved</small></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td><span class="gate allow" aria-label="runs without asking">●</span></td><td>Unattended work in a sandbox or throwaway repo; some integration prompts remain user-gated.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="permission-legend"><span><i class="gate allow">●</i> runs without asking</span><span><i class="gate ask">?</i> asks first</span><span><i class="gate">—</i> unavailable</span><span class="rules">standing rules: <code>/permissions</code> allow · ask · deny</span></div>
+</figure>

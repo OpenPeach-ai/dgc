@@ -1,0 +1,39 @@
+<header class="page-hero field field-2">
+  <div class="container">
+    <div class="eyebrow"><b>Editor</b> VS Code · Cursor · VSCodium</div>
+    <h1>The harness, inside your editor.</h1>
+    <p class="lede">Run DGC beside the code. Native local/API routes expose structured tools, readable diffs, DGC plans, permissions, goal-aware turns, and sessions; subscription routes retain local session/goal state and presentation while the vendor owns its turn.</p>
+    <div class="hero-actions"><a class="button button-primary" href="{{MARKETPLACE_URL}}" data-event="marketplace">Install from Marketplace ↗</a><a class="button" href="/vscode/dgc.vsix">Download .vsix</a></div>
+    <div class="page-meta"><span class="status-pill live">extension {{EXT_VERSION}}</span><span class="status-pill">CLI {{VERSION}} recommended</span><span class="status-pill">protocol v{{PROTOCOL_VERSION}} required</span></div>
+  </div>
+</header>
+
+<section class="section">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>01</b> Work surface</div><h2>Tool calls that look like work.</h2><p class="lede">The side panel keeps the local goal and timer above the transcript. On native routes it renders each tool as a typed card and carries diffs and test status back into the editor; delegated vendor turns remain vendor-owned.</p></header>
+    <div style="margin-top:44px">{{FIG3}}</div>
+  </div>
+</section>
+
+<section class="section field field-2">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>02</b> Install matrix</div><h2>Pick your editor and channel.</h2><p class="lede">Install the DGC CLI first, then choose a one-click listing or the self-hosted VSIX with its published <a href="/vscode/dgc.vsix.sha256">SHA-256 checksum</a>.</p></header>
+    <div class="instrument reveal" style="margin-top:38px;overflow:auto">
+      <table>
+        <thead><tr><th>Editor</th><th>One click</th><th>Registry</th><th>Self-hosted</th></tr></thead>
+        <tbody>
+          <tr><td><strong>VS Code</strong></td><td><a href="vscode:extension/vibedgc.dgc">Open editor</a></td><td><a href="{{MARKETPLACE_URL}}">Marketplace ↗</a></td><td><a href="/vscode/dgc.vsix">dgc.vsix</a> · <a href="/vscode/dgc.vsix.sha256">SHA-256</a></td></tr>
+          <tr><td><strong>Cursor</strong></td><td><a href="cursor:extension/vibedgc.dgc">Open editor</a></td><td><a href="{{MARKETPLACE_URL}}">Marketplace ↗</a></td><td><code>cursor --install-extension dgc.vsix</code></td></tr>
+          <tr><td><strong>VSCodium</strong></td><td>—</td><td><a href="https://open-vsx.org/extension/vibedgc/dgc">Open VSX ↗</a></td><td><code>codium --install-extension dgc.vsix</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container content-grid">
+    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Current release</div><h2>{{EXT_VERSION}} speaks typed protocol v{{PROTOCOL_VERSION}}.</h2><p class="lede">Native DGC plans, permission decisions, tools, and images are correlated with the CLI backend instead of reconstructed from terminal text. Session and local-goal state stay typed across routes; delegated results remain clearly attributed to the vendor turn.</p></header>
+    <aside class="card reveal"><span class="micro">Extension {{EXT_VERSION}}</span><h3 style="margin-top:18px">{{EXT_NOTE_1}}</h3><p>{{EXT_NOTE_2}} · {{EXT_NOTE_3}}.</p><a class="button" href="/changelog#extension" style="margin-top:24px">Extension changelog →</a></aside>
+  </div>
+</section>

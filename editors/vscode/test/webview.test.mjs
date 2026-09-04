@@ -32,6 +32,11 @@ assert.match(panelSrc, /path: uri\.fsPath/,
   "file mentions must carry canonical filesystem paths separately from display labels");
 assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
   "approving a plan into auto mode must pass an explicit warning gate");
+assert.match(panelSrc,
+  /this\.routeState\.subscriptionEngine\s*\?\s*\{ command: \{ type: "set_config", values: \{ subscription_model: model \} \}/,
+  "editor model changes must explicitly target the active subscription route");
+assert.match(panelSrc, /async listModels[\s\S]*?if \(this\.routeState\.subscriptionEngine\)[\s\S]*?this\.post\(\{ type: "models"[\s\S]*?return;[\s\S]*?this\.fetchModels\(\)/,
+  "subscription composer model listing must return before native endpoint discovery");
 
 function relativeLuminance(hex) {
   const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);
@@ -550,6 +555,54 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   dom.window.close();
 });
 
+test("subscription composer controls offer vendor default/free-form models and wait for thinking ack", (t) => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  t.after(() => dom.window.close());
+  send({ type: "state", state: {
+    model: "Codex default", mode: "default", think: "off", subscriptionEngine: "codex",
+  } });
+
+  doc.getElementById("btn-model").click();
+  assert.equal(posted.at(-1).type, "listModels");
+  send({ type: "models", ids: [], current: "", subscription: true,
+    label: "Codex (ChatGPT subscription)" });
+  const modelMenu = doc.getElementById("modelmenu");
+  assert.match(modelMenu.textContent, /CLI default/);
+  assert.match(modelMenu.textContent, /Enter another model/);
+  modelMenu.querySelector("[data-default]").click();
+  assert.equal(posted.at(-1).type, "setModel");
+  assert.equal(posted.at(-1).model, "");
+
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true, label: "Codex" });
+  modelMenu.querySelector("[data-custom]").click();
+  assert.equal(posted.at(-1).type, "pickModel");
+
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["opus", "sonnet"], current: "opus", subscription: true,
+    label: "Claude Code" });
+  assert.equal(modelMenu.querySelector('[data-i="0"]').getAttribute("aria-checked"), "true");
+  modelMenu.querySelector('[data-i="1"]').click();
+  assert.equal(posted.at(-1).type, "setModel");
+  assert.equal(posted.at(-1).model, "sonnet");
+
+  const modeButton = doc.getElementById("btn-mode");
+  modeButton.click();
+  assert.ok(doc.querySelector('[data-think="xhigh"]'), "subscription thinking menu should offer xhigh");
+  assert.ok(doc.querySelector('[data-think="max"]'), "subscription thinking menu should offer max");
+  const high = doc.querySelector('[data-think="high"]');
+  high.click();
+  assert.equal(posted.at(-1).type, "setThink");
+  assert.equal(posted.at(-1).level, "high");
+  // A rejected vendor effort must not leave an optimistic selection behind. Only a backend
+  // state/think_changed acknowledgement is allowed to change the visible value.
+  modeButton.click();
+  assert.equal(doc.querySelector('[data-think="high"]').classList.contains("sel"), false);
+  assert.equal(doc.querySelector('[data-think="off"]').classList.contains("sel"), true);
+  assert.equal(doc.querySelector('[data-think="off"] span:last-child').textContent, "default");
+  assert.deepEqual(errors, []);
+});
+
 test("provider runtime settings and actual usage round-trip through the webview", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   assert.ok([...doc.getElementById("s-api_mode").options].some((option) =>
@@ -559,18 +612,21 @@ test("provider runtime settings and actual usage round-trip through the webview"
   ], models: [] });
   send({ type: "event", event: {
     type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
-    mode: "default", think: "low", api_mode: "responses", provider_state: "server",
+    mode: "default", think: "xhigh", api_mode: "responses", provider_state: "server",
     subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
     fallback_api_key: "must-not-enter-webview",
     prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
-    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "high",
+    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "max",
     subscription_engines: [
       { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
   } });
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
   assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
   assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
-  assert.equal(doc.getElementById("s-subscription_effort").value, "high");
+  assert.equal(doc.getElementById("s-think").value, "xhigh",
+    "native xhigh must survive settings hydration while a subscription route is active");
+  assert.equal(doc.getElementById("s-subscription_effort").value, "max",
+    "subscription max must survive settings hydration");
   assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
@@ -587,7 +643,8 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
   assert.equal(saved.values.subscription_engine, "codex");
   assert.equal(saved.values.subscription_model, "gpt-5.6");
-  assert.equal(saved.values.subscription_effort, "high");
+  assert.equal(saved.values.think, "xhigh");
+  assert.equal(saved.values.subscription_effort, "max");
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",

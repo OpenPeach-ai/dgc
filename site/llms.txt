@@ -1,0 +1,32 @@
+# DGC
+
+A coding agent for the models you run.
+
+## Start
+- Docs: https://docs.vibedgc.com/
+- Benchmark: https://vibedgc.com/benchmark
+- Source: https://github.com/OpenPeach-ai/dgc
+
+## Product
+DGC is a coding-agent harness for a local model, compatible API, or supported coding subscription. For native local/API routes, DGC owns context, permissions, tools, execution, verification, sessions, plans, goals, MCP, skills, hooks, and terminal/editor presentation. Subscription routes delegate model and tool execution to the supported vendor CLI while DGC retains its session, SessionStart/Stop hooks, mode mapping, and presentation.
+
+## Documentation
+- Getting started: https://docs.vibedgc.com/getting-started
+- Keyboard shortcuts: https://docs.vibedgc.com/keyboard-shortcuts
+- Slash commands: https://docs.vibedgc.com/slash-commands
+- Command line: https://docs.vibedgc.com/command-line
+- Permission modes: https://docs.vibedgc.com/permission-modes
+- Plan mode: https://docs.vibedgc.com/plan-mode
+- Sessions & rewind: https://docs.vibedgc.com/sessions-rewind
+- Standing goals: https://docs.vibedgc.com/standing-goals
+- Connect your model: https://docs.vibedgc.com/connect-your-model
+- Subscriptions: https://docs.vibedgc.com/subscriptions
+- Thinking & reasoning: https://docs.vibedgc.com/thinking-reasoning
+- Artifacts: https://docs.vibedgc.com/artifacts
+- MCP servers: https://docs.vibedgc.com/mcp-servers
+- Lifecycle hooks: https://docs.vibedgc.com/lifecycle-hooks
+- Skills: https://docs.vibedgc.com/skills
+- Multiple agents: https://docs.vibedgc.com/multiple-agents
+- Training export: https://docs.vibedgc.com/training-export
+- Python code-action (power mode): https://docs.vibedgc.com/python-code-action-power-mode
+- Configuration: https://docs.vibedgc.com/configuration

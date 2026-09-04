@@ -814,7 +814,10 @@ class Agent:
         else:
             self.mcp = MCPManager(
                 config.project_root, client_capabilities=self._mcp_client_capabilities(ui))
-            self.mcp.connect_all(config.get("mcp_servers"), startup=True)
+            mcp_servers = (config.mcp_runtime_servers()
+                           if hasattr(config, "mcp_runtime_servers")
+                           else config.get("mcp_servers"))
+            self.mcp.connect_all(mcp_servers, startup=True)
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.cancelled = threading.Event()  # a front-end sets this to interrupt the turn/tool wait
@@ -3705,7 +3708,10 @@ class Agent:
                 isolated_mcp = MCPManager(
                     child_config.project_root,
                     client_capabilities=self._mcp_client_capabilities(sub_ui))
-                isolated_mcp.connect_all(child_config.get("mcp_servers"), startup=True)
+                child_servers = (child_config.mcp_runtime_servers()
+                                 if hasattr(child_config, "mcp_runtime_servers")
+                                 else child_config.get("mcp_servers"))
+                isolated_mcp.connect_all(child_servers, startup=True)
             sub = Agent(child_config, sub_ui, mcp=isolated_mcp if isolated else self.mcp)
             sub.depth = self.depth + 1
             sub.cancelled = self.cancelled

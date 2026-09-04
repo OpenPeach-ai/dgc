@@ -1,0 +1,35 @@
+<div class="announcement" data-announcement="{{VERSION_NUMBER}}">
+  <a href="{{SITE_URL}}/changelog"><span class="status-dot" aria-hidden="true"></span>DGC {{VERSION}} is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="{{SITE_URL}}/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="{{SITE_URL}}/#cli">CLI</a>
+    <a href="{{SITE_URL}}/vscode">Extension</a>
+    <a href="{{SITE_URL}}/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="{{GITHUB_URL}}" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+</header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="{{SITE_URL}}/#cli"><span>01</span>CLI</a>
+    <a href="{{SITE_URL}}/vscode"><span>02</span>Extension</a>
+    <a href="{{SITE_URL}}/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="{{GITHUB_URL}}"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>

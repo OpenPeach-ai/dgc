@@ -2,48 +2,79 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
 <title>Configuration · DGC Docs</title>
 <meta name="description" content="config.json, models, context, providers">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
-<link rel="canonical" href="https://docs.vibedgc.com/configuration.html">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/docs.css">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://docs.vibedgc.com/configuration">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Configuration · DGC Docs">
+<meta property="og:description" content="config.json, models, context, providers">
+<meta property="og:url" content="https://docs.vibedgc.com/configuration">
+<meta property="og:image" content="https://vibedgc.com/og-docs.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Configuration · DGC Docs"><meta name="twitter:description" content="config.json, models, context, providers"><meta name="twitter:image" content="https://vibedgc.com/og-docs.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"DGC","item":"https://vibedgc.com"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://docs.vibedgc.com"},{"@type":"ListItem","position":3,"name":"Configuration","item":"https://docs.vibedgc.com/configuration"}]}]</script>
 </head>
-<body data-page="configuration">
-<a class="skip" href="#content">Skip to content</a>
-
-<header class="topbar">
-  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
-  <a class="brand" href="https://vibedgc.com/" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
-  <div class="topspacer"></div>
-  <div class="search" role="search">
-    <span class="ico">/</span>
-    <input id="docsearch" type="search" placeholder="Search docs…"
-           aria-label="Search documentation" autocomplete="off" spellcheck="false">
-    <span class="kbd">/</span>
-  </div>
-  <div class="toplinks">
-    <a href="https://vibedgc.com/">Home</a>
-  </div>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
 </header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
 
-<div class="scrim" aria-hidden="true"></div>
-<div class="shell">
-  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
-<div class="grp">
+<main id="content">
+<div class="docs-shell" data-doc-page="configuration">
+  <nav class="docs-sidebar" id="docs-sidebar" aria-label="Documentation navigation"><div class="grp">
 <div class="grp-h">Getting started</div>
 <a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
 <a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
-<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="essential key bindings in the composer + transcript">Keyboard shortcuts</a>
 <a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
 <a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
 </div>
 <div class="grp">
 <div class="grp-h">Using DGC</div>
-<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="native default · acceptEdits · plan · auto">Permission modes</a>
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
@@ -67,168 +98,171 @@
 <div class="grp">
 <div class="grp-h">Reference</div>
 <a href="configuration.html" aria-current="page" class="active" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
-</div>
-</nav>
-  <main class="content" id="content">
-    <article class="doc">
+</div></nav>
+  <article class="docs-article">
+    <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC v0.26.0</span><a href="https://github.com/OpenPeach-ai/dgc/edit/main/dgc/docs.py">Edit on GitHub ↗</a></div>
       <div class="crumb">Reference<span class="sep">/</span>Configuration</div>
       <p class="lead">config.json, models, context, providers</p>
-<h1 id="configuration">Configuration<a class="anchor" href="#configuration" aria-label="Link to this section">#</a></h1>
-<p>Global settings live in <code>~/.dgc/config.json</code>; per-project overrides live in a project's <code>.dgc/</code>. Most settings have a slash command, so you rarely edit the file by hand.</p>
+<div class="heading-row h1-row"><h1 id="configuration">Configuration</h1><a class="anchor" href="#configuration" aria-label="Link to this section">#</a></div>
+<p>Global settings live in <code>~/.dgc/config.json</code>; per-project overrides live in a project&#x27;s <code>.dgc/</code>. Most settings have a slash command, so you rarely edit the file by hand.</p>
 <p>Useful keys:</p>
 <ul>
-<li><code>base_url</code>, <code>model</code> — the endpoint and model (<code>/connect</code>, <code>/model</code>). Credentials live in</li>
+<li><code>base_url</code>, <code>model</code> — the endpoint and model (<code>/connect</code>, <code>/model</code>). Credentials live in owner-only <code>~/.dgc/secrets.json</code>, VS Code SecretStorage, or <code>DGC_API_KEY</code> / the other <code>DGC_*_API_KEY</code> environment references; they are not written into normal config.</li>
+<li><code>mode</code>, <code>thinking</code> — permission mode and reasoning effort. <code>thinking</code> is <strong><code>off</code> by default</strong> (a coding agent should act, not deliberate at length) and accepts <code>off · low · medium · high · xhigh</code>. DGC maps the requested level to each provider&#x27;s supported control. Some reasoning-only models translate <code>off</code> to their minimum effort, and endpoints that do not expose a compatible control may ignore it; a set level reaches Qwen3-family llama.cpp/unsloth templates through <code>chat_template_kwargs</code>. <strong>Reasoning models (o-series, DeepSeek-R1, qwen-thinking) may do better on hard tasks with <code>/think high</code>.</strong> See the <strong>Thinking &amp; reasoning</strong> guide.</li>
+<li><code>show_reasoning</code>, <code>preserve_thinking</code> — <code>show_reasoning</code> (<code>/thoughts show|hide</code>) shows the model&#x27;s thinking, muted, in the transcript. <code>preserve_thinking</code> (<code>/preserve-thinking on|off</code>, default off) re-embeds the prior turn&#x27;s reasoning in the context sent back so a compatible/local model keeps its own thinking across turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and Ollama already round-trip their reasoning natively).</li>
+<li><code>think_budget_tokens</code>, <code>max_tokens</code> — safety backstops: a reasoning phase that runs away with no output is aborted + retried with less reasoning (<code>think_budget_tokens</code>, 0=off); output is capped at <code>max_tokens</code> (length-truncation auto-continues, 0=don&#x27;t send).</li>
+<li><code>api_mode</code>, <code>provider_state</code>, <code>prompt_cache</code> — transport and continuity. <code>auto</code> selects native Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for OpenAI, and Chat Completions for compatible servers. Use <code>api_mode: ollama</code> or <code>api_mode: anthropic</code> only when a proxy hides its provider identity. Anthropic Messages preserves signed thinking and grouped tool-result continuation blocks locally; it never sends the key as Bearer authentication. Responses defaults to stateless (<code>store: false</code>) with local encrypted-reasoning replay and a hashed cache-routing key when DGC derives the key. An explicit <code>prompt_cache_key</code> of up to 64 characters is sent verbatim. Choose <code>provider_state: server</code> only when provider-side response storage is acceptable.</li>
+<li><code>provider_capabilities</code>, <code>capability_cache_ttl_s</code> — explicit feature overrides and the bounded interval before DGC retries a capability that an endpoint/model rejected.</li>
+<li><code>context_size</code> — the requested operating window. Known model selections apply a memory-conscious recommendation; authoritative provider metadata clamps impossible values but never silently expands a local Ollama allocation. Long sessions compact at <code>compact_threshold</code> of the effective value.</li>
+<li><code>search_timeout</code> — bounded 1–60 second lifetime for internal <code>grep</code>/<code>glob</code> discovery. DGC uses ripgrep without a shell when available and a link-safe bounded fallback otherwise.</li>
+<li><code>session_redaction</code> — on by default. Durable transcripts, checkpoint conversation blobs, goals, titles, and plans receive an additional credential-redaction pass. Live native-provider/tool and editor/headless/ACP masking remains enforced. Delegated vendor-CLI streams in the full-screen TUI or subscription one-shot CLI are shown as the vendor emits them after terminal-control cleanup, so treat vendor output as sensitive. Exact file rewind snapshots remain byte-for-byte unchanged inside the owner-private session so <code>/rewind</code> cannot corrupt a file.</li>
+<li><code>tool_profile</code> — <code>adaptive</code> (default) keeps all core coding tools while activating web, artifact, skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use <code>full</code> to expose the whole execution catalog on every model request.</li>
+<li><code>code_action</code> — <strong>off by default.</strong> When <code>true</code>, DGC advertises a <code>python</code> power tool that runs code in a <strong>persistent per-session interpreter</strong> (variables/imports survive across calls). See the <strong>Python code-action</strong> guide. It executes arbitrary code and is gated by the same approval path as <code>bash</code> (asked in default/acceptEdits, denied in plan), but is not wrapped by <code>/sandbox</code>, checkpointed, or mutation-tracked for verifier reuse. It is never shown until you opt in.</li>
+<li><code>theme</code>, <code>background</code> — appearance (<code>background</code> defaults to *inherit*, never repainting your terminal).</li>
+<li><code>suggest</code> — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion requests wait for fleet-wide idle time and are canceled before foreground work; <code>aux_idle_delay_ms</code> controls the grace period.</li>
+<li><code>mcp_servers</code>, <code>hooks</code>, <code>fallback_model</code>, <code>subagent_model</code> — extend the agent. When a fallback or sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a forced main-provider mode; set <code>fallback_api_mode</code> or <code>subagent_api_mode</code> only to override that. Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded redacted head/tail, own a process group and checkout mutation lease, and honor <code>/sandbox</code>.</li>
+<li><code>subagent_worktree_root</code> — optional private storage for automatic delegated checkouts; empty uses <code>~/.dgc/worktrees</code>. It must be outside the source repository.</li>
+<li><code>fleet_worktree_root</code> — optional private storage for automatically isolated TUI agents; empty uses <code>~/.dgc/fleet-worktrees</code>. Conversation resume state remains scoped to the source project, and changed managed checkouts are retained rather than force-removed.</li>
+<li><code>max_parallel_tasks</code> — bounded <code>task</code> fan-out (default 4, maximum 8; set 1 to disable). In a Git-backed full-auto turn, two or more independent <code>task</code> calls emitted together are snapshotted from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive permission modes, mixed tool batches, and non-Git projects keep the normal serial path.</li>
+<li><code>language_servers</code>, <code>code_intel_timeout</code>, <code>code_intel_lsp_idle_s</code> — optional stdio LSP commands for richer definitions, references, symbols, and diagnostics. Keys may be a language (<code>python</code>) or extension (<code>.py</code>): <code>{&quot;language_servers&quot;:{&quot;python&quot;:{&quot;command&quot;:&quot;pyright-langserver&quot;,&quot;args&quot;:[&quot;--stdio&quot;]}}}</code>. Without one, the bounded dependency-free static analyzer remains available. Configured servers receive a minimal environment, run without a shell, and are serialized per project/server spec. DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle, and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set <code>code_intel_lsp_idle_s</code> to <code>0</code> for one-shot isolation everywhere.</li>
 </ul>
-<p>owner-only <code>~/.dgc/secrets.json</code>, VS Code SecretStorage, or <code>DGC_API_KEY</code> / the other <code>DGC_*_API_KEY</code> environment references; they are not written into normal config.</p>
-<ul>
-<li><code>mode</code>, <code>thinking</code> — permission mode and reasoning effort. <code>thinking</code> is **<code>off</code></li>
-</ul>
-<p>by default<strong> (a coding agent should act, not deliberate at length) and accepts <code>off · low · medium · high · xhigh</code>. DGC sends the correct reasoning switch </strong>per provider<strong> automatically — so <code>off</code> genuinely turns reasoning off on Ollama, vLLM, OpenAI, etc., and a set level reaches Qwen3-family llama.cpp/unsloth templates (which read it from inside <code>chat_template_kwargs</code>). </strong>Reasoning models (o-series, DeepSeek-R1, qwen-thinking) do better on hard tasks with <code>/think high</code>.<strong> See the </strong>Thinking &amp; reasoning** guide.</p>
-<ul>
-<li><code>show_reasoning</code>, <code>preserve_thinking</code> — <code>show_reasoning</code> (<code>/thoughts show|hide</code>)</li>
-</ul>
-<p>shows the model's thinking, muted, in the transcript. <code>preserve_thinking</code> (<code>/preserve-thinking on|off</code>, default off) re-embeds the prior turn's reasoning in the context sent back so a compatible/local model keeps its own thinking across turns (costs tokens; only the OpenAI-compatible/chat_completions path — Anthropic and Ollama already round-trip their reasoning natively).</p>
-<ul>
-<li><code>think_budget_tokens</code>, <code>max_tokens</code> — safety backstops: a reasoning phase that</li>
-</ul>
-<p>runs away with no output is aborted + retried with less reasoning (<code>think_budget_tokens</code>, 0=off); output is capped at <code>max_tokens</code> (length-truncation auto-continues, 0=don't send).</p>
-<ul>
-<li><code>api_mode</code>, <code>provider_state</code>, <code>prompt_cache</code> — transport and continuity. <code>auto</code> selects native</li>
-</ul>
-<p>Ollama chat for detected Ollama endpoints, Anthropic Messages for Anthropic, OpenAI Responses for OpenAI, and Chat Completions for compatible servers. Use <code>api_mode: ollama</code> or <code>api_mode: anthropic</code> only when a proxy hides its provider identity. Anthropic Messages preserves signed thinking and grouped tool-result continuation blocks locally; it never sends the key as Bearer authentication. Responses defaults to stateless (<code>store: false</code>) with local encrypted-reasoning replay and privacy-safe cache routing. Choose <code>provider_state: server</code> only when provider-side response storage is acceptable.</p>
-<ul>
-<li><code>provider_capabilities</code>, <code>capability_cache_ttl_s</code> — explicit feature overrides and the bounded</li>
-</ul>
-<p>interval before DGC retries a capability that an endpoint/model rejected.</p>
-<ul>
-<li><code>context_size</code> — the requested operating window. Known model selections apply a</li>
-</ul>
-<p>memory-conscious recommendation; authoritative provider metadata clamps impossible values but never silently expands a local Ollama allocation. Long sessions compact at <code>compact_threshold</code> of the effective value.</p>
-<ul>
-<li><code>search_timeout</code> — bounded 1–60 second lifetime for internal <code>grep</code>/<code>glob</code> discovery. DGC uses</li>
-</ul>
-<p>ripgrep without a shell when available and a link-safe bounded fallback otherwise.</p>
-<ul>
-<li><code>session_redaction</code> — on by default. Durable transcripts, checkpoint conversation blobs, goals,</li>
-</ul>
-<p>titles, and plans receive an additional credential-redaction pass. Live provider/tool/editor/ACP masking is always enforced. Exact file rewind snapshots remain byte-for-byte unchanged inside the owner-private session so <code>/rewind</code> cannot corrupt a file.</p>
-<ul>
-<li><code>tool_profile</code> — <code>adaptive</code> (default) keeps all core coding tools while activating web, artifact,</li>
-</ul>
-<p>skill-install, memory, goal, and delegation tools from explicit turn/standing-goal intent. Use <code>full</code> to expose the whole execution catalog on every model request.</p>
-<ul>
-<li><code>code_action</code> — <strong>off by default.</strong> When <code>true</code>, DGC advertises a <code>python</code> power tool that runs</li>
-</ul>
-<p>code in a <strong>persistent per-session interpreter</strong> (variables/imports survive across calls). See the <strong>Python code-action</strong> guide. It executes arbitrary code, so it is gated by the same approval path as <code>bash</code> (asked in default/acceptEdits, denied in plan) and is never shown until you opt in.</p>
-<ul>
-<li><code>theme</code>, <code>background</code> — appearance (<code>background</code> defaults to *inherit*, never</li>
-</ul>
-<p>repainting your terminal).</p>
-<ul>
-<li><code>suggest</code> — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion</li>
-</ul>
-<p>requests wait for fleet-wide idle time and are canceled before foreground work; <code>aux_idle_delay_ms</code> controls the grace period.</p>
-<ul>
-<li><code>mcp_servers</code>, <code>hooks</code>, <code>fallback_model</code>, <code>subagent_model</code> — extend the agent. When a fallback or</li>
-</ul>
-<p>sub-agent uses another endpoint, its transport is inferred independently instead of inheriting a forced main-provider mode; set <code>fallback_api_mode</code> or <code>subagent_api_mode</code> only to override that. Lifecycle-hook batches are capped at 32 entries and one 20-second deadline, drain only a bounded redacted head/tail, own a process group and checkout mutation lease, and honor <code>/sandbox</code>.</p>
-<ul>
-<li><code>subagent_worktree_root</code> — optional private storage for automatic delegated checkouts; empty uses</li>
-</ul>
-<p><code>~/.dgc/worktrees</code>. It must be outside the source repository.</p>
-<ul>
-<li><code>fleet_worktree_root</code> — optional private storage for automatically isolated TUI agents; empty uses</li>
-</ul>
-<p><code>~/.dgc/fleet-worktrees</code>. Conversation resume state remains scoped to the source project, and changed managed checkouts are retained rather than force-removed.</p>
-<ul>
-<li><code>max_parallel_tasks</code> — bounded <code>task</code> fan-out (default 4, maximum 8; set 1 to disable). In a</li>
-</ul>
-<p>Git-backed full-auto turn, two or more independent <code>task</code> calls emitted together are snapshotted from one parent baseline, run concurrently, and integrated in call order. Hooks, interactive permission modes, mixed tool batches, and non-Git projects keep the normal serial path.</p>
-<ul>
-<li><code>language_servers</code>, <code>code_intel_timeout</code>, <code>code_intel_lsp_idle_s</code> — optional stdio LSP</li>
-</ul>
-<p>commands for richer definitions, references, symbols, and diagnostics. Keys may be a language (<code>python</code>) or extension (<code>.py</code>): <code>{"language_servers":{"python":{"command":"pyright-langserver","args":["--stdio"]}}}</code>. Without one, the bounded dependency-free static analyzer remains available. Configured servers receive a minimal environment, run without a shell, and are serialized per project/server spec. DGC keeps at most four configured sessions warm for 120 seconds by default, reaps them when idle, and retires failed sessions. Explicitly approved external-file queries always stay one-shot; set <code>code_intel_lsp_idle_s</code> to <code>0</code> for one-shot isolation everywhere.</p>
-<h2 id="credentials">Credentials<a class="anchor" href="#credentials" aria-label="Link to this section">#</a></h2>
-<p>Keys never live in <code>config.json</code>. <code>api_key</code>, <code>search_api_key</code>, <code>subagent_api_key</code> and <code>fallback_api_key</code> are written to <code>~/.dgc/secrets.json</code> with owner-only permissions, and each can be supplied by environment variable instead (<code>DGC_API_KEY</code>, <code>DGC_SEARCH_API_KEY</code>, …). On the command line, <code>--api-key-env NAME</code> reads a key from the environment <strong>without persisting it at all</strong>. <code>fallback_base_url</code> and <code>subagent_base_url</code> point the fallback and sub-agent at their own endpoints.</p>
-<h2 id="sampling-and-limits">Sampling and limits<a class="anchor" href="#sampling-and-limits" aria-label="Link to this section">#</a></h2>
-<p>Sampling keys are empty by default, which means *use the endpoint's own defaults* — set one only when you want to override it.</p>
+<div class="heading-row h2-row"><h2 id="credentials">Credentials</h2><a class="anchor" href="#credentials" aria-label="Link to this section">#</a></div>
+<p>The <code>api_key</code>, <code>search_api_key</code>, <code>subagent_api_key</code>, and <code>fallback_api_key</code> values never live in <code>config.json</code>; they are written to <code>~/.dgc/secrets.json</code> with owner-only permissions, and each can be supplied by environment variable instead (<code>DGC_API_KEY</code>, <code>DGC_SEARCH_API_KEY</code>, …). On the command line, <code>--api-key-env NAME</code> reads a key from the environment <strong>without persisting it at all</strong>. <code>fallback_base_url</code> and <code>subagent_base_url</code> point the fallback and sub-agent at their own endpoints.</p>
+<div class="heading-row h2-row"><h2 id="sampling-and-limits">Sampling and limits</h2><a class="anchor" href="#sampling-and-limits" aria-label="Link to this section">#</a></div>
+<p>Sampling keys are empty by default, which means *use the endpoint&#x27;s own defaults* — set one only when you want to override it.</p>
 <ul>
 <li><code>temperature</code>, <code>top_p</code>, <code>top_k</code>, <code>min_p</code> — sampling parameters, passed through when set.</li>
 <li><code>max_turns</code> (default <code>80</code>) — tool-use iterations the agent may take in one turn.</li>
-<li><code>turn_budget_s</code> (default <code>0</code>, meaning no limit) — wall-clock budget for a turn. The agent</li>
-</ul>
-<p>reserves the tail of this budget to converge and persist rather than being cut off mid-edit.</p>
-<ul>
-<li><code>request_timeout</code> (default <code>1800</code>) — seconds to wait on a single provider response.</li>
+<li><code>turn_budget_s</code> (default <code>0</code>, meaning no limit) — wall-clock budget for a turn. The agent reserves the tail of this budget to converge and persist rather than being cut off mid-edit.</li>
+<li><code>request_timeout</code> (default <code>1800</code>) — maximum seconds of provider-stream inactivity between response chunks; an active response can take longer overall.</li>
 <li><code>bash_timeout</code> (default <code>120</code>) — per-command shell timeout.</li>
 <li><code>approval_timeout_s</code> (default <code>300</code>) — how long a permission prompt waits before giving up.</li>
 <li><code>ollama_keep_alive</code> (default <code>30m</code>) — how long Ollama keeps the model resident between turns.</li>
 <li><code>prompt_cache_key</code> — an explicit cache key for providers that support prompt caching.</li>
 </ul>
-<h2 id="web-search">Web search<a class="anchor" href="#web-search" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="web-search">Web search</h2><a class="anchor" href="#web-search" aria-label="Link to this section">#</a></div>
 <ul>
-<li><code>search_provider</code> (default <code>duckduckgo</code>) — which backend answers the agent's web searches.</li>
-<li><code>search_url</code> — a custom endpoint for a self-hosted search backend; empty uses the provider's own.</li>
-<li><code>search_timeout</code> bounds every query, and <code>search_api_key</code> lives in <code>secrets.json</code> (above).</li>
+<li><code>search_provider</code> (default <code>duckduckgo</code>) — which backend answers the agent&#x27;s web searches.</li>
+<li><code>search_url</code> — a custom endpoint for a self-hosted search backend; empty uses the provider&#x27;s own.</li>
+<li><code>search_api_key</code> lives in <code>secrets.json</code> (above). Web providers use bounded transport timeouts.</li>
 </ul>
-<h2 id="sandbox">Sandbox<a class="anchor" href="#sandbox" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="sandbox">Sandbox</h2><a class="anchor" href="#sandbox" aria-label="Link to this section">#</a></div>
 <ul>
 <li><code>sandbox</code> (default <code>false</code>) — run shell commands inside the sandbox.</li>
 <li><code>sandbox_network</code> (default <code>false</code>) — allow network access from sandboxed commands.</li>
-<li><code>sandbox_env_allow</code> (default <code>[]</code>) — environment variable names to pass through to sandboxed</li>
+<li><code>sandbox_env_allow</code> (default <code>[]</code>) — environment variable names to pass through to sandboxed commands. Other non-baseline host variables are withheld; DGC still supplies a small safe baseline plus sandbox-specific home, temporary, and runtime paths.</li>
 </ul>
-<p>commands. Everything else is withheld.</p>
-<h2 id="artifacts">Artifacts<a class="anchor" href="#artifacts" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="artifacts">Artifacts</h2><a class="anchor" href="#artifacts" aria-label="Link to this section">#</a></div>
 <ul>
 <li><code>artifact_autostart</code> (default <code>true</code>) — serve artifacts automatically as they are produced.</li>
-<li><code>artifact_port</code> (default <code>45000</code>) — the single localhost port every artifact shares.</li>
-<li><code>artifact_bind</code> (default <code>localhost</code>) — the bind address. Set it to a LAN address to preview</li>
-</ul>
-<p>from another device on your own network.</p>
-<ul>
-<li><code>artifact_hostname</code> — the hostname used when building the printed URL, if it differs from the</li>
-</ul>
-<p>bind address.</p>
-<ul>
+<li><code>artifact_port</code> (default <code>45000</code>) — the shared port for project artifacts. Plan previews use a separate transient loopback server and port.</li>
+<li><code>artifact_bind</code> (default <code>localhost</code>) — the bind mode. Set it to <code>lan</code> to preview from another device on your own network.</li>
+<li><code>artifact_hostname</code> — the hostname used when building the printed URL, if it differs from the bind address.</li>
 <li><code>plan_artifact</code> (default <code>true</code>) — render proposed plans as an artifact page.</li>
 <li><code>artifact_in_plan</code> (default <code>false</code>) — also serve artifacts while in plan mode.</li>
 </ul>
-<h2 id="unattended-runs">Unattended runs<a class="anchor" href="#unattended-runs" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="native-route-unattended-runs">Native-route unattended runs</h2><a class="anchor" href="#native-route-unattended-runs" aria-label="Link to this section">#</a></div>
 <ul>
-<li><code>autonomous_gate</code> — a check command that must exit <code>0</code> before the agent may stop a turn.</li>
+<li><code>autonomous_gate</code> — a check command that must exit <code>0</code> before a native local/API agent may stop a turn.</li>
 <li><code>autonomous_max_turns</code> (default <code>30</code>) — bound on failed gate retries.</li>
-<li><code>verify_before_done</code> (default <code>false</code>) and <code>verify_command</code> — run a command and feed a failure</li>
+<li><code>verify_before_done</code> (default <code>false</code>) and <code>verify_command</code> — run a command and feed a failure back before allowing a native local/API turn to end.</li>
 </ul>
-<p>back before allowing the turn to end.</p>
-<p>Each has a command-line equivalent; see <strong>Command line</strong>.</p>
-<h2 id="subscriptions">Subscriptions<a class="anchor" href="#subscriptions" aria-label="Link to this section">#</a></h2>
+<p>Subscription turns are delegated to the selected vendor CLI and bypass these two native-loop gates.</p>
+<p>The autonomous-gate pair has command-line equivalents; see <strong>Command line</strong>. The verifier pair is configured in <code>config.json</code>.</p>
+<div class="heading-row h2-row"><h2 id="subscriptions">Subscriptions</h2><a class="anchor" href="#subscriptions" aria-label="Link to this section">#</a></div>
 <ul>
 <li><code>subscription_engine</code> — which vendor CLI drives the turn.</li>
 <li><code>subscription_model</code>, <code>subscription_effort</code> — model and effort passed through to that CLI.</li>
 </ul>
-<h2 id="appearance">Appearance<a class="anchor" href="#appearance" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="appearance">Appearance</h2><a class="anchor" href="#appearance" aria-label="Link to this section">#</a></div>
 <ul>
-<li><code>logo_animation</code> (default <code>true</code>) — the animated mark on the welcome screen. Turn it off for a</li>
+<li><code>logo_animation</code> (default <code>true</code>) — the animated mark on the welcome screen. Turn it off for a static logo.</li>
 </ul>
-<p>static logo.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="python-code-action-power-mode.html"><div class="k">← Previous</div><div class="t">Python code-action (power mode)</div></a>
 </nav>
-    </article>
-  </main>
-  <aside class="toc" aria-label="On this page">
-<div class="h">On this page</div>
-<a href="#credentials" data-id="credentials" class="lvl2">Credentials</a>
+  </article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#credentials" data-id="credentials" class="lvl2">Credentials</a>
 <a href="#sampling-and-limits" data-id="sampling-and-limits" class="lvl2">Sampling and limits</a>
 <a href="#web-search" data-id="web-search" class="lvl2">Web search</a>
 <a href="#sandbox" data-id="sandbox" class="lvl2">Sandbox</a>
 <a href="#artifacts" data-id="artifacts" class="lvl2">Artifacts</a>
-<a href="#unattended-runs" data-id="unattended-runs" class="lvl2">Unattended runs</a>
+<a href="#native-route-unattended-runs" data-id="native-route-unattended-runs" class="lvl2">Native-route unattended runs</a>
 <a href="#subscriptions" data-id="subscriptions" class="lvl2">Subscriptions</a>
-<a href="#appearance" data-id="appearance" class="lvl2">Appearance</a>
-</aside>
+<a href="#appearance" data-id="appearance" class="lvl2">Appearance</a></aside>
 </div>
+<dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="essential key bindings in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="native default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" aria-current="page" class="active" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div></nav></dialog>
+<script src="/docs/assets/docs.js?v=777bbb86a947" defer></script>
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
 
-<script src="assets/docs.js"></script>
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
 </body>
 </html>

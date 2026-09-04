@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
+<title>Privacy · DGC</title>
+<meta name="description" content="What DGC stores locally, what reaches a chosen provider, and what the website processes.">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://vibedgc.com/privacy">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Privacy · DGC">
+<meta property="og:description" content="What DGC stores locally, what reaches a chosen provider, and what the website processes.">
+<meta property="og:url" content="https://vibedgc.com/privacy">
+<meta property="og:image" content="https://vibedgc.com/og-card.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Privacy · DGC"><meta name="twitter:description" content="What DGC stores locally, what reaches a chosen provider, and what the website processes."><meta name="twitter:image" content="https://vibedgc.com/og-card.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}}]</script>
+</head>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+</header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
+
+<main id="content">
+<header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>Legal</b> DGC</div><h1>Privacy</h1><p class="lede">What DGC stores locally, what reaches a chosen provider, and what the website processes.</p><p class="page-meta"><span class="micro">Effective</span> <time datetime="2026-09-04">2026-09-04</time></p></div></header><section class="section"><div class="container content-grid"><article class="prose"><p>This notice covers the DGC command-line tool and editor extension, the vibedgc.com website, and forms served from that site.</p>
+<div class="heading-row h2-row"><h2 id="dgc-on-your-machine">DGC on your machine</h2><a class="anchor" href="#dgc-on-your-machine" aria-label="Link to DGC on your machine">#</a></div>
+<p>DGC stores configuration, owner-restricted credentials, sessions, plans, goals, checkpoints, and related local state under its user data directory. The editor keeps credentials it manages in VS Code SecretStorage. Project instructions and project-scoped skills may also live in the repository you open. This data is used to operate the agent, resume work, and support local recovery.</p>
+<p>DGC does not send product-usage telemetry. An interactive CLI launch may make a small request to <code>vibedgc.com/version.json</code> to learn whether a newer release exists. A successful check is cached for a day; after a failed request, a later interactive launch may retry. The request sends the ordinary network metadata needed for HTTP and a <code>dgc-update-check</code> user-agent; it does not include prompts, source code, session content, tool arguments, or credentials. One-shot <code>dgc -p</code> runs skip this check. The self-hosted editor VSIX separately checks <code>vibedgc.com/vscode/version.json</code> at most once a day by default with a <code>dgc-vscode</code> user-agent. Marketplace and Open VSX builds skip that request, and <code>dgc.checkForUpdates</code> can disable it.</p>
+<p>The coding loop sends context only to services you choose to use. A model endpoint receives the prompts, selected project context, and tool results needed for the conversation. A local endpoint can keep that traffic on infrastructure you control; a cloud API or subscription provider processes it under that provider’s terms. Optional web search, fetched pages, MCP servers, and other configured integrations receive the requests or tool arguments you direct to them. A configured language server receives workspace metadata and the full text of documents queried through code intelligence.</p>
+<p>Training export is initiated by you and writes to a path you choose. DGC removes reasoning traces and provider continuation data, then deep-scrubs configured secrets and high-confidence credential patterns before writing portable JSONL. DGC does not upload that export.</p>
+<div class="heading-row h2-row"><h2 id="the-website">The website</h2><a class="anchor" href="#the-website" aria-label="Link to The website">#</a></div>
+<p>The site is delivered through Cloudflare. Cloudflare necessarily processes request information such as IP address, user agent, requested path, timestamps, and security signals to serve and protect the site. Where Cloudflare Web Analytics is enabled, it provides aggregate page-view information without an advertising profile.</p>
+<p>The site may also send a small first-party interaction event to a DGC endpoint—for example, that an install command was copied; a marketplace, benchmark-trace, or getting-started link was selected; a product capture was played; a commercial enquiry or release-subscription request was submitted; a subscription was confirmed; or a download was requested. The server derives the page path from the same-origin request and stores the event name, site hostname, that page path, and a coarse class such as desktop, mobile, bot, or DGC update checker. It does not store prompts, repository contents, form text, a full user-agent string, or a cross-site identifier in that event dataset. These events use no advertising cookie, are not sent when the browser reports <code>DNT: 1</code> or Global Privacy Control, and Cloudflare Analytics Engine retains them for three months.</p>
+<div class="heading-row h2-row"><h2 id="forms-and-email">Forms and email</h2><a class="anchor" href="#forms-and-email" aria-label="Link to Forms and email">#</a></div>
+<p>If you submit the commercial-use form, the service creates a delivery record containing your name, email address, company, expected seats, use case, time, delivery state and provider message identifier, plus SHA-256 email/submission lookup hashes and a random delivery idempotency key used for lookup, deduplication, and safe retry. It does so before asking Resend, the email-delivery processor, to send the enquiry to the DGC contact inbox. A provider timeout can leave that record marked as having an unknown delivery outcome. The record is assigned a 365-day logical expiry. Expired rows are ignored and removed by subsequent site cleanup; Cloudflare backups may retain deleted data for the provider&#x27;s backup window. Cloudflare, Resend, and the destination mailbox provider necessarily process the submission in transit or storage.</p>
+<p>The release-notes form stores the address, its SHA-256 lookup hash, a private confirmation token and hash, a separate private removal token and hash, source, times, delivery state, provider message identifier, and a random delivery idempotency key before asking Resend to send both links. The confirmation link opens a review page and does not subscribe you until you explicitly press Confirm. The removal link also opens a review page and can cancel a pending request or remove a confirmed address. An unconfirmed request becomes unusable after 48 hours and its row is eligible for subsequent cleanup. After confirmation, the address and its SHA-256 lookup hash, the confirmation-token hash, the removal token and its hash, and confirmation/update times remain on the release list until you use the removal link or ask us to remove it. The address is not added to the commercial-contact list.</p>
+<p>Form submissions are used only to respond, manage the requested relationship, prevent abuse, and keep the records described above. Abuse controls store keyed pseudonyms derived from an IP address or submitted email, never the raw value in the counter itself. Counters and cooldowns stop authorizing decisions after their short fixed windows and are removed by subsequent site cleanup. D1 has no automatic row TTL, so physical deletion follows cleanup traffic rather than an exact wall-clock deadline; deleted rows may also remain in Cloudflare backups for its backup window. Form data is not sold and is not used to train a model. Do not put API keys, source code, health data, payment-card details, or other secrets in a form. To ask for a commercial submission to be corrected or deleted, send a new request through the <a href="/pricing#commercial">commercial-use form</a> with the same email address and write “privacy request” plus the requested action in the Use case field. Release subscribers can use the removal link in their release email.</p>
+<div class="heading-row h2-row"><h2 id="choices-and-changes">Choices and changes</h2><a class="anchor" href="#choices-and-changes" aria-label="Link to Choices and changes">#</a></div>
+<p>You control the model and integrations DGC connects to, whether to create a training export, and whether to submit a form. Browser Do Not Track disables optional first-party interaction events. Network-level blocking may also prevent website analytics or the version check without stopping an already installed DGC from working with a reachable local model.</p>
+<p>This notice may change when the product or website data flows change. Material changes will be reflected by a new effective date.</p></article><aside class="card side-card"><span class="micro">DGC v0.26.0</span><h3 style="margin-top:18px">Built in the open.</h3><p>Inspect the implementation, its tests, release checksums, and the source that backs this page.</p><a href="https://github.com/OpenPeach-ai/dgc">Open repository ↗</a><a href="/changelog">Read changelog →</a></aside></div></section>
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
+
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
+</body>
+</html>

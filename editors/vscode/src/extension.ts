@@ -1,8 +1,36 @@
 import * as vscode from "vscode";
 import { DgcViewProvider } from "./panel";
+import { resolveDgcExecutable } from "./configuration";
 
 export function activate(context: vscode.ExtensionContext): void | object {
+  if (vscode.workspace.isTrusted === false) {
+    void vscode.window.showWarningMessage(
+      "DGC is disabled in Restricted Mode. Trust this workspace before starting the coding agent.");
+    return;
+  }
   const provider = new DgcViewProvider(context);
+
+  const runCliInTerminal = (subcommand: "update" | "export-training"): boolean => {
+    if (vscode.workspace.isTrusted === false) {
+      void vscode.window.showWarningMessage(
+        "DGC is disabled in Restricted Mode. Trust this workspace before running the CLI.");
+      return false;
+    }
+    const executable = resolveDgcExecutable();
+    if (executable.ignoredWorkspaceOverride) {
+      void vscode.window.showWarningMessage(
+        "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
+    }
+    // Launch an exact executable/argv pair. Interpolating a configurable path into shell text would
+    // allow metacharacters in that setting to execute an unrelated command.
+    const term = vscode.window.createTerminal({
+      name: subcommand === "update" ? "DGC update" : "DGC export-training",
+      shellPath: executable.command,
+      shellArgs: [subcommand],
+    });
+    term.show();
+    return true;
+  };
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("dgc.chat", provider, {
@@ -37,20 +65,18 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.updateCli", () => {
       // parity with the CLI's /update: run the installer in a terminal (curl | bash),
       // then remind the user to restart the backend so the panel picks up the new version.
-      const cmd = vscode.workspace.getConfiguration("dgc").get<string>("command", "dgc") || "dgc";
-      const term = vscode.window.createTerminal({ name: "DGC update" });
-      term.show();
-      term.sendText(`${cmd} update`);
-      vscode.window.showInformationMessage("Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
+      if (runCliInTerminal("update")) {
+        vscode.window.showInformationMessage(
+          "Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
+      }
     }),
     vscode.commands.registerCommand("dgc.exportTraining", () => {
       // parity with the CLI's /export-training: run the read-only exporter in a terminal so its
       // full scrubbed-JSONL summary is visible; the subcommand writes ./dgc-training.jsonl.
-      const cmd = vscode.workspace.getConfiguration("dgc").get<string>("command", "dgc") || "dgc";
-      const term = vscode.window.createTerminal({ name: "DGC export-training" });
-      term.show();
-      term.sendText(`${cmd} export-training`);
-      vscode.window.showInformationMessage("Exporting your DGC sessions as scrubbed fine-tuning JSONL — see the terminal.");
+      if (runCliInTerminal("export-training")) {
+        vscode.window.showInformationMessage(
+          "Exporting your DGC sessions as scrubbed fine-tuning JSONL — see the terminal.");
+      }
     }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     vscode.workspace.onDidChangeConfiguration((e) => {

@@ -1,0 +1,8 @@
+<figure class="instrument reveal" aria-labelledby="fig5-title" data-pipeline>
+  <figcaption class="figure-title" id="fig5-title"><span class="figure-id">FIG.5 · Native local/API pipeline</span><span>the model proposes · DGC orchestrates the loop</span><span class="figure-state">native route · 6 stages</span></figcaption>
+  <div class="pipeline-body" role="img" aria-label="Two ownership lanes show that, on native local and API routes, the model proposes actions while DGC assembles context, evaluates permissions, dispatches tools, runs verification gates and presents output.">
+    <div class="pipeline-lane model"><div class="lane-label">MODEL<small>proposes</small></div><div class="stage model-stage" data-step="02"><b>PROPOSE</b><small>structured or text tool calls</small></div></div>
+    <div class="return-path">failing test output · fed back to the next proposal</div>
+    <div class="pipeline-lane dgc"><div class="lane-label">DGC<small>orchestrates</small></div><div class="stage" data-step="01"><b>PROMPT</b><small>task · repo · goal</small></div><div class="stage" data-step="03"><b>PERMISSION</b><small>plan · default · edits · auto</small></div><div class="stage" data-step="04"><b>EXECUTE</b><small>file tools · policy-gated shell · MCP dispatch</small></div><div class="stage" data-step="05"><b>VERIFY</b><small>real tests · exit codes</small></div><div class="stage" data-step="06"><b>OUTPUT</b><small>diffs · tests · traces</small></div></div>
+  </div>
+</figure>

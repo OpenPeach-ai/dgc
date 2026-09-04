@@ -1,0 +1,33 @@
+<figure class="instrument reveal" aria-labelledby="fig3-title">
+  <figcaption class="figure-title" id="fig3-title"><span class="figure-id">FIG.3 · Editor surface</span><span>the same harness · native to the editor</span><span class="figure-state">VS Code · Cursor</span></figcaption>
+  <div class="editor-shell" role="img" aria-label="DGC inside an editor: a focused code diff beside an agent panel with a standing goal, structured tool calls and passing tests.">
+    <div class="editor-top">acme-api — Visual Studio Code</div>
+    <aside class="editor-rail" aria-hidden="true"><span>◇</span><span>⌕</span><span>///</span><span>⑂</span><span>⚙</span></aside>
+    <aside class="editor-tree"><strong>EXPLORER · ACME-API</strong><div class="tree-row">⌄ src</div><div class="tree-row indent">◇ index.ts</div><div class="tree-row indent">◇ login.ts</div><div class="tree-row indent">◇ rateLimit.ts</div><div class="tree-row">⌄ tests</div><div class="tree-row indent">◇ login.test.ts</div><div class="tree-row">› package.json</div></aside>
+    <div class="editor-code">
+      <div class="editor-tabs"><span>◇ login.ts &nbsp; M</span><span>◇ login.test.ts &nbsp; M</span></div>
+      <div class="code-lines">
+        <div class="code-row"><span class="ln">1</span><span></span><span>import { Router } from 'express'</span></div>
+        <div class="code-row add"><span class="ln">2</span><span class="sign">+</span><span>import { rateLimit } from '../mw/rateLimit'</span></div>
+        <div class="code-row"><span class="ln">3</span><span></span><span></span></div>
+        <div class="code-row"><span class="ln">4</span><span></span><span>const router = Router()</span></div>
+        <div class="code-row del"><span class="ln">5</span><span class="sign">−</span><span>router.post('/login', loginHandler)</span></div>
+        <div class="code-row add"><span class="ln">5</span><span class="sign">+</span><span>router.post('/login', rateLimit(5, '1m'), loginHandler)</span></div>
+        <div class="code-row"><span class="ln">6</span><span></span><span></span></div>
+        <div class="code-row"><span class="ln">7</span><span></span><span>export default router</span></div>
+      </div>
+      <div class="editor-status">login.ts &nbsp; +2 −1 · staged · <span data-editor-test>npm test</span></div>
+    </div>
+    <aside class="agent-panel">
+      <div class="agent-head"><span>/// DGC · Agent</span><span>32k · 41%</span></div>
+      <div class="goal-chip">Goal · ship verified login hardening &nbsp; <span>08:42</span></div>
+      <p>Add rate limiting to <code>/api/login</code> and cover it with a test.</p>
+      <div class="agent-step" style="--delay:1.2s"><b>→ Read</b> &nbsp; src/routes/login.ts<br><span>42 lines · symbols indexed</span></div>
+      <div class="agent-step" style="--delay:2.9s"><b>✎ Edit</b> &nbsp; 2 files<br><span>+ limiter middleware · + regression case</span></div>
+      <div class="agent-step" style="--delay:4.7s"><b>$ Bash</b> &nbsp; npm test -- login<br><span>12 passed · 2.4 s</span></div>
+      <p class="agent-final">Implemented a per-IP sliding window and verified rejection and recovery paths.</p>
+      <div class="editor-composer"><span>❯</span> Ask DGC to keep going…</div>
+    </aside>
+    <div class="editor-bottom"><span>⑂ main*</span><span>✓ 12 passed · UTF-8 · DGC · qwen3.8:27b</span></div>
+  </div>
+</figure>

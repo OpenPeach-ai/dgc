@@ -1,0 +1,118 @@
+{
+  "refreshed_at": "2026-09-04T00:00:00Z",
+  "source": "https://github.com/OpenPeach-ai/dgc/releases",
+  "cli_releases_last_14_days": 14,
+  "cli": [
+    {
+      "version": "0.26.1",
+      "date": "2026-09-04",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.1",
+      "status": "current",
+      "notes": [
+        "Audited model routing keeps native and subscription modes explicit and consistent.",
+        "Provider and MCP credentials are now endpoint-bound and fail closed; older unbound CLI keys may need to be entered once again.",
+        "Release provenance, public-site inventory, and deployment gates bind published bytes to reviewed source."
+      ]
+    },
+    {
+      "version": "0.26.0",
+      "date": "2026-09-03",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.0",
+      "status": "shipped",
+      "notes": [
+        "A refined full-screen terminal experience for long-running agent work.",
+        "Smoother concurrent TUI rendering while an agent keeps working.",
+        "Release archives rebuilt and verified against the published source."
+      ]
+    },
+    {
+      "version": "0.25.1",
+      "date": "2026-09-03",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.25.1",
+      "status": "shipped",
+      "notes": [
+        "Correct context budgeting when a resumed session stored the 32k default.",
+        "Resume behavior now preserves the configured model window exactly.",
+        "Site and release manifests promoted from the same verified bytes."
+      ]
+    },
+    {
+      "version": "0.25.0",
+      "date": "2026-09-02",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.25.0",
+      "status": "shipped",
+      "notes": [
+        "Standing goals, autonomous verification gates, and continuation handoffs.",
+        "Persistent Python code-action mode and scrubbed training export.",
+        "A structured VS Code/Cursor surface for goals, tools, diffs, and plans."
+      ]
+    },
+    {
+      "version": "0.21.1",
+      "date": "2026-08-29",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.21.1",
+      "status": "shipped",
+      "notes": [
+        "Follow-up reliability fixes after the 0.21 security release.",
+        "Tighter provider and session edge-case handling.",
+        "Published checksums and reproducible release metadata."
+      ]
+    },
+    {
+      "version": "0.21.0",
+      "date": "2026-08-27",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.21.0",
+      "status": "shipped",
+      "notes": [
+        "OS sandboxing and canonical workspace confinement.",
+        "Expanded permission rules, hooks, MCP, and tool-output boundaries.",
+        "Security-focused hardening across the terminal and editor protocols."
+      ]
+    },
+    {
+      "version": "0.20.8",
+      "date": "2026-08-23",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.20.8",
+      "status": "shipped",
+      "notes": [
+        "Local and OpenAI-compatible provider setup from one CLI.",
+        "Permission modes, plan review, artifacts, sessions, and model switching.",
+        "A stable baseline for subsequent reliability and interface releases."
+      ]
+    }
+  ],
+  "extension": [
+    {
+      "version": "0.12.0",
+      "date": "2026-09-04",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.12.0",
+      "status": "current",
+      "notes": [
+        "Protocol v5 with explicit route state and complete reasoning-effort support",
+        "Acknowledgement-driven settings and MCP changes with rollback-safe persistence",
+        "Identity-bound remote MCP secrets plus polished goals, tools, diffs, and streaming status"
+      ]
+    },
+    {
+      "version": "0.11.0",
+      "date": "2026-09-02",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.11.0",
+      "status": "shipped",
+      "notes": ["Standing goals and plan feedback", "Structured tool cards and diffs", "Protocol v4 lifecycle controls"]
+    },
+    {
+      "version": "0.10.0",
+      "date": "2026-08-31",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.10.0",
+      "status": "shipped",
+      "notes": ["Subscription-backed engines", "Multi-root workspace context", "Correlated permission decisions"]
+    },
+    {
+      "version": "0.8.1",
+      "date": "2026-08-20",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.8.1",
+      "status": "shipped",
+      "notes": ["Self-hosted VSIX channel", "Cursor installation flow", "Editor reliability fixes"]
+    }
+  ]
+}

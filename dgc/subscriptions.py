@@ -81,17 +81,11 @@ class SubEngine:
         into full-auto. ``session_id`` is preferred over each CLI's ambient "last session" switch
         so one DGC conversation cannot attach to an unrelated terminal conversation.
         """
-        if mode not in MODES:
-            raise EngineModeUnsupported(f"unknown DGC permission mode: {mode}")
+        validate_engine_mode(self.key, mode)
         for label, value in (("prompt", prompt), ("session id", session_id),
                              ("model", model), ("effort", effort)):
             if "\x00" in str(value):
                 raise EngineError(f"{label} contains an invalid NUL character")
-        if self.key == "kimi" and mode != "auto":
-            raise EngineModeUnsupported(
-                "Kimi prompt mode always grants automatic tool approval; select DGC auto mode "
-                "to use Kimi, or choose another engine for plan/default/accept-edits mode.")
-
         argv = [binary, *self.subcmd]
         if cont:
             if self.key == "codex":
@@ -223,7 +217,9 @@ def status() -> list[dict]:
                       "check_on_launch" if e.auth_on_launch else "signed_out")
         out.append({"key": e.key, "label": e.label, "installed": installed,
                     "logged_in": marked, "auth_state": auth_state,
-                    "login_cmd": e.login_cmd, "note": e.note})
+                    "login_cmd": e.login_cmd, "note": e.note,
+                    "model_hints": list(e.model_hints),
+                    "supports_effort": e.supports_effort()})
     return out
 
 
@@ -245,6 +241,23 @@ class EngineModeUnsupported(EngineError):
 
 class EngineLaunchError(EngineError):
     pass
+
+
+def validate_engine_mode(engine_key: str, mode: str) -> SubEngine | None:
+    """Validate the one permission invariant shared by every subscription surface.
+
+    Returning the resolved engine keeps callers from independently re-looking it up.  An empty
+    or unknown engine has no subscription-specific restriction; command/schema validation owns
+    whether that engine name is otherwise admissible.
+    """
+    if mode not in MODES:
+        raise EngineModeUnsupported(f"unknown DGC permission mode: {mode}")
+    engine = get_engine(engine_key)
+    if engine is not None and engine.key == "kimi" and mode != "auto":
+        raise EngineModeUnsupported(
+            "Kimi prompt mode always grants automatic tool approval; select DGC auto mode "
+            "to use Kimi, or choose another engine for plan/default/accept-edits mode.")
+    return engine
 
 
 # --- streaming normalizers --------------------------------------------------

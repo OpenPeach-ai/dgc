@@ -2,48 +2,79 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
 <title>Subscriptions · DGC Docs</title>
 <meta name="description" content="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2090%2090'%20fill='%237C5CFF'%3E%3Cpath%20d='M32%2024%20L20%2030%20L13%2072%20L25%2066%20Z'/%3E%3Cpath%20d='M54%2018%20L42%2024%20L35%2072%20L47%2066%20Z'/%3E%3Cpath%20d='M76%2024%20L64%2030%20L57%2066%20L69%2060%20Z'/%3E%3C/svg%3E">
-<link rel="canonical" href="https://docs.vibedgc.com/subscriptions.html">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/docs.css">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://docs.vibedgc.com/subscriptions">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Subscriptions · DGC Docs">
+<meta property="og:description" content="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">
+<meta property="og:url" content="https://docs.vibedgc.com/subscriptions">
+<meta property="og:image" content="https://vibedgc.com/og-docs.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Subscriptions · DGC Docs"><meta name="twitter:description" content="bring your own Claude / Codex / Qwen / Kimi / Copilot plan"><meta name="twitter:image" content="https://vibedgc.com/og-docs.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"DGC","item":"https://vibedgc.com"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://docs.vibedgc.com"},{"@type":"ListItem","position":3,"name":"Subscriptions","item":"https://docs.vibedgc.com/subscriptions"}]}]</script>
 </head>
-<body data-page="subscriptions">
-<a class="skip" href="#content">Skip to content</a>
-
-<header class="topbar">
-  <button class="menu-btn" type="button" aria-label="Toggle navigation">Menu</button>
-  <a class="brand" href="https://vibedgc.com/" title="DGC landing"><svg viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="tag">Docs</span></a>
-  <div class="topspacer"></div>
-  <div class="search" role="search">
-    <span class="ico">/</span>
-    <input id="docsearch" type="search" placeholder="Search docs…"
-           aria-label="Search documentation" autocomplete="off" spellcheck="false">
-    <span class="kbd">/</span>
-  </div>
-  <div class="toplinks">
-    <a href="https://vibedgc.com/">Home</a>
-  </div>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
 </header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
 
-<div class="scrim" aria-hidden="true"></div>
-<div class="shell">
-  <nav class="sidebar" id="sidebar" aria-label="Docs navigation">
-<div class="grp">
+<main id="content">
+<div class="docs-shell" data-doc-page="subscriptions">
+  <nav class="docs-sidebar" id="docs-sidebar" aria-label="Documentation navigation"><div class="grp">
 <div class="grp-h">Getting started</div>
 <a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
 <a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
-<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="every key binding in the composer + transcript">Keyboard shortcuts</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="essential key bindings in the composer + transcript">Keyboard shortcuts</a>
 <a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
 <a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
 </div>
 <div class="grp">
 <div class="grp-h">Using DGC</div>
-<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="default · acceptEdits · plan · auto">Permission modes</a>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="native default · acceptEdits · plan · auto">Permission modes</a>
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
@@ -67,55 +98,118 @@
 <div class="grp">
 <div class="grp-h">Reference</div>
 <a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
-</div>
-</nav>
-  <main class="content" id="content">
-    <article class="doc">
+</div></nav>
+  <article class="docs-article">
+    <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC v0.26.0</span><a href="https://github.com/OpenPeach-ai/dgc/edit/main/dgc/docs.py">Edit on GitHub ↗</a></div>
       <div class="crumb">Providers &amp; models<span class="sep">/</span>Subscriptions</div>
       <p class="lead">bring your own Claude / Codex / Qwen / Kimi / Copilot plan</p>
-<h1 id="subscriptions">Subscriptions<a class="anchor" href="#subscriptions" aria-label="Link to this section">#</a></h1>
-<p>Instead of a raw model endpoint, DGC can drive a coding CLI you already pay for and are logged into — running each turn through <strong>your own</strong> subscription.</p>
-<h2 id="engines">Engines<a class="anchor" href="#engines" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h1-row"><h1 id="subscriptions">Subscriptions</h1><a class="anchor" href="#subscriptions" aria-label="Link to this section">#</a></div>
+<p>Instead of a raw model endpoint, DGC can drive a coding CLI you already pay for and are logged into through the full-screen TUI, editor/headless backend, or a one-shot <code>dgc -p --engine</code> run. The legacy <code>--classic</code> REPL uses the configured native endpoint.</p>
+<div class="heading-row h2-row"><h2 id="engines">Engines</h2><a class="anchor" href="#engines" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>Claude Code</strong> — your Anthropic Pro / Max plan (<code>claude</code>).</li>
 <li><strong>Codex</strong> — your ChatGPT Plus / Pro plan (<code>codex</code>).</li>
 <li><strong>Qwen Code</strong> — your Qwen OAuth plan (<code>qwen</code>).</li>
-<li><strong>Kimi for Coding</strong> — your Moonshot plan (<code>kimi</code>).</li>
+<li><strong>Kimi for Coding</strong> — your Moonshot plan (<code>kimi</code>); its prompt mode is auto-only, so DGC must be in <code>auto</code> and the vendor controls its automatically approved internal tool actions.</li>
 <li><strong>GitHub Copilot CLI</strong> — your Copilot plan (<code>copilot</code>).</li>
 </ul>
-<h2 id="how-it-works-orchestration-not-a-token-proxy">How it works (orchestration, not a token proxy)<a class="anchor" href="#how-it-works-orchestration-not-a-token-proxy" aria-label="Link to this section">#</a></h2>
-<p>This is orchestration, not credential replay. DGC never reads, stores, refreshes, or replays the vendor's tokens and never sends vendor-private headers. Each engine authenticates through the vendor's <strong>own</strong> login command, which opens the vendor's own browser / device flow and keeps the token in its own store. When you run a turn, DGC shells out to the official binary in your workspace and streams its output into DGC's UI (session, checkpoints, transcript). Selecting one is equivalent to running that CLI directly.</p>
-<h2 id="select-and-sign-in">Select and sign in<a class="anchor" href="#select-and-sign-in" aria-label="Link to this section">#</a></h2>
+<div class="heading-row h2-row"><h2 id="how-it-works-orchestration-not-a-token-proxy">How it works (orchestration, not a token proxy)</h2><a class="anchor" href="#how-it-works-orchestration-not-a-token-proxy" aria-label="Link to this section">#</a></div>
+<p>This is orchestration, not credential replay. DGC never reads, stores, refreshes, or replays the vendor&#x27;s tokens and never sends vendor-private headers. Each engine authenticates through the vendor&#x27;s <strong>own</strong> login command, which opens the vendor&#x27;s own browser / device flow and keeps the token in its own store. When you run a turn, DGC shells out to the official binary in your workspace and streams its output into DGC&#x27;s UI. DGC saves the prompt and normalized final assistant response in its own session; vendor tool and thinking events remain display-only. Authentication, model execution, and internal tools remain owned by the selected vendor CLI, while DGC wraps the turn with its own prompt, mode, session mapping, timeout, and cleanup. The vendor process is not wrapped by DGC&#x27;s OS sandbox and inherits DGC&#x27;s ambient environment, including unrelated credentials. Use a trusted vendor CLI and launch DGC with only the environment secrets that turn needs.</p>
+<div class="heading-row h2-row"><h2 id="select-and-sign-in">Select and sign in</h2><a class="anchor" href="#select-and-sign-in" aria-label="Link to this section">#</a></div>
 <ul>
-<li><code>dgc setup</code> lists subscription engines first, with each one's sign-in status.</li>
-<li><code>/connect claude|codex|qwen|kimi|copilot</code> selects an engine (a direct <code>/connect</code></li>
+<li><code>dgc setup</code> lists subscription engines first, with each one&#x27;s detected login marker. The vendor performs the actual authentication check when its CLI launches.</li>
+<li><code>/connect claude|codex|qwen|kimi|copilot</code> selects an engine (a direct <code>/connect</code> to a provider or URL turns delegation back off).</li>
+<li>Sign in once with the vendor&#x27;s own command, e.g. <code>claude auth login</code>, <code>codex login</code>, <code>qwen</code> (device code), <code>kimi login</code>, <code>copilot login</code>. <code>dgc doctor</code> reports status.</li>
 </ul>
-<p>to a provider or URL turns delegation back off).</p>
+<div class="heading-row h2-row"><h2 id="model-reasoning-effort">Model + reasoning effort</h2><a class="anchor" href="#model-reasoning-effort" aria-label="Link to this section">#</a></div>
 <ul>
-<li>Sign in once with the vendor's own command, e.g. <code>claude auth login</code>, <code>codex login</code>,</li>
+<li><code>/model</code> steers the vendor&#x27;s own model (e.g. opus/sonnet/haiku for Claude).</li>
+<li><code>/think low|medium|high|xhigh|max</code> sets the reasoning effort for engines that take one (Claude, Codex, Copilot); engines without an effort flag steer it via <code>/model</code>.</li>
+<li>The editor&#x27;s composer controls, <code>/model</code> and <code>/think</code>, and the corresponding command-palette pickers all follow the active route. Subscription model pickers use vendor aliases when known and otherwise accept a vendor model id directly; they never query the configured native endpoint.</li>
+<li>In one-shot automation, <code>--model</code> and <code>--think</code> override only that delegated <code>dgc -p --engine</code> turn. They do not rewrite the saved native model or thinking level.</li>
 </ul>
-<p><code>qwen</code> (device code), <code>kimi login</code>, <code>copilot login</code>. <code>dgc doctor</code> reports status.</p>
-<h2 id="model-reasoning-effort">Model + reasoning effort<a class="anchor" href="#model-reasoning-effort" aria-label="Link to this section">#</a></h2>
-<ul>
-<li><code>/model</code> steers the vendor's own model (e.g. opus/sonnet/haiku for Claude).</li>
-<li><code>/think low|medium|high|xhigh</code> sets the reasoning effort for engines that take one</li>
-</ul>
-<p>(Claude, Codex, Copilot); engines without an effort flag steer it via <code>/model</code>.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="connect-your-model.html"><div class="k">← Previous</div><div class="t">Connect your model</div></a>
 <a class="next" href="thinking-reasoning.html"><div class="k">Next →</div><div class="t">Thinking &amp; reasoning</div></a>
 </nav>
-    </article>
-  </main>
-  <aside class="toc" aria-label="On this page">
-<div class="h">On this page</div>
-<a href="#engines" data-id="engines" class="lvl2">Engines</a>
+  </article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#engines" data-id="engines" class="lvl2">Engines</a>
 <a href="#how-it-works-orchestration-not-a-token-proxy" data-id="how-it-works-orchestration-not-a-token-proxy" class="lvl2">How it works (orchestration, not a token proxy)</a>
 <a href="#select-and-sign-in" data-id="select-and-sign-in" class="lvl2">Select and sign in</a>
-<a href="#model-reasoning-effort" data-id="model-reasoning-effort" class="lvl2">Model + reasoning effort</a>
-</aside>
+<a href="#model-reasoning-effort" data-id="model-reasoning-effort" class="lvl2">Model + reasoning effort</a></aside>
 </div>
+<dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
+<div class="grp-h">Getting started</div>
+<a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
+<a href="getting-started.html" class="" data-title="Getting started" data-desc="install, first launch, connect a model">Getting started</a>
+<a href="keyboard-shortcuts.html" class="" data-title="Keyboard shortcuts" data-desc="essential key bindings in the composer + transcript">Keyboard shortcuts</a>
+<a href="slash-commands.html" class="" data-title="Slash commands" data-desc="the full / command reference">Slash commands</a>
+<a href="command-line.html" class="" data-title="Command line" data-desc="flags, subcommands, and one-shot runs">Command line</a>
+</div>
+<div class="grp">
+<div class="grp-h">Using DGC</div>
+<a href="permission-modes.html" class="" data-title="Permission modes" data-desc="native default · acceptEdits · plan · auto">Permission modes</a>
+<a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
+<a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
+<a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+</div>
+<div class="grp">
+<div class="grp-h">Providers &amp; models</div>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="subscriptions.html" aria-current="page" class="active" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
+<a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
+</div>
+<div class="grp">
+<div class="grp-h">Features</div>
+<a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="mcp-servers.html" class="" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
+<a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
+<a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
+<a href="multiple-agents.html" class="" data-title="Multiple agents" data-desc="run a fleet of agents at once + the dashboard">Multiple agents</a>
+<a href="training-export.html" class="" data-title="Training export" data-desc="your real sessions → scrubbed fine-tuning JSONL">Training export</a>
+<a href="python-code-action-power-mode.html" class="" data-title="Python code-action (power mode)" data-desc="a persistent Python interpreter for token-efficient work">Python code-action (power mode)</a>
+</div>
+<div class="grp">
+<div class="grp-h">Reference</div>
+<a href="configuration.html" class="" data-title="Configuration" data-desc="config.json, models, context, providers">Configuration</a>
+</div></nav></dialog>
+<script src="/docs/assets/docs.js?v=777bbb86a947" defer></script>
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
 
-<script src="assets/docs.js"></script>
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
 </body>
 </html>

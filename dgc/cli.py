@@ -63,6 +63,7 @@ MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
 # mono + purple: muted / accent / lavender / red (auto stays red as a danger signal)
 MODE_COLOR = {"default": "#9A9A9E", "acceptEdits": "#7C5CFF", "plan": "#A78BFA", "auto": "#DC5A64"}
 THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
+DELEGATED_THINK_LEVELS = [*THINK_LEVELS, "max"]
 
 
 class UI:
@@ -541,6 +542,7 @@ class ClassicSlashCompleter(Completer):
 class CLI:
     def __init__(self, config: Config):
         self.config = config
+        self._classic_native_route = False
         style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
         self.ui = UI()
         self.ui._rule_hook = self._add_rule
@@ -576,15 +578,21 @@ class CLI:
     def banner(self) -> None:
         c = self.console
         cfg = self.config
-        mode, think = cfg.data.get("mode", "default"), cfg.data.get("thinking", "off")
+        mode = cfg.data.get("mode", "default")
+        engine = ("" if self._classic_native_route else
+                  str(cfg.get("subscription_engine", "") or "").strip().lower())
+        think = (str(cfg.get("subscription_effort", "") or "").strip()
+                 or "off") if engine else cfg.data.get("thinking", "off")
+        active_model = (str(cfg.get("subscription_model", "") or "").strip()
+                        or f"{engine} default") if engine else cfg.model
         self._logo()
         if (c.size.width or 80) < 34:                        # minimal: skip the config block
             return
         def row(label, value):                               # dim padded label + value (peachd statusLine)
             safe_label = _markup_literal(label)
             c.print(f"  [{DIM}]{safe_label:<8}[/]  {_markup_literal(value)}", highlight=False)
-        row("endpoint", cfg.base_url)
-        row("model", cfg.model)
+        row("endpoint", f"{engine} CLI subscription" if engine else cfg.base_url)
+        row("model", active_model)
         c.print(f"  [{DIM}]{'mode':<8}[/]  "
                 f"[{MODE_COLOR.get(mode, 'white')}]{_markup_literal(mode)}[/]  "
                 f"[{DIM}]· {_markup_literal(MODE_DESCRIPTIONS.get(mode, ''))}[/]",
@@ -643,6 +651,9 @@ class CLI:
                              [PROVIDERS[k]["base_url"] for k in pk])
                 if idx is not None:
                     prov = PROVIDERS[pk[idx]]
+                    cfg.set("subscription_engine", "")
+                    cfg.set("subscription_model", "")
+                    cfg.set("subscription_effort", "")
                     cfg.set("base_url", prov["base_url"])
                     cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
@@ -655,6 +666,16 @@ class CLI:
                     self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
             else:
                 target = args[0]
+                from . import subscriptions as subs
+                engine = subs.get_engine(target)
+                if engine is not None:
+                    self.ui.error(
+                        f"{engine.short_label} subscription delegation is unavailable in --classic; "
+                        "exit and run dgc, or use dgc -p --engine " + engine.key)
+                    return True
+                cfg.set("subscription_engine", "")
+                cfg.set("subscription_model", "")
+                cfg.set("subscription_effort", "")
                 if target in PROVIDERS:
                     prov = PROVIDERS[target]
                     cfg.set("base_url", prov["base_url"])
@@ -696,7 +717,17 @@ class CLI:
                 rest = MODE_CYCLE[(i + 1) % len(MODE_CYCLE)]
             if rest not in MODES:
                 self.ui.error(f"unknown mode {rest!r} — choose from {', '.join(MODES)}")
-            elif rest == "auto" and self.agent.mode != "auto":
+                return True
+            # Mode is durable and shared with the full-screen route.  Preserve the configured
+            # subscription invariant even though --classic itself executes the native fallback.
+            from . import subscriptions as subs
+            active_engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+            try:
+                subs.validate_engine_mode(active_engine, rest)
+            except subs.EngineModeUnsupported as exc:
+                self.ui.error(str(exc))
+                return True
+            if rest == "auto" and self.agent.mode != "auto":
                 auto_warning(self.console)
                 if input("  enable full-auto? [y/N] › ").strip().lower() in ("y", "yes"):
                     self.agent.set_mode("auto")
@@ -708,6 +739,13 @@ class CLI:
                 self.ui.info(f"mode → {rest} ({MODE_DESCRIPTIONS[rest]})")
         elif cmd == "plan":
             target = "default" if self.agent.mode == "plan" else "plan"
+            from . import subscriptions as subs
+            active_engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+            try:
+                subs.validate_engine_mode(active_engine, target)
+            except subs.EngineModeUnsupported as exc:
+                self.ui.error(str(exc))
+                return True
             self.agent.set_mode(target)
             self.ui.info(f"mode → {target} ({MODE_DESCRIPTIONS[target]})")
         elif cmd in ("view-plan", "plan-view", "viewplan"):
@@ -1548,7 +1586,20 @@ def run_setup(config: Config) -> None:
     n_sub = len(subs_status)
     if idx < n_sub:
         s = subs_status[idx]
+        try:
+            _subs.validate_engine_mode(s["key"], str(config.get("mode", "default")))
+        except _subs.EngineModeUnsupported:
+            auto_warning(c)
+            accepted = input(
+                f"  {s['label'].split(' (')[0]} requires full-auto; enable it? [y/N] › "
+            ).strip().lower() in ("y", "yes")
+            if not accepted:
+                c.print("  [dim]cancelled — provider and permission mode were not changed[/dim]\n")
+                return
+            config.set("mode", "auto")
         config.set("subscription_engine", s["key"])
+        config.set("subscription_model", "")
+        config.set("subscription_effort", "")
         c.print(f"\n  [bold green]selected[/bold green] {terminal_safe_text(s['label'])} — "
                 f"DGC will run each turn through your subscription via the official CLI.")
         if s["auth_state"] == "signed_in":
@@ -1682,6 +1733,8 @@ def main(argv: list[str] | None = None) -> int | None:
             from .protocol_cli import main as protocol_main
             return protocol_main(raw_argv[1:])
         cfg = Config()
+        for warning in cfg.credential_warnings:
+            print(f"warning: {warning}", file=sys.stderr)
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
 
@@ -1691,23 +1744,25 @@ def main(argv: list[str] | None = None) -> int | None:
         epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
-    parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
-    parser.add_argument("--model", help="model name (persisted)")
+    parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,
+                        help="thinking level for this session (with -p --engine, that delegated turn only)")
+    parser.add_argument("--model",
+                        help="model name (persisted natively; with -p --engine, that delegated turn only)")
     parser.add_argument("--engine", metavar="NAME", default=None,
-                        help="run this one turn through a subscription CLI "
+                        help="with -p, run the one-shot turn through a subscription CLI "
                              "(claude|codex|qwen|kimi|copilot) via your own login, without changing config")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
     parser.add_argument("--trust", action="store_true",
-                        help="trust this workspace for a non-interactive acceptEdits/auto run")
+                        help="persist this workspace as trusted, then run non-interactive acceptEdits/auto")
     parser.add_argument("-c", "--continue", dest="cont", action="store_true",
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
                         help="resume a past session by id (dgc --resume <id>), or pick one (dgc --resume)")
     parser.add_argument("--autonomous-gate", metavar="CMD", default=None,
-                        help="a check command that must exit 0 before the agent may stop a turn; "
-                             "a nonzero exit feeds its output back and continues (e.g. \"npm run check\")")
+                        help="a check command native local/API turns must pass before stopping; "
+                             "delegated subscription turns bypass it")
     parser.add_argument("--autonomous-max-turns", type=int, default=None, metavar="N",
                         help="bound on failed --autonomous-gate retries before the turn stops (default 30)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
@@ -1717,19 +1772,53 @@ def main(argv: list[str] | None = None) -> int | None:
         refresh_update_async()
 
     config = Config()
+    for warning in config.credential_warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if args.engine is not None and args.prompt is None:
+        parser.error("--engine is available only with -p/--prompt")
+    # Work out the one-shot route before applying native model/thinking overrides.  When a
+    # subscription engine owns this turn, --model/--think are vendor-CLI pass-throughs for this
+    # invocation only; they must not silently rewrite the fallback native route in config.json.
+    _oneshot_engine = (str(args.engine if args.engine is not None
+                           else config.get("subscription_engine", "")).strip().lower()
+                       if args.prompt is not None else "")
+    _interactive_engine = (
+        str(config.get("subscription_engine", "") or "").strip().lower()
+        if args.prompt is None and not args.classic and sys.stdout.isatty() else ""
+    )
+    _override_engine = _oneshot_engine or _interactive_engine
+    if args.think == "max" and not _override_engine:
+        parser.error("--think max is available only when a subscription route is active")
+    if _override_engine:
+        from . import subscriptions as _subscriptions
+        _override_spec = _subscriptions.get_engine(_override_engine)
+        if args.think and _override_spec is not None and not _override_spec.supports_effort():
+            parser.error(f"{_override_spec.short_label} does not expose a reasoning-effort flag; "
+                         "select its reasoning model with --model instead")
+        if args.mode is not None or args.prompt is not None:
+            try:
+                _subscriptions.validate_engine_mode(
+                    _override_engine, args.mode or str(config.get("mode", "default")))
+            except _subscriptions.EngineModeUnsupported as exc:
+                parser.error(str(exc))
     if args.base_url:
         config.set("base_url", args.base_url)
     if args.api_key_env:
         if args.api_key_env not in os.environ:
             parser.error(f"environment variable {args.api_key_env!r} is not set")
-        config.data["api_key"] = os.environ[args.api_key_env]
-        config._env_secret_keys.add("api_key")
-    if args.model:
-        config.set("model", args.model)
+        config.set_runtime_secret("api_key", os.environ[args.api_key_env])
+    if args.model and not _oneshot_engine:
+        if _interactive_engine:
+            config.data["subscription_model"] = args.model
+        else:
+            config.set("model", args.model)
     if args.mode:
         config.data["mode"] = args.mode
-    if args.think:
-        config.data["thinking"] = args.think
+    if args.think and not _oneshot_engine:
+        if _interactive_engine:
+            config.data["subscription_effort"] = "" if args.think == "off" else args.think
+        else:
+            config.data["thinking"] = args.think
     if args.autonomous_gate is not None:
         config.data["autonomous_gate"] = args.autonomous_gate
     if args.autonomous_max_turns is not None:
@@ -1782,12 +1871,11 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
-        _sub_engine = str(args.engine if args.engine is not None
-                          else config.get("subscription_engine", "")).strip().lower()
-        if _sub_engine:
+        if _oneshot_engine:
             return _run_subscription_oneshot(
-                config, cli.agent, _sub_engine, cli.expand_mentions(args.prompt),
-                bool(args.cont or args.resume is not None))
+                config, cli.agent, _oneshot_engine, cli.expand_mentions(args.prompt),
+                bool(args.cont or args.resume is not None),
+                model_override=args.model, effort_override=args.think)
         if config.data.get("mode") == "auto":
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
@@ -1815,6 +1903,7 @@ def main(argv: list[str] | None = None) -> int | None:
                     pass
             _se = str(config.get("subscription_engine", "")).strip().lower()
             if args.classic or not sys.stdout.isatty():
+                cli._classic_native_route = True
                 if _se:
                     from . import subscriptions as _subs
                     _eng = _subs.get_engine(_se)
@@ -1832,7 +1921,9 @@ def main(argv: list[str] | None = None) -> int | None:
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
 
 
-def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool) -> int:
+def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool,
+                              *, model_override: str | None = None,
+                              effort_override: str | None = None) -> int:
     """One-shot turn delegated to the user's own logged-in first-party CLI (their
     subscription). DGC streams the vendor CLI's output; the vendor owns auth, the
     model call, its tools, and its ToS. Returns a process exit code."""
@@ -1884,10 +1975,20 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     budget = int(config.get("turn_budget_s") or 0) or 1800
     mode = str(config.data.get("mode", "default"))
     configured_engine = str(config.get("subscription_engine", "")).strip().lower()
-    model = (str(config.get("subscription_model", "")).strip()
+    model = (str(model_override).strip() if model_override is not None else
+             str(config.get("subscription_model", "")).strip()
              if configured_engine == engine.key else "")
-    effort = (str(config.get("subscription_effort", "")).strip()
+    effort = (str(effort_override).strip() if effort_override is not None else
+              str(config.get("subscription_effort", "")).strip()
               if configured_engine == engine.key else "")
+    # Subscription configuration uses an empty value for the vendor's default effort.  Keep
+    # --think off useful without sending a value that first-party CLIs do not accept.
+    if effort == "off":
+        effort = ""
+    if effort and not engine.supports_effort():
+        c.print(f"  [yellow]{terminal_safe_text(engine.short_label)} does not expose a "
+                "reasoning-effort flag; omit --think or choose its reasoning model with --model[/yellow]")
+        return 1
     session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
 
     def delegate(safe_prompt: str) -> dict:

@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v4 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v5 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -129,8 +129,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
         "model": _S(),
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
-        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "base_url": _S(),
+        "subscription_engine": _S(False),
         "goal": _O(), "context_used": _I(), "context_size": _I(),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
@@ -140,7 +141,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "workspace_trusted": _B(False),
     },
     "think_changed": {
-        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "request_id": _S(False),
     },
     "models": {
@@ -238,6 +239,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     },
     "set_model": {
         "model": _S(False), "base_url": _S(False), "api_key": _S(False),
+        "route": _f("string", required=False, enum=("native", "subscription")),
         "clear_stored_api_key": _B(False), "request_id": _S(False),
     },
     "list_models": {"request_id": _S(False)},
@@ -274,7 +276,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_hooks": {"request_id": _S()},
     "generate_handoff": {"request_id": _S(), "save": _B(False)},
     "set_think": {
-        "level": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "level": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "request_id": _S(False),
     },
     "set_goal": {

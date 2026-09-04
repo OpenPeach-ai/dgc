@@ -47,7 +47,8 @@ python3 validate_harness.py all 999
 ## Endpoint-free edit-primitive gate
 
 Before spending model time, run the frozen 19,591-case edit corpus against DGC's exact and tolerant
-match tiers:
+match tiers. The release preflight verifies its SHA-256; when the ignored local corpus is absent, it
+regenerates it from the exact pinned upstream benchmark commit in a temporary checkout:
 
 ```bash
 python3 edit_micro.py edit_corpus/all.jsonl

@@ -96,7 +96,8 @@ cat <<EOF
     dgc doctor    # verify it can reach your model
     dgc           # start coding
 
-  Editor extension (VS Code / Cursor): auto-installed if 'cursor' or 'code' was found;
-  otherwise grab it at $BASE/vscode/
+  Editor extension (Cursor / VS Code / VSCodium): auto-installed if 'cursor', 'code',
+  or 'codium' was found (set DGC_SKIP_EXTENSION=1 to skip); otherwise get it at
+  $BASE/vscode/
 
 EOF

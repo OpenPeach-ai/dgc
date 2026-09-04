@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 — 2026-09-04
+
+- Moved the CLI/editor contract to protocol v5 with explicit route state and complete reasoning-effort support.
+- Made settings and MCP changes acknowledgement-driven, rollback-safe, and honest about partial failures.
+- Bound remote MCP credentials to an exact server identity and tightened persisted command and URL validation.
+- Polished goal controls, streaming status, tool cards, diffs, and long-running chat behavior.
+
+## 0.11.0 — 2026-09-02
+
+- Added standing-goal controls and plan feedback above the editor transcript.
+- Refined structured tool cards, readable diffs, and correlated lifecycle status.
+- Moved the CLI/editor contract to protocol v4 with stricter decision and cancellation handling.
+
 ## 0.10.0 — 2026-08-31
 
 - **Subscription delegation in the editor.** Selecting a subscription (Claude Code / Codex / Qwen / Kimi /

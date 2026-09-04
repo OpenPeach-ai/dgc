@@ -1,0 +1,24 @@
+<header class="page-hero field field-2 subscription-hero">
+  <div class="container">
+    <div class="eyebrow"><b>Release notes</b> explicit consent</div>
+    <h1>One deliberate click.</h1>
+    <p class="lede">Email links open this page but never change subscription state. Review the action, then confirm it yourself.</p>
+  </div>
+</header>
+<section class="section subscription-section">
+  <div class="container">
+    <article class="card subscription-panel" data-subscription-panel>
+      <span class="micro" data-subscription-label>Subscription link</span>
+      <h2 tabindex="-1" data-subscription-title>Checking this link…</h2>
+      <p data-subscription-copy>No action has been taken.</p>
+      <form method="post" data-async-form data-subscription-action hidden>
+        <input type="hidden" name="token" value="">
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <button class="button button-primary" type="submit" disabled data-subscription-submit>Continue</button>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+      <div class="subscription-links"><a href="/">Return home</a><a href="/privacy#forms-and-email">Privacy →</a><a href="/terms">Terms →</a></div>
+      <noscript><p class="subscription-noscript">JavaScript is required. After the same-site redirect, the private token stays in this page’s URL fragment and is not sent when the review page loads.</p></noscript>
+    </article>
+  </div>
+</section>

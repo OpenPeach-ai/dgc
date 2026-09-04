@@ -127,10 +127,10 @@ async function run() {
     command.base_url === initialEndpoint && command.api_key === fixtureSecret).length
       > migratedModelCount);
 
-  // Endpoint binding is part of the credential boundary. Moving to another host
-  // must delete the prior key and send no credential to the new endpoint.
+  // Endpoint binding is part of the credential boundary. Moving to another host must send no
+  // credential there, but it must not let a workspace/config override erase the user-owned key.
   const beforeEndpointChange = modelCommands().length;
-  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Global);
+  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Workspace);
   await waitFor(() => modelCommands().slice(beforeEndpointChange).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
   const changedRootCount = rootsCommands().length;
@@ -139,6 +139,10 @@ async function run() {
   await waitFor(() => rootsCommands().length > changedRootCount);
   await waitFor(() => modelCommands().slice(changedModelCount).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
+  const beforeEndpointRestore = modelCommands().length;
+  await config.update("baseUrl", undefined, vscode.ConfigurationTarget.Workspace);
+  await waitFor(() => modelCommands().slice(beforeEndpointRestore).some((command) =>
+    command.base_url === initialEndpoint && command.api_key === fixtureSecret));
 
   const initialCount = rootsCommands().length;
   assert.equal(vscode.workspace.updateWorkspaceFolders(1, 1), true,
@@ -224,11 +228,44 @@ async function run() {
   assert.equal(new Set(correlated.map((command) => command.request_id)).size, correlated.length,
     "editor state/query request IDs must remain unique across concurrent UI paths");
 
+  // Activate a delegated route through the real config event, then cross the installed extension
+  // boundary for every model/thinking surface. Vendor model discovery must stay local to the
+  // engine metadata instead of touching the native endpoint.
+  const settingsPosts = posted().filter((item) => item.type === "settings_open").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "openSettings" });
+  await waitFor(() => posted().filter((item) => item.type === "settings_open").length > settingsPosts);
+  const nativeListCount = backendCommands(backendLogPath)
+    .filter((command) => command.type === "list_models").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "listModels" });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(backendCommands(backendLogPath)
+    .filter((command) => command.type === "list_models").length, nativeListCount,
+  "the active subscription picker must not query the native model endpoint");
+
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setModel", model: "vendor-direct" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/model vendor-slash" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/think xhigh" });
+  await waitFor(() => {
+    const changes = backendCommands(backendLogPath).filter((command) => command.type === "set_config");
+    return changes.some((command) => command.values?.subscription_model === "vendor-direct")
+      && changes.some((command) => command.values?.subscription_model === "vendor-slash")
+      && changes.some((command) => command.values?.subscription_effort === "high")
+      && changes.some((command) => command.values?.subscription_effort === "xhigh");
+  });
+  const delegatedChanges = backendCommands(backendLogPath)
+    .filter((command) => command.type === "set_config"
+      && (hasOwn(command.values || {}, "subscription_model")
+        || hasOwn(command.values || {}, "subscription_effort")));
+  assert.ok(delegatedChanges.every((command) =>
+    typeof command.request_id === "string" && command.request_id.length > 0),
+  "delegated editor controls must retain correlated state acknowledgements");
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true }));
+    decisionLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };
