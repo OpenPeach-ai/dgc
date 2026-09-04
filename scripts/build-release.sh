@@ -58,7 +58,7 @@ sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
     "build": {"source_date_epoch": epoch, "python": platform.python_version()},
 }, sort_keys=True, indent=2) + "\n")
 PY
-$PYTHON scripts/generate-sbom.py "$OUT_DIR/dgc.cdx.json"
+$PYTHON -I scripts/generate-sbom.py "$OUT_DIR/dgc.cdx.json"
 
 # Do not use grep -q here: under pipefail it can close the pipe after the first match, make tar
 # receive SIGPIPE, and turn a valid release build into exit 141. grep consumes the complete listing.

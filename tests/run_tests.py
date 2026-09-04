@@ -482,9 +482,51 @@ def unit_tests(tmp: Path):
           and (os.name != "posix" or stat.S_IMODE(_mode_edit_file.stat().st_mode) == 0o751),
           _mode_edit_result)
 
+    # macOS spells temporary directories below /var even though /var is a protected OS alias for
+    # /private/var. The fallback must canonicalize only that immutable anchor alias; a symlink
+    # created below the workspace remains an escape and must still fail closed.
+    _alias_fallback_ok = True
+    _alias_descendant_rejected = os.name != "posix"
+    _trusted_alias_scanned = os.name != "posix"
+    _real_dirfd_supported = _workspace_safe._dirfd_supported
+    if os.name == "posix":
+        with tempfile.TemporaryDirectory() as _alias_td, tempfile.TemporaryDirectory() as _outside_td:
+            _alias_root = Path(_alias_td)
+            (_alias_root / "inside.txt").write_text("inside alias state\n")
+            _outside_root = Path(_outside_td)
+            (_outside_root / "secret.txt").write_text("outside alias state\n")
+            (_alias_root / "descendant-link").symlink_to(
+                _outside_root, target_is_directory=True)
+            _workspace_safe._dirfd_supported = lambda: False
+            try:
+                _alias_capture = _workspace_safe.read_regular_bytes(_alias_root / "inside.txt")
+                _alias_rows, _alias_truncated, _alias_seen = (
+                    _workspace_safe.scan_directory_entries(_alias_root, maximum=10))
+                _alias_fallback_ok = (
+                    _alias_capture is not None
+                    and _alias_capture[0] == b"inside alias state\n"
+                    and any(name == "inside.txt" for name, _info in _alias_rows)
+                    and not _alias_truncated and _alias_seen == 2)
+                try:
+                    _workspace_safe.read_regular_bytes(
+                        _alias_root / "descendant-link" / "secret.txt")
+                except _workspace_safe.WorkspaceBoundaryError:
+                    _alias_descendant_rejected = True
+
+                for _alias_candidate in map(Path, ("/var", "/tmp", "/bin", "/sbin", "/lib")):
+                    if _alias_candidate.is_symlink() and _alias_candidate.resolve().is_dir():
+                        _workspace_safe.scan_directory_entries(_alias_candidate, maximum=1)
+                        _trusted_alias_scanned = True
+                        break
+            finally:
+                _workspace_safe._dirfd_supported = _real_dirfd_supported
+    check("non-dirfd fallback permits a protected OS root alias",
+          _alias_fallback_ok and _trusted_alias_scanned)
+    check("OS root-alias support never permits a descendant symlink escape",
+          _alias_descendant_rejected)
+
     _fallback_platform_file = tmp / "fallback-platform-edit.txt"
     _fallback_platform_file.write_text("fallback before\n")
-    _real_dirfd_supported = _workspace_safe._dirfd_supported
     _workspace_safe._dirfd_supported = lambda: False
     try:
         _fallback_platform_edit = execute("edit_file", {
@@ -5707,10 +5749,11 @@ def test_worktree_git_runner():
           f"pid={child_pid} alive={child_alive} stdout={timed.stdout!r} stderr={timed.stderr!r}")
 
     flood_external = external_bin / "git"
+    flood_code = 'import sys;sys.stdout.buffer.write(b"x"*4096);sys.stdout.flush()'
     flood_external.write_text(
         "#!/bin/sh\n"
         f"exec {shlex.quote(sys.executable)} -c "
-        f"{shlex.quote('import sys;sys.stdout.buffer.write(b\"x\"*4096);sys.stdout.flush()')}\n")
+        f"{shlex.quote(flood_code)}\n")
     flood_external.chmod(0o700)
     os.environ["PATH"] = str(external_bin) + os.pathsep + old_path
     try:
@@ -15428,11 +15471,14 @@ def test_subscription_engines():
     with tempfile.TemporaryDirectory() as hd:
         os.environ["HOME"] = hd
         try:
+            # Auth preflight has two independent prerequisites. Pin the binary side to this test
+            # process so a CI runner with (or without) a vendor CLI still exercises signed-out auth.
+            installed_codex = replace(codex, binary=sys.executable)
             check("subscriptions: engine reports signed-out with no marker present",
-                  not codex.logged_in())
+                  not installed_codex.logged_in())
             not_auth = False
             try:
-                S.preflight(codex)
+                S.preflight(installed_codex)
             except S.EngineNotAuthenticated:
                 not_auth = True
             except S.EngineError:
@@ -15443,11 +15489,11 @@ def test_subscription_engines():
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.mkdir()
             check("subscriptions: a credential-marker directory never counts as signed in",
-                  not codex.logged_in())
+                  not installed_codex.logged_in())
             marker.rmdir()
             marker.write_text("{}")
             check("subscriptions: engine reports signed-in once its own marker exists",
-                  codex.logged_in())
+                  installed_codex.logged_in())
             missing = False
             try:
                 S.preflight(replace(codex, binary="dgc-no-such-binary-zzz"))
