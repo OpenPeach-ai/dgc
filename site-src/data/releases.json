@@ -1,13 +1,24 @@
 {
   "refreshed_at": "2026-09-04T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 15,
+  "cli_releases_last_14_days": 16,
   "cli": [
+    {
+      "version": "0.26.4",
+      "date": "2026-09-04",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.4",
+      "status": "current",
+      "notes": [
+        "User-cancelled streams now remain cancelled when provider socket shutdown appears as a clean end-of-stream.",
+        "Partial tool calls from cancelled generations remain non-executable and cannot enter automatic incomplete-stream recovery.",
+        "Provider terminal markers take precedence over late cancellation, preserving already-completed responses."
+      ]
+    },
     {
       "version": "0.26.3",
       "date": "2026-09-04",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.3",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "macOS code intelligence and session resume now share one protected system-alias identity.",
         "Repository-controlled and user-owned symlink paths remain outside that narrow compatibility rule.",
