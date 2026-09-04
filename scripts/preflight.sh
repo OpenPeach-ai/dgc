@@ -34,7 +34,7 @@ cleanup_preflight() {
   [ -z "$EDIT_GATE_TMP" ] || rm -rf -- "$EDIT_GATE_TMP"
 }
 trap cleanup_preflight EXIT
-"$PYTHON" scripts/generate-sbom.py "$SBOM_TMP"
+"$PYTHON" -I scripts/generate-sbom.py "$SBOM_TMP"
 "$PYTHON" - "$SBOM_TMP" "$ROOT/requirements.lock" "$ROOT/scripts/release_bundle.py" <<'PY'
 import copy
 import importlib.util

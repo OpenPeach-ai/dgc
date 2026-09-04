@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.1 — 2026-09-04
+
+- Rebuilt the protocol-v5 editor against the corrected DGC 0.26.2 cross-platform baseline.
+- Kept settings and MCP changes acknowledgement-driven, rollback-safe, and identity-bound.
+- Retained the polished goal controls, streaming status, tool cards, diffs, and long-running chat behavior.
+
 ## 0.12.0 — 2026-09-04
 
 - Moved the CLI/editor contract to protocol v5 with explicit route state and complete reasoning-effort support.

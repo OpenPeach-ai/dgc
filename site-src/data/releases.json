@@ -4,10 +4,21 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.26.2",
+      "date": "2026-09-04",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.2",
+      "status": "current",
+      "notes": [
+        "macOS workspaces now accept protected system path aliases while repository-controlled symlinks remain blocked.",
+        "Clean source checkouts generate deterministic runtime SBOMs without importing or executing package code.",
+        "Python 3.10 and subscription preflight release gates are now deterministic across CI runners."
+      ]
+    },
+    {
       "version": "0.26.1",
       "date": "2026-09-04",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.1",
-      "status": "current",
+      "status": "source tag",
       "notes": [
         "Audited model routing keeps native and subscription modes explicit and consistent.",
         "Provider and MCP credentials are now endpoint-bound and fail closed; older unbound CLI keys may need to be entered once again.",
@@ -83,10 +94,22 @@
   ],
   "extension": [
     {
+      "version": "0.12.1",
+      "date": "2026-09-04",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.12.1",
+      "status": "current",
+      "notes": [
+        "Protocol v5 with explicit route state and complete reasoning-effort support",
+        "Acknowledgement-driven settings and MCP changes with rollback-safe persistence",
+        "Identity-bound remote MCP secrets plus polished goals, tools, diffs, and streaming status",
+        "Corrected DGC 0.26.2 cross-platform baseline"
+      ]
+    },
+    {
       "version": "0.12.0",
       "date": "2026-09-04",
-      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.12.0",
-      "status": "current",
+      "url": "https://github.com/OpenPeach-ai/dgc/tree/v0.26.1/editors/vscode",
+      "status": "source only",
       "notes": [
         "Protocol v5 with explicit route state and complete reasoning-effort support",
         "Acknowledgement-driven settings and MCP changes with rollback-safe persistence",

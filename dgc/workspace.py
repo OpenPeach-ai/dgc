@@ -41,12 +41,76 @@ def _version(info: os.stat_result) -> FileVersion:
     )
 
 
+def _canonicalize_os_alias(path: Path) -> Path:
+    """Rewrite one immutable, OS-owned alias directly below the filesystem anchor.
+
+    Darwin deliberately exposes roots such as ``/var`` and ``/tmp`` as root-owned links into
+    ``/private``.  Treating those stable aliases like repository-controlled links makes otherwise
+    canonical tempfile workspaces unusable on macOS.  Only the first component below a
+    protected filesystem anchor is eligible; links anywhere below it remain untouched and are
+    rejected by the descriptor walk or fallback validation.
+    """
+    if os.name != "posix" or not path.anchor or len(path.parts) < 2:
+        return path
+    anchor = Path(path.anchor)
+    alias = anchor / path.parts[1]
+    try:
+        anchor_info = anchor.stat()
+        before = alias.lstat()
+    except OSError:
+        return path
+    # A process running the repository must not be able to replace the alias.  POSIX filesystem
+    # roots and their compatibility aliases are owned by uid 0, and the root itself is not writable
+    # by group/other.  Anything less trusted stays spelled as-is so the normal no-follow walk fails.
+    if (not stat.S_ISDIR(anchor_info.st_mode)
+            or int(getattr(anchor_info, "st_uid", -1)) != 0
+            or stat.S_IMODE(anchor_info.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
+            or not stat.S_ISLNK(before.st_mode)
+            or int(getattr(before, "st_uid", -1)) != 0):
+        return path
+    try:
+        link_value = os.readlink(alias)
+        after = alias.lstat()
+    except OSError:
+        return path
+    if _version(before) != _version(after):
+        raise WorkspaceBoundaryError(f"operating-system path alias changed: {alias}")
+    target = Path(link_value)
+    if not target.is_absolute():
+        target = alias.parent / target
+    target = Path(os.path.normpath(str(target)))
+    if not target.is_absolute() or not target.parts[1:]:
+        return path
+    # Do not use resolve() here: a nested target link could be controlled independently of the
+    # protected anchor alias.  Walk the literal target and require every intermediate directory to
+    # be OS-owned and non-writable by group/other.  The final directory may itself be writable
+    # (Darwin's /private/tmp is 01777), because its protected parent prevents replacement of the
+    # directory entry; repository-controlled descendants are still checked normally.
+    canonical_target = Path(target.anchor)
+    for index, part in enumerate(target.parts[1:]):
+        candidate = canonical_target / part
+        try:
+            target_info = candidate.lstat()
+        except OSError:
+            return path
+        if (stat.S_ISLNK(target_info.st_mode) or not stat.S_ISDIR(target_info.st_mode)
+                or int(getattr(target_info, "st_uid", -1)) != 0):
+            return path
+        if (index < len(target.parts[1:]) - 1
+                and stat.S_IMODE(target_info.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)):
+            return path
+        canonical_target = candidate
+    suffix = path.parts[2:]
+    return canonical_target.joinpath(*suffix)
+
+
 def _absolute_frozen(path: Path | str) -> Path:
     """Normalize spelling without following a component that may have changed since approval."""
     value = Path(path)
     if not value.is_absolute() or "\x00" in str(value) or ".." in value.parts:
         raise WorkspaceBoundaryError("a canonical absolute path is required")
-    return Path(os.path.normpath(str(value)))
+    normalized = Path(os.path.normpath(str(value)))
+    return _canonicalize_os_alias(normalized)
 
 
 def _dirfd_supported() -> bool:
