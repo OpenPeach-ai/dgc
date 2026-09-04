@@ -19,8 +19,8 @@
     auto:        { icon: "zap",       desc: "approve everything" },
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
-  const THINK = ["off", "low", "medium", "high"];
-  let curMode = "default", curThink = "off", curModel = "";
+  const THINK = ["off", "low", "medium", "high", "xhigh"];
+  let curMode = "default", curThink = "off", curModel = "", curSubscription = "";
   let lastConfig = null, settingsProviders = [];
 
   function applyMode(m) {
@@ -40,21 +40,33 @@
     const mm = $("modemenu");
     if (!mm.hidden) { hideModeMenu(); return; }
     hideModelMenu();
+    const effortLevels = curSubscription ? [...THINK, "max"] : THINK;
     mm.innerHTML =
       `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
       MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
       `</div><div class="mdiv" role="separator"></div><div role="group" aria-label="Thinking"><div class="mhead" role="presentation"><span>Thinking</span></div>` +
-      THINK.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === curThink}" class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb" aria-hidden="true"></span><span>${t}</span></button>`).join("") + `</div>`;
+      effortLevels.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === curThink}" class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb" aria-hidden="true"></span><span>${curSubscription && t === "off" ? "default" : t}</span></button>`).join("") + `</div>`;
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
-    mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { curThink = r.dataset.think; vscode.postMessage({ type: "setThink", level: curThink }); hideModeMenu(); });
+    mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setThink", level: r.dataset.think }); hideModeMenu(); });
     mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
     (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
   }
 
   // in-composer model menu (rendered from the `models` message the extension posts)
   function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
-  function renderModelMenu(ids, current, err) {
+  function renderModelMenu(ids, current, err, subscription, label) {
     const mm = $("modelmenu");
+    if (subscription) {
+      mm.innerHTML = `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>CLI default</span></button>`
+        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+        + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
+      mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
+      mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+      mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
+      mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
+      (mm.querySelector(".sel") || mm.querySelector("button"))?.focus(); return;
+    }
     if (err || !ids.length) {
       mm.innerHTML = `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
@@ -1238,6 +1250,7 @@
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
+      curSubscription = msg.state.subscriptionEngine || "";
       $("modelname").textContent = curModel || "dgc";
       $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change";
       $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
@@ -1245,7 +1258,7 @@
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
+    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "surface_open") { openSurface(msg.surface); }
     else if (msg.type === "command_menu") {

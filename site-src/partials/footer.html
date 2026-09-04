@@ -1,0 +1,34 @@
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="{{SITE_URL}}/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="{{SITE_URL}}/terms">Terms</a> and acknowledge the <a href="{{SITE_URL}}/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="{{SITE_URL}}/#cli">CLI</a><a href="{{SITE_URL}}/vscode">Extension</a><a href="{{SITE_URL}}/benchmark">Benchmark</a><a href="{{SITE_URL}}/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="{{SITE_URL}}/blog">Blog</a><a href="{{SITE_URL}}/changelog">Changelog</a><a href="{{SITE_URL}}/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="{{GITHUB_URL}}">GitHub <span aria-hidden="true">↗</span></a><a href="{{GITHUB_URL}}/releases">Releases <span aria-hidden="true">↗</span></a><a href="{{SITE_URL}}/security">Security</a><a href="{{SITE_URL}}/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">{{VERSION}}</span> · <a href="{{GITHUB_URL}}/commit/{{COMMIT}}"><code>{{COMMIT_SHORT}}</code></a></p>
+    <nav aria-label="Legal"><a href="{{SITE_URL}}/privacy">Privacy</a><a href="{{SITE_URL}}/terms">Terms</a><a href="{{GITHUB_URL}}/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>

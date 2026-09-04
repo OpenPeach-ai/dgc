@@ -1,0 +1,15 @@
+<div class="terminal-window reveal" aria-label="An illustrative reconstruction of a DGC benchmark session">
+  <div class="terminal-bar"><i></i><i></i><i></i><span>dgc · go/alphametics · illustrative replay</span></div>
+  <div class="terminal-body">
+    <div class="terminal-line" style="--delay:.2s"><span class="prompt">❯</span> fix the alphametics solver and run the real tests</div>
+    <div class="terminal-line" style="--delay:1s"><span class="agent">I’ll inspect the implementation and its cases first.</span></div>
+    <div class="terminal-line" style="--delay:1.8s"><span class="tool">→ read_file</span> alphametics.go · alphametics_test.go</div>
+    <div class="terminal-line" style="--delay:2.6s"><span class="tool">← edit_file</span> preserve winning assignment on success</div>
+    <div class="terminal-line diff-del" style="--delay:3.2s">− assignment[letter] = -1 &nbsp; // unconditional rollback</div>
+    <div class="terminal-line diff-add" style="--delay:3.8s">+ if !solve(next) { rollback() } &nbsp; // failure only</div>
+    <div class="terminal-line" style="--delay:4.6s"><span class="tool">$ bash</span> go test ./...</div>
+    <div class="terminal-line" style="--delay:5.5s"><span class="success">✓ scored pass</span> · isolated grader 0.4 s</div>
+    <div class="terminal-line" style="--delay:6.2s"><span class="agent">Fixed the success-path rollback and verified the full package.</span></div>
+    <div class="terminal-line" style="--delay:7s"><span class="prompt">❯</span> <span class="caret" aria-hidden="true"></span></div>
+  </div>
+</div>

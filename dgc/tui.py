@@ -44,6 +44,7 @@ from .update import cached_update
 from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        resolve_command)
+from .config import persisted_mcp_args_safe, valid_remote_mcp_url
 from .redaction import redact_text, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -371,6 +372,16 @@ class TUI:
     def _open_submenu(self, cmd: str) -> None:
         opts, current = self._SUBMENUS[cmd]
         cur = current(self)
+        if cmd == "think":
+            from . import subscriptions as subs
+            engine_key = str(self.config.get("subscription_engine", "")).strip().lower()
+            engine = subs.get_engine(engine_key)
+            if engine is not None and engine.supports_effort():
+                # Subscription CLIs expose a model-dependent session-only maximum in addition to
+                # DGC's native scale.  Keep the native menu unchanged when delegation is off.
+                opts = [("Default", "off"), ("Low", "low"), ("Medium", "medium"),
+                        ("High", "high"), ("Extra-high", "xhigh"), ("Maximum", "max")]
+                cur = str(self.config.get("subscription_effort", "")) or "off"
         rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
                            title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back",
@@ -492,7 +503,8 @@ class TUI:
         except ValueError:
             self._flash(f"'{raw}' isn't a valid value for {key}"); self._open_settings_cat(cat); return
         if key == "mode":
-            self._request_mode(str(val), after=lambda: self._open_settings_cat(cat))
+            reopen = lambda: self._open_settings_cat(cat)
+            self._request_mode(str(val), after=reopen, on_cancel=reopen)
             return
         elif key == "theme":
             self._handle_slash(f"/theme {val}")
@@ -2972,8 +2984,17 @@ class TUI:
         cur = order.index(self.agent.mode) if self.agent.mode in order else 0
         self._request_mode(order[(cur + 1) % len(order)])
 
-    def _request_mode(self, mode: str, after=None) -> None:
+    def _request_mode(self, mode: str, after=None, on_cancel=None) -> None:
         """Apply a permission mode, with a modal acknowledgement before full auto."""
+        from . import subscriptions as subs
+        active_engine = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        try:
+            subs.validate_engine_mode(active_engine, mode)
+        except subs.EngineModeUnsupported as exc:
+            self._flash(str(exc))
+            self._invalidate()
+            return
+
         def commit() -> None:
             self.agent.set_mode(mode)
             self._flash(f"mode → {mode}")
@@ -2994,8 +3015,8 @@ class TUI:
         def picked(row) -> None:
             if row["value"] == "yes":
                 commit()
-            elif after:
-                after()
+            elif on_cancel:
+                on_cancel()
         self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
                            on_pick=picked)
 
@@ -3240,12 +3261,12 @@ class TUI:
                 eng = subs.get_engine(_se)
                 if eng is not None and not eng.supports_effort():
                     self._flash(f"{eng.short_label} takes no reasoning-effort flag — steer it via /model")
-                elif rest in ("off", "low", "medium", "high", "xhigh"):
+                elif rest in ("off", "low", "medium", "high", "xhigh", "max"):
                     val = "" if rest == "off" else rest
                     cfg.set("subscription_effort", val); self._flash(f"subscription effort → {val or 'default'}")
                 else:
                     self._flash(f"subscription effort: {cfg.get('subscription_effort', '') or 'default'}"
-                                " — /think off|low|medium|high|xhigh")
+                                " — /think off|low|medium|high|xhigh|max")
             elif rest in ("off", "low", "medium", "high", "xhigh"):
                 cfg.set("thinking", rest); self._flash(f"thinking → {rest}")
             else:
@@ -3458,8 +3479,14 @@ class TUI:
         th = style_mod.theme()
         cfg = self.config
         used, size = self.agent.estimate_tokens(), self._context_window_size()
-        rows = [("model", cfg.model), ("host", cfg.base_url), ("mode", self.agent.mode),
-                ("thinking", cfg.get("thinking", "off")), ("context", f"{used} / {size} tokens"),
+        engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+        model = (str(cfg.get("subscription_model", "") or "").strip()
+                 or f"{engine} default") if engine else cfg.model
+        host = f"{engine} CLI subscription" if engine else cfg.base_url
+        thinking = (str(cfg.get("subscription_effort", "") or "").strip()
+                    or "off") if engine else cfg.get("thinking", "off")
+        rows = [("model", model), ("host", host), ("mode", self.agent.mode),
+                ("thinking", thinking), ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
                 ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
@@ -3527,7 +3554,7 @@ class TUI:
         self._flash(f"{name} model → {model or 'the CLI default'}")
 
     def _subscription_effort_flow(self, name: str) -> None:
-        levels = ["default", "low", "medium", "high", "xhigh"]
+        levels = ["default", "low", "medium", "high", "xhigh", "max"]
 
         def pick(i):
             val = "" if i == 0 else levels[i]
@@ -3652,6 +3679,8 @@ class TUI:
                 if kind == "mcp":
                     servers = dict(self.config.get("mcp_servers", {}) or {}); servers.pop(name, None)
                     self.config.set("mcp_servers", servers)
+                    if hasattr(self.config, "drop_mcp_secrets"):
+                        self.config.drop_mcp_secrets(name)
                     if getattr(self.agent, "mcp", None):
                         live = self.agent.mcp.servers.pop(name, None)
                         self.agent.mcp.failures.pop(name, None)
@@ -3680,10 +3709,12 @@ class TUI:
         self._flash(res.split(".")[0][:70])
 
     def _mcp_add_flow(self, st: dict | None = None) -> None:
-        """A single FORM modal to add an MCP server: every field is visible; arrow to a field and
-        Enter to edit it (or toggle the type), then choose 'Add server'. Esc cancels."""
-        st = st if st is not None else {"name": "", "transport": "local", "target": "", "token": "", "env": ""}
-        st.setdefault("env", "")
+        """Collect a persisted MCP spec without ever accepting a literal credential value."""
+        st = st if st is not None else {
+            "name": "", "transport": "local", "target": "", "auth_env": "", "env_names": "",
+        }
+        st.setdefault("auth_env", "")
+        st.setdefault("env_names", "")
         remote = st["transport"] == "remote"
 
         def frow(label, value, key):
@@ -3695,10 +3726,10 @@ class TUI:
             frow("URL" if remote else "Command", st["target"] or "—", "target"),
         ]
         if remote:
-            rows.append(frow("Auth token", "•" * 8 if st["token"] else "(none)", "token"))
-        else:                                          # local servers get their token as an env var
-            keys = [kv.split("=", 1)[0] for kv in st["env"].split() if "=" in kv]
-            rows.append(frow("Env / token", ", ".join(keys) if keys else "(none)", "env"))
+            rows.append(frow("Auth env", st["auth_env"] or "(none)", "auth_env"))
+        else:
+            keys = [item for item in re.split(r"[\s,]+", st["env_names"].strip()) if item]
+            rows.append(frow("Env names", ", ".join(keys) if keys else "(none)", "env_names"))
         rows += [{"label": "✓  Add server", "value": "save"},
                  {"label": "✗  Cancel", "value": "cancel"}]
 
@@ -3716,17 +3747,47 @@ class TUI:
                     self._flash(("a URL" if remote else "a command") + " is required")
                     self._mcp_add_flow(st); return
                 name = re.sub(r"\s+", "-", st["name"].strip())
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name):
+                    self._flash("server name must use 1–64 letters, digits, ., _, or -")
+                    self._mcp_add_flow(st); return
+                env_text = st["auth_env"] if remote else st["env_names"]
+                env_names = [item for item in re.split(r"[\s,]+", env_text.strip()) if item]
+                invalid = [item for item in env_names
+                           if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", item)]
+                if invalid or len(env_names) > 64:
+                    self._flash("environment names must be valid identifiers (maximum 64)")
+                    self._mcp_add_flow(st); return
+                env_names = list(dict.fromkeys(env_names))
+                if remote and len(env_names) > 1:
+                    self._flash("remote Bearer authentication accepts one environment variable")
+                    self._mcp_add_flow(st); return
                 if st["transport"] == "remote":          # bridge via the standard mcp-remote stdio proxy
-                    args = ["-y", "mcp-remote", st["target"].strip()]
-                    if st["token"].strip():
-                        args += ["--header", f"Authorization: Bearer {st['token'].strip()}"]
-                    self._mcp_save(name, {"command": "npx", "args": args})
+                    url = st["target"].strip()
+                    if not valid_remote_mcp_url(url):
+                        self._flash("remote MCP requires HTTPS (or loopback HTTP) without URL credentials")
+                        self._mcp_add_flow(st); return
+                    args = ["-y", "mcp-remote", url]
+                    remote_spec = {
+                        "transport": "remote", "command": "npx", "args": args,
+                        "env_names": env_names, "url": url,
+                    }
+                    if env_names:
+                        remote_spec["auth_env"] = env_names[0]
+                    self._mcp_save(name, remote_spec)
                 else:
-                    parts = st["target"].split()
-                    spec = {"command": parts[0], "args": parts[1:]}
-                    env = dict(kv.split("=", 1) for kv in st["env"].split() if "=" in kv)
-                    if env:                             # service tokens etc. → passed as env vars
-                        spec["env"] = env
+                    try:
+                        parts = shlex.split(st["target"])
+                    except ValueError:
+                        self._flash("command contains unmatched quoting")
+                        self._mcp_add_flow(st); return
+                    if not parts or len(parts) > 129 or any(len(item) > 8192 for item in parts):
+                        self._flash("command is empty or exceeds the MCP argument limits")
+                        self._mcp_add_flow(st); return
+                    if not persisted_mcp_args_safe(parts[1:]):
+                        self._flash("store MCP credentials via environment names, not command arguments")
+                        self._mcp_add_flow(st); return
+                    spec = {"transport": "stdio", "command": parts[0], "args": parts[1:],
+                            "env_names": env_names}
                     self._mcp_save(name, spec)
                 return
             # a text field → close the form, prompt for the value, re-open the form on submit
@@ -3734,9 +3795,8 @@ class TUI:
                 "name": "Server name (e.g. github, filesystem)",
                 "target": ("Server URL (e.g. https://mcp.example.com/mcp)" if remote
                            else "Command (e.g. npx -y @modelcontextprotocol/server-filesystem ~/)"),
-                "token": "Auth token for the Authorization header (blank = none)",
-                "env": "Env vars as KEY=VALUE, space-separated "
-                       "(e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_… )",
+                "auth_env": "Environment variable containing the Bearer token (blank = none)",
+                "env_names": "Environment variable names to pass, separated by spaces or commas",
             }
 
             def got(val):
@@ -3752,14 +3812,25 @@ class TUI:
     def _mcp_save(self, name: str, spec: dict) -> None:
         cfg = self.config
         servers = dict(cfg.get("mcp_servers", {}) or {})
+        if name not in servers and len(servers) >= 64:
+            self._flash("at most 64 MCP servers are supported")
+            return
+        if hasattr(cfg, "drop_mcp_secrets"):
+            # Reusing a server name must not attach a credential migrated for an older target.
+            cfg.drop_mcp_secrets(name)
         servers[name] = spec
         cfg.set("mcp_servers", servers)
         try:                                     # connect just the new one so it's live this session
-            self.agent.mcp.connect_all({name: spec})
+            runtime = (cfg.mcp_runtime_servers({name: spec})
+                       if hasattr(cfg, "mcp_runtime_servers") else {name: spec})
+            self.agent.mcp.connect_all(runtime)
             live = name in getattr(self.agent.mcp, "servers", {})
         except Exception:
             live = False
-        tail = f"{spec.get('command')} {' '.join(spec.get('args', []))}".strip()
+        tail = redact_text(
+            f"{spec.get('command')} {' '.join(spec.get('args', []))}".strip(),
+            secret_values(cfg),
+        )
         self._flash((f"MCP '{name}' added + connected" if live
                      else f"MCP '{name}' saved (connects next launch)") + f" — {tail}"[:52])
 
@@ -3795,18 +3866,32 @@ class TUI:
         def selected_engine(key: str) -> None:                # a subscription CLI (their own plan)
             prev = str(self.config.get("subscription_engine", "")).strip().lower()
             eng = subs.get_engine(key)
-            self.config.set("subscription_engine", key)
-            if key != prev:                    # model/effort are engine-specific — never carry them over
-                self.config.set("subscription_model", "")
-                self.config.set("subscription_effort", "")
-            if eng.resolve() is None:
-                self._offer_engine_install(eng)
-            elif not eng.logged_in() and not eng.auth_on_launch:
-                self._offer_engine_login(eng)
-            elif eng.auth_on_launch and not eng.logged_in():
-                self._flash(f"provider → {eng.label} — authentication checked by its CLI on launch", secs=8)
-            else:
-                self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
+            if eng is None:
+                self._flash(f"unknown subscription engine: {key}")
+                return
+
+            def commit_engine() -> None:
+                self.config.set("subscription_engine", key)
+                if key != prev:                # model/effort are engine-specific — never carry them over
+                    self.config.set("subscription_model", "")
+                    self.config.set("subscription_effort", "")
+                if eng.resolve() is None:
+                    self._offer_engine_install(eng)
+                elif not eng.logged_in() and not eng.auth_on_launch:
+                    self._offer_engine_login(eng)
+                elif eng.auth_on_launch and not eng.logged_in():
+                    self._flash(f"provider → {eng.label} — authentication checked by its CLI on launch", secs=8)
+                else:
+                    self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
+
+            try:
+                subs.validate_engine_mode(key, self.agent.mode)
+            except subs.EngineModeUnsupported:
+                # Kimi's prompt mode is inherently full-auto.  Never persist that route until
+                # the user accepts the same warning used by every other TUI auto transition.
+                self._request_mode("auto", after=commit_engine)
+                return
+            commit_engine()
 
         if rest:                                       # /connect <engine|preset|url>
             if not subagent and subs.get_engine(rest) is not None:
@@ -4836,7 +4921,7 @@ def _tui_help() -> str:
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
                           ("/subagent", "sub-agent model + host + API transport"),
-                          ("/think off|low|medium|high|xhigh", "reasoning effort")]),
+                          ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),

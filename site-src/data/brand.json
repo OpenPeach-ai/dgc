@@ -1,0 +1,11 @@
+{
+  "product": "DGC",
+  "long_name": "Vibe DGC",
+  "company": "OpenPeach",
+  "founder": "Mohit Kalra",
+  "tagline": "A coding agent for the models you run",
+  "site_url": "https://vibedgc.com",
+  "docs_url": "https://docs.vibedgc.com",
+  "github_url": "https://github.com/OpenPeach-ai/dgc",
+  "marketplace_url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc"
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_version": "0.24.0",
+  "publication_state": "measured slice; runner revision was not recorded",
+  "suite": "Aider polyglot",
+  "problems": 90,
+  "rounds": 2,
+  "metric": "pass@2",
+  "cap_seconds_per_round": 600,
+  "grader_timeout_seconds": 400,
+  "model": "qwen3.8:27b-orig",
+  "model_digest": "sha256-a448bc634a972fb6d18e01b89d443e1f3628921a7d0dbc5f2541f7d32190418b",
+  "dataset_commit": "7e0611e77b54e2dea774cdc0aa00cf9f7ed6144f",
+  "context_tokens": 32768,
+  "endpoint_policy": "identical model alias, caller-declared digest, and endpoint URL recorded for every harness; weights were not independently verified",
+  "harnesses": [
+    {"name": "goose", "pass_at_1_solved": 79, "solved": 86, "pass_at_2": 95.6, "timeouts": 3, "rounds": 101, "average_round_seconds": 142.9, "output_tokens": 389357, "per_language": {"cpp": 14, "go": 15, "java": 15, "javascript": 14, "python": 15, "rust": 13}},
+    {"name": "DGC", "pass_at_1_solved": 80, "solved": 85, "pass_at_2": 94.4, "timeouts": 0, "rounds": 100, "average_round_seconds": 121.7, "output_tokens": 293675, "per_language": {"cpp": 15, "go": 14, "java": 14, "javascript": 15, "python": 14, "rust": 13}},
+    {"name": "pi", "pass_at_1_solved": 81, "solved": 85, "pass_at_2": 94.4, "timeouts": 8, "rounds": 99, "average_round_seconds": 166.5, "output_tokens": 423667, "per_language": {"cpp": 15, "go": 14, "java": 15, "javascript": 15, "python": 15, "rust": 11}},
+    {"name": "OpenCode", "pass_at_1_solved": 77, "solved": 80, "pass_at_2": 88.9, "timeouts": 2, "rounds": 103, "average_round_seconds": 151.5, "output_tokens": 389337, "per_language": {"cpp": 14, "go": 13, "java": 14, "javascript": 15, "python": 14, "rust": 10}},
+    {"name": "Codex CLI", "pass_at_1_solved": 79, "solved": 79, "pass_at_2": 87.8, "timeouts": 3, "rounds": 101, "average_round_seconds": 153.7, "output_tokens": 358249, "per_language": {"cpp": 14, "go": 12, "java": 13, "javascript": 15, "python": 14, "rust": 11}}
+  ],
+  "dgc_cost": {
+    "timeouts": 0,
+    "average_round_seconds": 121.7,
+    "output_tokens_vs_leader_percent": -24.6
+  },
+  "languages": [
+    {"name": "Python", "slug": "python", "solved": 14, "total": 15},
+    {"name": "JavaScript", "slug": "javascript", "solved": 15, "total": 15},
+    {"name": "Java", "slug": "java", "solved": 14, "total": 15},
+    {"name": "Go", "slug": "go", "solved": 14, "total": 15},
+    {"name": "C++", "slug": "cpp", "solved": 15, "total": 15},
+    {"name": "Rust", "slug": "rust", "solved": 13, "total": 15}
+  ],
+  "swe_bench_lite": {
+    "solved": 184,
+    "total": 300,
+    "percent": 61.3,
+    "claim_source": "founder-published result",
+    "local_evidence_note": "300 predictions retained, 292 with non-empty patches; no evaluator report or resolved-instance list retained"
+  },
+  "completion_profile": null,
+  "trace_bundles": []
+}

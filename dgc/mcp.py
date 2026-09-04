@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import __version__
+from .config import valid_remote_mcp_url
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
@@ -33,6 +34,7 @@ _MAX_TOOLS = 512
 _MAX_TOOL_SCHEMA_BYTES = 128 * 1024
 _MAX_TOOL_CATALOG_BYTES = 8 * 1024 * 1024
 _MAX_CURSOR_BYTES = 4096
+_MAX_CONFIG_SERVERS = 64
 _MAX_CACHE_TTL_MS = 60 * 60 * 1000
 _MAX_SAFE_INTEGER = (1 << 53) - 1
 _CATALOG_RETRY_SECONDS = 5.0
@@ -439,6 +441,28 @@ def sanitize_input_request(method: str, params) -> dict:
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
+
+
+def _runtime_server_args(spec: dict) -> list[str]:
+    """Materialize safe remote auth indirection without persisting a header value."""
+    args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
+    env_names = spec.get("env_names")
+    auth_env = spec.get("auth_env")
+    url = spec.get("url")
+    has_authorization = any(
+        args[index] == "--header" and index + 1 < len(args)
+        and isinstance(args[index + 1], str)
+        and args[index + 1].lower().startswith("authorization:")
+        for index in range(len(args))
+    )
+    if (spec.get("transport") == "remote" and isinstance(env_names, list)
+            and isinstance(auth_env, str) and auth_env in env_names
+            and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
+            and isinstance(url, str) and args[2] == url and valid_remote_mcp_url(url)
+            and not has_authorization):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", auth_env):
+            args.extend(["--header", f"Authorization: Bearer ${{{auth_env}}}"])
+    return args
 
 
 def _bounded_lines(stream, limit: int = _MAX_FRAME):
@@ -1427,7 +1451,12 @@ class MCPManager:
         """Connect configured servers, deferring editor-secret entries during cold startup."""
         if not isinstance(config_servers, dict):
             return
-        for raw_name, raw_spec in config_servers.items():
+        for server_index, (raw_name, raw_spec) in enumerate(config_servers.items()):
+            # Keep startup work and child-process fan-out bounded even when config.json was
+            # hand-edited.  The editor/headless mutation APIs enforce the same public limit, but
+            # this is the final runtime boundary and must not trust their provenance.
+            if server_index >= _MAX_CONFIG_SERVERS:
+                break
             if not isinstance(raw_spec, dict):
                 continue
             if startup and raw_spec.get("defer_until_setup") is True:
@@ -1440,6 +1469,17 @@ class MCPManager:
             old = self.servers.pop(name, None)
             if old is not None:
                 old.stop()
+            if raw_spec.get("transport") == "remote":
+                raw_args = raw_spec.get("args")
+                url = raw_spec.get("url")
+                exact_bridge = (cmd == "npx" and isinstance(raw_args, list)
+                                and len(raw_args) >= 3
+                                and raw_args[:2] == ["-y", "mcp-remote"]
+                                and isinstance(url, str) and raw_args[2] == url
+                                and valid_remote_mcp_url(url))
+                if not exact_bridge:
+                    self.failures[name] = "invalid remote MCP bridge identity"
+                    continue
             configured_env = raw_spec.get("env")
             configured_env = dict(configured_env) if isinstance(configured_env, dict) else {}
             # Editor-managed credentials are persisted only as environment-variable names. A CLI
@@ -1450,7 +1490,8 @@ class MCPManager:
                 for env_name in env_names[:64]:
                     if isinstance(env_name, str) and env_name in os.environ:
                         configured_env.setdefault(env_name, os.environ[env_name])
-            server = MCPServer(name, cmd, raw_spec.get("args"), configured_env, self.root,
+            args = _runtime_server_args(raw_spec)
+            server = MCPServer(name, cmd, args, configured_env, self.root,
                                str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
             if server.start():
                 self.servers[name] = server

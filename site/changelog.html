@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
+<title>Changelog · DGC</title>
+<meta name="description" content="A build-time record of reviewed DGC CLI and editor releases.">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://vibedgc.com/changelog">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Changelog · DGC">
+<meta property="og:description" content="A build-time record of reviewed DGC CLI and editor releases.">
+<meta property="og:url" content="https://vibedgc.com/changelog">
+<meta property="og:image" content="https://vibedgc.com/og-card.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Changelog · DGC"><meta name="twitter:description" content="A build-time record of reviewed DGC CLI and editor releases."><meta name="twitter:image" content="https://vibedgc.com/og-card.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}}]</script>
+</head>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+</header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
+
+<main id="content">
+<header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>Changelog</b> Momentum, made visible</div><h1>What changed, and when.</h1><p class="lede">Selected reviewed release milestones from committed metadata. Linked release pages provide their available notes and source; the current release also publishes checksums, SBOM, and provenance.</p><div class="page-meta"><a class="status-pill" href="/changelog.xml">Atom feed ↗</a><span class="status-pill live">v0.26.0 current</span></div></div></header>
+<section class="section"><div class="container"><div class="release-list"><article class="release reveal" id="release-0-26-1"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.1">0.26.1 ↗</a><time datetime="2026-09-04">2026-09-04</time></div><ul><li>Audited model routing keeps native and subscription modes explicit and consistent.</li><li>Provider and MCP credentials are now endpoint-bound and fail closed; older unbound CLI keys may need to be entered once again.</li><li>Release provenance, public-site inventory, and deployment gates bind published bytes to reviewed source.</li></ul><span class="status-pill live">current</span></article><article class="release reveal" id="release-0-26-0"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.26.0">0.26.0 ↗</a><time datetime="2026-09-03">2026-09-03</time></div><ul><li>A refined full-screen terminal experience for long-running agent work.</li><li>Smoother concurrent TUI rendering while an agent keeps working.</li><li>Release archives rebuilt and verified against the published source.</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-25-1"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.25.1">0.25.1 ↗</a><time datetime="2026-09-03">2026-09-03</time></div><ul><li>Correct context budgeting when a resumed session stored the 32k default.</li><li>Resume behavior now preserves the configured model window exactly.</li><li>Site and release manifests promoted from the same verified bytes.</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-25-0"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.25.0">0.25.0 ↗</a><time datetime="2026-09-02">2026-09-02</time></div><ul><li>Standing goals, autonomous verification gates, and continuation handoffs.</li><li>Persistent Python code-action mode and scrubbed training export.</li><li>A structured VS Code/Cursor surface for goals, tools, diffs, and plans.</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-21-1"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.21.1">0.21.1 ↗</a><time datetime="2026-08-29">2026-08-29</time></div><ul><li>Follow-up reliability fixes after the 0.21 security release.</li><li>Tighter provider and session edge-case handling.</li><li>Published checksums and reproducible release metadata.</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-21-0"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.21.0">0.21.0 ↗</a><time datetime="2026-08-27">2026-08-27</time></div><ul><li>OS sandboxing and canonical workspace confinement.</li><li>Expanded permission rules, hooks, MCP, and tool-output boundaries.</li><li>Security-focused hardening across the terminal and editor protocols.</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-20-8"><div><a class="release-version" href="https://github.com/OpenPeach-ai/dgc/releases/tag/v0.20.8">0.20.8 ↗</a><time datetime="2026-08-23">2026-08-23</time></div><ul><li>Local and OpenAI-compatible provider setup from one CLI.</li><li>Permission modes, plan review, artifacts, sessions, and model switching.</li><li>A stable baseline for subsequent reliability and interface releases.</li></ul><span class="status-pill">shipped</span></article></div></div></section>
+<section class="section field field-2" id="extension"><div class="container"><header class="section-copy"><div class="eyebrow"><b>Extension</b> VS Code · Cursor</div><h2>Editor releases.</h2></header><div class="release-list" style="margin-top:38px"><article class="release reveal" id="release-0-12-0"><div><a class="release-version" href="https://open-vsx.org/extension/vibedgc/dgc/0.12.0">0.12.0 ↗</a><time datetime="2026-09-04">2026-09-04</time></div><ul><li>Protocol v5 with explicit route state and complete reasoning-effort support</li><li>Acknowledgement-driven settings and MCP changes with rollback-safe persistence</li><li>Identity-bound remote MCP secrets plus polished goals, tools, diffs, and streaming status</li></ul><span class="status-pill live">current</span></article><article class="release reveal" id="release-0-11-0"><div><a class="release-version" href="https://open-vsx.org/extension/vibedgc/dgc/0.11.0">0.11.0 ↗</a><time datetime="2026-09-02">2026-09-02</time></div><ul><li>Standing goals and plan feedback</li><li>Structured tool cards and diffs</li><li>Protocol v4 lifecycle controls</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-10-0"><div><a class="release-version" href="https://open-vsx.org/extension/vibedgc/dgc/0.10.0">0.10.0 ↗</a><time datetime="2026-08-31">2026-08-31</time></div><ul><li>Subscription-backed engines</li><li>Multi-root workspace context</li><li>Correlated permission decisions</li></ul><span class="status-pill">shipped</span></article><article class="release reveal" id="release-0-8-1"><div><a class="release-version" href="https://open-vsx.org/extension/vibedgc/dgc/0.8.1">0.8.1 ↗</a><time datetime="2026-08-20">2026-08-20</time></div><ul><li>Self-hosted VSIX channel</li><li>Cursor installation flow</li><li>Editor reliability fixes</li></ul><span class="status-pill">shipped</span></article></div></div></section>
+
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
+
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
+</body>
+</html>

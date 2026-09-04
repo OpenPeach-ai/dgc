@@ -43,8 +43,17 @@ const fs = require("node:fs");
 const readline = require("node:readline");
 let seq = 0;
 let rootsAcknowledged = false;
+let subscriptionModel = "";
+let subscriptionEffort = "";
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
-send({ type: "ready", version: "fixture", protocol_version: 4,
+const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
+  model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
+  project_root: process.cwd(), goal: { text: "", status: "none" },
+  subscription_engine: "codex", subscription_model: subscriptionModel,
+  subscription_effort: subscriptionEffort,
+  subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
+    model_hints: [], supports_effort: true }] });
+send({ type: "ready", version: "fixture", protocol_version: 5,
   capabilities: { correlated_state_requests: true },
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
@@ -64,6 +73,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     mode: cmd.mode, workspace_trusted: true });
   if (cmd.type === "set_think") send({ type: "think_changed", request_id: cmd.request_id,
     think: cmd.level });
+  if (cmd.type === "get_config") sendConfig(cmd.request_id);
+  if (cmd.type === "list_models") send({ type: "models", request_id: cmd.request_id,
+    ids: ["native-fixture"], base_url: "http://127.0.0.1:1/v1", api_mode: "auto" });
+  if (cmd.type === "set_config") {
+    if (Object.prototype.hasOwnProperty.call(cmd.values || {}, "subscription_model")) {
+      subscriptionModel = String(cmd.values.subscription_model || "");
+    }
+    if (Object.prototype.hasOwnProperty.call(cmd.values || {}, "subscription_effort")) {
+      subscriptionEffort = String(cmd.values.subscription_effort || "");
+    }
+    sendConfig(cmd.request_id);
+  }
   if (cmd.type === "set_goal") send({ type: "goal_changed", request_id: cmd.request_id,
     goal: cmd.text || "installed-host goal", status: cmd.status || "active" });
   if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
@@ -132,6 +153,9 @@ if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND
 args.push(workspaceFile);
 
 try {
+  if (configured && !existsSync(configured)) {
+    throw new Error(`DGC_VSCODE_EXECUTABLE does not exist: ${configured}`);
+  }
   const env = { ...process.env };
   // A shell launched from VS Code/Cursor inherits extension-host and remote-CLI bootstrap state.
   // The test must create an isolated desktop instance instead of reusing that process or running
@@ -169,10 +193,17 @@ try {
       || evidence.multiRootLifecycle !== true
       || evidence.secretStorageLifecycle !== true
       || evidence.decisionLifecycle !== true
-      || !Number.isInteger(evidence.commands) || evidence.commands < 1) {
+      || !Number.isInteger(evidence.commands) || evidence.commands < 1
+      || typeof evidence.vscodeVersion !== "string"
+      || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
+      || typeof evidence.appName !== "string" || !evidence.appName.trim()) {
     throw new Error("VS Code extension-host test evidence was incomplete");
   }
-  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
+  const expectedVersion = process.env.DGC_EXPECT_VSCODE_VERSION;
+  if (expectedVersion && evidence.vscodeVersion !== expectedVersion) {
+    throw new Error(`expected VS Code ${expectedVersion}, host reported ${evidence.vscodeVersion}`);
+  }
+  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
 } finally {
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);

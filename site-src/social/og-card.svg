@@ -1,0 +1,14 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs><pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#ffffff" opacity=".07"/></pattern><pattern id="grid" width="110" height="110" patternUnits="userSpaceOnUse"><path d="M110 0H0V110" fill="none" stroke="#34343c" stroke-width="1" opacity=".35"/></pattern><radialGradient id="aurora" cx="0" cy="0" r="1" gradientTransform="translate(865 130) rotate(145) scale(520 360)" gradientUnits="userSpaceOnUse"><stop stop-color="#7C5CFF" stop-opacity=".28"/><stop offset="1" stop-color="#7C5CFF" stop-opacity="0"/></radialGradient><filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="18"/></filter></defs>
+  <rect width="1200" height="630" fill="#0B0B0D"/><rect width="1200" height="630" fill="url(#dots)"/><rect width="1200" height="630" fill="url(#grid)"/><ellipse cx="865" cy="130" rx="440" ry="290" fill="url(#aurora)" filter="url(#glow)"/>
+  <path d="M106 70 90 78 81 134 97 126Z M137 62 121 70 112 134 128 126Z M168 70 152 78 143 126 159 118Z" fill="#7C5CFF"/>
+  <text x="198" y="108" fill="#EDEDF1" font-family="monospace" font-size="25" font-weight="500" letter-spacing="4">DGC</text>
+  <text x="82" y="295" fill="#FFFFFF" font-family="sans-serif" font-size="76" font-weight="500" letter-spacing="-3">Own your coding agent.</text>
+  <text x="84" y="351" fill="#A6A6B0" font-family="sans-serif" font-size="27">A real agentic loop for the models you run.</text>
+  <line x1="82" y1="461" x2="1118" y2="461" stroke="#34343C"/>
+  <circle cx="94" cy="512" r="5" fill="#7C5CFF"/><text x="112" y="521" fill="#A78BFA" font-family="monospace" font-size="19" letter-spacing="2">94.4% PASS@2</text>
+  <circle cx="390" cy="512" r="5" fill="#7C5CFF"/><text x="408" y="521" fill="#A6A6B0" font-family="monospace" font-size="19" letter-spacing="2">0 TIMEOUTS</text>
+  <circle cx="680" cy="512" r="5" fill="#7C5CFF"/><text x="698" y="521" fill="#A6A6B0" font-family="monospace" font-size="19" letter-spacing="2">CLI + EDITOR</text>
+  <text x="1118" y="565" text-anchor="end" fill="#7C7C88" font-family="monospace" font-size="15" letter-spacing="2">VIBEDGC.COM</text>
+  <path d="M20 42V20H42 M1158 20H1180V42 M20 588V610H42 M1158 610H1180V588" fill="none" stroke="#7C7C88" opacity=".55"/>
+</svg>

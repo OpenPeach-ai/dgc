@@ -7,13 +7,13 @@ substrate the ACP adapter will reframe (Phase 4).
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from . import sessions as sessions_mod
@@ -22,8 +22,9 @@ from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import Config
-from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
+from .config import Config, mcp_url_has_credentials, persisted_mcp_args_safe, valid_remote_mcp_url
+from .editor_protocol import (MAX_COMMAND_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
+                              command_error, event_error)
 from .permissions import Rule, rule_for
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .redaction import redact_value, secret_values
@@ -45,17 +46,6 @@ _MCP_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
 _MCP_LOG_LEVELS = frozenset({
     "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency", "off",
 })
-_MCP_SENSITIVE_QUERY_NAMES = frozenset({
-    "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
-    "authorization", "auth",
-})
-# Value-bearing CLI flags whose argument (or `--flag=value` tail) is a secret.
-# A persisted MCP spec must route these through env_names, never inline args.
-_MCP_SECRET_FLAGS = frozenset({
-    "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
-    "--auth", "--authorization", "--password", "--passwd", "--secret", "--bearer",
-    "--key", "--credential", "--credentials",
-})
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
@@ -74,6 +64,95 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_memory", "add_memory",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
+_CONFIG_BOOLEAN_KEYS = frozenset({
+    "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
+    "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
+})
+_CONFIG_STRING_LIMITS = {
+    "subagent_model": 512,
+    "subagent_base_url": 4096,
+    "subagent_api_key": 16_384,
+    "prompt_cache_key": 64,
+    "fallback_model": 512,
+    "fallback_base_url": 4096,
+    "fallback_api_key": 16_384,
+    "autonomous_gate": 512,
+    "subscription_model": 256,
+}
+_CONFIG_ENUMS = {
+    "api_mode": frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"}),
+    "subagent_api_mode": frozenset({"", "auto", "ollama", "anthropic",
+                                     "chat_completions", "responses"}),
+    "fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic",
+                                     "chat_completions", "responses"}),
+    "provider_state": frozenset({"stateless", "server"}),
+    "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
+    "tool_profile": frozenset({"adaptive", "full"}),
+    "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
+    "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
+}
+_CONFIG_INTEGER_RANGES = {
+    "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
+    "context_size": (2_048, MAX_SAFE_INTEGER),
+    "max_parallel_tasks": (1, 8),
+    "autonomous_max_turns": (1, 1_000),
+}
+
+
+def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None, str | None]:
+    """Validate the generic set_config object completely before any state is changed."""
+    if not isinstance(raw_values, dict):
+        return None, "settings values must be an object"
+    allowed = {*_CONFIG_BOOLEAN_KEYS, *_CONFIG_STRING_LIMITS, *_CONFIG_ENUMS,
+               *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine"}
+    unknown = [key for key in raw_values if key not in allowed]
+    if unknown:
+        return None, f"unsupported settings key: {str(unknown[0])[:80]}"
+    values = dict(raw_values)
+    for key in _CONFIG_BOOLEAN_KEYS:
+        if key in values and not isinstance(values[key], bool):
+            return None, f"{key} must be true or false"
+    for key, limit in _CONFIG_STRING_LIMITS.items():
+        if key not in values:
+            continue
+        value = values[key]
+        if (not isinstance(value, str) or len(value) > limit
+                or any(ord(char) < 32 and not (key == "autonomous_gate" and char == "\t")
+                       for char in value)):
+            return None, f"{key} must be a bounded plain string"
+    for key in ("subagent_base_url", "fallback_base_url"):
+        value = values.get(key)
+        if value and (any(char.isspace() for char in value) or mcp_url_has_credentials(value)):
+            return None, f"{key} cannot contain whitespace or URL credentials"
+    # Tabs are useful in a shell gate and were accepted by the prior contract; other controls are
+    # neither executable text nor safe durable configuration.
+    gate = values.get("autonomous_gate")
+    if isinstance(gate, str) and any(ord(char) < 32 and char != "\t" for char in gate):
+        return None, "autonomous_gate must be a single-line command string (\u2264512 chars)"
+    for key, choices in _CONFIG_ENUMS.items():
+        if key in values and (not isinstance(values[key], str) or values[key] not in choices):
+            return None, f"{key} has an unsupported value"
+    if "subscription_engine" in values:
+        engine = values["subscription_engine"]
+        if (not isinstance(engine, str) or (engine and engine not in subscription_keys)):
+            return None, ("subscription_engine must be empty or one of: "
+                          + ", ".join(subscription_keys))
+    for key, (minimum, maximum) in _CONFIG_INTEGER_RANGES.items():
+        if key not in values:
+            continue
+        value = values[key]
+        if (isinstance(value, bool) or not isinstance(value, int)
+                or not minimum <= value <= maximum):
+            return None, f"{key} must be an integer from {minimum} to {maximum}"
+    if "provider_capabilities" in values:
+        capabilities = values["provider_capabilities"]
+        from .llm import ProviderCapabilities
+        known = frozenset(ProviderCapabilities.__dataclass_fields__)
+        if (not isinstance(capabilities, dict) or len(capabilities) > len(known)
+                or set(capabilities) - known
+                or any(not isinstance(value, bool) for value in capabilities.values())):
+            return None, "provider_capabilities must contain only known boolean feature overrides"
+    return values, None
 
 
 def _turn_payload_bytes(text, images, context) -> int:
@@ -94,20 +173,14 @@ def _json_payload_bytes(value) -> int:
 
 
 def _mcp_url_has_credentials(value: str) -> bool:
-    try:
-        parsed = urlsplit(value)
-        return bool(parsed.username or parsed.password) or any(
-            re.sub(r"[^a-z0-9]", "", key.lower()) in _MCP_SENSITIVE_QUERY_NAMES
-            for key, _item in parse_qsl(parsed.query, keep_blank_values=True))
-    except ValueError:
-        return True
+    return mcp_url_has_credentials(value)
 
 
 def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
     """Validate one bounded editor MCP spec; persisted specs can never carry secret values."""
     if not isinstance(value, dict):
         return None, "server specification must be an object"
-    allowed = {"transport", "command", "args", "env", "env_names", "url", "log_level",
+    allowed = {"transport", "command", "args", "env", "env_names", "auth_env", "url", "log_level",
                "defer_until_setup"}
     if set(value) - allowed:
         return None, "server specification contains unsupported fields"
@@ -123,16 +196,7 @@ def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
         return None, "server transport must be stdio or remote"
     url = str(value.get("url") or "")
     if transport == "remote":
-        try:
-            parsed = urlsplit(url)
-            loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-            valid_remote = (parsed.scheme == "https" or (parsed.scheme == "http" and loopback))
-            valid_remote = (valid_remote and bool(parsed.netloc)
-                            and not parsed.username and not parsed.password)
-            valid_remote = valid_remote and not _mcp_url_has_credentials(url)
-        except ValueError:
-            valid_remote = False
-        if not valid_remote or len(url) > 4096 or any(char.isspace() for char in url):
+        if not valid_remote_mcp_url(url):
             return None, "remote MCP servers require HTTPS (or loopback HTTP) without URL credentials"
     log_level = str(value.get("log_level") or "warning").lower()
     if log_level not in _MCP_LOG_LEVELS:
@@ -142,38 +206,27 @@ def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
             or any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
                    for name in env_names)):
         return None, "env_names must contain at most 64 environment variable names"
+    auth_env = value.get("auth_env", "")
+    if not isinstance(auth_env, str) or (auth_env and not _MCP_ENV_RE.fullmatch(auth_env)):
+        return None, "auth_env must be a valid environment variable name"
+    if auth_env and auth_env not in env_names:
+        return None, "auth_env must also be declared in env_names"
+    remote_bridge = (transport == "remote" and command.strip() == "npx"
+                     and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
+                     and args[2] == url)
+    if transport == "remote" and not remote_bridge:
+        return None, ("remote MCP servers must use the standard npx -y mcp-remote bridge "
+                      "with the same validated URL")
+    if auth_env and not remote_bridge:
+        return None, "auth_env is supported only by the standard remote MCP bridge"
     env = value.get("env", {})
     if not isinstance(env, dict) or len(env) > 64:
         return None, "server env must be an object with at most 64 entries"
     if persisted and env:
         return None, "persisted MCP specifications cannot contain environment values"
-    if persisted:
-        for index, arg in enumerate(args):
-            raw = arg.strip()
-            lowered = raw.lower()
-            prior_raw = args[index - 1].strip() if index else ""
-            prior = prior_raw.lower()
-            has_url_credentials = False
-            if lowered.startswith(("http://", "https://")):
-                try:
-                    parsed_arg = urlsplit(arg)
-                    has_url_credentials = bool(parsed_arg.username or parsed_arg.password)
-                except ValueError:
-                    has_url_credentials = True
-            # A secret can ride in as a value-bearing flag (`--api-key sk-...`,
-            # `--token=...`) or a header, not only as env/URL creds. Reject the
-            # whole persisted spec if any recognized secret flag is present, in
-            # either its own arg or the value that follows it. `-H` stays
-            # case-sensitive so it never collides with `-h`/help.
-            head = lowered.split("=", 1)[0]
-            prior_head = prior.split("=", 1)[0]
-            is_header_short = raw == "-H" or prior_raw == "-H"
-            if (lowered.startswith("authorization:") or lowered == "--header"
-                    or prior == "--header" or is_header_short
-                    or head in _MCP_SECRET_FLAGS or prior_head in _MCP_SECRET_FLAGS
-                    or has_url_credentials):
-                return None, ("persisted MCP specifications cannot contain inline secrets; "
-                              "declare tokens, headers, or credentials via env_names")
+    if persisted and not persisted_mcp_args_safe(args):
+        return None, ("persisted MCP specifications cannot contain inline secrets; "
+                      "declare tokens, headers, or credentials via env_names")
     if any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
            or not isinstance(item, str) or len(item) > 16_384 or "\x00" in item
            for name, item in env.items()):
@@ -185,6 +238,8 @@ def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
         return None, "defer_until_setup must be true or false"
     clean = {"transport": transport, "command": command.strip(), "args": list(args),
              "env_names": list(dict.fromkeys(env_names)), "log_level": log_level}
+    if auth_env:
+        clean["auth_env"] = auth_env
     if defer_until_setup:
         clean["defer_until_setup"] = True
     if url:
@@ -486,7 +541,12 @@ class Backend:
             goal={"text": self.agent.goal, "status": self.agent.goal_status,
                   "elapsed_seconds": self._goal_elapsed_seconds()},
             context_size=self._context_window_size())
+        for warning in getattr(self.config, "credential_warnings", ()):
+            self.em.emit("info", message=str(warning)[:1000])
         self._emit_context()
+        # Publish the complete route state immediately after the ready handshake. ``config``
+        # carries both native and delegated settings so editors render the route that will run.
+        self._emit_config()
 
     def _context_window_size(self) -> int:
         effective = getattr(self.agent, "context_size", None)
@@ -789,6 +849,17 @@ class Backend:
     def _public_mcp_spec(raw) -> dict:
         spec = raw if isinstance(raw, dict) else {}
         raw_args = spec.get("args") if isinstance(spec.get("args"), list) else []
+        auth_env = (spec.get("auth_env") if isinstance(spec.get("auth_env"), str)
+                    and _MCP_ENV_RE.fullmatch(spec.get("auth_env")) else "")
+        legacy_auth_env = ""
+        for index, raw_arg in enumerate(raw_args[:-1]):
+            if raw_arg != "--header" or not isinstance(raw_args[index + 1], str):
+                continue
+            match = re.fullmatch(
+                r"Authorization:\s*Bearer\s+\$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}",
+                raw_args[index + 1], re.IGNORECASE)
+            if match:
+                legacy_auth_env = match.group(1)
         args, skip = [], False
         for arg in raw_args[:128]:
             text = str(arg)[:8192]
@@ -805,7 +876,7 @@ class Backend:
             args.append(text)
         env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
         declared = spec.get("env_names") if isinstance(spec.get("env_names"), list) else []
-        env_names = [name for name in [*declared, *env]
+        env_names = [name for name in [*declared, *env, *([legacy_auth_env] if legacy_auth_env else [])]
                      if isinstance(name, str) and _MCP_ENV_RE.fullmatch(name)][:64]
         transport = str(spec.get("transport") or "")
         url = str(spec.get("url") or "")
@@ -816,12 +887,22 @@ class Backend:
             url = str(raw_args[2])[:4096]
         if url and _mcp_url_has_credentials(url):
             url = ""
-        return {
+        exact_bridge = (transport == "remote" and spec.get("command") == "npx"
+                        and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
+                        and args[2] == url)
+        if not auth_env and legacy_auth_env:
+            auth_env = legacy_auth_env
+        if not exact_bridge or auth_env not in env_names:
+            auth_env = ""
+        public = {
             "transport": transport if transport in ("stdio", "remote") else "stdio",
             "command": str(spec.get("command") or "")[:4096], "args": args,
             "env_names": list(dict.fromkeys(env_names)), "url": url[:4096],
             "log_level": str(spec.get("log_level") or "warning")[:16],
         }
+        if auth_env:
+            public["auth_env"] = auth_env
+        return public
 
     def _emit_mcp_servers(self, request_id: str, error: str | None = None) -> None:
         configured = self.config.get("mcp_servers", {}) or {}
@@ -861,7 +942,7 @@ class Backend:
         problem = runtime_error or persisted_error
         if not problem and runtime and persisted:
             if (any(runtime.get(key) != persisted.get(key)
-                    for key in ("transport", "command", "env_names", "url", "log_level"))
+                    for key in ("transport", "command", "env_names", "auth_env", "url", "log_level"))
                     or bool(runtime.get("defer_until_setup"))
                     != bool(persisted.get("defer_until_setup"))):
                 problem = "runtime and persisted server identity do not match"
@@ -874,7 +955,8 @@ class Backend:
                 if (persisted.get("transport") != "remote" or len(extra) != 2
                         or extra[0] != "--header" or header_env is None
                         or header_env.group(1) not in runtime.get("env", {})
-                        or header_env.group(1) not in persisted.get("env_names", [])):
+                        or header_env.group(1) not in persisted.get("env_names", [])
+                        or header_env.group(1) != persisted.get("auth_env")):
                     problem = "runtime arguments may only add one bounded remote Authorization header"
             elif extra is None:
                 problem = "runtime arguments must preserve the persisted argument prefix"
@@ -885,6 +967,10 @@ class Backend:
         if name not in servers and len(servers) >= _MAX_MCP_SERVERS:
             self._emit_mcp_servers(request_id, f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
             return
+        if hasattr(self.config, "drop_mcp_secrets"):
+            # An editor upsert may replace a SecretStorage value without changing the public
+            # server identity.  Never let an older CLI-migrated value win on the next launch.
+            self.config.drop_mcp_secrets(name)
         servers[name] = persisted
         self.config.set("mcp_servers", servers)
         secret_candidates = list(runtime.get("env", {}).values())
@@ -1235,6 +1321,8 @@ class Backend:
             servers = dict(self.config.get("mcp_servers", {}) or {})
             servers.pop(name, None)
             self.config.set("mcp_servers", servers)
+            if hasattr(self.config, "drop_mcp_secrets"):
+                self.config.drop_mcp_secrets(name)
             live = self.agent.mcp.servers.pop(name, None)
             self.agent.mcp.failures.pop(name, None)
             if live is not None:
@@ -1245,7 +1333,10 @@ class Backend:
         elif t == "reload_mcp_servers":
             request_id = str(cmd.get("request_id") or "")
             self.agent.mcp.stop_all()
-            self.agent.mcp.connect_all(self.config.get("mcp_servers", {}), startup=True)
+            servers = (self.config.mcp_runtime_servers()
+                       if hasattr(self.config, "mcp_runtime_servers")
+                       else self.config.get("mcp_servers", {}))
+            self.agent.mcp.connect_all(servers, startup=True)
             self._emit_mcp_servers(request_id)
 
         elif t == "list_permissions":
@@ -1340,6 +1431,19 @@ class Backend:
 
         elif t == "set_mode":
             mode = cmd.get("mode", "default")
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            from . import subscriptions as _subscriptions
+            try:
+                _subscriptions.validate_engine_mode(active_engine, mode)
+            except _subscriptions.EngineModeUnsupported as exc:
+                self.em.emit("command_rejected", command=t, reason="unsupported_subscription_mode",
+                             message=str(exc),
+                             **_request_fields(request_id))
+                return
             if mode in ("acceptEdits", "auto") and not self.workspace_trusted:
                 if cmd.get("acknowledge_workspace_trust") is not True:
                     self.em.emit("command_rejected", command=t, reason="workspace_untrusted",
@@ -1354,6 +1458,46 @@ class Backend:
                          workspace_trusted=self.workspace_trusted,
                          **_request_fields(request_id))
         elif t == "set_model":
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            route = str(cmd.get("route") or "").strip().lower()
+            if route not in ("", "native", "subscription"):
+                self.em.emit("command_rejected", command=t, reason="invalid_route",
+                             message="model route must be native or subscription",
+                             **_request_fields(request_id))
+                return
+            # A model-only command means "the active chat route".  Meaningful connection fields
+            # are an unambiguous native-provider operation (settings hydration and /connect).
+            # Ignore old protocol clients' serialized no-op defaults (`base_url: ""` and
+            # `clear_stored_api_key: false`) so they cannot silently retarget a delegated model.
+            # Merely supplying api_key remains deliberate, including the empty string used to
+            # clear a process-local editor credential.
+            native_connection = (route == "native" or bool(cmd.get("base_url"))
+                                 or "api_key" in cmd or cmd.get("clear_stored_api_key") is True)
+            if route == "subscription" and not active_engine:
+                self.em.emit("command_rejected", command=t, reason="route_unavailable",
+                             message="no subscription engine is active",
+                             **_request_fields(request_id))
+                return
+            if route == "subscription" and native_connection:
+                self.em.emit("command_rejected", command=t, reason="route_conflict",
+                             message="subscription model changes cannot include native connection fields",
+                             **_request_fields(request_id))
+                return
+            if active_engine and "model" in cmd and not native_connection:
+                model = str(cmd.get("model") or "").strip()
+                if len(model) > 256 or any(ord(char) < 32 for char in model):
+                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                 message="subscription model must be a bounded plain string",
+                                 **_request_fields(request_id))
+                    return
+                self.config.set("subscription_model", model)
+                self.em.emit("model_changed", model=model, base_url=self.config.base_url,
+                             **_request_fields(request_id))
+                return
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
                 # switches provider, erase any older CLI secret so a later CLI launch cannot
@@ -1361,15 +1505,25 @@ class Backend:
                 self.config.data["api_key"] = ""
                 if hasattr(self.config, "_stored_secrets"):
                     self.config._stored_secrets["api_key"] = ""
-                self.config._env_secret_keys.add("api_key")
+                if hasattr(self.config, "_stored_provider_identity"):
+                    self.config._stored_provider_identity.pop("api_key", None)
+                runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                if callable(runtime_secret):
+                    runtime_secret("api_key", "")
+                else:
+                    self.config._env_secret_keys.add("api_key")
             if cmd.get("base_url"):
                 self.config.set("base_url", cmd["base_url"])
             if "api_key" in cmd:
                 # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
                 # a later non-secret config save preserves any existing CLI secret instead of
                 # duplicating the editor key into ~/.dgc/secrets.json.
-                self.config.data["api_key"] = str(cmd.get("api_key") or "")
-                self.config._env_secret_keys.add("api_key")
+                runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                if callable(runtime_secret):
+                    runtime_secret("api_key", str(cmd.get("api_key") or ""))
+                else:
+                    self.config.data["api_key"] = str(cmd.get("api_key") or "")
+                    self.config._env_secret_keys.add("api_key")
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
@@ -1379,7 +1533,11 @@ class Backend:
             if ctx and ctx != int(self.config.get("context_size", 32768)):
                 self.config.set("context_size", ctx)
                 context_changed = True
-            self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url,
+            # While delegation is active, keep the public model control aligned with the route a
+            # prompt will use even when a settings operation updates the native fallback.
+            shown_model = (str(config_get("subscription_model", "")).strip()
+                           if active_engine and callable(config_get) else self.config.model)
+            self.em.emit("model_changed", model=shown_model, base_url=self.config.base_url,
                          **_request_fields(request_id))
             if context_changed:
                 self._emit_context()
@@ -1412,9 +1570,41 @@ class Backend:
                     lock.release()
             threading.Thread(target=discover_models, daemon=True).start()
         elif t == "set_think":
-            self.config.set("thinking", cmd.get("level", "off"))   # persisted
-            self.em.emit("think_changed", think=self.config.get("thinking", "off"),
-                         **_request_fields(request_id))
+            level = str(cmd.get("level", "off"))
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            if active_engine:
+                from . import subscriptions as _subs
+                engine = _subs.get_engine(active_engine)
+                effort = "" if level == "off" else level
+                if engine is None:
+                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                 message=f"unknown subscription engine '{active_engine}'",
+                                 **_request_fields(request_id))
+                    return
+                if effort and not engine.supports_effort():
+                    self.em.emit(
+                        "command_rejected", command=t, reason="invalid_config_value",
+                        message=f"{engine.short_label} does not expose a reasoning-effort flag; "
+                                "choose its reasoning model with /model instead",
+                        **_request_fields(request_id))
+                    return
+                self.config.set("subscription_effort", effort)
+                self.em.emit("think_changed", think=effort or "off",
+                             **_request_fields(request_id))
+            else:
+                if level == "max":
+                    self.em.emit(
+                        "command_rejected", command=t, reason="invalid_config_value",
+                        message="max reasoning effort is available only on a supported subscription route",
+                        **_request_fields(request_id))
+                    return
+                self.config.set("thinking", level)   # persisted native route
+                self.em.emit("think_changed", think=self.config.get("thinking", "off"),
+                             **_request_fields(request_id))
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
@@ -1545,72 +1735,27 @@ class Backend:
             artifacts.stop(str(cmd.get("id", "")))
             self._emit_artifacts(request_id)
         elif t == "set_config":
-            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
-                       "subagent_api_mode", "api_mode",
-                       "provider_state", "prompt_cache", "prompt_cache_key",
-                       "provider_capabilities", "capability_cache_ttl_s",
-                       "fallback_model", "fallback_base_url", "fallback_api_key",
-                       "fallback_api_mode",
-                       "context_size", "search_provider", "sandbox", "sandbox_network",
-                       "show_reasoning", "preserve_thinking", "code_action", "suggest",
-                       "plan_artifact", "artifact_autostart",
-                       "artifact_in_plan", "tool_profile", "max_parallel_tasks",
-                       "autonomous_gate", "autonomous_max_turns",
-                       "subscription_engine", "subscription_model", "subscription_effort")
-            refresh = False
-            raw_values = cmd.get("values") or {}
-            if not isinstance(raw_values, dict):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="settings values must be an object",
-                             **_request_fields(request_id))
-                return
-            values = {k: v for k, v in raw_values.items() if k in allowed}
-            boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
-                            "preserve_thinking", "code_action", "suggest", "plan_artifact",
-                            "artifact_autostart", "artifact_in_plan"}
-            if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="boolean settings require true or false",
-                             **_request_fields(request_id))
-                return
-            if ("tool_profile" in values
-                    and values["tool_profile"] not in ("adaptive", "full")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="tool_profile must be adaptive or full",
-                             **_request_fields(request_id))
-                return
             from .subscriptions import ENGINE_KEYS as _sub_keys
-            if ("subscription_engine" in values
-                    and (not isinstance(values["subscription_engine"], str)
-                         or (values["subscription_engine"]
-                             and values["subscription_engine"] not in _sub_keys))):
+            values, problem = _validated_config_values(cmd.get("values"), _sub_keys)
+            if problem or values is None:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription_engine must be empty or one of: "
-                                     + ", ".join(_sub_keys),
-                             **_request_fields(request_id))
-                return
-            if any(key in values and (not isinstance(values[key], str)
-                                      or len(values[key]) > (256 if key == "subscription_model" else 64)
-                                      or any(ord(char) < 32 for char in values[key]))
-                   for key in ("subscription_model", "subscription_effort")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription model/effort must be bounded plain strings",
-                             **_request_fields(request_id))
-                return
-            if ("subscription_effort" in values
-                    and values["subscription_effort"] not in
-                    ("", "low", "medium", "high", "xhigh", "max")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription_effort must be empty, low, medium, high, xhigh, or max",
+                             message=problem or "invalid settings values",
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)
             current_engine = (config_get("subscription_engine", "") if callable(config_get) else
                               getattr(self.config, "data", {}).get("subscription_engine", ""))
             selected_engine = str(values.get("subscription_engine", current_engine))
-            if selected_engine == "kimi" and self.agent.mode != "auto":
+            from . import subscriptions as _subscriptions
+            try:
+                _subscriptions.validate_engine_mode(
+                    selected_engine,
+                    str(getattr(self.agent, "mode", None)
+                        or (config_get("mode", "default") if callable(config_get) else "default")),
+                )
+            except _subscriptions.EngineModeUnsupported as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="Kimi prompt mode requires DGC auto mode",
+                             message=str(exc),
                              **_request_fields(request_id))
                 return
             if selected_engine in ("qwen", "kimi") and values.get("subscription_effort"):
@@ -1625,31 +1770,6 @@ class Backend:
             if "subscription_engine" in values and not selected_engine:
                 values["subscription_model"] = ""
                 values["subscription_effort"] = ""
-            if ("max_parallel_tasks" in values
-                    and (isinstance(values["max_parallel_tasks"], bool)
-                         or not isinstance(values["max_parallel_tasks"], int)
-                         or not 1 <= values["max_parallel_tasks"] <= 8)):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="max_parallel_tasks must be an integer from 1 to 8",
-                             **_request_fields(request_id))
-                return
-            if ("autonomous_gate" in values
-                    and (not isinstance(values["autonomous_gate"], str)
-                         or len(values["autonomous_gate"]) > 512
-                         or any(ord(char) < 32 and char not in "\t"
-                                for char in values["autonomous_gate"]))):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="autonomous_gate must be a single-line command string (≤512 chars)",
-                             **_request_fields(request_id))
-                return
-            if ("autonomous_max_turns" in values
-                    and (isinstance(values["autonomous_max_turns"], bool)
-                         or not isinstance(values["autonomous_max_turns"], int)
-                         or not 1 <= values["autonomous_max_turns"] <= 1000)):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="autonomous_max_turns must be an integer from 1 to 1000",
-                             **_request_fields(request_id))
-                return
             if values.get("sandbox") is True:
                 from . import sandbox
                 if not sandbox.available():
@@ -1659,31 +1779,91 @@ class Backend:
                         **_request_fields(request_id))
                     return
             secret_keys = ("subagent_api_key", "fallback_api_key")
-            # Apply endpoints first: Config.set invalidates the old endpoint-bound secret. Then
-            # install any replacement credential process-locally, regardless of JSON key order.
-            for k, v in values.items():
-                if k not in secret_keys:
-                    self.config.set(k, v)
-                refresh = refresh or k in {"api_mode", "provider_state", "prompt_cache",
-                                           "prompt_cache_key", "provider_capabilities",
-                                           "capability_cache_ttl_s"}
-            for k in secret_keys:
-                if k in values:
-                    self.config.data[k] = str(values[k] or "")
-                    self.config._env_secret_keys.add(k)
-            # autonomous-gate settings are cached on the agent at construction — re-sync live.
-            if "autonomous_gate" in values:
-                self.agent.autonomous_gate = str(self.config.get("autonomous_gate", "") or "")
-            if "autonomous_max_turns" in values:
-                self.agent.autonomous_max_turns = int(self.config.get("autonomous_max_turns", 30) or 30)
-            if refresh:
-                self.agent.refresh_client()
+            refresh = bool(set(values) & {
+                "api_mode", "provider_state", "prompt_cache", "prompt_cache_key",
+                "provider_capabilities", "capability_cache_ttl_s", "context_size",
+            })
+            # Config.set normally persists each key. Suspend that behavior while staging so another
+            # process cannot observe half of a route change, then commit the complete validated
+            # snapshot once. Endpoint invalidation still runs before process-local replacement keys.
+            data_before = copy.deepcopy(self.config.data)
+            attr_before = {
+                attr: copy.deepcopy(getattr(self.config, attr))
+                for attr in ("_stored_secrets", "_stored_provider_identity",
+                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys")
+                if hasattr(self.config, attr)
+            }
+            missing = object()
+            client_before = getattr(self.agent, "client", missing)
+            gate_before = getattr(self.agent, "autonomous_gate", missing)
+            gate_max_before = getattr(self.agent, "autonomous_max_turns", missing)
+            has_persist_flag = hasattr(self.config, "_persist")
+            persist_before = getattr(self.config, "_persist", None)
+            try:
+                if has_persist_flag:
+                    self.config._persist = False
+                for key, value in values.items():
+                    if key not in secret_keys:
+                        self.config.set(key, value)
+                if has_persist_flag:
+                    self.config._persist = persist_before
+                for key in secret_keys:
+                    if key in values:
+                        runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                        if callable(runtime_secret):
+                            runtime_secret(key, values[key])
+                        else:
+                            self.config.data[key] = values[key]
+                            self.config._env_secret_keys.add(key)
+                save = getattr(self.config, "save", None)
+                if callable(save):
+                    save()
+                if refresh:
+                    self.agent.refresh_client()
+                # These settings are cached on the agent at construction; publish them only after
+                # both the durable commit and any client rebuild have succeeded.
+                if "autonomous_gate" in values:
+                    self.agent.autonomous_gate = values["autonomous_gate"]
+                if "autonomous_max_turns" in values:
+                    self.agent.autonomous_max_turns = values["autonomous_max_turns"]
+            except Exception as exc:
+                if has_persist_flag:
+                    self.config._persist = persist_before
+                self.config.data = data_before
+                for attr, snapshot in attr_before.items():
+                    setattr(self.config, attr, snapshot)
+                if client_before is not missing:
+                    self.agent.client = client_before
+                if gate_before is not missing:
+                    self.agent.autonomous_gate = gate_before
+                if gate_max_before is not missing:
+                    self.agent.autonomous_max_turns = gate_max_before
+                try:
+                    save = getattr(self.config, "save", None)
+                    if callable(save):
+                        save()
+                except Exception:
+                    pass
+                self.em.emit(
+                    "command_rejected", command=t, reason="config_apply_failed",
+                    message=f"settings were not applied ({type(exc).__name__})",
+                    **_request_fields(request_id))
+                return
+            finally:
+                if has_persist_flag:
+                    self.config._persist = persist_before
             self._emit_config(request_id)
         elif t == "get_config":
             self._emit_config(request_id)
         elif t == "status":
-            self.em.emit("status", model=self.config.model, mode=self.agent.mode,
-                         think=self.config.get("thinking", "off"), base_url=self.config.base_url,
+            active_engine = str(self.config.get("subscription_engine", "") or "").strip()
+            active_model = (str(self.config.get("subscription_model", "") or "").strip()
+                            or f"{active_engine} default") if active_engine else self.config.model
+            active_think = (str(self.config.get("subscription_effort", "") or "").strip()
+                            or "off") if active_engine else self.config.get("thinking", "off")
+            self.em.emit("status", model=active_model, mode=self.agent.mode,
+                         think=active_think, base_url=self.config.base_url,
+                         subscription_engine=active_engine,
                          goal={"text": getattr(self.agent, "goal", ""),
                                "status": getattr(self.agent, "goal_status", "none"),
                                "elapsed_seconds": self._goal_elapsed_seconds()},

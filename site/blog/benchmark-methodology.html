@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
+<title>A benchmark is a protocol, not a percentage · DGC</title>
+<meta name="description" content="How DGC compares coding harnesses on one model, real tests, controlled settings, and publishable provenance.">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://vibedgc.com/blog/benchmark-methodology">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="A benchmark is a protocol, not a percentage · DGC">
+<meta property="og:description" content="How DGC compares coding harnesses on one model, real tests, controlled settings, and publishable provenance.">
+<meta property="og:url" content="https://vibedgc.com/blog/benchmark-methodology">
+<meta property="og:image" content="https://vibedgc.com/og-card.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="A benchmark is a protocol, not a percentage · DGC"><meta name="twitter:description" content="How DGC compares coding harnesses on one model, real tests, controlled settings, and publishable provenance."><meta name="twitter:image" content="https://vibedgc.com/og-card.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}}]</script>
+</head>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+</header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
+
+<main id="content">
+<header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>Engineering note</b> 2026-09-04</div><h1>A benchmark is a protocol, not a percentage</h1><p class="lede">How DGC compares coding harnesses on one model, real tests, controlled settings, and publishable provenance.</p></div></header><section class="section"><div class="container"><article class="prose"><p>A coding-agent score looks simple at the end: problems solved divided by problems attempted. Getting to a number worth comparing is harder. The model, context window, transport, task checkout, time budget, retry policy, and grader can each move the result. If two harnesses see different conditions, the percentage says less about the harness than it appears to.</p>
+<p>DGC’s polyglot runner treats the protocol as the result’s foundation.</p>
+<div class="heading-row h2-row"><h2 id="hold-the-model-constant">Hold the model constant</h2><a class="anchor" href="#hold-the-model-constant" aria-label="Link to Hold the model constant">#</a></div>
+<p>The question is not which model is strongest. It is what different harnesses help the same model accomplish. Every agent therefore points at the same controlled endpoint and model alias. For Ollama, the context size is baked into a dedicated alias because an OpenAI-compatible request cannot reliably change the server’s <code>num_ctx</code>; the runner checks that metadata before a scored task begins. The endpoint operator must separately pin and verify the model weights—the runner records a supplied digest but does not derive it from the response server.</p>
+<p>The publishable league also records the immutable model digest, hardware label, accelerator, context size, runner revision, dataset revision, harness executable versions, and expected provider transport. Missing provenance is a failed publication gate, not a footnote.</p>
+<div class="heading-row h2-row"><h2 id="grade-the-repository-not-the-explanation">Grade the repository, not the explanation</h2><a class="anchor" href="#grade-the-repository-not-the-explanation" aria-label="Link to Grade the repository, not the explanation">#</a></div>
+<p>The Aider polyglot benchmark contains Exercism problems in Python, JavaScript, Java, Go, C++, and Rust. Each task begins from its stub. The agent works in an isolated copy, and the grader runs the exercise’s official tests in a fresh fixture containing only the allowed solution files. A harness cannot improve its score by weakening tests, changing a manifest, or leaving an unrelated helper file behind.</p>
+<p>Round one starts a fresh session and asks the agent to implement the solution. If the official tests fail, round two continues that same session with a bounded tail of the failure output, normalized so paths still point at the live exercise workspace. Pass@1 means the first attempt passed. Pass@2 means it passed by the end of the recovery round.</p>
+<div class="heading-row h2-row"><h2 id="time-is-part-of-the-claim">Time is part of the claim</h2><a class="anchor" href="#time-is-part-of-the-claim" aria-label="Link to Time is part of the claim">#</a></div>
+<p>A strict 600-second per-task cap answers a useful question: what finishes within a common wall-clock budget? An uncapped diagnostic answers a different one: what can a local model eventually solve? Those views should never be blended into one number or described as if they were interchangeable. The currently published measured slice used 600 seconds per round—up to 1,200 agent seconds for a two-round recovery—and is labelled accordingly rather than presented as a 600-second per-task curve.</p>
+<p>Timeouts are charged to the harness that incurred them. If a provider continues computing after a client disconnect, the accounting proxy waits for that request to drain before the next task and keeps the cancelled compute attached to the correct row. Unexplained request-count differences make a result unsynchronized and therefore unpublishable.</p>
+<div class="heading-row h2-row"><h2 id="keep-the-evidence-useful-without-retaining-the-work">Keep the evidence useful without retaining the work</h2><a class="anchor" href="#keep-the-evidence-useful-without-retaining-the-work" aria-label="Link to Keep the evidence useful without retaining the work">#</a></div>
+<p>The benchmark stores aggregate and per-task facts: pass state, rounds, timing, timeouts, request counts, provider-reported tokens, edit failures, and bounded tool activity. The accounting proxy does not record prompts or responses. DGC’s internal metrics journal likewise uses fixed controller-owned reason labels; it does not retain model text, tool arguments, commands, or project paths as benchmark telemetry.</p>
+<p>Reference solutions are validated before model time is spent. Runs append one task at a time, so an interrupted league can resume without silently rerunning completed work. The comparison report checks that every engine used the same task set before producing paired deltas and confidence intervals.</p>
+<div class="heading-row h2-row"><h2 id="reproduction-is-the-final-check">Reproduction is the final check</h2><a class="anchor" href="#reproduction-is-the-final-check" aria-label="Link to Reproduction is the final check">#</a></div>
+<p>The runner, harness installers, validation script, report tools, and protocol documentation ship in the repository. A reader can inspect the settings, run a small non-publishable canary, or reproduce a complete controlled league on another model endpoint.</p>
+<p>That does not make every benchmark universal. A polyglot exercise suite is not a production monorepo, and pass@2 is not a promise about a particular codebase. A fully provenance-complete result can still make a narrow, inspectable, repeatable claim: under disclosed conditions, this harness produced these test outcomes. The current 90-task slice lacks its runner revision, so its site page calls out that remaining reproduction boundary instead of treating it as release-gating evidence.</p></article></div></section>
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
+
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
+<title>Permission modes are an execution contract · DGC</title>
+<meta name="description" content="Why DGC enforces plan, default, acceptEdits, and auto below the model—and keeps deny rules first.">
+
+<meta name="theme-color" content="#0B0B0D">
+<link rel="canonical" href="https://vibedgc.com/blog/permission-model">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Vibe DGC">
+<meta property="og:title" content="Permission modes are an execution contract · DGC">
+<meta property="og:description" content="Why DGC enforces plan, default, acceptEdits, and auto below the model—and keeps deny rules first.">
+<meta property="og:url" content="https://vibedgc.com/blog/permission-model">
+<meta property="og:image" content="https://vibedgc.com/og-card.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Permission modes are an execution contract · DGC"><meta name="twitter:description" content="Why DGC enforces plan, default, acceptEdits, and auto below the model—and keeps deny rules first."><meta name="twitter:image" content="https://vibedgc.com/og-card.png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="DGC engineering" href="/feed.xml"><link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
+
+<link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/tokens.css?v=777bbb86a947"><link rel="stylesheet" href="/assets/site.css?v=777bbb86a947">
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.26.0","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}}]</script>
+</head>
+<body class="">
+<a class="skip-link" href="#content">Skip to content</a>
+<div class="announcement" data-announcement="0.26.0">
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.26.0 is out <span aria-hidden="true">→</span></a>
+  <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
+</div>
+<header class="site-header" data-site-header>
+  <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+    <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+    <span>DGC</span>
+  </a>
+  <nav class="nav-pill" aria-label="Primary navigation">
+    <a href="https://vibedgc.com/#cli">CLI</a>
+    <a href="https://vibedgc.com/vscode">Extension</a>
+    <a href="https://vibedgc.com/benchmark">Benchmark</a>
+    <a href="https://docs.vibedgc.com/">Docs</a>
+    <a class="nav-github" href="https://github.com/OpenPeach-ai/dgc" aria-label="DGC on GitHub">GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-primary nav-install" href="https://docs.vibedgc.com/getting-started">Install</a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav">
+    <span class="sr-only">Open navigation</span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+</header>
+<dialog class="mobile-nav" id="mobile-nav" aria-label="Navigation">
+  <div class="mobile-nav-head">
+    <span class="micro">Navigate</span>
+    <button type="button" data-close-menu aria-label="Close navigation">×</button>
+  </div>
+  <nav aria-label="Mobile navigation">
+    <a href="https://vibedgc.com/#cli"><span>01</span>CLI</a>
+    <a href="https://vibedgc.com/vscode"><span>02</span>Extension</a>
+    <a href="https://vibedgc.com/benchmark"><span>03</span>Benchmark</a>
+    <a href="https://docs.vibedgc.com/"><span>04</span>Docs</a>
+    <a href="https://github.com/OpenPeach-ai/dgc"><span>05</span>GitHub <b aria-hidden="true">↗</b></a>
+  </nav>
+  <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Install DGC</a>
+</dialog>
+
+<main id="content">
+<header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>Engineering note</b> 2026-09-04</div><h1>Permission modes are an execution contract</h1><p class="lede">Why DGC enforces plan, default, acceptEdits, and auto below the model—and keeps deny rules first.</p></div></header><section class="section"><div class="container"><article class="prose"><p>Telling a coding model to “be careful” is useful guidance. It is not a security boundary. A dependable agent needs an execution layer that decides which capabilities are available, which action requires a person, and which action must be refused regardless of what the model asks for.</p>
+<p>DGC makes that layer visible through four permission modes.</p>
+<div class="heading-row h2-row"><h2 id="four-modes-four-clear-expectations">Four modes, four clear expectations</h2><a class="anchor" href="#four-modes-four-clear-expectations" aria-label="Link to Four modes, four clear expectations">#</a></div>
+<p><code>default</code> is the normal starting point. Structured reads can run without interruption, while model-requested file writes and arbitrary shell commands ask by baseline. Explicit deny, ask, and allow rules are evaluated before that baseline. Direct user <code>!cmd</code> commands are already intentional actions and do not prompt again. The model can investigate quickly while the user retains the two powers most likely to change a system.</p>
+<p><code>acceptEdits</code> removes friction from direct file work. Structured edits apply automatically by baseline; shell commands ask by baseline, subject to the same explicit rules. This is useful when the task is understood and the user wants to review a resulting diff without approving each patch operation.</p>
+<p><code>plan</code> is read-only. The agent can inspect files, search, use code intelligence, and assemble a concrete plan. Mutation tools are denied in the permission layer, external project paths are unavailable, and MCP execution is not exposed. Approval ends the planning boundary and returns to an edit-capable mode chosen by the user.</p>
+<p><code>auto</code> approves model-requested actions. It exists for trusted workspaces and controlled unattended runs, not as a claim that review no longer matters. DGC gives it a separate warning because a model with shell and write access has the same practical reach as the commands it can launch.</p>
+<div class="heading-row h2-row"><h2 id="deny-must-win">Deny must win</h2><a class="anchor" href="#deny-must-win" aria-label="Link to Deny must win">#</a></div>
+<p>Modes describe broad behavior. Fine-grained rules handle local policy: allow a formatter, ask for a deployment command, or deny reads of a credential pattern. DGC evaluates those rules in the fixed order deny, ask, allow.</p>
+<p>That ordering prevents a convenient broad allow from overriding a narrow safety rule. It also means a deny remains a deny in <code>auto</code>. An approval containing a credential may run once, but it cannot become a persistent permission rule.</p>
+<p>Arbitrary shell is never classified as intrinsically read-only from the command string. Redirection, substitutions, wrappers, interpreters, and project configuration make such allowlists easy to misunderstand. In <code>default</code> and <code>acceptEdits</code>, shell asks.</p>
+<div class="heading-row h2-row"><h2 id="the-workspace-is-another-boundary">The workspace is another boundary</h2><a class="anchor" href="#the-workspace-is-another-boundary" aria-label="Link to The workspace is another boundary">#</a></div>
+<p>A permission to edit in <code>default</code> or <code>acceptEdits</code> does not imply permission to edit anywhere. Structured filesystem tools resolve through a canonical project boundary. An external path needs a separate approval: “allow once” is session-scoped, while “always allow” persists a scoped external-directory rule. Neither turns an unrelated parent into a second workspace. <code>plan</code> refuses external paths, while <code>auto</code> deliberately permits model-requested external structured paths unless a deny rule blocks them. Symlink and traversal checks are applied where the path is consumed, not just when text first enters the tool. OS sandboxing wraps spawned commands and hooks; it does not confine structured file tools running in DGC&#x27;s parent process.</p>
+<p>Optional OS sandboxing adds a different layer. On supported Linux and macOS hosts it limits what a spawned command can see or change and blocks network by default. It does not bypass ordinary approval prompts. If the requested backend is unavailable, DGC refuses to claim that the process is confined.</p>
+<div class="heading-row h2-row"><h2 id="keep-the-decision-attached-to-the-action">Keep the decision attached to the action</h2><a class="anchor" href="#keep-the-decision-attached-to-the-action" aria-label="Link to Keep the decision attached to the action">#</a></div>
+<p>For DGC’s native model/tool loop, the terminal, editor, ACP adapter, and headless protocol carry typed permission requests with correlated identifiers. Late, duplicated, mismatched, or post-restart answers fail closed. Delegated subscription turns map the selected mode into the official vendor CLI instead; DGC’s fine-grained tool rules do not wrap that vendor’s internal tool calls. The interface can change; the native-loop decision semantics do not.</p>
+<p>This is the core design principle: permission mode is not a mood in the prompt. It is an execution contract below the model. The model can propose an action, explain why it needs it, and respond to a denial. The harness decides whether that action can actually happen.</p></article></div></section>
+</main>
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="https://vibedgc.com/" aria-label="DGC home">
+        <svg viewBox="0 0 90 90" aria-hidden="true"><path d="M32 24 20 30 13 72 25 66Z"/><path d="M54 18 42 24 35 72 47 66Z"/><path d="M76 24 64 30 57 66 69 60Z"/></svg>
+        <span>DGC</span>
+      </a>
+      <p>A coding agent for the models you run.</p>
+      <form class="release-form" id="release-notes" action="/api/subscribe" method="post" data-async-form>
+        <label for="release-email">Release notes, occasionally.</label>
+        <div><input id="release-email" name="email" type="email" autocomplete="email" placeholder="you@domain.com" required maxlength="254"><button type="submit" aria-label="Subscribe">→</button></div>
+        <label class="sr-only" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <small class="form-fineprint">Confirm by email; unsubscribe any time. By requesting, you agree to the <a href="https://vibedgc.com/terms">Terms</a> and acknowledge the <a href="https://vibedgc.com/privacy#forms-and-email">Privacy notice</a>.</small>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="https://vibedgc.com/#cli">CLI</a><a href="https://vibedgc.com/vscode">Extension</a><a href="https://vibedgc.com/benchmark">Benchmark</a><a href="https://vibedgc.com/pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Learn">
+      <h2>Learn</h2>
+      <a href="https://docs.vibedgc.com/">Docs</a><a href="https://vibedgc.com/blog">Blog</a><a href="https://vibedgc.com/changelog">Changelog</a><a href="https://vibedgc.com/about">About</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/OpenPeach-ai/dgc">GitHub <span aria-hidden="true">↗</span></a><a href="https://github.com/OpenPeach-ai/dgc/releases">Releases <span aria-hidden="true">↗</span></a><a href="https://vibedgc.com/security">Security</a><a href="https://vibedgc.com/brand">Brand</a>
+    </nav>
+  </div>
+  <div class="footer-legal">
+    <p><span class="status-dot" aria-hidden="true"></span>DGC <span class="js-ver">v0.26.0</span> · <a href="https://github.com/OpenPeach-ai/dgc/commit/3bbceb78f77a24bc0f3bb7000317285f0ebac20c"><code>3bbceb78</code></a></p>
+    <nav aria-label="Legal"><a href="https://vibedgc.com/privacy">Privacy</a><a href="https://vibedgc.com/terms">Terms</a><a href="https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE">PolyForm Noncommercial</a></nav>
+  </div>
+</footer>
+
+<script src="/assets/site.js?v=777bbb86a947" defer></script>
+</body>
+</html>

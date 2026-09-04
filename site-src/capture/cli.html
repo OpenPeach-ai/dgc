@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DGC illustrative trace replay</title>
+<style>
+@font-face{font-family:Geist;src:url('/site/assets/fonts/geist-regular-latin.woff2')}@font-face{font-family:Geist;src:url('/site/assets/fonts/geist-medium-latin.woff2');font-weight:500}@font-face{font-family:JetBrains Mono;src:url('/site/assets/fonts/jetbrains-mono-regular-latin.woff2')}@font-face{font-family:JetBrains Mono;src:url('/site/assets/fonts/jetbrains-mono-medium-latin.woff2');font-weight:500}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#08080a;color:#e8e8ed}body{font-family:JetBrains Mono,monospace;background-image:radial-gradient(circle at 76% 18%,rgba(124,92,255,.16),transparent 28%),linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);background-size:auto,22px 22px,22px 22px;padding:54px}
+.frame{height:100%;border:1px solid #2b2b31;border-radius:18px;background:rgba(11,11,13,.97);box-shadow:0 30px 100px #000,0 0 90px rgba(124,92,255,.12);overflow:hidden;display:grid;grid-template-rows:64px 1fr 50px;position:relative}.frame:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 35%,rgba(167,139,250,.035) 50%,transparent 65%)}
+.bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-bottom:1px solid #232326;padding:0 22px;background:#111114}.dots{display:flex;gap:8px}.dots i{width:9px;height:9px;border-radius:50%;background:#34343a}.dots i:first-child{background:#7c5cff}.title{text-transform:uppercase;letter-spacing:.16em;font:500 11px/1 Geist,sans-serif;color:#9d9da7}.state{justify-self:end;display:flex;align-items:center;gap:9px;text-transform:uppercase;letter-spacing:.12em;font-size:10px;color:#72d99c}.state i{width:7px;height:7px;border-radius:50%;background:#5bcb8b;box-shadow:0 0 12px #5bcb8b}
+.terminal{padding:27px 30px 18px;overflow:hidden;position:relative}.output{position:absolute;left:30px;right:30px;bottom:18px;display:flex;flex-direction:column;gap:8px;transition:transform .3s ease}.line{font-size:15px;line-height:1.46;white-space:pre-wrap;opacity:0;transform:translateY(7px);animation:arrive .28s ease forwards}.line.agent{color:#cbbdff}.line.tool{color:#e8e8ed}.line.tool .arrow,.line.diff .plus{color:#a78bfa}.line.meta{color:#777783;font-size:12px}.line.file{color:#9b9ba6}.line.diff{padding:13px 16px;border:1px solid #292930;background:#101013;border-radius:8px;color:#acacb6}.line.diff .minus{color:#df7c88}.line.verify{color:#cdbfff}.line.pass{color:#78dba1;border-left:2px solid #5bcb8b;padding-left:13px}.line.final{color:#f1f1f4;font-family:Geist,sans-serif;font-size:17px}.cursor{display:inline-block;width:8px;height:17px;margin-left:5px;vertical-align:-3px;background:#a78bfa;animation:blink .8s steps(1) infinite}
+.footer{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;border-top:1px solid #232326;padding:0 20px;color:#73737e;text-transform:uppercase;font-size:9px;letter-spacing:.13em}.footer b{font-weight:500;color:#9f8bfa}.clock{justify-self:center;color:#aaaab3}.progress{height:2px;position:absolute;left:0;right:0;bottom:49px;background:#1d1d21}.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7c5cff,#a78bfa);box-shadow:0 0 12px rgba(124,92,255,.8);animation:progress 52s linear forwards}.mark{justify-self:end;display:flex;gap:4px}.mark i{display:block;width:5px;height:17px;transform:skew(-10deg);background:#7c5cff}.mark i:nth-child(2){margin-top:-3px}.mark i:nth-child(3){margin-top:2px}
+@keyframes arrive{to{opacity:1;transform:none}}@keyframes blink{50%{opacity:0}}@keyframes progress{to{width:100%}}
+</style>
+</head>
+<body>
+<main class="frame" aria-label="Illustrative reconstruction of a DGC benchmark trace">
+  <header class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="title">DGC · go/alphametics · illustrative replay</span><span class="state"><i></i> agent running</span></header>
+  <section class="terminal"><div class="output" id="output"></div></section>
+  <div class="progress"><i></i></div>
+  <footer class="footer"><span><b>Reconstruction</b> · prose and timing condensed</span><span class="clock" id="clock">00:00 / 00:52</span><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span></footer>
+</main>
+<script>
+const steps=[
+ [600,'meta','· resumed session (58 messages) — DGC 0.24.0'],
+ [2300,'agent','I’ll inspect the relevant code and current behavior first.'],
+ [5100,'tool','<span class="arrow">→</span> read_file  alphametics.go'],
+ [7300,'file','  137    assignment[li] = need\n  138    used[need] = true\n  139    ok := solveColumn(c+1, nextCarry)\n  140    assignment[li] = -1\n  141    used[need] = false\n  … 34 more lines'],
+ [12400,'agent','The bug is confirmed at lines 137–142: rollback runs unconditionally—even on the success path—erasing the winning value.'],
+ [17700,'agent','The fix is focused: only roll back when deeper recursion fails. Applying it now:'],
+ [21400,'tool','<span class="arrow">✎</span> edit_file  alphametics.go'],
+ [23200,'diff','  137    assignment[li] = need\n  138    used[need] = true\n<span class="minus">- 139    ok := solveColumn(c+1, nextCarry)</span>\n<span class="plus">+ 139    if solveColumn(c+1, nextCarry) {</span>\n<span class="plus">+ 140        return true</span>\n<span class="plus">+ 141    }</span>\n  142    assignment[li] = -1\n  143    used[need] = false\n<span class="minus">- 144    return ok</span>\n<span class="plus">+ 144    return false</span>'],
+ [31700,'verify','· ⧗ verify: go test ./... <span class="cursor"></span>'],
+ [36800,'pass','PASS  ·  all tests passed  ·  0.4 s'],
+ [41100,'final','Implemented and verified the requested change.'],
+ [44100,'meta','Updated: alphametics.go  ·  one focused diff  ·  round 2/2'],
+ [47000,'agent','Verification: the test command passed.'],
+];
+const out=document.getElementById('output');
+const add=(kind,html)=>{const line=document.createElement('div');line.className='line '+kind;line.innerHTML=html;out.append(line);while(out.scrollHeight>out.parentElement.clientHeight-18&&out.children.length>1)out.firstElementChild.remove()};
+steps.forEach(([at,kind,html])=>setTimeout(()=>add(kind,html),at));
+const started=performance.now(),clock=document.getElementById('clock');
+const tick=()=>{const sec=Math.min(52,Math.floor((performance.now()-started)/1000));clock.textContent=`00:${String(sec).padStart(2,'0')} / 00:52`;if(sec<52)requestAnimationFrame(tick)};tick();
+</script>
+</body>
+</html>

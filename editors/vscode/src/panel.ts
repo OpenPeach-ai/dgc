@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
+import { createHash } from "crypto";
 import { DgcBackend, DgcEvent } from "./backend";
+import { resolveDgcExecutable } from "./configuration";
 
 const MODES = [
   { id: "default", label: "$(shield) default", detail: "ask before writes and shell commands" },
@@ -7,11 +9,15 @@ const MODES = [
   { id: "plan", label: "$(book) plan", detail: "read-only — research and propose a plan you approve" },
   { id: "auto", label: "$(zap) auto", detail: "full auto — approve everything (deny rules still apply)" },
 ];
+const MODE_CAPABILITY_RANK: Record<string, number> = {
+  plan: 0, default: 1, acceptEdits: 2, auto: 3,
+};
 const THINK = [
   { id: "off", detail: "no extra reasoning" },
   { id: "low", detail: "think briefly before acting" },
   { id: "medium", detail: "reason step by step; consider edge cases" },
   { id: "high", detail: "maximum depth (ultrathink)" },
+  { id: "xhigh", detail: "deepest available reasoning effort" },
 ];
 const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string }> = {
   ollama: { url: "http://localhost:11434/v1", needsKey: false, label: "Ollama (local)", apiKey: "ollama" },
@@ -40,15 +46,142 @@ type ManagedMcpServer = {
 
 type ManagedMcpSecrets = { env?: Record<string, string>; token?: string };
 
+type ProviderSecretId = "apiKey" | "subagentApiKey" | "fallbackApiKey";
+type ProviderSecretMutation = {
+  id: ProviderSecretId;
+  value?: string;
+  endpoint: string;
+  remove: boolean;
+};
+type ApprovedModeChange = { mode: string; acknowledgeWorkspaceTrust: boolean };
+
+const MCP_SECRET_FLAGS = new Set([
+  "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
+  "--auth", "--authorization", "--password", "--passwd", "--secret", "--bearer",
+  "--key", "--credential", "--credentials", "--env", "--env-file", "-e",
+  "--user", "--username", "-u",
+  "--client-secret", "--client_secret", "--clientsecret",
+  "--refresh-token", "--refresh_token", "--refreshtoken",
+  "--access_token", "--accesstoken",
+]);
+const MCP_SECRET_FLAG_NAMES = new Set([
+  "apikey", "token", "accesstoken", "refreshtoken", "clientsecret", "auth",
+  "authorization", "password", "passwd", "secret", "bearer", "key", "credential",
+  "credentials", "env", "envfile", "user",
+]);
+const MCP_SECRET_ASSIGNMENT = /^(?:[A-Za-z_][A-Za-z0-9_]*)?(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)[A-Za-z0-9_]*=/i;
+const MCP_SENSITIVE_QUERY_NAMES = new Set([
+  "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
+  "authorization", "auth",
+]);
+const MCP_SENSITIVE_NAME_PARTS = new Set([
+  "token", "apikey", "key", "secret", "password", "passwd", "credential",
+  "credentials", "authorization", "auth", "bearer",
+]);
+const MCP_SENSITIVE_NAME_SUFFIXES = [
+  "apikey", "token", "secret", "password", "passwd", "credential", "credentials",
+  "authorization", "bearer", "auth",
+];
+
+function mcpSensitiveName(value: string): boolean {
+  const lower = value.toLowerCase();
+  const normalized = lower.replace(/[^a-z0-9]/g, "");
+  const parts = lower.split(/[^a-z0-9]+/).filter(Boolean);
+  return MCP_SENSITIVE_QUERY_NAMES.has(normalized)
+    || parts.some((part) => MCP_SENSITIVE_NAME_PARTS.has(part))
+    || MCP_SENSITIVE_NAME_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function mcpArgHasCredentials(value: string): boolean {
+  const raw = value.trim();
+  const candidates = [raw];
+  if (raw.includes("=")) { candidates.push(raw.slice(raw.indexOf("=") + 1).trim()); }
+  for (const candidate of candidates) {
+    if (!/^https?:\/\//i.test(candidate)) { continue; }
+    try {
+      const url = new URL(candidate);
+      const fragmentParams = new URLSearchParams(url.hash.slice(1));
+      if (url.username || url.password || [...url.searchParams.keys()].some(mcpSensitiveName)
+          || [...fragmentParams.keys()].some(mcpSensitiveName)) {
+        return true;
+      }
+    } catch { return true; }
+  }
+  return false;
+}
+
+/** Return the canonical URL accepted by both the managed-server editor and its migration path. */
+function normalizedRemoteMcpUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value || value.length > 4096
+      || value.includes("\0") || /\s/u.test(value)) { return undefined; }
+  try {
+    const url = new URL(value);
+    const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname);
+    const sensitiveQuery = [...url.searchParams.keys()].some(mcpSensitiveName);
+    const sensitiveFragment = [...new URLSearchParams(url.hash.slice(1)).keys()]
+      .some(mcpSensitiveName);
+    if (!url.hostname || url.username || url.password || sensitiveQuery || sensitiveFragment
+        || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function persistedMcpArgsSafe(args: string[]): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const raw = args[index].trim(), lower = raw.toLowerCase();
+    const priorRaw = index ? args[index - 1].trim() : "";
+    const prior = priorRaw.toLowerCase();
+    const head = lower.split("=", 1)[0];
+    const priorHead = prior.split("=", 1)[0];
+    const normalizedHead = head.replace(/^-+/, "").replace(/[^a-z0-9]/g, "");
+    const normalizedPrior = priorHead.replace(/^-+/, "").replace(/[^a-z0-9]/g, "");
+    const combinedEnv = /^-e(?:=.*|[A-Za-z_][A-Za-z0-9_]*(?:=.*)?)$/.test(raw);
+    const combinedUser = raw.startsWith("-u") && raw.length > 2 && raw.slice(2).includes(":");
+    if (lower.startsWith("authorization:") || lower === "--header" || prior === "--header"
+        || raw === "-H" || priorRaw === "-H"
+        || raw.startsWith("-H")
+        || MCP_SECRET_FLAGS.has(head) || MCP_SECRET_FLAGS.has(priorHead)
+        || MCP_SECRET_FLAG_NAMES.has(normalizedHead)
+        || MCP_SECRET_FLAG_NAMES.has(normalizedPrior)
+        || mcpSensitiveName(head.replace(/^-+/, ""))
+        || mcpSensitiveName(priorHead.replace(/^-+/, ""))
+        || combinedEnv || combinedUser || MCP_SECRET_ASSIGNMENT.test(raw)
+        || mcpArgHasCredentials(raw)) { return false; }
+  }
+  return true;
+}
+
+function managedMcpIdentity(item: ManagedMcpServer): string {
+  const publicIdentity = JSON.stringify({
+    transport: item.transport,
+    target: item.target,
+    args: item.args,
+    envNames: item.envNames,
+  });
+  return createHash("sha256").update(publicIdentity, "utf8").digest("hex");
+}
+
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", baseUrl: "", workspaceTrusted: false,
+                    subscriptionEngine: "",
                     goal: { text: "", status: "none", elapsed_seconds: 0 } };
   private _installPrompted = false;
   private featureRequest = 0;
   private correlatedStateRequests = false;
-  private routeState = { subagentBaseUrl: "", fallbackBaseUrl: "" };
+  private routeState: {
+    subagentBaseUrl: string; fallbackBaseUrl: string;
+    nativeModel: string; nativeThink: string;
+    subscriptionEngine: string; subscriptionModel: string; subscriptionEffort: string;
+    subscriptionEngines: any[];
+  } = { subagentBaseUrl: "", fallbackBaseUrl: "", nativeModel: "", nativeThink: "off",
+        subscriptionEngine: "", subscriptionModel: "", subscriptionEffort: "",
+        subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
@@ -62,6 +195,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private webviewReady = false;
   private pendingWebviewActions: Array<() => void> = [];
   private testPostedMessages: Array<{ type: string; eventType?: string; id?: string }> = [];
+  private settingsSaveInFlight = false;
+  private commandOverrideWarningShown = false;
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -91,6 +226,41 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private requestState(be: DgcBackend, prefix: string, command: any,
                        responseType: DgcEvent["type"], timeoutMs = 5000): Promise<DgcEvent> {
     return be.request(this.stateCommand(prefix, command), responseType, timeoutMs);
+  }
+
+  private activeSubscription(): any | undefined {
+    if (!this.routeState.subscriptionEngine) { return undefined; }
+    return this.routeState.subscriptionEngines.find(
+      (item) => item && item.key === this.routeState.subscriptionEngine);
+  }
+
+  private syncActiveRouteState(): void {
+    const engine = this.routeState.subscriptionEngine;
+    this.state.subscriptionEngine = engine;
+    if (!engine) {
+      this.state.model = this.routeState.nativeModel;
+      this.state.think = this.routeState.nativeThink;
+      return;
+    }
+    const info = this.activeSubscription();
+    const short = String(info?.label || engine).split(" (")[0];
+    this.state.model = this.routeState.subscriptionModel || `${short} default`;
+    this.state.think = this.routeState.subscriptionEffort || "off";
+  }
+
+  private modelCommand(model: string): { command: any; response: DgcEvent["type"] } {
+    return this.routeState.subscriptionEngine
+      ? { command: { type: "set_config", values: { subscription_model: model } },
+          response: "config" }
+      : { command: { type: "set_model", route: "native", model }, response: "model_changed" };
+  }
+
+  private thinkCommand(level: string): { command: any; response: DgcEvent["type"] } {
+    return this.routeState.subscriptionEngine
+      ? { command: { type: "set_config",
+                     values: { subscription_effort: level === "off" ? "" : level } },
+          response: "config" }
+      : { command: { type: "set_think", level }, response: "think_changed" };
   }
 
   /** Keep the backend's external-directory grants identical to the live VS Code
@@ -207,10 +377,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private ensureBackend(): DgcBackend {
+    if (vscode.workspace.isTrusted === false) {
+      throw new Error("DGC is disabled until this workspace is trusted.");
+    }
     if (this.backend) {
       return this.backend;
     }
-    const cmd = vscode.workspace.getConfiguration("dgc").get<string>("command", "dgc");
+    const executable = resolveDgcExecutable();
+    if (executable.ignoredWorkspaceOverride && !this.commandOverrideWarningShown) {
+      this.commandOverrideWarningShown = true;
+      void vscode.window.showWarningMessage(
+        "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
+    }
+    const cmd = executable.command;
     const be = new DgcBackend(this.cwd(), cmd);
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
@@ -241,6 +420,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.workspaceRootsDirty = true;
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
+    this.routeState.subscriptionEngine = "";
+    this.routeState.subscriptionModel = "";
+    this.routeState.subscriptionEffort = "";
+    this.routeState.subscriptionEngines = [];
     this.ensureBackend();
     this.post({ type: "cleared" });
   }
@@ -252,7 +435,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
+        this.routeState.nativeModel = String(ev.model || "");
+        this.routeState.nativeThink = String(ev.think || "off");
+        this.routeState.subscriptionEngine = "";
+        this.routeState.subscriptionModel = "";
+        this.routeState.subscriptionEffort = "";
+        this.routeState.subscriptionEngines = [];
         this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
+                       subscriptionEngine: "",
                        workspaceTrusted: ev.workspace_trusted === true,
                        goal: ev.goal || { text: "", status: "none", elapsed_seconds: 0 } };
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
@@ -288,7 +478,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "model_changed":
-        this.state.model = ev.model;
+        if (this.routeState.subscriptionEngine) {
+          this.routeState.subscriptionModel = String(ev.model || "");
+        } else {
+          this.routeState.nativeModel = String(ev.model || "");
+        }
+        this.syncActiveRouteState();
         this.state.baseUrl = ev.base_url ?? this.state.baseUrl;
         this.postState();
         break;
@@ -300,7 +495,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         break;
       case "think_changed":
-        this.state.think = ev.think;
+        if (this.routeState.subscriptionEngine) {
+          this.routeState.subscriptionEffort = ev.think === "off" ? "" : String(ev.think || "");
+        } else {
+          this.routeState.nativeThink = String(ev.think || "off");
+        }
+        this.syncActiveRouteState();
         this.postState();
         break;
       case "goal_changed":
@@ -312,11 +512,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.postState();
         break;
       case "config":
+        this.routeState.nativeModel = String(ev.model || "");
+        this.routeState.nativeThink = String(ev.think || "off");
+        this.routeState.subscriptionEngine = String(ev.subscription_engine || "");
+        this.routeState.subscriptionModel = String(ev.subscription_model || "");
+        this.routeState.subscriptionEffort = String(ev.subscription_effort || "");
+        this.routeState.subscriptionEngines = Array.isArray(ev.subscription_engines)
+          ? ev.subscription_engines : [];
         this.routeState.subagentBaseUrl = String(ev.subagent_base_url || "");
         this.routeState.fallbackBaseUrl = String(ev.fallback_base_url || "");
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
         this.behaviorState.preserveThinking = ev.preserve_thinking === true;
         this.behaviorState.codeAction = ev.code_action === true;
+        this.state.baseUrl = String(ev.base_url || this.state.baseUrl);
+        this.state.mode = String(ev.mode || this.state.mode);
+        this.syncActiveRouteState();
+        this.postState();
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
@@ -443,7 +654,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")],
     };
     view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
+    view.webview.onDidReceiveMessage((msg) => {
+      void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
+        err?.message || "DGC could not process that editor request."));
+    });
+    if (vscode.workspace.isTrusted === false) {
+      void vscode.window.showWarningMessage(
+        "DGC is disabled in Restricted Mode. Trust this workspace before starting the coding agent.");
+      return;
+    }
     this.ensureBackend();
     if (this.state.model) {
       this.postState();
@@ -595,7 +814,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.listModels();
         break;
       case "setModel":
-        be.send(this.stateCommand("model", { type: "set_model", model: msg.model }));
+        {
+          const mutation = this.modelCommand(String(msg.model || ""));
+          be.send(this.stateCommand("model", mutation.command));
+        }
         break;
       case "connect":
         this.connect();
@@ -604,7 +826,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         void this.requestMode(String(msg.mode));
         break;
       case "setThink":
-        be.send(this.stateCommand("think", { type: "set_think", level: msg.level }));
+        {
+          const mutation = this.thinkCommand(String(msg.level || "off"));
+          be.send(this.stateCommand("think", mutation.command));
+        }
         break;
       case "compact":
         be.send(this.stateCommand("compact", { type: "compact" }));
@@ -613,7 +838,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.openSettings();
         break;
       case "saveSettings":
-        this.saveSettings(msg.values || {});
+        await this.saveSettings(msg.values || {});
         break;
       case "pickMode":
         this.setMode();
@@ -724,7 +949,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private managedMcpServers(): ManagedMcpServer[] {
     const value = this.context.globalState.get<ManagedMcpServer[]>("dgc.managedMcpServers.v1", []);
-    if (!Array.isArray(value)) { return []; }
+    if (!Array.isArray(value)) {
+      void this.context.globalState.update("dgc.managedMcpServers.v1", []);
+      return [];
+    }
     const safe: ManagedMcpServer[] = [];
     for (const item of value.slice(0, 64)) {
       if (!item || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(item.name)
@@ -732,14 +960,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           || typeof item.target !== "string" || !item.target || item.target.length > 4096
           || item.target.includes("\0") || !Array.isArray(item.args)
           || !Array.isArray(item.envNames)) { continue; }
-      const args = item.args.filter((arg) => typeof arg === "string"
-        && arg.length <= 8192 && !arg.includes("\0")).slice(0, 128);
-      const envNames = item.envNames.filter((name) =>
-        typeof name === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)).slice(0, 64);
+      let target = item.target;
+      let args: string[];
+      let envNames: string[];
+      if (item.transport === "remote") {
+        const remote = normalizedRemoteMcpUrl(target);
+        // Editor-managed remote entries always synthesize one exact `npx -y mcp-remote URL`
+        // bridge at runtime. Persisted argv or environment names are an unsupported legacy shape
+        // and could otherwise smuggle a credential around the SecretStorage boundary.
+        if (!remote || item.args.length !== 0 || item.envNames.length !== 0) { continue; }
+        target = remote;
+        args = [];
+        envNames = [];
+      } else {
+        args = item.args.filter((arg) => typeof arg === "string"
+          && arg.length <= 8192 && !arg.includes("\0")).slice(0, 128);
+        if (!persistedMcpArgsSafe(args)) { continue; }
+        envNames = item.envNames.filter((name) =>
+          typeof name === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)).slice(0, 64);
+      }
       const logLevel = ["debug", "info", "notice", "warning", "error", "critical", "alert",
         "emergency", "off"].includes(item.logLevel) ? item.logLevel : "warning";
-      safe.push({ name: item.name, transport: item.transport, target: item.target,
+      safe.push({ name: item.name, transport: item.transport, target,
                   args, envNames, logLevel });
+    }
+    if (JSON.stringify(safe) !== JSON.stringify(value)) {
+      // Migrate malformed or pre-hardening definitions out of durable globalState. Literal
+      // credentials belong only in SecretStorage and are intentionally not recoverable here. The
+      // full-value comparison also removes an otherwise invisible tail beyond the 64-server cap.
+      void this.context.globalState.update("dgc.managedMcpServers.v1", safe).then(undefined, () => {
+        void vscode.window.showWarningMessage(
+          "DGC could not persist the managed MCP safety migration; unsafe entries remain disabled for this session.");
+      });
     }
     return safe;
   }
@@ -748,36 +1000,63 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return `dgc.mcp.${encodeURIComponent(name)}`;
   }
 
-  private async mcpSecrets(name: string): Promise<ManagedMcpSecrets> {
-    try {
-      const raw = await this.context.secrets.get(this.mcpSecretKey(name));
-      const value = raw ? JSON.parse(raw) : {};
-      if (!value || typeof value !== "object" || Array.isArray(value)) { return {}; }
-      const env: Record<string, string> = {};
-      if (value.env && typeof value.env === "object" && !Array.isArray(value.env)) {
-        for (const [key, item] of Object.entries(value.env).slice(0, 64)) {
-          if (/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) && typeof item === "string"
-              && item.length <= 16_384 && !item.includes("\0")) { env[key] = item; }
-        }
+  private async mcpSecrets(item: ManagedMcpServer): Promise<ManagedMcpSecrets> {
+    const key = this.mcpSecretKey(item.name);
+    const raw = await this.context.secrets.get(key);
+    if (!raw) { return {}; }
+    let value: any;
+    try { value = JSON.parse(raw); }
+    catch {
+      await this.context.secrets.delete(key);
+      return {};
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)
+        || value.identity !== managedMcpIdentity(item)) {
+      // Malformed/pre-fingerprint records and same-name identity changes are intentionally not
+      // migrated: replaying any of them could disclose a credential to another executable or URL.
+      await this.context.secrets.delete(key);
+      return {};
+    }
+    const env: Record<string, string> = {};
+    if (value.env && typeof value.env === "object" && !Array.isArray(value.env)) {
+      for (const [envKey, envValue] of Object.entries(value.env).slice(0, 64)) {
+        if (/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(envKey) && typeof envValue === "string"
+            && envValue.length <= 16_384 && !envValue.includes("\0")) { env[envKey] = envValue; }
       }
-      const token = typeof value.token === "string" && value.token.length <= 16_384
-        && !value.token.includes("\0") ? value.token : "";
-      return { env, token };
-    } catch { return {}; }
+    }
+    const token = typeof value.token === "string" && value.token.length <= 16_384
+      && !value.token.includes("\0") ? value.token : "";
+    return { env, token };
   }
 
-  private async storeMcpSecrets(name: string, value: ManagedMcpSecrets): Promise<void> {
+  private async storeMcpSecrets(item: ManagedMcpServer, value: ManagedMcpSecrets): Promise<void> {
     const env = value.env && typeof value.env === "object" ? value.env : {};
     if (!Object.keys(env).length && !value.token) {
-      await this.context.secrets.delete(this.mcpSecretKey(name));
+      await this.context.secrets.delete(this.mcpSecretKey(item.name));
       return;
     }
-    await this.context.secrets.store(this.mcpSecretKey(name), JSON.stringify({ env, token: value.token || "" }));
+    await this.context.secrets.store(this.mcpSecretKey(item.name), JSON.stringify({
+      identity: managedMcpIdentity(item), env, token: value.token || "",
+    }));
+  }
+
+  private async restoreRawMcpSecret(name: string, value: string | undefined): Promise<void> {
+    const key = this.mcpSecretKey(name);
+    if (value === undefined) { await this.context.secrets.delete(key); }
+    else { await this.context.secrets.store(key, value); }
+  }
+
+  private async removeManagedMcpBackend(be: DgcBackend, name: string, prefix: string): Promise<void> {
+    const event = await this.requestState(be, prefix, {
+      type: "remove_mcp_server", name,
+    }, "mcp_servers", 10000);
+    if ((event as any).error) { throw new Error(String((event as any).error)); }
   }
 
   private async sendManagedMcp(be: DgcBackend, item: ManagedMcpServer,
-                               setup = false): Promise<boolean> {
-    const secrets = await this.mcpSecrets(item.name);
+                               setup = false, suppliedSecrets?: ManagedMcpSecrets,
+                               waitForAck = false): Promise<boolean> {
+    const secrets = suppliedSecrets ?? await this.mcpSecrets(item);
     const env: Record<string, string> = {};
     for (const name of item.envNames.slice(0, 64)) {
       const value = secrets.env?.[name];
@@ -807,12 +1086,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       env_names: envNames, url: item.transport === "remote" ? item.target : "",
       log_level: item.logLevel || "warning",
       defer_until_setup: hasStoredSecrets,
+      ...(item.transport === "remote" && secrets.token
+        ? { auth_env: "DGC_MCP_BEARER_TOKEN" } : {}),
     };
     const command: any = {
       type: "upsert_mcp_server", request_id: this.nextRequestId("mcp-config"), name: item.name,
       runtime: { ...common, args: runtimeArgs, env }, persisted: { ...common, args: baseArgs },
     };
-    return setup ? be.sendSetup(command) : be.send(command);
+    if (setup) { return be.sendSetup(command); }
+    if (!waitForAck) { return be.send(command); }
+    const event = await be.request(command, "mcp_servers", 10000);
+    if ((event as any).error) { throw new Error(String((event as any).error)); }
+    return true;
   }
 
   private async saveMcpServer(values: any): Promise<void> {
@@ -829,24 +1114,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (transport === "remote") {
-      try {
-        const url = new URL(target);
-        const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname);
-        const sensitiveQuery = [...url.searchParams.keys()].some((key) => [
-          "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
-          "authorization", "auth",
-        ].includes(key.toLowerCase().replace(/[^a-z0-9]/g, "")));
-        if (url.username || url.password
-            || sensitiveQuery
-            || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
-          throw new Error();
-        }
-        target = url.toString();
-      } catch {
+      const remote = normalizedRemoteMcpUrl(target);
+      if (!remote) {
         void vscode.window.showErrorMessage(
           "Remote MCP URLs must use HTTPS (or loopback HTTP) without embedded credentials.");
         return;
       }
+      target = remote;
     }
     const logLevel = String(values.log_level || "warning").toLowerCase();
     if (!["debug", "info", "notice", "warning", "error", "critical", "alert",
@@ -865,8 +1139,44 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showErrorMessage("Each MCP argument must be a bounded single line.");
       return;
     }
+    if (transport === "stdio" && !persistedMcpArgsSafe(args)) {
+      void vscode.window.showErrorMessage(
+        "Store MCP credentials as environment entries so DGC can keep them in SecretStorage.");
+      return;
+    }
     const clearSecrets = values.clear_secrets === true;
-    const savedSecrets = clearSecrets ? {} : await this.mcpSecrets(original);
+    const previous = existingManaged.find((entry) => entry.name === original);
+    const previousAtDestination = existingManaged.find((entry) => entry.name === name);
+    if (original !== name && previousAtDestination) {
+      void vscode.window.showErrorMessage(
+        `An editor-managed MCP server named “${name}” already exists. Choose another name.`);
+      return;
+    }
+    let originalSecrets: ManagedMcpSecrets;
+    let destinationSecrets: ManagedMcpSecrets;
+    let originalRawSecret: string | undefined;
+    let destinationRawSecret: string | undefined;
+    try {
+      originalSecrets = previous ? await this.mcpSecrets(previous) : {};
+      destinationSecrets = original === name
+        ? originalSecrets : previousAtDestination ? await this.mcpSecrets(previousAtDestination) : {};
+      // Read rollback bytes only after identity verification has purged an unbound/mismatched record.
+      originalRawSecret = await this.context.secrets.get(this.mcpSecretKey(original));
+      destinationRawSecret = original === name
+        ? originalRawSecret : await this.context.secrets.get(this.mcpSecretKey(name));
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(
+        err?.message || "DGC could not read the prior MCP credentials; no server was changed.");
+      return;
+    }
+    const sameCredentialBoundary = Boolean(previous
+      && previous.transport === transport
+      && previous.target === target
+      && JSON.stringify(previous.args) === JSON.stringify(transport === "stdio" ? args : []));
+    // A credential belongs to one exact executable/URL boundary. Blank fields preserve it only
+    // while that identity is unchanged; renaming the same definition remains safe.
+    const savedSecrets = clearSecrets || !sameCredentialBoundary
+      ? {} : originalSecrets;
     let env = transport === "stdio" ? { ...(savedSecrets.env || {}) } : {};
     let referencedEnvNames = transport === "stdio" && !clearSecrets
       ? (Array.isArray(values.env_names) ? values.env_names.filter((key: unknown) =>
@@ -893,19 +1203,73 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       env, token: transport === "remote" ? (tokenInput || savedSecrets.token || "") : "",
     };
     const declaredEnvNames = [...new Set([...referencedEnvNames, ...Object.keys(env)])].slice(0, 64);
+    if (transport === "stdio") {
+      secrets.env = Object.fromEntries(
+        Object.entries(env).filter(([key]) => declaredEnvNames.includes(key)));
+    }
     const item: ManagedMcpServer = {
       name, transport, target, args: transport === "stdio" ? args : [],
       envNames: declaredEnvNames, logLevel,
     };
+    const be = this.ensureBackend();
+    try {
+      await this.sendManagedMcp(be, item, false, secrets, true);
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC rejected that MCP server.");
+      return;
+    }
     let managed = existingManaged.filter((entry) => entry.name !== original && entry.name !== name);
     managed.push(item);
-    await this.context.globalState.update("dgc.managedMcpServers.v1", managed.slice(0, 64));
     if (original !== name) {
-      await this.context.secrets.delete(this.mcpSecretKey(original));
-      this.ensureBackend().send({ type: "remove_mcp_server", request_id: this.nextRequestId("mcp-remove"), name: original });
+      try {
+        await this.removeManagedMcpBackend(be, original, "mcp-rename-remove-old");
+      } catch (err: any) {
+        let restored = false;
+        try {
+          if (previousAtDestination) {
+            await this.sendManagedMcp(be, previousAtDestination, false, destinationSecrets, true);
+          } else {
+            await this.removeManagedMcpBackend(be, name, "mcp-rename-remove-new");
+          }
+          restored = true;
+        } catch { /* report the incomplete compensation below */ }
+        void vscode.window.showErrorMessage(
+          `${err?.message || "DGC could not remove the old MCP server."}${restored
+            ? " The new backend entry was rolled back; local settings were not changed."
+            : " DGC could not roll back the new backend entry; reload MCP servers before continuing."}`);
+        return;
+      }
     }
-    await this.storeMcpSecrets(name, secrets);
-    await this.sendManagedMcp(this.ensureBackend(), item);
+    try {
+      await this.context.globalState.update("dgc.managedMcpServers.v1", managed.slice(0, 64));
+      await this.storeMcpSecrets(item, secrets);
+      if (original !== name) { await this.context.secrets.delete(this.mcpSecretKey(original)); }
+    } catch (err: any) {
+      let localRestored = false;
+      let backendRestored = false;
+      try {
+        await this.context.globalState.update("dgc.managedMcpServers.v1", existingManaged);
+        await this.restoreRawMcpSecret(name, destinationRawSecret);
+        if (original !== name) { await this.restoreRawMcpSecret(original, originalRawSecret); }
+        localRestored = true;
+      } catch { /* retain the original storage failure */ }
+      try {
+        if (previousAtDestination) {
+          await this.sendManagedMcp(be, previousAtDestination, false, destinationSecrets, true);
+        } else {
+          await this.removeManagedMcpBackend(be, name, "mcp-save-rollback-new");
+        }
+        if (original !== name && previous) {
+          await this.sendManagedMcp(be, previous, false, originalSecrets, true);
+        }
+        backendRestored = true;
+      } catch { /* surface rollback status without hiding the persistence error */ }
+      void vscode.window.showErrorMessage(
+        `${err?.message || "DGC could not persist that MCP server."} `
+        + (localRestored && backendRestored
+          ? "The prior MCP settings were restored."
+          : "DGC could not fully restore prior MCP state; reload MCP servers before continuing."));
+    }
   }
 
   private async removeMcpServer(name: string): Promise<void> {
@@ -913,10 +1277,43 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const confirm = await vscode.window.showWarningMessage(
       `Remove MCP server “${name}”?`, { modal: true }, "Remove server");
     if (confirm !== "Remove server") { return; }
-    await this.context.globalState.update("dgc.managedMcpServers.v1",
-      this.managedMcpServers().filter((item) => item.name !== name));
-    await this.context.secrets.delete(this.mcpSecretKey(name));
-    this.ensureBackend().send({ type: "remove_mcp_server", request_id: this.nextRequestId("mcp-remove"), name });
+    const existingManaged = this.managedMcpServers();
+    const previous = existingManaged.find((item) => item.name === name);
+    if (!previous) { return; }
+    let previousSecrets: ManagedMcpSecrets;
+    let previousRawSecret: string | undefined;
+    try {
+      previousSecrets = await this.mcpSecrets(previous);
+      previousRawSecret = await this.context.secrets.get(this.mcpSecretKey(name));
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(
+        err?.message || "DGC could not read the prior MCP credentials; no server was removed.");
+      return;
+    }
+    const be = this.ensureBackend();
+    try {
+      await this.removeManagedMcpBackend(be, name, "mcp-remove");
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(err?.message || "DGC could not remove that MCP server.");
+      return;
+    }
+    try {
+      await this.context.globalState.update("dgc.managedMcpServers.v1",
+        existingManaged.filter((item) => item.name !== name));
+      await this.context.secrets.delete(this.mcpSecretKey(name));
+    } catch (err: any) {
+      let restored = false;
+      try {
+        await this.context.globalState.update("dgc.managedMcpServers.v1", existingManaged);
+        await this.restoreRawMcpSecret(name, previousRawSecret);
+        await this.sendManagedMcp(be, previous, false, previousSecrets, true);
+        restored = true;
+      } catch { /* make an incomplete rollback explicit below */ }
+      void vscode.window.showErrorMessage(
+        `${err?.message || "DGC could not persist MCP removal."} ${restored
+          ? "The server and its prior local settings were restored."
+          : "DGC could not fully restore prior MCP state; reload MCP servers before continuing."}`);
+    }
   }
 
   private async reloadMcpServers(): Promise<void> {
@@ -1012,7 +1409,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     if (name === "model") {
       if (rest) {
-        be.send(this.stateCommand("model", { type: "set_model", model: rest }));
+        const mutation = this.modelCommand(rest);
+        be.send(this.stateCommand("model", mutation.command));
       } else { await this.selectModel(); }
       return;
     }
@@ -1021,8 +1419,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (name === "think") {
-      if (["off", "low", "medium", "high"].includes(rest)) {
-        be.send(this.stateCommand("think", { type: "set_think", level: rest }));
+      const levels = this.routeState.subscriptionEngine
+        ? ["off", "low", "medium", "high", "xhigh", "max"]
+        : ["off", "low", "medium", "high", "xhigh"];
+      if (levels.includes(rest)) {
+        const mutation = this.thinkCommand(rest);
+        be.send(this.stateCommand("think", mutation.command));
       } else { await this.setThinking(); }
       return;
     }
@@ -1276,16 +1678,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const key = `dgc.${id}`;
     const saved = await this.context.secrets.get(key);
     const config = vscode.workspace.getConfiguration("dgc");
-    const legacy = config.get<string>(id, "");
+    const inspected = config.inspect<string>(id);
+    // Removed plaintext settings can still exist in old user/workspace files. Only a user-scoped
+    // value is eligible for migration; a repository-controlled value must never become a live key.
+    const legacy = typeof inspected?.globalValue === "string" ? inspected.globalValue : "";
+    const globalSetting = (name: string): string => {
+      const value = config.inspect<string>(name)?.globalValue;
+      return typeof value === "string" ? value : "";
+    };
+    const globalBase = globalSetting("baseUrl") || this.state.baseUrl || PROVIDERS.ollama.url;
+    const migrationEndpoint = id === "apiKey" ? globalBase
+      : id === "subagentApiKey"
+        ? (globalSetting("subagentBaseUrl") || this.routeState.subagentBaseUrl || globalBase)
+        : (globalSetting("fallbackBaseUrl") || this.routeState.fallbackBaseUrl || globalBase);
     const migrated = !saved && Boolean(legacy);
     if (migrated) {
-      await this.storeSecret(id, legacy, endpoint);
+      await this.storeSecret(id, legacy, migrationEndpoint);
     }
 
     // One-way compatibility migration from the old plaintext settings. Remove
     // every scope after the value is safely in SecretStorage so it cannot linger
     // in settings.json, workspace files, sync, or configuration exports.
-    const inspected = config.inspect<string>(id);
     const oldScopes: Array<[string | undefined, vscode.ConfigurationTarget]> = [
       [inspected?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
       [inspected?.workspaceValue, vscode.ConfigurationTarget.Workspace],
@@ -1294,7 +1707,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Removed configuration keys can make VS Code reject—or, when its file watcher
     // is unhealthy, never settle—the update even after settings.json was rewritten.
     // Keep each cleanup alive, but never hold the credential/backend handshake forever.
-    const removals = oldScopes.filter(([value]) => value !== undefined).map(async ([, target]) => {
+    const removals = oldScopes.filter(([value, target]) => value !== undefined
+      && (target !== vscode.ConfigurationTarget.Global || Boolean(saved) || migrated))
+      .map(async ([, target]) => {
       try { await config.update(id, undefined, target); }
       catch { /* verify the post-update configuration below */ }
     });
@@ -1312,20 +1727,68 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showWarningMessage(
         `DGC secured this key, but VS Code could not remove the legacy plaintext dgc.${id} setting from every scope. Delete that setting manually.`);
     }
-    const secret = saved || legacy;
+    const secret = saved || (migrated ? legacy : "");
     if (!secret) { return ""; }
     // A completed migration just stored both values atomically from this call's
     // perspective; avoid a redundant keyring read on the activation hot path.
     const boundEndpoint = migrated
-      ? endpointId(endpoint)
+      ? endpointId(migrationEndpoint)
       : await this.context.secrets.get(`${key}.endpoint`);
-    if (!boundEndpoint || boundEndpoint !== endpointId(endpoint)) {
+    if (!boundEndpoint) {
       await this.deleteSecret(id);
       void vscode.window.showWarningMessage(
-        "DGC discarded a provider key whose endpoint binding was missing or stale. Reconnect that provider to continue.");
+        "DGC discarded an unbound provider key. Reconnect that provider to continue.");
+      return "";
+    }
+    if (boundEndpoint !== endpointId(endpoint)) {
+      // A workspace can override provider URLs. Fail closed for the active endpoint without letting
+      // that workspace erase a user-owned credential that remains valid for its original host.
+      void vscode.window.showWarningMessage(
+        "DGC did not send a provider key because it is bound to a different endpoint.");
       return "";
     }
     return secret;
+  }
+
+  /** Commit provider credentials only after every corresponding backend state command has
+   * acknowledged. SecretStorage has no multi-key transaction API, so preserve and restore the
+   * exact prior records if a later keyring write fails. */
+  private async commitProviderSecrets(changes: ProviderSecretMutation[]): Promise<void> {
+    if (!changes.length) { return; }
+    const previous = new Map<ProviderSecretId, { value?: string; endpoint?: string }>();
+    for (const change of changes) {
+      if (previous.has(change.id)) { continue; }
+      const key = `dgc.${change.id}`;
+      previous.set(change.id, {
+        value: await this.context.secrets.get(key),
+        endpoint: await this.context.secrets.get(`${key}.endpoint`),
+      });
+    }
+    try {
+      for (const change of changes) {
+        if (change.remove) {
+          await this.deleteSecret(change.id);
+        } else {
+          await this.storeSecret(change.id, String(change.value || ""), change.endpoint);
+        }
+      }
+    } catch (err) {
+      // Best-effort compensation keeps a failed multi-secret save from leaving a mixture of old
+      // and new credentials. Missing endpoint bindings fail closed in storedSecret() on restart.
+      for (const [id, snapshot] of [...previous.entries()].reverse()) {
+        const key = `dgc.${id}`;
+        try {
+          if (snapshot.value === undefined) { await this.context.secrets.delete(key); }
+          else { await this.context.secrets.store(key, snapshot.value); }
+          if (snapshot.endpoint === undefined) {
+            await this.context.secrets.delete(`${key}.endpoint`);
+          } else {
+            await this.context.secrets.store(`${key}.endpoint`, snapshot.endpoint);
+          }
+        } catch { /* retain the original keyring error */ }
+      }
+      throw err;
+    }
   }
 
   private async fetchModels(): Promise<string[]> {
@@ -1341,6 +1804,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // in-composer model menu (rendered inside the webview)
   async listModels(): Promise<void> {
+    const subscription = this.activeSubscription();
+    if (this.routeState.subscriptionEngine) {
+      const ids = Array.isArray(subscription?.model_hints)
+        ? subscription.model_hints.filter((id: unknown): id is string => typeof id === "string")
+        : [];
+      if (this.routeState.subscriptionModel
+          && !ids.includes(this.routeState.subscriptionModel)) {
+        ids.unshift(this.routeState.subscriptionModel);
+      }
+      this.post({ type: "models", ids, current: this.routeState.subscriptionModel,
+                  subscription: true,
+                  label: String(subscription?.label || this.routeState.subscriptionEngine) });
+      return;
+    }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {
       const ids = await this.fetchModels();
@@ -1363,7 +1840,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const apiKey = await this.storedSecret("apiKey", effectiveBase);
     const model = c.get<string>("model", "");
     if (baseUrl || apiKey || model) {
-      send("model-setup", { type: "set_model", base_url: baseUrl || undefined,
+      send("model-setup", { type: "set_model", route: "native", base_url: effectiveBase,
                             api_key: apiKey || undefined, model: model || undefined });
     }
     const values: any = {};
@@ -1418,87 +1895,278 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   async saveSettings(v: any): Promise<void> {
-    const be = this.ensureBackend();
-    const baseChanged = Boolean(v.base_url)
-      && endpointId(v.base_url) !== endpointId(this.state.baseUrl);
-    const subagentBaseChanged = endpointId(v.subagent_base_url)
-      !== endpointId(this.routeState.subagentBaseUrl);
-    const fallbackBaseChanged = endpointId(v.fallback_base_url)
-      !== endpointId(this.routeState.fallbackBaseUrl);
-    let apiKey: string | undefined = v.api_key ? String(v.api_key) : undefined;
-    let subagentKey: string | undefined = v.subagent_api_key
-      ? String(v.subagent_api_key) : undefined;
-    let fallbackKey: string | undefined = v.fallback_api_key
-      ? String(v.fallback_api_key) : undefined;
-    const effectiveBase = String(v.base_url || this.state.baseUrl || PROVIDERS.ollama.url);
-    const effectiveSubagentBase = String(v.subagent_base_url || effectiveBase);
-    const effectiveFallbackBase = String(v.fallback_base_url || effectiveBase);
-    if (apiKey) { await this.storeSecret("apiKey", apiKey, effectiveBase); }
-    else if (baseChanged) { await this.deleteSecret("apiKey"); apiKey = ""; }
-    if (subagentKey) {
-      await this.storeSecret("subagentApiKey", subagentKey, effectiveSubagentBase);
+    if (this.settingsSaveInFlight) {
+      void vscode.window.showWarningMessage("DGC is already saving settings.");
+      return;
     }
-    else if (subagentBaseChanged) {
-      await this.deleteSecret("subagentApiKey"); subagentKey = "";
-    }
-    if (fallbackKey) {
-      await this.storeSecret("fallbackApiKey", fallbackKey, effectiveFallbackBase);
-    }
-    else if (fallbackBaseChanged) {
-      await this.deleteSecret("fallbackApiKey"); fallbackKey = "";
-    }
-    const operations: Array<Promise<DgcEvent>> = [];
-    if (v.base_url || v.api_key || v.model) {
-      operations.push(this.requestState(be, "model-save", {
-        type: "set_model", base_url: v.base_url || undefined,
-        api_key: apiKey, clear_stored_api_key: baseChanged,
-        model: v.model || undefined,
-      }, "model_changed", 10000));
-    }
-    if (v.mode) { await this.requestMode(String(v.mode)); }
-    if (v.think) {
-      operations.push(this.requestState(
-        be, "think-save", { type: "set_think", level: v.think }, "think_changed"));
-    }
-    const values: any = {
-      subagent_model: v.subagent_model || "", subagent_base_url: v.subagent_base_url || "",
-      subagent_api_mode: v.subagent_api_mode || "",
-      fallback_model: v.fallback_model || "",
-      fallback_base_url: v.fallback_base_url || "",
-      fallback_api_mode: v.fallback_api_mode || "",
-      api_mode: v.api_mode || "auto", provider_state: v.provider_state || "stateless",
-      prompt_cache: v.prompt_cache !== false,
-      sandbox: v.sandbox === true, sandbox_network: v.sandbox_network === true,
-      show_reasoning: v.show_reasoning !== false, suggest: v.suggest !== false,
-      plan_artifact: v.plan_artifact !== false,
-      artifact_autostart: v.artifact_autostart !== false,
-      artifact_in_plan: v.artifact_in_plan === true,
-      tool_profile: v.tool_profile === "full" ? "full" : "adaptive",
-      max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
-      subscription_engine: v.subscription_engine || "",
-      subscription_model: v.subscription_model || "",
-      subscription_effort: v.subscription_effort || "",
+    this.settingsSaveInFlight = true;
+    let backend: DgcBackend | undefined;
+    const appliedStages: string[] = [];
+    const previousMode = this.state.mode;
+    const previousSubscription = {
+      engine: this.routeState.subscriptionEngine,
+      model: this.routeState.subscriptionModel,
+      effort: this.routeState.subscriptionEffort,
     };
-    if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
-    if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
-    if (v.context_size) { values.context_size = Number(v.context_size); }
-    if (v.capability_cache_ttl_s) {
-      values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
-    }
-    operations.push(this.requestState(
-      be, "config-save", { type: "set_config", values }, "config", 10000));
+    let stagedKimiMode = false;
     try {
-      await Promise.all(operations);
+      const be = this.ensureBackend();
+      backend = be;
+      const baseChanged = Boolean(v.base_url)
+        && endpointId(v.base_url) !== endpointId(this.state.baseUrl);
+      const subagentBaseChanged = endpointId(v.subagent_base_url)
+        !== endpointId(this.routeState.subagentBaseUrl);
+      const fallbackBaseChanged = endpointId(v.fallback_base_url)
+        !== endpointId(this.routeState.fallbackBaseUrl);
+      let apiKey: string | undefined = v.api_key ? String(v.api_key) : undefined;
+      let subagentKey: string | undefined = v.subagent_api_key
+        ? String(v.subagent_api_key) : undefined;
+      let fallbackKey: string | undefined = v.fallback_api_key
+        ? String(v.fallback_api_key) : undefined;
+      const effectiveBase = String(v.base_url || this.state.baseUrl || PROVIDERS.ollama.url);
+      const effectiveSubagentBase = String(v.subagent_base_url || effectiveBase);
+      const effectiveFallbackBase = String(v.fallback_base_url || effectiveBase);
+      const secretChanges: ProviderSecretMutation[] = [];
+      if (apiKey) {
+        secretChanges.push({ id: "apiKey", value: apiKey, endpoint: effectiveBase, remove: false });
+      } else if (baseChanged) {
+        apiKey = "";
+        secretChanges.push({ id: "apiKey", endpoint: effectiveBase, remove: true });
+      }
+      if (subagentKey) {
+        secretChanges.push({ id: "subagentApiKey", value: subagentKey,
+                             endpoint: effectiveSubagentBase, remove: false });
+      } else if (subagentBaseChanged) {
+        subagentKey = "";
+        secretChanges.push({ id: "subagentApiKey", endpoint: effectiveSubagentBase, remove: true });
+      }
+      if (fallbackKey) {
+        secretChanges.push({ id: "fallbackApiKey", value: fallbackKey,
+                             endpoint: effectiveFallbackBase, remove: false });
+      } else if (fallbackBaseChanged) {
+        fallbackKey = "";
+        secretChanges.push({ id: "fallbackApiKey", endpoint: effectiveFallbackBase, remove: true });
+      }
+
+      const requestedMode = String(v.mode || this.state.mode || "default");
+      if (!MODES.some((mode) => mode.id === requestedMode)) {
+        throw new Error("DGC settings contain an unsupported permission mode.");
+      }
+      const selectedEngine = String(v.subscription_engine || "").trim().toLowerCase();
+      if (selectedEngine && !["claude", "codex", "qwen", "kimi", "copilot"].includes(selectedEngine)) {
+        throw new Error("DGC settings contain an unsupported subscription engine.");
+      }
+      if (selectedEngine === "kimi" && requestedMode !== "auto") {
+        throw new Error("Kimi prompt mode requires DGC auto mode.");
+      }
+      const subscriptionEffort = String(v.subscription_effort || "").trim().toLowerCase();
+      if ((selectedEngine === "qwen" || selectedEngine === "kimi") && subscriptionEffort) {
+        throw new Error(`${selectedEngine} does not expose a subscription effort setting.`);
+      }
+      // Confirm trust/full-auto before changing any backend or secret state. Applying the mode is
+      // kept separate because an active Kimi route must first receive an acknowledged disconnect.
+      const approvedMode = requestedMode !== this.state.mode
+        ? await this.approveModeChange(requestedMode) : undefined;
+      if (requestedMode !== this.state.mode && !approvedMode) { return; }
+      const enteringKimiNeedsAutoFirst = selectedEngine === "kimi"
+        && this.routeState.subscriptionEngine !== "kimi" && this.state.mode !== "auto";
+      const restrictiveModeChange = Boolean(approvedMode)
+        && MODE_CAPABILITY_RANK[requestedMode] < MODE_CAPABILITY_RANK[this.state.mode];
+
+      const values: any = {
+        subagent_model: v.subagent_model || "", subagent_base_url: v.subagent_base_url || "",
+        subagent_api_mode: v.subagent_api_mode || "",
+        fallback_model: v.fallback_model || "",
+        fallback_base_url: v.fallback_base_url || "",
+        fallback_api_mode: v.fallback_api_mode || "",
+        api_mode: v.api_mode || "auto", provider_state: v.provider_state || "stateless",
+        prompt_cache: v.prompt_cache !== false,
+        sandbox: v.sandbox === true, sandbox_network: v.sandbox_network === true,
+        show_reasoning: v.show_reasoning !== false, suggest: v.suggest !== false,
+        plan_artifact: v.plan_artifact !== false,
+        artifact_autostart: v.artifact_autostart !== false,
+        artifact_in_plan: v.artifact_in_plan === true,
+        tool_profile: v.tool_profile === "full" ? "full" : "adaptive",
+        max_parallel_tasks: Math.max(1, Math.min(8, Number(v.max_parallel_tasks || 4))),
+        thinking: v.think || "off",
+        subscription_engine: selectedEngine,
+        subscription_model: v.subscription_model || "",
+        subscription_effort: subscriptionEffort,
+      };
+      if (subagentKey !== undefined) { values.subagent_api_key = subagentKey; }
+      if (fallbackKey !== undefined) { values.fallback_api_key = fallbackKey; }
+      if (v.context_size) { values.context_size = Number(v.context_size); }
+      if (v.capability_cache_ttl_s) {
+        values.capability_cache_ttl_s = Math.max(1, Number(v.capability_cache_ttl_s));
+      }
+
+      const saveConfig = async (prefix: string, configValues: any): Promise<void> => {
+        await this.requestState(
+          be, prefix, { type: "set_config", values: configValues }, "config", 10000);
+        appliedStages.push("configuration");
+      };
+      const saveNativeModel = async (): Promise<void> => {
+        if (!(v.base_url || v.api_key || v.model)) { return; }
+        await this.requestState(be, "model-save", {
+          type: "set_model", route: "native", base_url: effectiveBase,
+          api_key: apiKey, clear_stored_api_key: baseChanged,
+          model: v.model || undefined,
+        }, "model_changed", 10000);
+        if (v.model) { this.routeState.nativeModel = String(v.model); }
+        appliedStages.push("native provider");
+      };
+
+      if (enteringKimiNeedsAutoFirst) {
+        // Validate/apply every independent setting before elevating permissions. The first config
+        // keeps the current route because the backend intentionally refuses Kimi outside auto.
+        await saveConfig("config-save-before-kimi", {
+          ...values,
+          subscription_engine: previousSubscription.engine,
+          subscription_model: previousSubscription.model,
+          subscription_effort: previousSubscription.effort,
+        });
+        await saveNativeModel();
+        await this.commitProviderSecrets(secretChanges);
+        if (secretChanges.length) { appliedStages.push("provider credentials"); }
+        if (!approvedMode || !await this.applyApprovedModeChange(approvedMode)) {
+          void vscode.window.showWarningMessage(
+            `DGC applied ${[...new Set(appliedStages)].join(" and ")}, but the permission mode did not change. Review Settings before continuing.`);
+          return;
+        }
+        stagedKimiMode = true;
+        appliedStages.push("permission mode");
+        // Keep the post-elevation operation minimal: all fallible independent values were already
+        // acknowledged, and a failed/ambiguous route switch is compensated in the catch block.
+        await saveConfig("config-save-kimi-route", {
+          subscription_engine: selectedEngine,
+          subscription_model: values.subscription_model,
+          subscription_effort: values.subscription_effort,
+        });
+      } else {
+        if (restrictiveModeChange && approvedMode) {
+          let disconnectedKimi = false;
+          if (previousSubscription.engine === "kimi") {
+            // The backend refuses every non-auto mode while Kimi is active. Disconnect only that
+            // route first; if lowering fails, restore Kimi while the prior auto mode is intact.
+            await saveConfig("config-disconnect-kimi-before-mode", {
+              subscription_engine: "", subscription_model: "", subscription_effort: "",
+            });
+            disconnectedKimi = true;
+          }
+          if (!await this.applyApprovedModeChange(approvedMode)) {
+            let restored = !disconnectedKimi;
+            if (disconnectedKimi) {
+              try {
+                await this.requestState(be, "config-restore-kimi-after-mode-failure", {
+                  type: "set_config", values: {
+                    subscription_engine: previousSubscription.engine,
+                    subscription_model: previousSubscription.model,
+                    subscription_effort: previousSubscription.effort,
+                  },
+                }, "config", 10000);
+                restored = true;
+              } catch { /* the warning below makes an incomplete restore explicit */ }
+            }
+            void vscode.window.showWarningMessage(restored
+              ? "DGC did not change the permission mode; no other settings were applied."
+              : "DGC did not change the permission mode and could not restore the prior Kimi route. Review Settings before continuing.");
+            return;
+          }
+          appliedStages.push("permission mode");
+        }
+        // Elevations are deliberately last: a rejected sandbox/config/provider setting must never
+        // leave a previously guarded workspace in auto/acceptEdits or persist a trust elevation.
+        // Restrictive changes run above, as early as the Kimi route invariant permits.
+        await saveConfig("config-save", values);
+        await saveNativeModel();
+        await this.commitProviderSecrets(secretChanges);
+        if (secretChanges.length) { appliedStages.push("provider credentials"); }
+        if (approvedMode && !restrictiveModeChange
+            && !await this.applyApprovedModeChange(approvedMode)) {
+          void vscode.window.showWarningMessage(
+            `DGC applied ${[...new Set(appliedStages)].join(" and ")}, but the permission mode did not change. Review Settings before continuing.`);
+          return;
+        }
+        if (approvedMode && !restrictiveModeChange) { appliedStages.push("permission mode"); }
+      }
       this.routeState.subagentBaseUrl = String(v.subagent_base_url || "");
       this.routeState.fallbackBaseUrl = String(v.fallback_base_url || "");
-      vscode.window.showInformationMessage("DGC settings saved.");
+      void vscode.window.showInformationMessage("DGC settings saved.");
     } catch (err: any) {
-      vscode.window.showErrorMessage(err?.message || "DGC settings could not be saved.");
+      let rollbackNote = "";
+      if (stagedKimiMode && backend) {
+        let routeRestored = false;
+        let modeRestored = false;
+        try {
+          await this.requestState(backend, "config-rollback-kimi", {
+            type: "set_config", values: {
+              subscription_engine: previousSubscription.engine,
+              subscription_model: previousSubscription.model,
+              subscription_effort: previousSubscription.effort,
+            },
+          }, "config", 10000);
+          routeRestored = true;
+          modeRestored = await this.applyApprovedModeChange({
+            mode: previousMode, acknowledgeWorkspaceTrust: false,
+          });
+        } catch { /* surface the fail-closed rollback status below */ }
+        rollbackNote = routeRestored && modeRestored
+          ? " The previous route and permission mode were restored; any explicit workspace-trust confirmation remains recorded."
+          : " DGC could not fully restore the previous Kimi route/mode; review Settings before continuing.";
+      }
+      const detail = err?.message || "DGC settings could not be saved.";
+      const partial = appliedStages.length
+        ? `Some settings were applied (${[...new Set(appliedStages)].join(", ")}) before the save stopped. `
+        : "";
+      void vscode.window.showErrorMessage(`${partial}${detail}${rollbackNote}`);
+    } finally {
+      this.settingsSaveInFlight = false;
     }
   }
 
   async selectModel(): Promise<void> {
     const be = this.ensureBackend();
+    const subscription = this.activeSubscription();
+    if (this.routeState.subscriptionEngine) {
+      const current = this.routeState.subscriptionModel;
+      const label = String(subscription?.label || this.routeState.subscriptionEngine).split(" (")[0];
+      const hints = Array.isArray(subscription?.model_hints)
+        ? subscription.model_hints.filter((id: unknown): id is string => typeof id === "string")
+        : [];
+      let selected: string | undefined;
+      if (hints.length) {
+        const items = [
+          { label: "$(circle-slash) CLI default", description: current ? "" : "$(check) current",
+            value: "", custom: false },
+          ...hints.map((id: string) => ({ label: id,
+            description: id === current ? "$(check) current" : "", value: id, custom: false })),
+          { label: "$(edit) Enter another model…", description: "vendor model id or alias",
+            value: "", custom: true },
+        ];
+        const pick = await vscode.window.showQuickPick(items, {
+          placeHolder: `${label} subscription model`, matchOnDescription: true });
+        if (!pick) { return; }
+        if (!pick.custom) {
+          selected = pick.value;
+        }
+      }
+      if (selected === undefined) {
+        const input = await vscode.window.showInputBox({
+          prompt: `${label} model override (leave blank to use the CLI default)`,
+          value: current, placeHolder: "CLI default",
+        });
+        if (input === undefined) { return; }
+        selected = input.trim();
+      }
+      try {
+        const mutation = this.modelCommand(selected);
+        await this.requestState(
+          be, "model-select", mutation.command, mutation.response, 10000);
+      } catch (err: any) {
+        void vscode.window.showErrorMessage(err?.message || "DGC could not switch subscription models.");
+      }
+      return;
+    }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     let ids: string[] = [];
     try {
@@ -1521,7 +2189,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (pick) {
       try {
         await this.requestState(
-          be, "model-select", { type: "set_model", model: pick.label }, "model_changed", 10000);
+          be, "model-select", { type: "set_model", route: "native", model: pick.label }, "model_changed", 10000);
       } catch (err: any) {
         void vscode.window.showErrorMessage(err?.message || "DGC could not switch models.");
       }
@@ -1564,8 +2232,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           be, "provider-config", { type: "set_config", values: { api_mode: "auto" } },
           "config", 10000);
       }
+      if (this.routeState.subscriptionEngine) {
+        await this.requestState(
+          be, "provider-route", { type: "set_config", values: { subscription_engine: "" } },
+          "config", 10000);
+      }
       await this.requestState(be, "provider-model", {
-        type: "set_model", base_url: url, api_key: key, clear_stored_api_key: true,
+        type: "set_model", route: "native", base_url: url, api_key: key, clear_stored_api_key: true,
       }, "model_changed", 10000);
       await this.selectModel();
     } catch (err: any) {
@@ -1583,8 +2256,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.requestMode(pick.id);
   }
 
-  private async requestMode(mode: string): Promise<boolean> {
-    if (!MODES.some((m) => m.id === mode)) { return false; }
+  private async approveModeChange(mode: string): Promise<ApprovedModeChange | undefined> {
+    if (!MODES.some((m) => m.id === mode)) { return undefined; }
     const mutationMode = mode === "acceptEdits" || mode === "auto";
     const needsTrust = mutationMode && !this.state.workspaceTrusted;
     const needsAutoWarning = mode === "auto" && this.state.mode !== "auto";
@@ -1599,12 +2272,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         message, { modal: true }, action);
       if (ok !== action) {
         this.postState();
-        return false;
+        return undefined;
       }
     }
+    return { mode, acknowledgeWorkspaceTrust: needsTrust };
+  }
+
+  private async applyApprovedModeChange(change: ApprovedModeChange): Promise<boolean> {
     try {
       await this.requestState(this.ensureBackend(), "mode", {
-        type: "set_mode", mode, acknowledge_workspace_trust: needsTrust,
+        type: "set_mode", mode: change.mode,
+        acknowledge_workspace_trust: change.acknowledgeWorkspaceTrust,
       }, "mode_changed", 5000);
       return true;
     } catch (err: any) {
@@ -1612,6 +2290,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.postState();
       return false;
     }
+  }
+
+  private async requestMode(mode: string): Promise<boolean> {
+    const approved = await this.approveModeChange(mode);
+    return approved ? this.applyApprovedModeChange(approved) : false;
   }
 
   async cycleMode(): Promise<void> {
@@ -1624,13 +2307,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   async setThinking(): Promise<void> {
     const be = this.ensureBackend();
+    const subscription = this.activeSubscription();
+    if (this.routeState.subscriptionEngine && subscription?.supports_effort === false) {
+      void vscode.window.showInformationMessage(
+        `${String(subscription.label || this.routeState.subscriptionEngine).split(" (")[0]} controls reasoning through its model; choose one with DGC: Select Model.`);
+      return;
+    }
+    const current = this.routeState.subscriptionEngine
+      ? (this.routeState.subscriptionEffort || "off") : this.state.think;
+    const available = this.routeState.subscriptionEngine
+      ? [...THINK, { id: "max", detail: "maximum session effort where the active model supports it" }]
+      : THINK;
     const pick = await vscode.window.showQuickPick(
-      THINK.map((t) => ({ label: t.id, detail: t.detail, description: t.id === this.state.think ? "current" : "" })),
-      { placeHolder: "Thinking level" });
+      available.map((t) => ({ label: this.routeState.subscriptionEngine && t.id === "off"
+                                     ? "default" : t.id,
+                          detail: this.routeState.subscriptionEngine && t.id === "off"
+                            ? "use the vendor CLI's default effort" : t.detail,
+                          description: t.id === current ? "current" : "",
+                          level: t.id })),
+      { placeHolder: this.routeState.subscriptionEngine
+          ? "Subscription reasoning effort" : "Thinking level" });
     if (pick) {
       try {
+        const mutation = this.thinkCommand(pick.level);
         await this.requestState(
-          be, "think", { type: "set_think", level: pick.label }, "think_changed");
+          be, "think", mutation.command, mutation.response);
       } catch (err: any) {
         void vscode.window.showErrorMessage(err?.message || "DGC could not change thinking level.");
       }
@@ -1745,8 +2446,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div id="s-subscription_status" class="set-hint"></div>
     <label>Subscription model <span class="set-hint">optional — overrides the CLI's own default</span>
       <input id="s-subscription_model" type="text" spellcheck="false" placeholder="(the CLI's default)"></label>
-    <label>Reasoning effort <span class="set-hint">Claude &amp; Codex only</span>
-      <select id="s-subscription_effort"><option value="">default</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+    <label>Reasoning effort <span class="set-hint">Claude, Codex &amp; Copilot · model support varies</span>
+      <select id="s-subscription_effort"><option value="">default</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select></label>
 
     <div class="set-group">Provider runtime <span class="set-hint">server state stores Responses with the provider</span></div>
     <label>API transport
@@ -1786,7 +2487,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label>Permission mode
       <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
     <label>Thinking
-      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+      <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
     <label>Context size (tokens)
       <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"></label>
     <label>Show model thinking

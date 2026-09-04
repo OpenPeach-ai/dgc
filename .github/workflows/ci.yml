@@ -14,6 +14,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  site:
+    name: Website build and Worker contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python scripts/build-site.py --check
+      - run: python scripts/check-site.py --allow-unpublished-source-tag
+      - run: node --no-warnings scripts/check-site-worker.mjs
+
   python:
     name: Python ${{ matrix.python }} · ${{ matrix.os }}
     strategy:
@@ -31,9 +48,9 @@ jobs:
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
       - run: python -m pip check
-      - run: python -m compileall -q dgc
-      - run: python -m py_compile bench/*.py
-      - run: python -m dgc --version
+      - run: python -m compileall -q dgc tests/run_tests.py
+      - run: python -m py_compile bench/*.py scripts/generate-sbom.py
+      - run: python tests/run_tests.py
 
   windows-smoke:
     name: Windows import and CLI smoke
@@ -62,27 +79,23 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - run: npm ci
-      - run: npm run check-types
-      - run: npm test
-      - run: npm audit --audit-level=moderate
-      - run: npm run package
-      - name: Installed VS Code extension-host smoke
+      - name: Install pinned VS Code extension host
         shell: bash
-        run: |
-          if command -v code >/dev/null 2>&1 || [ -x /usr/share/code/code ]; then
-            npm run test:host
-          else
-            echo "VS Code is not installed on this runner; host smoke was not requested."
-          fi
-      - run: ./node_modules/.bin/vsce package --no-dependencies -o dgc-ci.vsix
+        run: test/install-pinned-vscode.sh "$RUNNER_TEMP/dgc-vscode-host"
+      - name: Build and validate both release VSIX flavors in the real extension host
+        shell: bash
+        env:
+          DGC_EXTENSION_OUT: ${{ runner.temp }}/dgc-extension-release
+          DGC_VSCODE_EXECUTABLE: ${{ runner.temp }}/dgc-vscode-host/code
+          DGC_EXPECT_VSCODE_VERSION: 1.107.1
+        run: xvfb-run -a bash ../../scripts/release-extension.sh --build
       - uses: actions/upload-artifact@v4
         with:
           name: dgc-extension-ci
-          path: editors/vscode/dgc-ci.vsix
+          path: ${{ runner.temp }}/dgc-extension-release/*
 
   package:
-    name: Python package
+    name: Python package and release archive
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,9 +106,14 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check dist/*
+      - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
+      - run: sha256sum -c dist/release/dgc.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: dgc-python-package
+          name: dgc-release-candidate
           path: |
-            dist/*.whl
-            dist/dgc-*.tar.gz
+            dist/release/dgc.tar.gz
+            dist/release/dgc.tar.gz.sha256
+            dist/release/version.json
+            dist/release/provenance.json
+            dist/release/dgc.cdx.json

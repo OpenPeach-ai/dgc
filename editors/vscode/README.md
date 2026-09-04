@@ -2,14 +2,14 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Requires the matching DGC CLI build (editor protocol v4) on your PATH. Run `dgc setup`, then use
+> Requires the matching DGC CLI build (editor protocol v5) on your PATH. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does
 
 - **Chat panel** in the activity bar — streaming responses, aligned Markdown tables, streaming-safe fenced code with exact-source copy, a live *thinking* indicator, collapsible tool cards, and inline diffs. The panel matches the DGC CLI's look: a mono, near-black surface with a single purple accent — tool cards lead with the CLI's glyphs (`→` read · `✎` edit · `$` shell · `✱` search · `▸` other), and diffs render **mono + purple**, not green/red.
 - **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics, explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
-- **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: an inline model picker, a mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
+- **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: an inline model picker, a mode/thinking picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. Model/thinking controls follow the active native or subscription route; subscription pickers use vendor hints or a free-form vendor model id without querying the native endpoint. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
 - **Feature browsers instead of transcript dumps** — `/skills`, `/docs`, `/mcp`, `/permissions`, `/memory`, and `/hooks` open searchable, keyboard-accessible surfaces. Skills show their winning project/user/bundled source and instructions; documentation renders in place; none of these catalogs pollutes chat history.
 - **MCP manager** — add, edit, remove, inspect, and reload local STDIO or remote servers from the panel. Safe server metadata is persisted in DGC configuration while environment values and remote bearer tokens stay in VS Code SecretStorage and never enter the webview again.
 - **Categorized Settings page** (gear icon) — General, Models, Agents, Security, and Extensions cover provider routes, reasoning display, suggestions, permission/sandbox/network scope, plan/artifact behavior, tool profile, parallelism, and feature-manager shortcuts. Model credentials stay in endpoint-scoped VS Code SecretStorage; non-secret provider defaults can also be set in Settings UI → **DGC**.
@@ -49,7 +49,7 @@ must also start in the standalone CLI. Tool execution still passes through DGC's
 
 - `dgc.command` — path to the `dgc` executable (default `dgc`).
 - Native DGC settings provide provider-route defaults. The in-panel page owns live agent behavior,
-  sandbox, artifact, and extension-manager settings exposed by protocol v4.
+  sandbox, artifact, and extension-manager settings exposed by protocol v5.
 
 ## Local verification
 

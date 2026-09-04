@@ -26,7 +26,10 @@ bench/             reproducible same-model harness comparison and edit-quality t
 editors/vscode/    VS Code/Cursor client, webview and tests
 schemas/           generated reviewable wire schemas (regenerate, never hand-edit)
 install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`)
-site/              vibedgc.com landing page (index.html) + the files it serves (install.sh, dgc.tar.gz)
+site-src/          vibedgc.com templates, content, data and self-hosted source assets
+site/              generated, exact-allowlist deploy tree plus promoted release artifacts
+scripts/           site generation/checks and explicit, separated release/deploy phases
+migrations/        reviewed Cloudflare D1 schema migrations for the site Worker
 ```
 
 ## Run & test

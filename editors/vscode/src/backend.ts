@@ -477,7 +477,7 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send a query/state command and settle only from the response belonging to this request.
-   * Current protocol-v4 backends echo `request_id`; callers may omit it only for a negotiated
+   * Current protocol-v5 backends echo `request_id`; callers may omit it only for a negotiated
    * legacy backend, where installing the listener before `send` still provides a post-send
    * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
    * every listener. */

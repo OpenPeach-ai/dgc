@@ -1,0 +1,127 @@
+<section class="hero" id="top">
+  <div class="hero-media" aria-hidden="true">
+    <video autoplay muted loop playsinline preload="none" fetchpriority="high" poster="/assets/hero-graded-poster.jpg" data-hero-video>
+      <source data-src="/assets/hero-mobile.webm" type="video/webm" media="(max-width:760px)">
+      <source data-src="/assets/hero-mobile.mp4" type="video/mp4" media="(max-width:760px)">
+      <source data-src="/assets/hero-graded.webm" type="video/webm">
+      <source data-src="/assets/hero-graded.mp4" type="video/mp4">
+    </video>
+  </div>
+  <div class="container">
+    <div class="hero-copy reveal">
+      <div class="eyebrow">A coding agent for the models you run</div>
+      <h1>Own your coding agent.</h1>
+      <p class="lede">A native agentic loop for local and API models, plus delegated turns through supported coding subscriptions. In your terminal and your editor.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="https://docs.vibedgc.com/getting-started" data-event="get_started">Get started <span aria-hidden="true">→</span></a>
+        <a class="button" href="/benchmark">See the benchmark</a>
+        <a class="quiet-link" href="#product-capture" data-open-capture>Watch it work · 0:52 <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="install-panel" data-install-tabs data-copy-scope>
+        <div class="install-inner">
+          <div class="os-tabs" role="tablist" aria-label="Install command platform"><button id="install-tab-macos" type="button" role="tab" aria-controls="install-panel" data-os="macos" aria-selected="true">macOS</button><button id="install-tab-linux" type="button" role="tab" aria-controls="install-panel" data-os="linux" aria-selected="false" tabindex="-1">Linux</button><button id="install-tab-windows" type="button" role="tab" aria-controls="install-panel" data-os="windows" aria-selected="false" tabindex="-1">Windows · WSL</button></div>
+          <div class="install-command" id="install-panel" role="tabpanel" aria-labelledby="install-tab-macos"><span class="prompt">$</span><code id="hero-install" data-install-command>curl -fsSL https://vibedgc.com/install.sh | bash</code><button class="copy-button" type="button" data-copy data-copy-target="#hero-install" data-event="install_copy">copy</button></div>
+          <div class="requirements">Python 3.10+ · no root · local, API, and subscription routes</div>
+        </div>
+      </div>
+    </div>
+    <div class="stat-grid reveal" aria-label="DGC measured results">
+      <div class="stat"><span class="stat-value" data-count="94.4" data-decimals="1" data-suffix="%">94.4%</span><span class="stat-label">Aider polyglot · pass@2</span></div>
+      <div class="stat"><span class="stat-value" data-count="184" data-suffix=" / 300">184 / 300</span><span class="stat-label"><a href="/benchmark#swe-bench">SWE-bench Lite · published</a></span></div>
+      <div class="stat"><span class="stat-value" data-count="0">0</span><span class="stat-label">agent-round timeouts · DGC</span></div>
+      <div class="stat"><span class="stat-value" data-count="121.7" data-decimals="1" data-suffix=" s">121.7 s</span><span class="stat-label">average measured round</span></div>
+      <div class="stat"><span class="stat-value" data-count="{{RELEASE_COUNT}}">{{RELEASE_COUNT}}</span><span class="stat-label">GitHub releases · Aug 21–Sep 4</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="proof-strip" aria-label="Provider and proof strip">
+  <div class="marquee" aria-label="Supported provider routes">
+    <div class="marquee-set"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
+    <div class="marquee-set" aria-hidden="true"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
+  </div>
+  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="{{MARKETPLACE_URL}}" data-event="marketplace"><span>Editor</span>VS Code + Cursor <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>Five harness run summaries <b aria-hidden="true">→</b></a></div>
+</section>
+
+<section class="section field field-2" id="cli">
+  <div class="container">
+    <div class="section-split">
+      <header class="section-copy reveal"><div class="eyebrow"><b>01</b> The CLI</div><h2>A real agentic loop, in your terminal.</h2><p class="lede">Reads, edits, runs the tests and self-corrects. Permission modes, plans, skills, hooks and a multi-agent fleet in one focused TUI.</p></header>
+      {{FIG1}}
+    </div>
+    <div class="cli-evidence">{{TERMINAL}}</div>
+  </div>
+</section>
+
+<section class="section section-bleed" id="extension">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>02</b> The extension</div><h2>The same harness, native to your editor.</h2><p class="lede">On native local/API routes: structured tools, readable diffs, goal-aware turns, permission decisions, and plan feedback. Subscription routes retain DGC's local goal record and presentation while the vendor owns its turn.</p></header>
+    <div style="margin-top:44px">{{FIG3}}</div>
+    <div class="feature-grid extension-features"><article><h3>Structured tools</h3><p>Native-loop intent, target and result stay scannable.</p></article><article><h3>Reviewable diffs</h3><p>Additions and removals remain first-class.</p></article><article><h3>Goal controls</h3><p>Local record, timer, progress, pause and cancel at hand.</p></article><article><h3>Native plan review</h3><p>Approve, revise, or keep researching on local/API routes.</p></article></div>
+  </div>
+</section>
+
+<section class="section field field-2" id="artifacts">
+  <div class="container artifact-layout">
+    <header class="artifact-copy reveal"><div class="eyebrow"><b>03</b> Native plan artifacts</div><h2>Review the plan as a real page.</h2><p class="lede">On local/API routes during the current process, a DGC plan can open as a clean page on a private loopback port—not raw Markdown racing past your terminal. The plan text saves with the session, so you can reopen it in DGC after a restart.</p><p class="artifact-note">NATIVE ROUTES · PRIVATE LOOPBACK PREVIEW · PLAN TEXT SAVED WITH THE SESSION</p></header>
+    <div class="browser reveal" data-artifact-tabs>
+      <div class="browser-bar"><span class="browser-dots"><i></i><i></i><i></i></span><span class="browser-address">127.0.0.1:45000/plan/refactor-auth</span><span class="browser-select" role="tablist"><button role="tab" aria-selected="true">PLAN</button></span></div>
+      <article class="artifact-page" role="tabpanel"><span class="artifact-kicker">/// PROPOSED PLAN</span><h3>Refactor auth into its own package</h3><p>Move token and verification helpers into one package and update the callers, without changing behavior.</p><ol class="artifact-steps"><li>Create the package and move the helpers.<code>2 files</code></li><li>Re-export the public surface.<code>1 file</code></li><li>Update callers and run the suite.<code>7 imports</code></li></ol><div class="artifact-approval"><span>Approve in terminal</span><span>3 steps · plan text saved</span></div></article>
+    </div>
+  </div>
+</section>
+
+<section class="section field field-2" id="providers">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>04</b> Providers</div><h2>Point it at anything that serves a model.</h2><p class="lede">Local inference, direct APIs, or a subscription you already pay for. One harness and one <code>/connect</code> surface.</p></header>
+    <div class="provider-grid">
+      <article class="card spotlight reveal"><span class="micro">Local · on device</span><h3>Your machine, your weights</h3><p>Native chat or an OpenAI-compatible local server.</p><ul class="provider-list"><li>Ollama<small>native chat</small></li><li>llama.cpp<small>OpenAI /v1</small></li><li>vLLM<small>OpenAI /v1</small></li><li>LM Studio<small>local server</small></li></ul></article>
+      <article class="card spotlight reveal"><span class="micro">API · direct</span><h3>Your chosen endpoint</h3><p>DGC sends model-conversation context to the endpoint you configure. Optional integrations receive directed requests; language servers also receive queried document text.</p><ul class="provider-list"><li>OpenAI<small>native</small></li><li>Anthropic<small>native</small></li><li>OpenRouter<small>multi-model</small></li><li>Groq · DeepSeek<small>compatible</small></li></ul></article>
+      <article class="card spotlight reveal"><span class="micro">Subscription · official CLI</span><h3>Use the plan you have</h3><p>The vendor’s binary keeps ownership of login and terms.</p><ul class="provider-list"><li>Claude Code<small>Pro / Max</small></li><li>Codex<small>ChatGPT</small></li><li>Qwen · Kimi<small>coding plans</small></li><li>GitHub Copilot<small>GitHub</small></li></ul></article>
+    </div>
+  </div>
+</section>
+
+<section class="video-stage section" id="subscription">
+  <video muted loop playsinline preload="none" data-poster="/assets/sub-graded-poster.jpg" data-lazy-video aria-hidden="true"><source data-src="/assets/sub-graded.webm" type="video/webm"><source data-src="/assets/sub-graded.mp4" type="video/mp4"></video>
+  <div class="container">
+    <header class="video-copy reveal"><div class="eyebrow"><b>05</b> Bring your own subscription</div><h2>Already pay for a coding model? Run it here.</h2><p class="lede">Pick the vendor in <code>/connect</code>. DGC passes each turn to its official CLI using that vendor account route—without configuring a separate DGC API key. Vendor plan, usage, and fee terms still apply.</p></header>
+    <div class="glass-grid"><article class="glass reveal"><span class="micro">Claude · ChatGPT</span><h3>Your existing plan</h3><p>Pro, Max, ChatGPT, and other supported first-party subscriptions.</p></article><article class="glass reveal"><span class="micro">Qwen · Kimi · Copilot</span><h3>Official route</h3><p>Each vendor binary owns authentication, account policy, and its model/tool turn.</p></article><article class="glass reveal"><span class="micro">DGC delegation</span><h3>One place to start</h3><p>DGC maps the mode, retains session history, runs SessionStart/Stop hooks, and presents the vendor’s result.</p></article></div>
+    <div class="flow-mini reveal"><div><b>DGC</b><small>passes prompt + mapped mode</small></div><span>→</span><div><b>Official CLI</b><small>owns sign-in, model + tools</small></div><span>→</span><div><b>DGC</b><small>records and presents the result</small></div></div>
+  </div>
+</section>
+
+<section class="section field field-2" id="benchmark">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>06</b> Benchmark</div><h2>Measured on a model you run yourself.</h2><p class="lede">A measured 90-task, six-language slice. Every manifest records the same model alias, caller-declared digest, endpoint URL, hardware, and 600-second allowance per round; model weights were not independently verified.</p></header>
+    {{FIG4}}
+    <p class="figure-foot">Method, caveats, raw-source checksums and reproducible commands live on the <a href="/benchmark">full benchmark page →</a></p>
+  </div>
+</section>
+
+<section class="quote-band field field-2">
+  <div class="container quote-grid reveal"><div><span class="micro">The DGC thesis</span><p class="positioning">The harness matters as much as the model. Capability lives in the loop—not only in the weights.</p></div><p class="quote-by"><b>Design premise</b>Context · tools · verification</p></div>
+</section>
+
+<section class="video-stage section" id="power">
+  <video muted loop playsinline preload="none" data-poster="/assets/power-graded-poster.jpg" data-lazy-video aria-hidden="true"><source data-src="/assets/power-graded.webm" type="video/webm"><source data-src="/assets/power-graded.mp4" type="video/mp4"></video>
+  <div class="container">
+    <header class="video-copy reveal"><div class="eyebrow"><b>07</b> Power tools</div><h2>Built for real, long, autonomous work.</h2><p class="lede">Optional modes for data-heavy tasks, verified unattended native-model runs, and turning your own sessions into scrubbed training data.</p></header>
+    <div class="glass-grid"><article class="glass reveal"><span class="micro">Persistent state</span><h3>A Python workspace across turns</h3><p>Load a dataset once, then operate on variables without repeating it into context.</p><code>/code-action on</code></article><article class="glass reveal"><span class="micro">Native autonomous gate</span><h3>Run until the check passes</h3><p>On local/API routes, failures return to the next turn and completion waits for a real exit code. Delegated vendor turns bypass this gate.</p><code>dgc --autonomous-gate "npm run check"</code></article><article class="glass reveal"><span class="micro">Trace → training</span><h3>Your usage becomes your data</h3><p>Export heuristic-filtered sessions as bounded, credential-scrubbed JSONL; review them before training.</p><code>dgc export-training --successful-only</code></article></div>
+  </div>
+</section>
+
+<section class="section field field-2" id="inside">
+  <div class="container">
+    <header class="section-copy reveal"><div class="eyebrow"><b>08</b> What’s inside</div><h2>A complete harness, not a wrapper.</h2><p class="lede">On native local and API routes, the model proposes while DGC orchestrates boundaries, execution, persistence, verification, and the evidence you review. Subscription routes delegate the model-and-tool turn to the vendor CLI.</p></header>
+    <div style="margin-top:44px">{{FIG5}}</div>
+    <div style="margin-top:18px">{{FIG2}}</div>
+    <div class="capability-grid"><article class="card spotlight"><span class="micro">Control</span><h3>Gate the loop</h3><p>Permission modes, plan review and thinking control.</p><div class="chip-list"><span>permissions</span><span>plan</span><span>thinking</span></div></article><article class="card spotlight"><span class="micro">Execution</span><h3>Bound the work</h3><p>Sandbox, MCP, artifacts and lifecycle hooks.</p><div class="chip-list"><span>sandbox</span><span>MCP</span><span>hooks</span></div></article><article class="card spotlight"><span class="micro">Memory</span><h3>Keep useful state</h3><p>Standing goals, sessions, rewind and project memory.</p><div class="chip-list"><span>/goal</span><span>sessions</span><span>rewind</span></div></article><article class="card spotlight"><span class="micro">Scale</span><h3>Run in parallel</h3><p>Fleet sessions, isolated sub-agents and reusable skills.</p><div class="chip-list"><span>fleet</span><span>task</span><span>skills</span></div></article></div>
+  </div>
+</section>
+
+<dialog class="capture-dialog" id="product-capture" aria-label="DGC product capture">
+  <div class="capture-head"><span class="micro">DGC · illustrative trace replay · 0:52</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
+  <video controls playsinline preload="metadata" data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play"><source src="/assets/cli-capture.webm" type="video/webm"><source src="/assets/cli-capture.mp4" type="video/mp4"></video>
+  <p>Illustrative reconstruction based on the retained <code>go/alphametics</code> result. Recorded rounds and pass state are real; prose, diff selection, and timing are condensed.</p>
+</dialog>
