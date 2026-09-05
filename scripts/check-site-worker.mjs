@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readdirSync, readFileSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
@@ -10,7 +10,11 @@ import worker from "../site/_worker.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
-const MIGRATION = readFileSync(join(ROOT, "migrations", "0001_site.sql"), "utf8");
+const MIGRATIONS = readdirSync(join(ROOT, "migrations"))
+  .filter(name => /^\d+_[a-z0-9_]+\.sql$/.test(name))
+  .sort()
+  .map(name => readFileSync(join(ROOT, "migrations", name), "utf8"))
+  .join("\n");
 const SECRET = "worker-test-secret-that-is-longer-than-thirty-two-bytes";
 const encoder = new TextEncoder();
 const originalFetch = globalThis.fetch;
@@ -94,7 +98,7 @@ class D1Statement {
 class MemoryD1 {
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
-    this.sqlite.exec(MIGRATION);
+    this.sqlite.exec(MIGRATIONS);
     this.executions = 0;
     this.writeExecutions = 0;
     this.failures = [];
@@ -242,8 +246,6 @@ function environment(overrides = {}) {
     RESEND_API_KEY: overrides.RESEND_API_KEY === undefined ? "re_test" : overrides.RESEND_API_KEY,
     DGC_FROM_EMAIL: overrides.DGC_FROM_EMAIL === undefined
       ? "DGC <release@vibedgc.com>" : overrides.DGC_FROM_EMAIL,
-    DGC_CONTACT_EMAIL: overrides.DGC_CONTACT_EMAIL === undefined
-      ? "hello@vibedgc.com" : overrides.DGC_CONTACT_EMAIL,
   };
 }
 
@@ -712,6 +714,7 @@ register("subscription success persists first, sends an idempotent email, and re
   assert.notEqual(pending.unsubscribe_token, pending.token);
   assert.equal(pending.delivery_state, "accepted");
   assert.equal(emailCalls[0].init.headers["idempotency-key"], pending.idempotency_key);
+  assert.equal("reply_to" in emailCalls[0].body, false);
   assert.match(emailCalls[0].body.text, new RegExp("token=" + pending.token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(emailCalls[0].body.text, new RegExp(
     "token=" + pending.unsubscribe_token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
@@ -775,86 +778,19 @@ register("definitive subscription rejection cleans state; ambiguous states retai
   assert.equal(network.DGC_SITE_DB.value("SELECT delivery_state FROM pending_subscriptions"), "unknown");
 });
 
-register("commercial delivery uses idempotency and records accepted/failed/ambiguous states", async () => {
-  const fields = {
-    name: "Ada Lovelace", email: "ada@example.com", company: "Analytical Engines",
-    seats: "11–50", use_case: "We evaluate local coding models across a private monorepo.",
-    website: "",
-  };
-  const accepted = environment();
-  resetEmail();
-  const success = await worker.fetch(browserPost("/api/commercial", urlencoded(fields), {
-    ip: "203.0.113.60",
-  }), accepted);
-  assert.equal(success.status, 201);
-  const lead = accepted.DGC_SITE_DB.rows("SELECT * FROM commercial_leads")[0];
-  assert.equal(lead.delivery_state, "accepted");
-  assert.equal(emailCalls[0].init.headers["idempotency-key"], lead.idempotency_key);
-  assert.equal(emailCalls[0].body.reply_to, fields.email);
-  assert.equal(emailCalls[0].body.to[0], accepted.DGC_CONTACT_EMAIL);
-
-  const rejected = environment();
-  resetEmail(async () => new Response(JSON.stringify({name: "validation_error"}), {
-    status: 422, headers: {"content-type": "application/json"},
-  }));
-  assert.equal((await worker.fetch(browserPost("/api/commercial", urlencoded(fields), {
-    ip: "203.0.113.61",
-  }), rejected)).status, 503);
-  assert.equal(rejected.DGC_SITE_DB.value("SELECT count(*) FROM commercial_leads"), 0);
-  assert.equal(rejected.DGC_SITE_DB.value("SELECT count(*) FROM form_cooldowns"), 0);
-
-  const ambiguous = environment();
-  resetEmail(async () => { throw new Error("timeout"); });
-  assert.equal((await worker.fetch(browserPost("/api/commercial", urlencoded(fields), {
-    ip: "203.0.113.62",
-  }), ambiguous)).status, 503);
-  assert.equal(ambiguous.DGC_SITE_DB.value("SELECT delivery_state FROM commercial_leads"), "unknown");
-  assert.equal(ambiguous.DGC_SITE_DB.value("SELECT count(*) FROM form_cooldowns"), 1);
-});
-
-register("commercial retries recover a post-send state-write failure without a new mail key", async () => {
-  const fields = {
-    name: "Grace Hopper", email: "grace@example.com", company: "Compiler Systems",
-    seats: "51–200", use_case: "We need a reliable local-first coding harness for a regulated monorepo.",
-    website: "",
-  };
+register("commercial enquiry intake is not exposed", async () => {
   const env = environment();
-  const providerDeliveries = new Map();
-  resetEmail(async call => {
-    const key = call.init.headers["idempotency-key"];
-    if (!providerDeliveries.has(key)) providerDeliveries.set(key, "email-recovery");
-    return new Response(JSON.stringify({id: providerDeliveries.get(key)}), {
-      status: 200, headers: {"content-type": "application/json"},
-    });
-  });
-  env.DGC_SITE_DB.failNext("UPDATE commercial_leads SET delivery_state");
-
-  const first = await worker.fetch(browserPost("/api/commercial", urlencoded(fields), {
-    ip: "203.0.113.63",
-  }), env);
-  assert.equal(first.status, 201);
-  assert.equal(emailCalls.length, 1);
-  const stranded = env.DGC_SITE_DB.rows("SELECT * FROM commercial_leads")[0];
-  assert.equal(stranded.delivery_state, "sending");
-  const firstKey = emailCalls[0].init.headers["idempotency-key"];
-  const firstBody = emailCalls[0].body;
-
-  // Simulate the one-hour destination lease expiring while Resend's key is still
-  // inside its 24-hour replay window.
-  env.DGC_SITE_DB.sqlite.exec("DELETE FROM form_cooldowns");
-  const retry = await worker.fetch(browserPost("/api/commercial", urlencoded(fields), {
-    ip: "203.0.113.64",
-  }), env);
-  assert.equal(retry.status, 201);
-  assert.equal(emailCalls.length, 2);
-  assert.equal(emailCalls[1].init.headers["idempotency-key"], firstKey);
-  assert.deepEqual(emailCalls[1].body, firstBody);
-  assert.equal(providerDeliveries.size, 1);
-  assert.equal(env.DGC_SITE_DB.value("SELECT count(*) FROM commercial_leads"), 1);
-  const recovered = env.DGC_SITE_DB.rows("SELECT * FROM commercial_leads")[0];
-  assert.equal(recovered.id, stranded.id);
-  assert.equal(recovered.delivery_state, "accepted");
-  assert.equal(recovered.resend_id, "email-recovery");
+  resetEmail();
+  const executions = env.DGC_SITE_DB.executions;
+  const response = await worker.fetch(browserPost("/api/commercial", urlencoded({
+    email: "person@example.com", website: "",
+  })), env);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), {error: "Not found"});
+  assert.equal(env.DGC_SITE_DB.executions, executions);
+  assert.equal(env.DGC_ANALYTICS.points.length, 0);
+  assert.equal(emailCalls.length, 0);
+  assert.equal(env.DGC_SITE_DB.value("SELECT count(*) FROM commercial_leads"), 0);
 });
 
 register("GET/HEAD actions do not touch D1; POST confirm and unsubscribe are explicit and idempotent", async () => {

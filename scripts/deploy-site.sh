@@ -67,7 +67,7 @@ secret_list=$(npx --yes "wrangler@$WRANGLER_VERSION" pages secret list \
   --project-name="$PROJECT" 2>/dev/null) || {
   echo "could not verify Cloudflare Pages secrets" >&2; exit 1;
 }
-for required_secret in RESEND_API_KEY DGC_RATE_LIMIT_SECRET DGC_CONTACT_EMAIL; do
+for required_secret in RESEND_API_KEY DGC_RATE_LIMIT_SECRET; do
   printf '%s\n' "$secret_list" | grep -Eq "(^|[[:space:]│])${required_secret}([[:space:]│]|$)" || {
     echo "Cloudflare Pages secret is missing: $required_secret" >&2; exit 1;
   }

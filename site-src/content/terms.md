@@ -1,18 +1,18 @@
 ---
 title: Terms
 description: Terms for the DGC website and the relationship between the site and the software license.
-effective_date: 2026-09-04
+effective_date: 2026-09-05
 ---
 
 # Terms
 
-These terms apply to your use of vibedgc.com and its downloads, documentation, and contact forms. The site is operated by Mohit Kalra, who publishes DGC as an OpenPeach project; “DGC”, “we”, and “us” below refer to that project and its operator. By using the site, you agree to these terms. The DGC software is separately governed by the license included with the source and release archive.
+These terms apply to your use of vibedgc.com and its downloads, documentation, and release-note subscription form. The site is operated by Mohit Kalra, who publishes DGC as an OpenPeach project; “DGC”, “we”, and “us” below refer to that project and its operator. By using the site, you agree to these terms. The DGC software is separately governed by the license included with the source and release archive.
 
 ## Software license
 
 DGC is source-available under the PolyForm Noncommercial License 1.0.0, copyright 2026 Mohit Kalra. The license permits qualifying noncommercial use, modification, and distribution subject to its terms. Commercial use—including selling DGC, offering it as a paid hosted service, or white-labeling it—requires a separate written license.
 
-The repository’s [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file is the controlling software license. Any plain-language summary on this site is informational and does not amend or replace it. If your intended use may be commercial, submit the commercial-use form before relying on DGC for that use.
+The repository’s [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file is the controlling software license. Any plain-language summary on this site is informational and does not amend or replace it. This website does not accept commercial-use requests and no website interaction grants commercial-use rights.
 
 ## Your use of a coding agent
 
@@ -22,11 +22,11 @@ DGC can read files, modify a workspace, make network requests, and run commands 
 
 You are also responsible for the models, APIs, subscriptions, MCP servers, search providers, language servers, repositories, and other services you connect to DGC. Their separate terms, acceptable-use rules, data practices, and fees may apply.
 
-## Website and forms
+## Website and release notes
 
-You may use the site for lawful evaluation, installation, documentation, security reporting, contribution, and licensing enquiries. Do not attempt to disrupt the service, bypass access controls, submit malware, impersonate another person, or use forms for spam or unlawful content.
+You may use the site for lawful evaluation, installation, documentation, security reporting, contribution, and release-note subscriptions. Do not attempt to disrupt the service, bypass access controls, submit malware, impersonate another person, or use forms for spam or unlawful content.
 
-Information submitted through a form must be accurate enough for us to respond. A form submission is an enquiry, not an accepted commercial license, employment offer, service-level commitment, or other agreement. We aim to respond to commercial enquiries within two business days, but that target is not a guarantee.
+The release-note form is only for requesting email release updates. A subscription request is not a commercial license, employment offer, service-level commitment, or other agreement.
 
 ## Availability and changes
 
@@ -40,4 +40,4 @@ To the extent allowed by law, the site and software are provided as is, without 
 
 Our handling of personal information is described in the Privacy notice. Security vulnerabilities should be reported through GitHub private vulnerability reporting, not a public issue.
 
-These terms may be updated as DGC and its commercial offering evolve. The effective date above identifies the current version.
+These terms may be updated as DGC and its licensing terms evolve. The effective date above identifies the current version.

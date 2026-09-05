@@ -6,7 +6,6 @@ const FORM_ORIGINS = new Set([
   "https://vibedgc.com", "https://www.vibedgc.com", "https://docs.vibedgc.com",
 ]);
 const PUBLIC_HOSTS = new Set(["vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"]);
-const SEAT_OPTIONS = new Set(["1–10", "11–50", "51–200", "201+"]);
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{40,64}$/;
 const EMAIL_PATTERN = /^[A-Z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$/i;
 const SECURITY_HEADERS = {
@@ -249,6 +248,7 @@ async function cleanupExpired(env) {
       env.DGC_SITE_DB.prepare("DELETE FROM rate_limits WHERE expires_at <= ?1").bind(now),
       env.DGC_SITE_DB.prepare("DELETE FROM form_cooldowns WHERE expires_at <= ?1").bind(now),
       env.DGC_SITE_DB.prepare("DELETE FROM pending_subscriptions WHERE expires_at <= ?1").bind(now),
+      // Retain expiry cleanup for compatibility with the original schema. Intake is retired.
       env.DGC_SITE_DB.prepare("DELETE FROM commercial_leads WHERE expires_at <= ?1").bind(now),
     ]);
   } catch {
@@ -354,7 +354,7 @@ function randomToken() {
     .replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function sendEmail(env, {to, subject, text, replyTo, idempotencyKey}) {
+async function sendEmail(env, {to, subject, text, idempotencyKey}) {
   if (!env.RESEND_API_KEY || !env.DGC_FROM_EMAIL || !to) {
     return {ok: false, ambiguous: false, id: ""};
   }
@@ -369,7 +369,6 @@ async function sendEmail(env, {to, subject, text, replyTo, idempotencyKey}) {
       body: JSON.stringify({
         from: env.DGC_FROM_EMAIL,
         to: [to],
-        reply_to: replyTo || env.DGC_CONTACT_EMAIL,
         subject,
         text,
       }),
@@ -401,10 +400,6 @@ function formError(message, status) {
 }
 
 async function subscribeRoute(request, env, email, cooldown) {
-  if (!env.DGC_CONTACT_EMAIL) {
-    await releaseCooldown(env, cooldown.key, cooldown.lease).catch(() => {});
-    return formError("Subscriptions are temporarily unavailable", 503);
-  }
   const now = Math.floor(Date.now() / 1000);
   const emailHash = await digest(email);
   const proposedToken = randomToken();
@@ -443,7 +438,6 @@ async function subscribeRoute(request, env, email, cooldown) {
   const sent = await sendEmail(env, {
     to: email,
     subject: "Confirm DGC release notes",
-    replyTo: env.DGC_CONTACT_EMAIL,
     idempotencyKey: pending.idempotency_key,
     text: "Confirm your DGC release-notes subscription:\n\n" + confirm
       + "\n\nThe confirmation link expires in 48 hours and opens a page where you must "
@@ -479,112 +473,12 @@ async function subscribeRoute(request, env, email, cooldown) {
   );
 }
 
-function normalizedCommercial(fields) {
-  const rawName = String(fields.name || "");
-  const rawCompany = String(fields.company || "");
-  const rawSeats = String(fields.seats || "");
-  const rawUseCase = String(fields.use_case || "");
-  return {
-    name: oneLine(rawName, 101),
-    company: oneLine(rawCompany, 161),
-    seats: oneLine(rawSeats, 31),
-    useCase: rawUseCase.replace(/\u0000/g, "").trim(),
-  };
-}
-
-function validCommercial(fields) {
-  return Boolean(fields.name && fields.company
-    && fields.name.length <= 100
-    && fields.company.length <= 160
-    && fields.seats.length <= 30
-    && SEAT_OPTIONS.has(fields.seats)
-    && fields.useCase.length >= 10
-    && fields.useCase.length <= 2000);
-}
-
-async function commercialRoute(request, env, fields, email, cooldown) {
-  if (!env.DGC_CONTACT_EMAIL) {
-    await releaseCooldown(env, cooldown.key, cooldown.lease).catch(() => {});
-    return formError("Form delivery is temporarily unavailable", 503);
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const emailHash = await digest(email);
-  const submissionHash = await digest(JSON.stringify([
-    email, fields.name, fields.company, fields.seats, fields.useCase,
-  ]));
-  let id = crypto.randomUUID();
-  let idempotencyKey = "dgc-commercial-" + id;
-  try {
-    const recoverable = await env.DGC_SITE_DB.prepare([
-      "SELECT id, idempotency_key FROM commercial_leads",
-      "WHERE email_hash = ?1 AND submission_hash = ?2",
-      "AND delivery_state IN ('sending', 'unknown')",
-      "AND created_at > ?3 ORDER BY created_at DESC LIMIT 1",
-    ].join(" ")).bind(emailHash, submissionHash, now - 86400).first();
-    if (recoverable?.id && recoverable?.idempotency_key) {
-      id = recoverable.id;
-      idempotencyKey = recoverable.idempotency_key;
-    } else {
-      await env.DGC_SITE_DB.batch([
-        env.DGC_SITE_DB.prepare(
-          "DELETE FROM commercial_leads WHERE expires_at <= ?1",
-        ).bind(now),
-        env.DGC_SITE_DB.prepare([
-          "INSERT INTO commercial_leads",
-          "(id, email_hash, submission_hash, name, email, company, seats, use_case,",
-          "created_at, expires_at, delivery_state, idempotency_key)",
-          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'sending', ?11)",
-        ].join(" ")).bind(
-          id, emailHash, submissionHash, fields.name, email, fields.company,
-          fields.seats, fields.useCase, now, now + 31536000, idempotencyKey,
-        ),
-      ]);
-    }
-  } catch {
-    await releaseCooldown(env, cooldown.key, cooldown.lease).catch(() => {});
-    return formError("Form delivery is temporarily unavailable", 503);
-  }
-  const text = "Commercial DGC enquiry\n\nName: " + fields.name
-    + "\nEmail: " + email + "\nCompany: " + fields.company
-    + "\nSeats: " + fields.seats + "\n\nUse case:\n" + fields.useCase
-    + "\n\nLead ID: " + id;
-  const sent = await sendEmail(env, {
-    to: env.DGC_CONTACT_EMAIL,
-    subject: "DGC commercial enquiry · " + fields.company,
-    text,
-    replyTo: email,
-    idempotencyKey,
-  });
-  try {
-    const state = sent.ok ? "accepted" : sent.ambiguous ? "unknown" : "sending";
-    await env.DGC_SITE_DB.prepare([
-      "UPDATE commercial_leads SET delivery_state = ?1, resend_id = ?2",
-      "WHERE id = ?3",
-    ].join(" ")).bind(state, sent.id || null, id).run();
-  } catch {}
-  if (!sent.ok) {
-    if (!sent.ambiguous) {
-      await env.DGC_SITE_DB.prepare(
-        "DELETE FROM commercial_leads WHERE id = ?1",
-      ).bind(id).run().catch(() => {});
-      await releaseCooldown(env, cooldown.key, cooldown.lease).catch(() => {});
-    }
-    return formError("Form delivery is temporarily unavailable", 503);
-  }
-  measure(env, "commercial_enquiry", request, "/api/commercial");
-  return formSuccess(
-    request,
-    {message: "Received. We aim to reply within two business days."},
-    "/pricing?commercial=received#commercial",
-  );
-}
-
-async function formRoute(request, env, kind) {
+async function subscribeRequestRoute(request, env) {
   if (request.method !== "POST") {
     return json({error: "Method not allowed"}, 405, {allow: "POST"});
   }
   if (!formEnvironmentReady(request, env)) {
-    return formError("Forms are unavailable in this environment", 503);
+    return formError("Subscriptions are unavailable in this environment", 503);
   }
   if (!validBrowserPost(request)) return formError("Origin rejected", 403);
   let fields;
@@ -602,32 +496,25 @@ async function formRoute(request, env, kind) {
 
   const email = String(fields.email || "").trim().toLowerCase();
   if (!validEmail(email)) return formError("Enter a valid email", 400);
-  const commercial = kind === "commercial" ? normalizedCommercial(fields) : null;
-  if (commercial && !validCommercial(commercial)) {
-    return formError("Complete every field", 400);
-  }
-  const rate = await permitted(request, env, kind, kind === "subscribe" ? 6 : 4);
+  const rate = await permitted(request, env, "subscribe", 6);
   if (!rate.allowed) {
     return formError(
-      rate.unavailable ? "Forms are temporarily unavailable" : "Too many requests",
+      rate.unavailable ? "Subscriptions are temporarily unavailable" : "Too many requests",
       rate.unavailable ? 503 : 429,
     );
   }
   const cooldown = await destinationCooldown(
-    env, kind, email, kind === "subscribe" ? 900 : 3600,
+    env, "subscribe", email, 900,
   );
   if (!cooldown.allowed) {
     return formError(
       cooldown.unavailable
-        ? "Forms are temporarily unavailable"
+        ? "Subscriptions are temporarily unavailable"
         : "Please wait before submitting this address again",
       cooldown.unavailable ? 503 : 429,
     );
   }
-  if (kind === "subscribe") {
-    return subscribeRoute(request, env, email, cooldown);
-  }
-  return commercialRoute(request, env, commercial, email, cooldown);
+  return subscribeRoute(request, env, email, cooldown);
 }
 
 async function subscriptionAction(request, env, action) {
@@ -797,9 +684,9 @@ export default {
       } else if (url.pathname === "/api/event") {
         response = await eventRoute(request, env);
       } else if (url.pathname === "/api/commercial") {
-        response = await formRoute(request, env, "commercial");
+        response = json({error: "Not found"}, 404);
       } else if (url.pathname === "/api/subscribe") {
-        response = await formRoute(request, env, "subscribe");
+        response = await subscribeRequestRoute(request, env);
       } else if (url.pathname === "/api/subscribe/confirm") {
         response = await subscriptionAction(request, env, "confirm");
       } else if (url.pathname === "/api/unsubscribe") {
