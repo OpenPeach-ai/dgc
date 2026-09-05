@@ -518,8 +518,9 @@ test("editor capture autoplays in place and retains an explicit controls dialog"
     paused: video.paused,
     playsInline: video.playsInline,
   }));
-  expect(["/assets/editor-capture.mp4", "/assets/editor-capture.webm"])
-    .toContain(previewState.currentSrc);
+  expect(previewState.currentSrc).toBe("/assets/editor-capture.mp4");
+  expect(mediaRequests.map(url => new URL(url).pathname))
+    .toEqual(["/assets/editor-capture.mp4"]);
   expect({...previewState, currentSrc: "selected capture source"}).toEqual({
     autoplay: true,
     currentSrc: "selected capture source",
