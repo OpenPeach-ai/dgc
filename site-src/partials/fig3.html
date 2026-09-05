@@ -1,10 +1,11 @@
 <figure class="instrument capture-figure reveal" aria-labelledby="fig3-title">
   <figcaption class="figure-title" id="fig3-title"><span class="figure-id">FIG.3 · Editor surface</span><span>Actual extension · {{CAPTURE_EDITOR_DURATION_LABEL}} · real time</span><span class="figure-state">VS Code · Cursor</span></figcaption>
   <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
-  <button class="capture-card" type="button" data-open-capture="editor-capture" aria-controls="editor-capture" aria-haspopup="dialog" aria-expanded="false" aria-label="Play the {{CAPTURE_EDITOR_DURATION_LABEL}} DGC editor capture">
-    <img src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" data-src="/assets/editor-capture-poster.jpg" data-srcset="/assets/editor-capture-poster-720.jpg 720w, /assets/editor-capture-poster.jpg 1440w" data-sizes="(max-width:1040px) calc(100vw - 64px), 1240px" data-lazy-image width="1440" height="900" loading="lazy" decoding="async" alt="">
+  <button class="capture-card" type="button" data-open-capture="editor-capture" aria-controls="editor-capture" aria-haspopup="dialog" aria-expanded="false" aria-label="Open the {{CAPTURE_EDITOR_DURATION_LABEL}} DGC editor capture with controls">
+    <video autoplay muted loop playsinline preload="none" data-poster="/assets/editor-capture-poster.jpg" data-poster-mobile="/assets/editor-capture-poster-720.jpg" data-lazy-video data-editor-preview aria-hidden="true"><source data-src="/assets/editor-capture.mp4" type="video/mp4"><source data-src="/assets/editor-capture.webm" type="video/webm"></video>
     <span class="capture-shade" aria-hidden="true"></span>
-    <span class="capture-play" aria-hidden="true"><i>▶</i><b>Play editor capture</b><small>{{CAPTURE_EDITOR_DURATION_LABEL}} · real time</small></span>
+    <span class="capture-live" aria-hidden="true"><i></i><span data-capture-status data-playing="Auto-playing · {{CAPTURE_EDITOR_DURATION_LABEL}}" data-paused="Motion paused · {{CAPTURE_EDITOR_DURATION_LABEL}}">Auto-playing · {{CAPTURE_EDITOR_DURATION_LABEL}}</span></span>
+    <span class="capture-expand" aria-hidden="true">Open controls ↗</span>
   </button>
   <p class="capture-caption">{{CAPTURE_EDITOR_PROVENANCE}}</p>
 </figure>

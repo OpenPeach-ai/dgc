@@ -161,6 +161,70 @@ test("a returning visitor's dismissed announcement does not shift layout", async
   expect(shifts, JSON.stringify(shifts, null, 2)).toEqual([]);
 });
 
+test("the sticky header spans the viewport while its controls stay container-aligned", async ({page}) => {
+  const runtime = observeRuntime(page);
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector(".site-header").getBoundingClientRect();
+    const container = document.querySelector("main .container").getBoundingClientRect();
+    const brand = document.querySelector(".site-header .brand").getBoundingClientRect();
+    const candidates = [...document.querySelectorAll(".site-header .nav-install,.site-header .nav-toggle")];
+    const trailing = candidates.find(element => getComputedStyle(element).display !== "none")
+      .getBoundingClientRect();
+    return {
+      brandLeft: brand.left,
+      clientWidth: document.documentElement.clientWidth,
+      containerLeft: container.left,
+      containerRight: container.right,
+      headerLeft: header.left,
+      headerRight: header.right,
+      trailingRight: trailing.right,
+    };
+  });
+  expect(Math.abs(geometry.headerLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.headerRight - geometry.clientWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.brandLeft - geometry.containerLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.trailingRight - geometry.containerRight)).toBeLessThanOrEqual(1);
+  expect(runtime.consoleErrors).toEqual([]);
+  expect(runtime.pageErrors).toEqual([]);
+  expect(runtime.httpErrors).toEqual([]);
+});
+
+test("mobile drawers retain viewport gutters without horizontal clipping", async ({page}) => {
+  test.skip((page.viewportSize()?.width || 0) > 1040);
+  const assertDrawerFits = async drawer => {
+    await expect(drawer).toHaveAttribute("open", "");
+    const geometry = await drawer.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        clientWidth: element.clientWidth,
+        left: bounds.left,
+        right: bounds.right,
+        scrollWidth: element.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+      };
+    });
+    expect(geometry.left).toBeGreaterThanOrEqual(11);
+    expect(geometry.viewportWidth - geometry.right).toBeGreaterThanOrEqual(11);
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth);
+  };
+
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  await page.getByRole("button", {name: "Open navigation"}).click();
+  await assertDrawerFits(page.locator("#mobile-nav"));
+
+  if ((page.viewportSize()?.width || 0) <= 760) {
+    await page.getByRole("button", {name: "Close navigation"}).click();
+    await page.goto("/docs", {waitUntil: "domcontentloaded"});
+    await settle(page);
+    await page.getByRole("button", {name: "Browse docs"}).click();
+    await assertDrawerFits(page.locator("#docs-menu"));
+  }
+});
+
 test("a direct home fragment is fully styled without a layout shift", async ({page}) => {
   await page.addInitScript(() => {
     window.__dgcLayoutShifts = [];
@@ -401,7 +465,7 @@ test("artifact views support complete keyboard tab navigation", async ({page}) =
   expect(runtime.httpErrors).toEqual([]);
 });
 
-test("editor capture stays lazy until an explicit, labelled play action", async ({page}) => {
+test("editor capture autoplays in place and retains an explicit controls dialog", async ({page}) => {
   const runtime = observeRuntime(page);
   const mediaRequests = [];
   page.on("request", request => {
@@ -409,14 +473,39 @@ test("editor capture stays lazy until an explicit, labelled play action", async 
       mediaRequests.push(request.url());
     }
   });
-  await page.goto("/vscode", {waitUntil: "domcontentloaded"});
+  await page.goto("/", {waitUntil: "domcontentloaded"});
   await settle(page);
 
   const opener = page.locator('[data-open-capture="editor-capture"]');
+  const preview = opener.locator("video[data-editor-preview]");
   const capture = page.locator("#editor-capture");
   await expect(opener).toHaveAttribute("aria-expanded", "false");
+  await expect(preview).not.toHaveAttribute("data-hydrated", "true");
   await expect(capture.locator("video")).not.toHaveAttribute("data-hydrated", "true");
   expect(mediaRequests).toEqual([]);
+
+  await preview.scrollIntoViewIfNeeded();
+  await expect(preview).toHaveAttribute("data-hydrated", "true");
+  await expect.poll(() => preview.evaluate(video => !video.paused && Boolean(video.currentSrc)))
+    .toBe(true);
+  const previewState = await preview.evaluate(video => ({
+    autoplay: video.autoplay,
+    currentSrc: video.currentSrc ? new URL(video.currentSrc).pathname : "",
+    loop: video.loop,
+    muted: video.muted,
+    paused: video.paused,
+    playsInline: video.playsInline,
+  }));
+  expect(["/assets/editor-capture.mp4", "/assets/editor-capture.webm"])
+    .toContain(previewState.currentSrc);
+  expect({...previewState, currentSrc: "selected capture source"}).toEqual({
+    autoplay: true,
+    currentSrc: "selected capture source",
+    loop: true,
+    muted: true,
+    paused: false,
+    playsInline: true,
+  });
 
   await opener.click();
   await expect(capture).toHaveAttribute("open", "");
@@ -441,17 +530,17 @@ test("editor capture preview selects the viewport-sized source", async ({page}) 
     }
   });
   await page.goto("/vscode", {waitUntil: "domcontentloaded"});
-  const preview = page.locator('[data-open-capture="editor-capture"] img');
+  const preview = page.locator('[data-open-capture="editor-capture"] video[data-editor-preview]');
   await expect(preview).toBeVisible();
   await page.evaluate(async () => {
     if (document.fonts?.ready) {
       await document.fonts.ready;
     }
   });
-  await expect.poll(() => preview.evaluate(async image => {
-    const first = image.getBoundingClientRect();
+  await expect.poll(() => preview.evaluate(async video => {
+    const first = video.getBoundingClientRect();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const second = image.getBoundingClientRect();
+    const second = video.getBoundingClientRect();
     const positive = first.width > 0 && first.height > 0
       && second.width > 0 && second.height > 0;
     const stable = Math.abs(first.top - second.top) <= 1
@@ -463,8 +552,8 @@ test("editor capture preview selects the viewport-sized source", async ({page}) 
   // Font settlement can move the tablet preview across the viewport boundary
   // for a frame. Treat that narrow prefetch zone as near-viewport; the strict
   // no-request assertion is meaningful only when the image starts well away.
-  const startsNearViewport = await preview.evaluate(image => {
-    const bounds = image.getBoundingClientRect();
+  const startsNearViewport = await preview.evaluate(video => {
+    const bounds = video.getBoundingClientRect();
     const margin = 64;
     return bounds.bottom >= -margin && bounds.top <= innerHeight + margin
       && bounds.right >= -margin && bounds.left <= innerWidth + margin;
@@ -477,10 +566,62 @@ test("editor capture preview selects the viewport-sized source", async ({page}) 
   const expected = (page.viewportSize()?.width || 0) <= 1040
     ? "/assets/editor-capture-poster-720.jpg"
     : "/assets/editor-capture-poster.jpg";
-  await expect.poll(() => preview.evaluate(image => (
-    image.currentSrc ? new URL(image.currentSrc).pathname : ""
+  await expect.poll(() => preview.evaluate(video => (
+    video.poster ? new URL(video.poster).pathname : ""
   )))
     .toBe(expected);
+});
+
+test("benchmark score lines terminate at every plotted point", async ({page}) => {
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const panel = page.locator(".benchmark-panel");
+  await panel.scrollIntoViewIfNeeded();
+  await expect(panel).toHaveClass(/\bin\b/);
+  const readRows = () => panel.locator(".plot-row").evaluateAll(elements => elements.map(row => {
+      const rowBox = row.getBoundingClientRect();
+      const dotBox = row.querySelector(".plot-dot").getBoundingClientRect();
+      const line = getComputedStyle(row, "::after");
+      return {
+        delta: Math.abs(Number.parseFloat(line.width) - (dotBox.left + dotBox.width / 2 - rowBox.left)),
+        lineContent: line.content,
+        transform: line.transform,
+      };
+    }));
+  await expect.poll(async () => (await readRows()).every(row => (
+    row.transform === "none" || row.transform === "matrix(1, 0, 0, 1, 0, 0)"
+  )), {timeout: 5_000}).toBe(true);
+
+  const rows = await readRows();
+  expect(rows).toHaveLength(5);
+  expect(rows.every(row => row.lineContent !== "none" && row.delta <= 1.5)).toBe(true);
+  expect(rows.every(row => row.transform === "none" || row.transform === "matrix(1, 0, 0, 1, 0, 0)"))
+    .toBe(true);
+});
+
+test("native pipeline animates in numbered order before its feedback retry", async ({page}, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-desktop-1440");
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const panel = page.locator("[data-pipeline]");
+  await panel.scrollIntoViewIfNeeded();
+  await expect(panel).toHaveAttribute(
+    "data-pipeline-sequence",
+    "01,02,03,04,05,feedback,02,03,04,05,06",
+  );
+  const observed = await panel.evaluate(element => new Promise(resolve => {
+    const seen = [];
+    const record = () => {
+      const step = element.dataset.activeStep;
+      if (step && step !== "idle" && seen.at(-1) !== step) seen.push(step);
+      if (seen.length >= 3) { observer.disconnect(); resolve(seen); }
+    };
+    const observer = new MutationObserver(record);
+    observer.observe(element, {attributes: true, attributeFilter: ["data-active-step"]});
+    record();
+    setTimeout(() => { observer.disconnect(); resolve(seen); }, 3_200);
+  }));
+  expect(observed.slice(0, 3)).toEqual(["01", "02", "03"]);
 });
 
 test("power command demo types the complete command on focus", async ({page}) => {

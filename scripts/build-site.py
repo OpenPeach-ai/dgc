@@ -162,12 +162,12 @@ def figure4(bench: dict[str, Any]) -> str:
     rows = []
     table_rows = []
     aria_scores = []
-    for item in ranked:
+    for index, item in enumerate(ranked):
         cls = " dgc" if item is subject else ""
         score = float(item["pass_at_2"])
         position = 100 * (score - axis_min) / axis_width
         name = html.escape(str(item["name"]))
-        rows.append(f'<div class="plot-row{cls}"><span class="plot-name">{name}</span><span class="plot-dot" style="left:{position:.3f}%" aria-hidden="true"></span><span class="plot-value" style="left:calc({position:.3f}% + 15px)">{score:.1f}%</span></div>')
+        rows.append(f'<div class="plot-row{cls}" style="--score-pos:{position:.3f}%;--plot-index:{index}"><span class="plot-name">{name}</span><span class="plot-dot" aria-hidden="true"></span><span class="plot-value">{score:.1f}%</span></div>')
         aria_scores.append(f'{item["name"]} {score:.1f} percent')
         note = "direct result rows"
         if item is subject:

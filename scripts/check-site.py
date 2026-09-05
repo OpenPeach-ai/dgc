@@ -505,14 +505,26 @@ def check_media(parsed: dict[Path, PageParser], errors: list[str]) -> None:
     if home is None:
         errors.append("index.html: missing")
         return
-    autoplay = [video for video in home.videos if "autoplay" in video]
-    if (len(autoplay) != 1 or "data-hero-video" not in autoplay[0]
-            or autoplay[0].get("preload") != "auto"
-            or not all(key in autoplay[0] for key in ("muted", "loop", "playsinline"))):
-        errors.append("index.html: hero must be the sole muted, looping, inline autoplay video with preload=auto")
-    lazy = [video for video in home.videos if "data-lazy-video" in video]
-    if len(lazy) != 2 or any(video.get("preload") != "none" for video in lazy):
+    hero = [video for video in home.videos if "data-hero-video" in video]
+    if (len(hero) != 1 or "autoplay" not in hero[0] or hero[0].get("preload") != "auto"
+            or not all(key in hero[0] for key in ("muted", "loop", "playsinline"))):
+        errors.append("index.html: hero must be muted, looping, inline autoplay with preload=auto")
+    ambient = [video for video in home.videos
+               if "data-lazy-video" in video and "data-editor-preview" not in video]
+    if len(ambient) != 2 or any(video.get("preload") != "none" for video in ambient):
         errors.append("index.html: both ambient section videos must lazy-load with preload=none")
+    for label in ("index.html", "vscode/index.html"):
+        page = parsed.get(SITE / label)
+        previews = [] if page is None else [
+            video for video in page.videos if "data-editor-preview" in video
+        ]
+        if (len(previews) != 1 or previews[0].get("preload") != "none"
+                or "data-lazy-video" not in previews[0]
+                or not all(key in previews[0]
+                           for key in ("autoplay", "muted", "loop", "playsinline"))):
+            errors.append(
+                f"{label}: editor preview must be muted looping inline autoplay and lazy-load"
+            )
     required = {
         "og-card.png": (1200, 630), "og-benchmark.png": (1200, 630),
         "og-docs.png": (1200, 630), "og-editor.png": (1200, 630),
