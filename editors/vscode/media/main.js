@@ -20,8 +20,12 @@
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
   const THINK = ["off", "low", "medium", "high", "xhigh"];
-  let curMode = "default", curThink = "off", curModel = "", curSubscription = "";
+  let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
+  let curWorkers = 4;
   let lastConfig = null, settingsProviders = [];
+  let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
+    cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
+  let lastCompaction = null, compacting = false;
 
   function applyMode(m) {
     if (!MODES[m]) return;
@@ -39,28 +43,107 @@
   function toggleModeMenu() {
     const mm = $("modemenu");
     if (!mm.hidden) { hideModeMenu(); return; }
-    hideModelMenu();
-    const effortLevels = curSubscription ? [...THINK, "max"] : THINK;
+    hideModelMenu(); hideContextMenu();
     mm.innerHTML =
       `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
       MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
-      `</div><div class="mdiv" role="separator"></div><div role="group" aria-label="Thinking"><div class="mhead" role="presentation"><span>Thinking</span></div>` +
-      effortLevels.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === curThink}" class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb" aria-hidden="true"></span><span>${curSubscription && t === "off" ? "default" : t}</span></button>`).join("") + `</div>`;
+      `</div>`;
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
-    mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setThink", level: r.dataset.think }); hideModeMenu(); });
     mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
     (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
   }
 
   // in-composer model menu (rendered from the `models` message the extension posts)
   function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
-  function renderModelMenu(ids, current, err, subscription, label) {
+  function hideContextMenu() { $("ctxmenu").hidden = true; $("btn-ctx").setAttribute("aria-expanded", "false"); }
+  function fmtTokens(n) { return Number(n || 0).toLocaleString(); }
+  function compactionLabel(strategy) {
+    return ({ provider_native: "Provider-native", model_summary: "Model summary",
+      mechanical: "Safe local fallback", tool_prune: "Local tool-output prune",
+      none: "No change" })[strategy] || "Not compacted yet";
+  }
+  function renderContextMenu() {
+    const used = Math.max(0, Number(contextState.used || 0));
+    const size = Math.max(0, Number(contextState.size || 0));
+    const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
+    $("ctx-used").textContent = `${fmtTokens(used)} / ${fmtTokens(size)}`;
+    $("ctx-pct").textContent = `${pct}%`;
+    $("ctx-fill").style.width = `${pct}%`;
+    $("ctx-free").textContent = `${fmtTokens(Math.max(0, size - used))} free`;
+    const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
+    const thresholdPct = Math.round(threshold * 100);
+    $("ctx-auto").textContent = `auto at ${thresholdPct}%`;
+    $("ctx-usage").textContent = `${fmtTokens(contextState.input_tokens)} in · ` +
+      `${fmtTokens(contextState.output_tokens)} out · ${fmtTokens(contextState.requests)} requests`;
+    $("ctx-compact").disabled = compacting;
+    $("ctx-compact").textContent = compacting ? "Compacting…" : "Compact now";
+    if (lastCompaction) {
+      const before = fmtTokens(lastCompaction.before_tokens), after = fmtTokens(lastCompaction.after_tokens);
+      $("ctx-last").textContent = `${compactionLabel(lastCompaction.strategy)} · ${before} → ${after}`;
+      const detail = String(lastCompaction.fallback_reason || "");
+      $("ctx-detail").textContent = detail;
+      $("ctx-detail").hidden = !detail;
+    } else {
+      $("ctx-last").textContent = `DGC compacts automatically near ${thresholdPct}%.`;
+      $("ctx-detail").textContent = ""; $("ctx-detail").hidden = true;
+    }
+  }
+  function renderContext() {
+    const used = Math.max(0, Number(contextState.used || 0));
+    const size = Math.max(0, Number(contextState.size || 0));
+    const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
+    const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
+    $("ctx").textContent = pct + "%";
+    $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
+    $("btn-ctx").classList.toggle("busy", compacting);
+    $("btn-ctx").title = `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens · ` +
+      `provider ${fmtTokens(contextState.input_tokens)} in / ${fmtTokens(contextState.output_tokens)} out · ` +
+      `${fmtTokens(contextState.cached_input_tokens)} cached · ${fmtTokens(contextState.reasoning_tokens)} reasoning · ` +
+      `${fmtTokens(contextState.requests)} requests · click for details`;
+    $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; open context details`);
+    renderContextMenu();
+  }
+  function toggleContextMenu() {
+    const menu = $("ctxmenu");
+    if (!menu.hidden) { hideContextMenu(); return; }
+    hideModelMenu(); hideModeMenu(); renderContextMenu();
+    menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
+    $("ctx-compact").focus();
+  }
+  function profileMenu(subscription, supportsEffort) {
+    const levels = subscription
+      ? (supportsEffort === false ? ["off"] : [...THINK, "max"])
+      : THINK;
+    const profiles = [...levels, "ultra"];
+    const selected = curUltra ? "ultra" : curThink;
+    const selectedRank = Math.max(0, profiles.indexOf(selected));
+    const buttons = profiles.map((profile, index) => {
+      const display = profile === "ultra" ? "Ultra"
+        : subscription && profile === "off" ? "Default"
+          : profile === "xhigh" ? "XHigh" : profile[0].toUpperCase() + profile.slice(1);
+      const description = profile === "ultra"
+        ? "Deep reasoning + bounded parallel agents"
+        : profile === "off" ? (subscription ? "Vendor default" : "No extra reasoning")
+          : profile === "max" ? "Vendor maximum" : `${display} reasoning`;
+      return `<button type="button" role="menuitemradio" aria-checked="${profile === selected}" aria-label="${display}: ${description}" class="power-stop${index <= selectedRank ? " charged" : ""}${profile === selected ? " selected" : ""}${profile === "ultra" ? " ultra" : ""}" data-profile="${profile}"><span class="power-dot" aria-hidden="true"></span><span>${display}</span></button>`;
+    }).join("");
+    return `<section class="power-card${curUltra ? " is-ultra" : ""}" aria-label="Reasoning profile"><div class="power-head"><div><span class="power-kicker">Reasoning profile</span><strong>${curUltra ? "Ultra" : (subscription && curThink === "off" ? "Default" : curThink)}</strong></div><span class="power-state">${curUltra ? "DGC fleet active" : "Tune model depth"}</span></div><div class="power-rail">${buttons}</div><p>${curUltra ? `Uses the deepest route-safe effort and up to ${curWorkers} bounded sub-agents. Permissions stay unchanged.` : "Higher levels use more time and tokens. Ultra also coordinates independent sub-agents."}</p></section><div class="mdiv" role="separator"></div>`;
+  }
+  function bindProfiles(mm) {
+    mm.querySelectorAll("[data-profile]").forEach((button) => button.onclick = () => {
+      vscode.postMessage({ type: "setReasoningProfile", level: button.dataset.profile });
+      hideModelMenu();
+    });
+  }
+  function renderModelMenu(ids, current, err, subscription, label, supportsEffort) {
     const mm = $("modelmenu");
+    const profile = profileMenu(subscription, supportsEffort);
     if (subscription) {
-      mm.innerHTML = `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
+      mm.innerHTML = profile + `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
         + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>CLI default</span></button>`
         + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
         + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
+      bindProfiles(mm);
       mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
       mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
       mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
@@ -68,15 +151,27 @@
       (mm.querySelector(".sel") || mm.querySelector("button"))?.focus(); return;
     }
     if (err || !ids.length) {
-      mm.innerHTML = `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
+      mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
+      bindProfiles(mm);
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
-    mm.innerHTML = `<div class="mhead"><span>Model</span></div>` +
+    mm.innerHTML = profile + `<div class="mhead"><span>Model</span></div>` +
       ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
+    bindProfiles(mm);
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
     (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
+  }
+
+  function updateModelControl() {
+    const model = curModel || "dgc";
+    const effort = curUltra ? "Ultra" : (curSubscription && curThink === "off" ? "default" : curThink);
+    $("modelname").textContent = model;
+    $("effortname").textContent = effort;
+    $("btn-model").classList.toggle("ultra", curUltra);
+    $("btn-model").title = `${model} · ${effort} reasoning — click to change`;
+    $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
   }
 
   function menuKeys(menu, close, trigger, e) {
@@ -131,6 +226,7 @@
     { name: "connect", description: "provider or a custom LAN host", action: "connect" },
     { name: "mode", description: "permission mode", action: "pickMode" },
     { name: "think", description: "how hard the model reasons", action: "pickThink" },
+    { name: "ultra", description: "deep reasoning + bounded parallel agents", action: "toggleUltra" },
     { name: "goal", description: "inspect, set, pause, resume, or clear the standing objective", action: "goal", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
@@ -285,7 +381,15 @@
     turn = null;
   }
   function ensureTurn() { if (!turn) startTurn(); }
-  function textBlock() { if (!turn.textEl) { turn.textEl = el("div", "text"); turn.block.appendChild(turn.textEl); } return turn.textEl; }
+  // Keep the live activity row at the visual edge of the active turn. New response text,
+  // tool cards, diffs and decisions are inserted immediately before it, so a user following
+  // the stream always sees that DGC is still running beneath the newest content.
+  function appendTurnContent(node) { turn.block.insertBefore(node, turn.act); return node; }
+  function appendConversationContent(node) {
+    if (turn) return appendTurnContent(node);
+    log.appendChild(node); return node;
+  }
+  function textBlock() { if (!turn.textEl) { turn.textEl = appendTurnContent(el("div", "text")); } return turn.textEl; }
   function breakText() { if (turn) { turn.textEl = null; turn._buf = ""; } }
 
   function openFileBtn(path, line) {
@@ -340,7 +444,7 @@
     const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
     c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
     setToolStatus(c, "running");
-    turn.block.appendChild(c); breakText(); scroll(); return c;
+    appendTurnContent(c); breakText(); return c;
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");
@@ -371,7 +475,7 @@
     if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
-  function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
+  function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; appendConversationContent(c); breakText(); return c; }
   function requestCard(c, id) { c.dataset.requestId = String(id); return c; }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
@@ -383,7 +487,7 @@
   function expireOpenRequests() {
     document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
   }
-  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
+  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
   // ---- standing goal — durable state above the composer, with an active-work clock ----
   let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
@@ -588,15 +692,8 @@
         break;
       }
       case "context": {
-        const pct = ev.size ? Math.min(100, Math.round((ev.used / ev.size) * 100)) : 0;
-        $("ctx").textContent = pct + "%";
-        $("btn-ctx").classList.toggle("warn", pct >= 85);
-        const fmt = (n) => Number(n || 0).toLocaleString();
-        $("btn-ctx").title = `Context ${fmt(ev.used)} / ${fmt(ev.size)} estimated tokens · ` +
-          `provider ${fmt(ev.input_tokens)} in / ${fmt(ev.output_tokens)} out · ` +
-          `${fmt(ev.cached_input_tokens)} cached · ${fmt(ev.reasoning_tokens)} reasoning · ` +
-          `${fmt(ev.requests)} requests · click to compact`;
-        $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; compact context`);
+        contextState = { ...contextState, ...ev };
+        renderContext();
         break;
       }
       case "history": renderHistory(ev.items || []); break;
@@ -612,6 +709,9 @@
         break;
       case "config":
         lastConfig = ev;
+        curUltra = ev.ultra_mode === true;
+        curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
+        updateModelControl();
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
@@ -629,7 +729,7 @@
           const reasonId = `reasoning-${++disclosureId}`;
           d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
           d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " thinking"; d.setAttribute("aria-expanded", String(open)); };
-          turn.block.appendChild(d); turn.block.appendChild(r); turn.reasonEl = r;
+          appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
         }
         turn.reasonEl.textContent += ev.text; break;
       case "stream_end": breakText(); break;
@@ -657,7 +757,7 @@
         if (ev.is_error) {
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
-        if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
+        if (ev.is_diff && ev.diff) appendTurnContent(renderDiff(ev.diff));
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
       }
@@ -810,7 +910,7 @@
       }
       case "todos": {
         ensureTurn();
-        if (!turn._todo) { turn._todo = el("div", "todos"); turn.block.appendChild(turn._todo); }
+        if (!turn._todo) { turn._todo = appendTurnContent(el("div", "todos")); }
         const TG = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
         const dn = ev.todos.filter((t) => t.status === "done").length;
         turn._todo.innerHTML = `<div class="thead">Tasks <span>${dn}/${ev.todos.length}</span></div>` +
@@ -829,7 +929,7 @@
         stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: ev.id }); c.classList.add("stopped"); };
         row.appendChild(open); row.appendChild(stop); c.appendChild(row);
         c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        turn.block.appendChild(c); breakText(); scroll();
+        appendTurnContent(c); breakText();
         break;
       }
       case "artifacts": {
@@ -901,6 +1001,7 @@
       }
       case "status":
         sysLine(`${ev.model} · ${ev.mode} · thinking ${ev.think} · context ${ev.context_used}/${ev.context_size}`
+          + (ev.ultra_mode ? " · Ultra" : "")
           + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
         break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
@@ -911,7 +1012,19 @@
           if (card.dataset.requestId === String(ev.id)) resolveCard(card);
         });
         sysLine("Approval request expired; the action was denied.", true); break;
-      case "compacted": sysLine("context compacted"); break;
+      case "compacted": {
+        compacting = false; lastCompaction = ev;
+        contextState = { ...contextState, used: ev.after_tokens, size: ev.context_size };
+        renderContext();
+        const before = fmtTokens(ev.before_tokens), after = fmtTokens(ev.after_tokens);
+        const lead = ev.status === "unchanged" ? "Context unchanged"
+          : ev.strategy === "tool_prune" ? "Context pruned"
+            : ev.strategy === "provider_native" ? "Context compacted natively"
+              : ev.strategy === "mechanical" ? "Context compacted safely on-device"
+                : "Context compacted";
+        sysLine(`${lead} · ${before} → ${after} estimated tokens`);
+        break;
+      }
       case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
       case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(); setSending(false); break;
     }
@@ -1063,7 +1176,15 @@
     }
   });
   send.onclick = () => { if (streaming) doStop(); else submit(); };
-  $("btn-ctx").onclick = () => vscode.postMessage({ type: "compact" });
+  $("btn-ctx").onclick = (e) => { e.stopPropagation(); toggleContextMenu(); };
+  $("ctx-compact").onclick = () => {
+    if (compacting) return;
+    compacting = true; renderContext();
+    vscode.postMessage({ type: "compact" });
+  };
+  $("ctxmenu").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); $("btn-ctx").focus(); }
+  });
   $("btn-mode").onclick = (e) => { e.stopPropagation(); toggleModeMenu(); };
   $("btn-add").onclick = () => {                       // insert @ at the caret → file popover
     input.focus();
@@ -1078,13 +1199,14 @@
     const mm = $("modelmenu");
     if (!mm.hidden) { hideModelMenu(); return; }
     mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu();
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu();
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
+    if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
   });
 
   // ---- settings page ----
@@ -1092,11 +1214,11 @@
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
     "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
-    "sandbox_network", "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+    "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
     "artifact_in_plan", "tool_profile", "max_parallel_tasks",
     "subscription_engine", "subscription_model", "subscription_effort"];
   const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
-    "show_reasoning", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
+    "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
@@ -1111,6 +1233,7 @@
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
       sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
       show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      ultra_mode: String(cfg.ultra_mode === true),
       plan_artifact: String(cfg.plan_artifact !== false),
       artifact_autostart: String(cfg.artifact_autostart !== false),
       artifact_in_plan: String(cfg.artifact_in_plan === true),
@@ -1251,14 +1374,13 @@
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
       curSubscription = msg.state.subscriptionEngine || "";
-      $("modelname").textContent = curModel || "dgc";
-      $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change";
-      $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
+      curUltra = msg.state.ultra === true;
+      updateModelControl();
       if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label); }
+    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "surface_open") { openSurface(msg.surface); }
     else if (msg.type === "command_menu") {
@@ -1270,6 +1392,11 @@
     }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { setSending(false); }
+    else if (msg.type === "compact_state") {
+      compacting = msg.state === "working";
+      renderContext();
+      if (msg.error) sysLine(String(msg.error), true);
+    }
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
       attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
     }

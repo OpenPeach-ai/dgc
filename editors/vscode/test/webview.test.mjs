@@ -58,6 +58,15 @@ function rootHex(name) {
   return value;
 }
 
+test("webview shell pins the composer and gives scrolling exclusively to the transcript", () => {
+  assert.match(mainCss, /html, body\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/s,
+    "the outer webview document must not acquire a second vertical scrollbar");
+  assert.match(mainCss, /#log\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overflow-anchor:\s*none/s,
+    "the shrinking transcript must own scrolling without browser scroll-anchor jumps");
+  assert.match(mainCss, /footer\s*\{[^}]*flex:\s*0 0 auto/s,
+    "the composer footer must remain outside the transcript scrollport");
+});
+
 // Pull the real HTML template out of panel.ts's html() and neutralise the
 // `${nonce}` / `${css}` / `${csp}` interpolations so the markup stays in sync
 // with what ships — the test never hand-rolls its own DOM.
@@ -176,10 +185,49 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   send({ type: "event", event: { type: "turn_end" } });
   assert.ok(doc.querySelector(".thinking.done"), "turn footer did not settle");
+  assert.equal(doc.querySelector(".msg.dgc").lastElementChild, doc.querySelector(".thinking.done"),
+    "turn timing should remain below the completed response");
   assert.ok([...doc.querySelectorAll(".text")].at(-1).classList.contains("final"),
     "the last assistant segment should be marked as the final answer");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
+  dom.window.close();
+});
+
+test("live activity follows the newest response content without stealing an intentional scroll", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const log = doc.getElementById("log");
+  send({ type: "event", event: { type: "turn_start" } });
+  const response = doc.querySelector(".msg.dgc");
+  const activity = response.querySelector(".thinking");
+
+  Object.defineProperties(log, {
+    clientHeight: { configurable: true, get: () => 100 },
+    scrollHeight: { configurable: true, get: () => 1000 },
+    scrollTop: { configurable: true, writable: true, value: 900 },
+  });
+  send({ type: "event", event: { type: "text_delta", text: "First streamed line.\nSecond streamed line." } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest streamed text");
+  assert.equal(log.scrollTop, 1000, "a reader at the tail should follow new streamed text");
+
+  log.scrollTop = 200;
+  send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/app.ts", call_id: "tail-1" } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest tool call");
+  assert.equal(log.scrollTop, 200, "new tool content must not steal an intentional upward scroll");
+
+  send({ type: "event", event: { type: "tool_result", name: "read_file", call_id: "tail-1",
+    is_diff: true, diff: "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new" } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest diff");
+  assert.equal(log.scrollTop, 200, "a diff must preserve the reader's upward scroll");
+
+  send({ type: "event", event: { type: "turn_end" } });
+  assert.equal(response.lastElementChild, activity,
+    "settled turn timing should remain at the response tail");
+  assert.ok(activity.classList.contains("done"));
+  assert.deepEqual(errors, [], "turn-tail activity flow raised JS errors");
   dom.window.close();
 });
 
@@ -555,7 +603,7 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   dom.window.close();
 });
 
-test("subscription composer controls offer vendor default/free-form models and wait for thinking ack", (t) => {
+test("combined model/reasoning control offers Ultra while permissions stay separate", (t) => {
   const { dom, errors, posted, send, doc } = makeDom();
   t.after(() => dom.window.close());
   send({ type: "state", state: {
@@ -586,20 +634,41 @@ test("subscription composer controls offer vendor default/free-form models and w
   assert.equal(posted.at(-1).type, "setModel");
   assert.equal(posted.at(-1).model, "sonnet");
 
-  const modeButton = doc.getElementById("btn-mode");
-  modeButton.click();
-  assert.ok(doc.querySelector('[data-think="xhigh"]'), "subscription thinking menu should offer xhigh");
-  assert.ok(doc.querySelector('[data-think="max"]'), "subscription thinking menu should offer max");
-  const high = doc.querySelector('[data-think="high"]');
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["opus", "sonnet"], current: "sonnet", subscription: true,
+    supportsEffort: true, label: "Claude Code" });
+  assert.ok(modelMenu.querySelector('[data-profile="xhigh"]'), "subscription profile should offer xhigh");
+  assert.ok(modelMenu.querySelector('[data-profile="max"]'), "subscription profile should offer max");
+  assert.ok(modelMenu.querySelector('[data-profile="ultra"]'), "every route should offer DGC Ultra");
+  const high = modelMenu.querySelector('[data-profile="high"]');
   high.click();
-  assert.equal(posted.at(-1).type, "setThink");
+  assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "high");
   // A rejected vendor effort must not leave an optimistic selection behind. Only a backend
   // state/think_changed acknowledgement is allowed to change the visible value.
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true,
+    supportsEffort: true, label: "Codex" });
+  assert.equal(modelMenu.querySelector('[data-profile="high"]').classList.contains("selected"), false);
+  assert.equal(modelMenu.querySelector('[data-profile="off"]').classList.contains("selected"), true);
+
+  const modeButton = doc.getElementById("btn-mode");
   modeButton.click();
-  assert.equal(doc.querySelector('[data-think="high"]').classList.contains("sel"), false);
-  assert.equal(doc.querySelector('[data-think="off"]').classList.contains("sel"), true);
-  assert.equal(doc.querySelector('[data-think="off"] span:last-child').textContent, "default");
+  assert.equal(doc.getElementById("modemenu").querySelector("[data-profile], [data-think]"), null,
+    "permission control must not mix in reasoning settings");
+
+  send({ type: "state", state: {
+    model: "Codex default", mode: "default", think: "off", subscriptionEngine: "codex", ultra: true,
+  } });
+  assert.equal(doc.getElementById("effortname").textContent, "Ultra");
+  assert.ok(doc.getElementById("btn-model").classList.contains("ultra"));
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true,
+    supportsEffort: true, label: "Codex" });
+  assert.ok(modelMenu.querySelector(".power-card.is-ultra"));
+  modelMenu.querySelector('[data-profile="off"]').click();
+  assert.equal(posted.at(-1).type, "setReasoningProfile");
+  assert.equal(posted.at(-1).level, "off");
   assert.deepEqual(errors, []);
 });
 
@@ -615,7 +684,7 @@ test("provider runtime settings and actual usage round-trip through the webview"
     mode: "default", think: "xhigh", api_mode: "responses", provider_state: "server",
     subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
     fallback_api_key: "must-not-enter-webview",
-    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
+    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000, ultra_mode: true,
     subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "max",
     subscription_engines: [
       { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
@@ -631,6 +700,7 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
   assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
+  assert.equal(doc.getElementById("s-ultra_mode").value, "true");
   assert.equal(doc.getElementById("s-fallback_api_key").value, "",
     "backend config must never populate a secret field in the webview");
   doc.getElementById("s-fallback_api_key").value = "new-fallback-secret";
@@ -645,6 +715,7 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.subscription_model, "gpt-5.6");
   assert.equal(saved.values.think, "xhigh");
   assert.equal(saved.values.subscription_effort, "max");
+  assert.equal(saved.values.ultra_mode, true);
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",
@@ -671,11 +742,31 @@ test("provider runtime settings and actual usage round-trip through the webview"
     "engines without an effort flag must not accept a stale effort override");
 
   send({ type: "event", event: { type: "context", used: 1000, size: 4000,
+    compact_threshold: .75, compact_at: 3000,
     input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,
     reasoning_tokens: 250, requests: 7 } });
   assert.equal(doc.getElementById("ctx").textContent, "25%");
   assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
   assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
+  doc.getElementById("btn-ctx").click();
+  assert.equal(doc.getElementById("ctxmenu").hidden, false);
+  assert.equal(doc.getElementById("ctx-used").textContent, "1,000 / 4,000");
+  assert.equal(doc.getElementById("ctx-auto").textContent, "auto at 75%");
+  assert.match(doc.getElementById("ctx-last").textContent, /near 75%/);
+  assert.match(doc.getElementById("ctx-usage").textContent, /3,000 in.*800 out.*7 requests/);
+  doc.getElementById("ctx-compact").click();
+  assert.equal(posted.at(-1).type, "compact");
+  assert.equal(doc.getElementById("ctx-compact").disabled, true);
+  assert.equal(doc.getElementById("ctx-compact").textContent, "Compacting…");
+  send({ type: "event", event: { type: "compacted", status: "compacted",
+    strategy: "mechanical", trigger: "manual", before_tokens: 1000, after_tokens: 500,
+    context_size: 4000, freed_tokens: 500,
+    fallback_reason: "the summarizer was unavailable (LLMError)" } });
+  assert.equal(doc.getElementById("ctx").textContent, "13%");
+  assert.equal(doc.getElementById("ctx-compact").disabled, false);
+  assert.match(doc.getElementById("ctx-last").textContent, /Safe local fallback.*1,000.*500/);
+  assert.match(doc.getElementById("ctx-detail").textContent, /summarizer was unavailable/);
+  assert.match(doc.getElementById("log").textContent, /Context compacted safely on-device/);
   assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
   dom.window.close();
 });

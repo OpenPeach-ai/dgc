@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import sys
 import threading
@@ -67,6 +68,7 @@ _EDITOR_CONTEXT_LIMIT = 64_000
 _CONFIG_BOOLEAN_KEYS = frozenset({
     "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
     "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
+    "ultra_mode",
 })
 _CONFIG_STRING_LIMITS = {
     "subagent_model": 512,
@@ -411,6 +413,10 @@ class HeadlessUI:
     def info(self, message: str) -> None:
         self.em.emit("info", message=message)
 
+    def context_compacted(self, result: dict) -> None:
+        """Carry the exact post-save compaction outcome instead of parsing a status sentence."""
+        self.em.emit("compacted", **result)
+
     def error(self, message: str) -> None:
         self.em.emit("error", message=message)
 
@@ -523,9 +529,11 @@ class Backend:
                           "headless_mcp_call": True, "headless_skill_catalog": True,
                           "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
-                          "hook_activity": True, "correlated_state_requests": True},
+                          "hook_activity": True, "correlated_state_requests": True,
+                          "ultra_profile": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
+            ultra_mode=bool(self.config.get("ultra_mode", False)),
             subagent_base_url=self.config.get("subagent_base_url", ""),
             fallback_base_url=self.config.get("fallback_base_url", ""),
             project_root=str(self.config.project_root),
@@ -552,7 +560,10 @@ class Backend:
         effective = getattr(self.agent, "context_size", None)
         if callable(effective):
             return int(effective())
-        return int(self.config.get("context_size", 32768))
+        config_get = getattr(self.config, "get", None)
+        if callable(config_get):
+            return int(config_get("context_size", 32768))
+        return int(getattr(self.config, "data", {}).get("context_size", 32768))
 
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
@@ -601,7 +612,10 @@ class Backend:
             return False
         mode = str(self.config.data.get("mode", "default"))
         model = str(self.config.get("subscription_model", "")).strip()
-        effort = str(self.config.get("subscription_effort", "")).strip()
+        configured_effort = str(self.config.get("subscription_effort", "")).strip()
+        from .ultra import delegated_effort, delegated_prompt
+        effort = delegated_effort(
+            self.config, engine.key, configured_effort, engine.supports_effort())
         session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
         names: dict[str, str] = {}
         diffs: dict[str, str] = {}
@@ -638,7 +652,7 @@ class Backend:
 
         def delegate(safe_prompt: str) -> dict:
             result = subs.run_turn(
-                engine, safe_prompt, self.config.project_root,
+                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self.agent.cancelled.is_set,
                 model=model, effort=effort)
@@ -1050,7 +1064,15 @@ class Backend:
         except Exception:
             used = 0
         totals = getattr(self.agent, "usage_totals", {})
-        self.em.emit("context", used=used, size=self._context_window_size(),
+        size = self._context_window_size()
+        try:
+            threshold = float(self.config.get("compact_threshold", 0.85))
+        except (AttributeError, TypeError, ValueError):
+            threshold = 0.85
+        if not math.isfinite(threshold) or threshold <= 0:
+            threshold = 0.85
+        self.em.emit("context", used=used, size=size,
+                     compact_threshold=threshold, compact_at=max(0, int(size * threshold)),
                      input_tokens=int(totals.get("input_tokens", 0)),
                      output_tokens=int(totals.get("output_tokens", 0)),
                      cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
@@ -1099,6 +1121,7 @@ class Backend:
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
                      preserve_thinking=bool(c.get("preserve_thinking", False)),
+                     ultra_mode=bool(c.get("ultra_mode", False)),
                      code_action=bool(c.get("code_action", False)),
                      suggest=bool(c.get("suggest", True)),
                      plan_artifact=bool(c.get("plan_artifact", True)),
@@ -1539,8 +1562,10 @@ class Backend:
                            if active_engine and callable(config_get) else self.config.model)
             self.em.emit("model_changed", model=shown_model, base_url=self.config.base_url,
                          **_request_fields(request_id))
-            if context_changed:
-                self._emit_context()
+            # A model refresh can change the provider-advertised effective limit even when the
+            # configured recommendation happens to be identical. Never leave the editor meter on
+            # the prior model's window.
+            self._emit_context(request_id if context_changed else None)
         elif t == "list_models":
             request_id = redact_value(
                 str(cmd.get("request_id") or ""), secret_values(self.config))[:128]
@@ -1634,6 +1659,7 @@ class Backend:
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, **_request_fields(request_id))
+            self._emit_context(request_id)
             self._emit_goal()
         elif t == "name_session":
             name = str(cmd.get("name") or "").strip()[:200]
@@ -1723,10 +1749,13 @@ class Backend:
                              f"{result.error or result.status}.{conflicts}")
             self._emit_retained_tasks(request_id)
         elif t == "compact":
-            if not self.agent.maybe_compact(force=True):
-                self.em.emit("error", message=self.agent._last_persist_error
+            if not self.agent.maybe_compact(force=True, trigger="manual", notify=False):
+                self.em.emit("command_rejected", command=t, reason="compaction_failed",
+                             message=self.agent._last_persist_error
                              or "context compaction failed", **_request_fields(request_id))
                 return
+            self.em.emit("compacted", **self.agent.compaction_status(),
+                         **_request_fields(request_id))
             self._emit_context(request_id)
         elif t == "list_artifacts":
             self._emit_artifacts(request_id)
@@ -1820,6 +1849,10 @@ class Backend:
                     save()
                 if refresh:
                     self.agent.refresh_client()
+                elif "ultra_mode" in values:
+                    # Ultra changes the trusted system policy/tool exposure immediately without
+                    # rebuilding the provider transport.
+                    self.agent._refresh_system()
                 # These settings are cached on the agent at construction; publish them only after
                 # both the durable commit and any client rebuild have succeeded.
                 if "autonomous_gate" in values:
@@ -1853,6 +1886,8 @@ class Backend:
                 if has_persist_flag:
                     self.config._persist = persist_before
             self._emit_config(request_id)
+            if "context_size" in values:
+                self._emit_context(request_id)
         elif t == "get_config":
             self._emit_config(request_id)
         elif t == "status":
@@ -1864,6 +1899,7 @@ class Backend:
             self.em.emit("status", model=active_model, mode=self.agent.mode,
                          think=active_think, base_url=self.config.base_url,
                          subscription_engine=active_engine,
+                         ultra_mode=bool(self.config.get("ultra_mode", False)),
                          goal={"text": getattr(self.agent, "goal", ""),
                                "status": getattr(self.agent, "goal_status", "none"),
                                "elapsed_seconds": self._goal_elapsed_seconds()},

@@ -66,6 +66,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 aliases=("plan-view", "viewplan")),
     CommandSpec("think", "how hard the model reasons: off · low · medium · high · xhigh", _TCE,
                 "pickThink", usage="think [LEVEL]"),
+    CommandSpec("ultra", "extended reasoning + proactive bounded parallel agents", _TCE,
+                "toggleUltra", usage="ultra [on|off]"),
     CommandSpec("thoughts", "show or hide the model's thinking in the transcript",
                 frozenset({"tui", "editor"}), "toggleThoughts",
                 aliases=("reasoning", "reason")),

@@ -279,6 +279,8 @@ DEFAULTS: dict = {
     "capability_cache_ttl_s": 300,               # retry a rejected endpoint/model feature after this interval
     "mode": "default",                          # default | acceptEdits | plan | auto
     "thinking": "off",                          # off | low | medium | high
+    "ultra_mode": False,                        # extended reasoning + proactive bounded sub-agents;
+                                                 #   never broadens the selected permission mode
     "think_budget_tokens": 8000,                # over-thinking watchdog: abort+retry-with-less if a
                                                 #   model reasons past this many tokens with no output (0=off)
     "max_tokens": 16384,                        # output-token backstop per request; length-truncation
@@ -290,8 +292,9 @@ DEFAULTS: dict = {
     "top_k": "",                                # only the top-K tokens (Ollama/llama.cpp/vLLM/SGLang)
     "min_p": "",                                # min-probability floor (llama.cpp/vLLM/SGLang)
     "context_size": 32768,
-    "max_turns": 80,                            # max tool-use iterations per user turn (the grind +
-                                                #   doom-loop guards catch thrash, so this is a backstop)
+    "max_turns": 0,                             # no fixed tool-iteration cap by default: a progressing turn
+                                                #   runs until completion/cancel/deadline. Set >0 only as an
+                                                #   explicit emergency backstop; no-progress guards still apply.
     "turn_budget_s": 0,                         # wall-clock seconds per turn before DGC triages to finish
                                                 #   (0 = OFF: no time pressure — for slow local models). When
                                                 #   >0 (e.g. a benchmark cap), DGC nudges itself to land+verify
@@ -674,6 +677,13 @@ class Config:
         # Remember which keys the user actually wrote, so a stored value that happens to equal a
         # default is never mistaken for "unset".
         self._explicit_keys = set(raw)
+        # Releases through 0.26 wrote their then-default 40/80 iteration ceiling into every config,
+        # making long, productive coding turns stop and ask the user to say "continue". Those values
+        # were not evidence of an intentional limit, so migrate both historical defaults to the new
+        # Codex-like unlimited setting. Any other positive custom value remains an explicit backstop.
+        if raw.get("max_turns") in (40, 80):
+            raw["max_turns"] = 0
+            migrated = True
         self.data.update(raw)
         prior_provider_identity = _clean_provider_identity_map(
             secrets.get("provider_identity", {}))

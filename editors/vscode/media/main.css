@@ -14,7 +14,9 @@
   --mono: var(--vscode-editor-font-family), ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; padding: 0; }
+/* The webview is an app shell, not a document page. Keep wheel/touch scrolling inside the
+   transcript so the composer can never drift upward with a second body scrollbar. */
+html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
 button, input, select, textarea { font: inherit; }
 :where(button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px;
@@ -23,13 +25,15 @@ button, input, select, textarea { font: inherit; }
   padding: 0 !important; margin: -1px !important; overflow: hidden !important;
   clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 body {
-  display: flex; flex-direction: column;
+  display: flex; flex-direction: column; min-width: 0;
   font-family: var(--sans); font-size: 13px;
   color: var(--text); background: var(--bg);
   -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes ultra-sweep { from { transform: translateX(-135%); } to { transform: translateX(360%); } }
+@keyframes ultra-breathe { 0%,100% { opacity: .42; transform: scale(.88); } 50% { opacity: 1; transform: scale(1.08); } }
 
 /* thin, unobtrusive scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -46,7 +50,8 @@ body {
 #phead .pd:hover { color: var(--muted); }
 
 /* transcript */
-#log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 13px; }
+#log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior: contain; overflow-anchor: none; padding: 14px; display: flex; flex-direction: column; gap: 13px; }
 .msg { display: flex; flex-direction: column; gap: 5px; }
 .role { font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
 .role.dgc { color: var(--accent-text); }
@@ -85,6 +90,9 @@ body {
   .thinking .tmark path { opacity: 1; }
   #phead .pm .cur, .tool .dot.run { animation: none; }
   .tool .chev { transition: none; }
+  .power-card.is-ultra::after, .power-card.is-ultra .power-dot { animation: none !important; }
+  #btn-ctx.busy .codicon { animation: none !important; }
+  .context-track span { transition: none !important; }
 }
 
 .thinking .verb { color: var(--muted); }
@@ -192,7 +200,8 @@ button.opt.rec .n { color: var(--accent-text); }
 .sys.err { color: var(--err); }
 
 /* composer */
-footer { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-top: 1px solid var(--border); background: var(--bg); }
+footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direction: column; gap: 5px;
+  padding: 10px; border-top: 1px solid var(--border); background: var(--bg); }
 #goalbar { display: flex; align-items: center; gap: 9px; margin: 0 1px 4px; padding: 8px 8px 8px 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); box-shadow: inset 2px 0 0 var(--accent); }
 #goalbar[hidden] { display: none; }
 #goalbar[data-status="blocked"] { box-shadow: inset 2px 0 0 var(--faint); }
@@ -227,7 +236,33 @@ footer { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-
 .fbtn.mode:hover { color: var(--text); }
 .fbtn.mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fbtn .codicon { font-size: 15px; }
+.model-control { height: 32px; max-width: min(230px, 45vw) !important; padding: 2px 6px 2px 7px; gap: 6px; }
+.model-control .model-copy { min-width: 0; display: grid; justify-items: start; gap: 1px; }
+.model-control #modelname { max-width: 145px; color: var(--text); font: 500 11.5px/1.05 var(--mono); }
+.model-control #effortname { color: var(--faint); font: 600 8.5px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+.model-control .model-chevron { color: var(--faint); font-size: 12px; }
+.model-control.ultra { color: var(--accent-text); background: var(--accent-soft); box-shadow: inset 0 -1px 0 var(--accent); }
+.model-control.ultra #effortname { color: var(--lav); }
 #btn-ctx.warn { color: var(--err); }
+#btn-ctx.busy .codicon { color: var(--lav); animation: context-pulse 1.1s ease-in-out infinite; }
+.context-picker { flex: none; }
+.cmenu.context-menu { right: auto; left: 0; width: min(300px, calc(100vw - 20px)); padding: 12px; }
+.context-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.context-head > div { min-width: 0; display: grid; gap: 4px; }
+.context-kicker { color: var(--faint); font: 650 8.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.context-head strong { color: var(--text-strong); font: 600 13px/1.15 var(--mono); font-variant-numeric: tabular-nums; }
+#ctx-pct { color: var(--accent-text); font: 700 18px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.context-track { height: 4px; margin-top: 11px; overflow: hidden; border-radius: 999px; background: var(--border); }
+.context-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--lav)); transition: width .24s ease; }
+.context-split { display: flex; justify-content: space-between; margin-top: 6px; color: var(--faint); font: 500 8.5px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.context-usage { margin-top: 11px; padding: 8px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); background: var(--code); font: 500 9px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.context-last { display: flex; align-items: flex-start; gap: 7px; margin-top: 10px; color: var(--muted); font: 400 10px/1.35 var(--sans); }
+.context-last .codicon { flex: none; margin-top: 1px; color: var(--accent-text); }
+.context-detail { margin: 5px 0 0 22px; color: var(--faint); font: 400 9px/1.35 var(--sans); }
+.context-action { width: 100%; min-height: 30px; margin-top: 11px; border: 1px solid rgba(124,92,255,.55); border-radius: 7px; color: var(--text-strong); background: var(--accent-soft); cursor: pointer; font: 600 10px/1 var(--mono); }
+.context-action:hover:not(:disabled) { border-color: var(--accent); background: rgba(124,92,255,.2); }
+.context-action:disabled { cursor: wait; color: var(--faint); opacity: .75; }
+@keyframes context-pulse { 50% { opacity: .35; transform: scale(.88); } }
 .csend { height: 27px; width: 27px; margin-left: 3px; border: none; border-radius: 7px; cursor: pointer; color: #fff; background: var(--accent-fill); display: inline-flex; align-items: center; justify-content: center; }
 .csend:hover { background: var(--accent-hover); }
 .csend[data-mode="auto"] { background: var(--err); }
@@ -235,8 +270,12 @@ footer { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-
 
 /* mode / model picker menus (open upward) */
 .picker { position: relative; }
-.cmenu { position: absolute; bottom: 100%; right: 0; margin-bottom: 8px; min-width: 280px; max-height: 340px; overflow-y: auto; padding: 5px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); z-index: 20; }
-#modelmenu { min-width: 230px; }
+.cmenu { position: absolute; bottom: 100%; right: 0; margin-bottom: 8px;
+  width: min(310px, calc(100vw - 20px)); min-width: min(280px, calc(100vw - 20px));
+  max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; padding: 5px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); z-index: 20; }
+#modelmenu { width: min(330px, calc(100vw - 20px)); }
 .cmenu .mhead { padding: 6px 9px 4px; font: 400 11px/1 var(--mono); color: var(--faint); display: flex; justify-content: space-between; align-items: center; }
 .cmenu .mhead kbd { background: var(--code); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font: 400 10px/1 var(--mono); color: var(--muted); }
 .cmenu .mrow { display: flex; align-items: center; gap: 9px; width: calc(100% - 4px); margin: 1px 2px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; font: 400 12.5px/1.3 var(--sans); color: var(--text); }
@@ -246,6 +285,54 @@ footer { display: flex; flex-direction: column; gap: 5px; padding: 10px; border-
 .cmenu .mrow.sel .mi { color: var(--accent-text); }
 .cmenu .mrow .md { color: var(--faint); font: 400 11px/1.2 var(--mono); margin-left: auto; text-align: right; }
 .cmenu .mdiv { height: 1px; background: var(--border); margin: 5px 0; }
+
+/* Combined model + reasoning selector. The continuous rail reads as one power scale while every
+   stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
+.power-card { position: relative; isolation: isolate; overflow: hidden; margin: 1px; padding: 10px 9px 9px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--code); }
+.power-card::after { content: ""; position: absolute; z-index: -1; inset: -40% auto -40% -22%; width: 32%;
+  background: linear-gradient(90deg, transparent, rgba(167,139,250,.18), transparent); opacity: 0; pointer-events: none; }
+.power-card.is-ultra { border-color: rgba(124,92,255,.65); box-shadow: inset 0 0 24px rgba(124,92,255,.07), 0 0 18px rgba(124,92,255,.08); }
+.power-card.is-ultra::after { opacity: 1; animation: ultra-sweep 2.8s linear infinite; }
+.power-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.power-head > div { min-width: 0; display: grid; gap: 3px; }
+.power-kicker { color: var(--faint); font: 600 8.5px/1 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
+.power-head strong { color: var(--text-strong); font: 650 13px/1.1 var(--sans); text-transform: capitalize; }
+.power-state { max-width: 120px; color: var(--faint); font: 500 9px/1.25 var(--mono); text-align: right; }
+.power-card.is-ultra .power-head strong, .power-card.is-ultra .power-state { color: var(--lav); }
+.power-rail { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(37px, 1fr);
+  gap: 0; margin: 11px 0 7px; overflow-x: auto; scrollbar-width: none; }
+.power-rail::-webkit-scrollbar { display: none; }
+.power-rail::before { content: ""; position: absolute; top: 5px; right: 18px; left: 18px; height: 1px;
+  background: linear-gradient(90deg, var(--border-strong), var(--accent)); }
+.power-stop { position: relative; z-index: 1; min-width: 36px; display: grid; justify-items: center; gap: 6px;
+  padding: 0 2px; border: 0; background: transparent; color: var(--faint); cursor: pointer;
+  font: 600 8px/1 var(--mono); text-transform: uppercase; }
+.power-stop:hover, .power-stop:focus-visible { color: var(--text); }
+.power-dot { width: 11px; height: 11px; border: 2px solid var(--border-strong); border-radius: 50%;
+  background: var(--code); box-shadow: 0 0 0 2px var(--code); }
+.power-stop.charged .power-dot { border-color: var(--accent); background: var(--accent); }
+.power-stop.selected { color: var(--text); }
+.power-stop.selected .power-dot { box-shadow: 0 0 0 2px var(--code), 0 0 0 4px rgba(124,92,255,.25); }
+.power-stop.ultra .power-dot { border-color: var(--lav); }
+.power-card.is-ultra .power-stop.ultra .power-dot { background: var(--lav); animation: ultra-breathe 1.7s ease-in-out infinite; }
+.power-card p { margin: 8px 1px 0; color: var(--faint); font: 400 9.5px/1.45 var(--sans); }
+
+@media (max-width: 360px) {
+  footer { padding-right: 7px; padding-left: 7px; }
+  #cfooter { gap: 0; padding-right: 4px; padding-left: 4px; }
+  #btn-settings, #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
+  .model-control { max-width: 112px !important; }
+  .model-control #modelname { max-width: 72px; }
+  .cmenu { right: -35px; }
+  #modelmenu { right: -70px; }
+  /* The context trigger follows two 28px controls. Anchor its wide detail card back to the
+     viewport gutter so the right border remains visible even in a 300px Cursor sidebar. */
+  .cmenu.context-menu { right: auto; left: -60px; }
+  .power-card { padding-right: 6px; padding-left: 6px; }
+  .power-rail { grid-auto-columns: minmax(32px, 1fr); }
+  .power-stop { min-width: 31px; font-size: 7px; }
+}
 
 /* settings and feature-management overlays */
 #settings, .panel-overlay { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; background: var(--bg); }
@@ -362,7 +449,7 @@ pre.code .copy:focus-visible { opacity: 1; }
     outline: 2px solid Highlight !important; outline-offset: 2px;
   }
   .tool, .diff, .card, .todos, .artifact, .md-table, .md-table th, .md-table td, #goalbar,
-  #cbox, .cmenu, .pop,
+  #cbox, .cmenu, .pop, .power-card, .power-dot,
   #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
     border-color: CanvasText;
   }

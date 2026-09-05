@@ -78,7 +78,7 @@ beforeEach(() => {
 
 function settings(overrides = {}) {
   return {
-    mode: "default", think: "off", subscription_engine: "",
+    mode: "default", think: "off", ultra_mode: false, subscription_engine: "",
     subscription_model: "", subscription_effort: "",
     api_mode: "auto", provider_state: "stateless", prompt_cache: true,
     sandbox: false, sandbox_network: false, show_reasoning: true, suggest: true,
@@ -151,7 +151,7 @@ function harness({ mode = "default", engine = "", trusted = true, rejectType = "
   provider.backend = backend;
   provider.correlatedStateRequests = true;
   provider.state = {
-    model: "native-model", mode, think: "off", baseUrl: "https://old.invalid/v1",
+    model: "native-model", mode, think: "off", ultra: false, baseUrl: "https://old.invalid/v1",
     workspaceTrusted: trusted, subscriptionEngine: engine,
     goal: { text: "", status: "none", elapsed_seconds: 0 },
   };
@@ -290,6 +290,48 @@ test("settings cancellation happens before backend or SecretStorage mutation", a
   assert.deepEqual(secretMutations(timeline), []);
   assert.deepEqual(notices.info, []);
   assert.equal(notices.warnings.length, 1);
+});
+
+test("Ultra profile is acknowledged independently from permission mode and normal effort", async () => {
+  const { provider, timeline, commands } = harness({ mode: "default", engine: "codex" });
+  await provider.setReasoningProfile("ultra");
+  assert.deepEqual(requestTypes(timeline), ["set_config"]);
+  assert.deepEqual(commands[0].values, { ultra_mode: true });
+  assert.equal(commands.some((command) => command.type === "set_mode"), false,
+    "Ultra must never elevate the permission mode");
+
+  timeline.length = 0; commands.length = 0;
+  provider.state.ultra = true;
+  await provider.setReasoningProfile("high");
+  assert.deepEqual(requestTypes(timeline), ["set_config", "set_config"]);
+  assert.deepEqual(commands[0].values, { ultra_mode: false });
+  assert.deepEqual(commands[1].values, { subscription_effort: "high" });
+});
+
+test("context compaction waits for a correlated outcome and reports busy/failure state", async () => {
+  const ok = harness();
+  const posted = [];
+  ok.provider.post = (message) => posted.push(message);
+  await ok.provider.compactContext();
+  assert.deepEqual(requestTypes(ok.timeline), ["compact"]);
+  assert.equal(ok.commands[0].request_id.startsWith("compact-"), true);
+  assert.deepEqual(posted.map((message) => [message.type, message.state]), [
+    ["compact_state", "working"], ["compact_state", "idle"],
+  ]);
+
+  const rejected = harness({ rejectType: "compact" });
+  const rejectedPosts = [];
+  rejected.provider.post = (message) => rejectedPosts.push(message);
+  await rejected.provider.compactContext();
+  assert.match(rejectedPosts.at(-1).error, /synthetic compact rejection/);
+
+  const busy = harness();
+  const busyPosts = [];
+  busy.provider.post = (message) => busyPosts.push(message);
+  busy.provider.turnActive = true;
+  await busy.provider.compactContext();
+  assert.deepEqual(requestTypes(busy.timeline), []);
+  assert.match(busyPosts.at(-1).error, /current turn is complete/);
 });
 
 test("a rejected elevation reports the already-applied config and never claims success", async () => {

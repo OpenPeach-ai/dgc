@@ -58,6 +58,9 @@
                 "xhigh"
               ]
             },
+            "ultra_mode": {
+              "type": "boolean"
+            },
             "base_url": {
               "type": "string"
             },
@@ -810,6 +813,16 @@
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
             },
+            "compact_threshold": {
+              "type": "number",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "compact_at": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
             "input_tokens": {
               "type": "integer",
               "minimum": -9007199254740991,
@@ -841,6 +854,84 @@
             "seq",
             "used",
             "size"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "compacted"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "compacted",
+                "pruned",
+                "unchanged"
+              ]
+            },
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "provider_native",
+                "model_summary",
+                "mechanical",
+                "tool_prune",
+                "none"
+              ]
+            },
+            "trigger": {
+              "type": "string",
+              "enum": [
+                "automatic",
+                "manual",
+                "overflow",
+                "resume"
+              ]
+            },
+            "before_tokens": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "after_tokens": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "context_size": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "freed_tokens": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "fallback_reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "status",
+            "strategy",
+            "trigger",
+            "before_tokens",
+            "after_tokens",
+            "context_size",
+            "freed_tokens"
           ],
           "additionalProperties": false
         },
@@ -982,6 +1073,9 @@
             "preserve_thinking": {
               "type": "boolean"
             },
+            "ultra_mode": {
+              "type": "boolean"
+            },
             "code_action": {
               "type": "boolean"
             },
@@ -1072,6 +1166,9 @@
             },
             "subscription_engine": {
               "type": "string"
+            },
+            "ultra_mode": {
+              "type": "boolean"
             },
             "goal": {
               "type": "object"

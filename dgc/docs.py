@@ -866,7 +866,9 @@ Sampling keys are empty by default, which means *use the endpoint's own defaults
 when you want to override it.
 
 - `temperature`, `top_p`, `top_k`, `min_p` — sampling parameters, passed through when set.
-- `max_turns` (default `80`) — tool-use iterations the agent may take in one turn.
+- `max_turns` (default `0`) — optional emergency tool-iteration backstop. `0` lets a progressing
+  turn continue until it completes, is cancelled, or reaches an explicitly configured time budget;
+  repeated-call and no-progress guards remain active independently.
 - `turn_budget_s` (default `0`, meaning no limit) — wall-clock budget for a turn. The agent
   reserves the tail of this budget to converge and persist rather than being cut off mid-edit.
 - `request_timeout` (default `1800`) — maximum seconds of provider-stream inactivity between

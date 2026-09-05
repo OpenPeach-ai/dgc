@@ -16,7 +16,7 @@ const THINK = [
   { id: "off", detail: "no extra reasoning" },
   { id: "low", detail: "think briefly before acting" },
   { id: "medium", detail: "reason step by step; consider edge cases" },
-  { id: "high", detail: "maximum depth (ultrathink)" },
+  { id: "high", detail: "sustained reasoning on complex work" },
   { id: "xhigh", detail: "deepest available reasoning effort" },
 ];
 const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string; apiKey?: string }> = {
@@ -168,7 +168,8 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private backend?: DgcBackend;
-  private state = { model: "", mode: "default", think: "off", baseUrl: "", workspaceTrusted: false,
+  private state = { model: "", mode: "default", think: "off", ultra: false,
+                    baseUrl: "", workspaceTrusted: false,
                     subscriptionEngine: "",
                     goal: { text: "", status: "none", elapsed_seconds: 0 } };
   private _installPrompted = false;
@@ -226,6 +227,23 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private requestState(be: DgcBackend, prefix: string, command: any,
                        responseType: DgcEvent["type"], timeoutMs = 5000): Promise<DgcEvent> {
     return be.request(this.stateCommand(prefix, command), responseType, timeoutMs);
+  }
+
+  private async compactContext(): Promise<void> {
+    if (this.turnActive) {
+      this.post({ type: "compact_state", state: "idle",
+                  error: "Context compaction waits until the current turn is complete." });
+      return;
+    }
+    this.post({ type: "compact_state", state: "working" });
+    try {
+      await this.requestState(this.ensureBackend(), "compact", { type: "compact" },
+                              "compacted", 130000);
+      this.post({ type: "compact_state", state: "idle" });
+    } catch (err: any) {
+      this.post({ type: "compact_state", state: "idle",
+                  error: err?.message || "Context compaction did not complete." });
+    }
   }
 
   private activeSubscription(): any | undefined {
@@ -441,7 +459,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.routeState.subscriptionModel = "";
         this.routeState.subscriptionEffort = "";
         this.routeState.subscriptionEngines = [];
-        this.state = { model: ev.model, mode: ev.mode, think: ev.think, baseUrl: ev.base_url,
+        this.state = { model: ev.model, mode: ev.mode, think: ev.think,
+                       ultra: ev.ultra_mode === true, baseUrl: ev.base_url,
                        subscriptionEngine: "",
                        workspaceTrusted: ev.workspace_trusted === true,
                        goal: ev.goal || { text: "", status: "none", elapsed_seconds: 0 } };
@@ -524,6 +543,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.behaviorState.showReasoning = ev.show_reasoning !== false;
         this.behaviorState.preserveThinking = ev.preserve_thinking === true;
         this.behaviorState.codeAction = ev.code_action === true;
+        this.state.ultra = ev.ultra_mode === true;
         this.state.baseUrl = String(ev.base_url || this.state.baseUrl);
         this.state.mode = String(ev.mode || this.state.mode);
         this.syncActiveRouteState();
@@ -640,8 +660,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
   private postState(): void {
     this.post({ type: "state", state: this.state });
-    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${this.state.mode}`;
-    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${this.state.mode} mode · click to change model`;
+    const profile = this.state.ultra ? "Ultra" : this.state.think;
+    this.sb.text = `$(circuit-board) ${this.state.model || "dgc"} · ${profile} · ${this.state.mode}`;
+    this.sb.tooltip = `DGC — ${this.state.model || "no model"} · ${profile} reasoning · ${this.state.mode} mode · click to change model`;
     this.sb.show();
   }
 
@@ -831,8 +852,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           be.send(this.stateCommand("think", mutation.command));
         }
         break;
+      case "setReasoningProfile":
+        await this.setReasoningProfile(String(msg.level || "off"));
+        break;
+      case "setUltra":
+        await this.setUltra(msg.enabled === true);
+        break;
       case "compact":
-        be.send(this.stateCommand("compact", { type: "compact" }));
+        void this.compactContext();
         break;
       case "openSettings":
         this.openSettings();
@@ -1329,10 +1356,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "connect": this.connect(); break;
       case "pickMode": this.setMode(); break;
       case "pickThink": this.setThinking(); break;
+      case "toggleUltra": void this.setUltra(!this.state.ultra).catch((err: any) =>
+        vscode.window.showErrorMessage(err?.message || "DGC could not change the Ultra profile.")); break;
       case "resume": this.resume(); break;
       case "new": this.newSession(); break;
-      case "compact": this.ensureBackend().send(
-        this.stateCommand("compact", { type: "compact" })); break;
+      case "compact": void this.compactContext(); break;
       case "clear": this.ensureBackend().send(
         this.stateCommand("session-clear", { type: "clear_session" })); break;
       case "rewind": this.rewind(); break;
@@ -1426,6 +1454,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const mutation = this.thinkCommand(rest);
         be.send(this.stateCommand("think", mutation.command));
       } else { await this.setThinking(); }
+      return;
+    }
+    if (name === "ultra") {
+      const low = rest.toLowerCase();
+      if (["on", "true", "1", "yes", "enable", "enabled"].includes(low)) {
+        await this.setUltra(true);
+      } else if (["off", "false", "0", "no", "disable", "disabled"].includes(low)) {
+        await this.setUltra(false);
+      } else if (!low || low === "status") {
+        this.post({ type: "event", event: { type: "info",
+          message: `DGC Ultra is ${this.state.ultra ? "on" : "off"} — /ultra on|off` } });
+      } else {
+        this.post({ type: "event", event: { type: "error", message: "usage: /ultra [on|off]" } });
+      }
       return;
     }
     if (name === "name") {
@@ -1815,13 +1857,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       this.post({ type: "models", ids, current: this.routeState.subscriptionModel,
                   subscription: true,
+                  supportsEffort: subscription?.supports_effort !== false,
                   label: String(subscription?.label || this.routeState.subscriptionEngine) });
       return;
     }
     const base = this.state.baseUrl || PROVIDERS.ollama.url;
     try {
       const ids = await this.fetchModels();
-      this.post({ type: "models", ids, current: this.state.model, base });
+      this.post({ type: "models", ids, current: this.state.model, base, supportsEffort: true });
     } catch {
       this.post({ type: "models", ids: [], base, err: true });
     }
@@ -1983,6 +2026,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         prompt_cache: v.prompt_cache !== false,
         sandbox: v.sandbox === true, sandbox_network: v.sandbox_network === true,
         show_reasoning: v.show_reasoning !== false, suggest: v.suggest !== false,
+        ultra_mode: v.ultra_mode === true,
         plan_artifact: v.plan_artifact !== false,
         artifact_autostart: v.artifact_autostart !== false,
         artifact_in_plan: v.artifact_in_plan === true,
@@ -2308,34 +2352,53 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   async setThinking(): Promise<void> {
     const be = this.ensureBackend();
     const subscription = this.activeSubscription();
-    if (this.routeState.subscriptionEngine && subscription?.supports_effort === false) {
-      void vscode.window.showInformationMessage(
-        `${String(subscription.label || this.routeState.subscriptionEngine).split(" (")[0]} controls reasoning through its model; choose one with DGC: Select Model.`);
-      return;
-    }
     const current = this.routeState.subscriptionEngine
       ? (this.routeState.subscriptionEffort || "off") : this.state.think;
-    const available = this.routeState.subscriptionEngine
+    const supportsEffort = !this.routeState.subscriptionEngine
+      || subscription?.supports_effort !== false;
+    const available = this.routeState.subscriptionEngine && supportsEffort
       ? [...THINK, { id: "max", detail: "maximum session effort where the active model supports it" }]
-      : THINK;
+      : this.routeState.subscriptionEngine ? [THINK[0]] : THINK;
+    const profiles = [...available, {
+      id: "ultra",
+      detail: "deepest reasoning plus proactive bounded sub-agents; permissions stay unchanged",
+    }];
     const pick = await vscode.window.showQuickPick(
-      available.map((t) => ({ label: this.routeState.subscriptionEngine && t.id === "off"
+      profiles.map((t) => ({ label: t.id === "ultra" ? "Ultra"
+                                   : this.routeState.subscriptionEngine && t.id === "off"
                                      ? "default" : t.id,
-                          detail: this.routeState.subscriptionEngine && t.id === "off"
+                          detail: t.id === "ultra" ? t.detail
+                            : this.routeState.subscriptionEngine && t.id === "off"
                             ? "use the vendor CLI's default effort" : t.detail,
-                          description: t.id === current ? "current" : "",
+                          description: (t.id === "ultra" ? this.state.ultra
+                            : !this.state.ultra && t.id === current) ? "current" : "",
                           level: t.id })),
-      { placeHolder: this.routeState.subscriptionEngine
-          ? "Subscription reasoning effort" : "Thinking level" });
+      { placeHolder: "Model reasoning profile" });
     if (pick) {
       try {
-        const mutation = this.thinkCommand(pick.level);
-        await this.requestState(
-          be, "think", mutation.command, mutation.response);
+        await this.setReasoningProfile(pick.level, be);
       } catch (err: any) {
         void vscode.window.showErrorMessage(err?.message || "DGC could not change thinking level.");
       }
     }
+  }
+
+  private async setUltra(enabled: boolean, be = this.ensureBackend()): Promise<void> {
+    await this.requestState(be, "ultra", {
+      type: "set_config", values: { ultra_mode: enabled },
+    }, "config", 5000);
+  }
+
+  private async setReasoningProfile(level: string, be = this.ensureBackend()): Promise<void> {
+    if (level === "ultra") {
+      await this.setUltra(true, be);
+      return;
+    }
+    if (this.state.ultra) {
+      await this.setUltra(false, be);
+    }
+    const mutation = this.thinkCommand(level);
+    await this.requestState(be, "think", mutation.command, mutation.response);
   }
 
   async newSession(): Promise<void> {
@@ -2488,6 +2551,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <select id="s-mode"><option value="default">default</option><option value="acceptEdits">acceptEdits</option><option value="plan">plan</option><option value="auto">auto</option></select></label>
     <label>Thinking
       <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
+    <label>DGC Ultra <span class="set-hint">deepest reasoning + proactive bounded sub-agents; never changes permissions</span>
+      <select id="s-ultra_mode"><option value="false">off</option><option value="true">on</option></select></label>
     <label>Context size (tokens)
       <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"></label>
     <label>Show model thinking
@@ -2554,16 +2619,27 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div id="cfooter">
       <button type="button" id="btn-add" class="fbtn" title="Attach a file (@-mention)" aria-label="Attach a file"><span class="codicon codicon-add" aria-hidden="true"></span></button>
       <button type="button" id="btn-cmd" class="fbtn" title="Commands (/)" aria-label="Open commands"><span class="codicon codicon-terminal" aria-hidden="true"></span></button>
-      <button type="button" id="btn-ctx" class="fbtn" title="Context used — click to compact" aria-label="Context used: 0 percent; compact context"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
+      <div class="picker context-picker">
+        <button type="button" id="btn-ctx" class="fbtn" title="Context used — click for details" aria-label="Context used: 0 percent; open context details" aria-haspopup="dialog" aria-expanded="false"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>
+        <section id="ctxmenu" class="cmenu context-menu" role="dialog" aria-label="Context window" hidden>
+          <div class="context-head"><div><span class="context-kicker">Context window</span><strong id="ctx-used">0 / 0</strong></div><span id="ctx-pct">0%</span></div>
+          <div class="context-track" aria-hidden="true"><span id="ctx-fill"></span></div>
+          <div class="context-split"><span id="ctx-free">0 free</span><span id="ctx-auto">auto at 85%</span></div>
+          <div id="ctx-usage" class="context-usage">0 in · 0 out · 0 requests</div>
+          <div class="context-last"><span class="codicon codicon-history" aria-hidden="true"></span><span id="ctx-last">DGC compacts automatically near 85%.</span></div>
+          <p id="ctx-detail" class="context-detail" hidden></p>
+          <button type="button" id="ctx-compact" class="context-action">Compact now</button>
+        </section>
+      </div>
       <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
       <span class="cspacer"></span>
       <div class="picker">
-        <button type="button" id="btn-model" class="fbtn mode" title="Model — click to change" aria-label="Change model" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-chip" aria-hidden="true"></span> <span id="modelname">dgc</span></button>
+        <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-chip" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
         <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
       </div>
       <div class="picker">
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
-        <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode and thinking" hidden></div>
+        <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
     </div>
