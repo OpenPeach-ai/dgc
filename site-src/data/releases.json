@@ -132,7 +132,7 @@
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.13.0",
       "status": "current",
       "notes": [
-        "DGC Ultra and a combined model/reasoning selector",
+        "Protocol v5 with DGC Ultra and a combined model/reasoning selector",
         "Goal objectives that persist, start immediately, and remain timed above the composer",
         "Automatic thread titles plus live activity anchored beneath the newest response",
         "Single-action artifact shutdown and visible finalization failures"
