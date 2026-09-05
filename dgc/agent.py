@@ -1213,6 +1213,7 @@ class Agent:
                        if ((name := tool.get("function", {}).get("name", "")).startswith("mcp__")
                            or name not in _OPTIONAL_TOOL_INTENT
                            or _OPTIONAL_TOOL_INTENT[name] in active
+                           or (name == "task" and bool(self.config.get("ultra_mode", False)))
                            or (name in {"repo_map", "code_intel"}
                                and "narrow_scope" not in active)
                            or (self.mode == "plan" and name in {"repo_map", "code_intel"})
@@ -1464,6 +1465,12 @@ class Agent:
         self._session_exists = False
         self._last_persist_error = ""
         self._last_turn_error = ""
+        self._last_compaction = {
+            "status": "none", "strategy": "none", "trigger": "none",
+            "before_tokens": 0, "after_tokens": 0,
+            "context_size": self.context_size(), "freed_tokens": 0,
+            "fallback_reason": "",
+        }
         self.plan_return_mode = None
         self._pending_images = None
         with self._steer_lock:
@@ -1599,6 +1606,22 @@ class Agent:
                 "in one write_file call and move on.",
             ]
 
+        if self.config.get("ultra_mode", False):
+            from .ultra import worker_limit
+            workers = worker_limit(self.config)
+            parts += [
+                "",
+                "# DGC Ultra execution profile",
+                "Ultra is active: use extended reasoning and proactively delegate genuinely independent "
+                f"workstreams with the task tool when that improves quality or latency (up to {workers} "
+                "parallel workers).",
+                "Keep coupled edits serial. Reconcile every child result in the parent, inspect the landed "
+                "changes, and verify the integrated result before finishing. Do not delegate trivial work "
+                "merely to use the available workers.",
+                f"Ultra does not change authority: permission mode remains {mode}, and every parent or child "
+                "action stays inside that policy.",
+            ]
+
         # Only carry the (heavy ~450-tok) artifact instructions when the artifact surface is actually
         # live — i.e. the shared server is set to autostart. A headless/scripted run with artifacts off
         # (e.g. the benchmark) never reaches them, so this reclaims per-turn prefill instead of re-sending
@@ -1693,7 +1716,8 @@ class Agent:
         for keyword, bumped in THINK_KEYWORDS:
             if keyword in lower and order[bumped] > order.get(level, 0):
                 level = bumped
-        return level
+        from .ultra import native_effort
+        return native_effort(self.config, level)
 
     def steer(self, text: str) -> bool:
         """Queue a message the user typed WHILE a turn is running; it's injected at the next
@@ -2451,7 +2475,8 @@ class Agent:
         # shape (llm._reasoning_payload). "off" is handled correctly there — e.g. on
         # Ollama it becomes reasoning_effort:"none" (omitting would force thinking ON).
         effort = thinking
-        max_turns = int(self.config.get("max_turns", 40))
+        configured_turn_limit = int(self.config.get("max_turns", 0) or 0)
+        max_turns: int | None = configured_turn_limit if configured_turn_limit > 0 else None
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
         fail_streak = 0             # consecutive non-zero bash exits (no success) — grind guard
         fail_nudged = False
@@ -2490,9 +2515,6 @@ class Agent:
         except (TypeError, ValueError):
             budget = 0.0
         deadline = (time.monotonic() + budget) if budget > 0 else None
-        if deadline is not None:
-            max_turns = max(max_turns, 200)   # budgeted: let the DEADLINE govern turns, not a hard 40-cap —
-                                              # hard problems (rust/forth, rust/decimal) exhaust 40 iterations mid-debug with budget to spare
         # Exact ephemeral bytes/modes/symlinks for checkpoint-known project mutations at the last
         # verified state. It never serializes external-path authority and is restored transactionally.
         good_snapshot: WorkspaceSnapshot | None = None
@@ -2576,7 +2598,9 @@ class Agent:
                     lease.release()
             return safe_cmd, self._safe_text(out)
 
-        for _ in range(max_turns):
+        iteration = 0
+        while max_turns is None or iteration < max_turns:
+            iteration += 1
             if self.cancelled.is_set():
                 if held_final_messages:
                     withhold_final(
@@ -2642,7 +2666,8 @@ class Agent:
             # Do not rewrite the transcript between pieces of one deferred length continuation: the
             # held message references are also the exact provider context needed to continue it.
             if not held_final_messages:
-                self.maybe_compact(deadline=compact_deadline, tools=tools)
+                self.maybe_compact(deadline=compact_deadline, tools=tools,
+                                   trigger="automatic")
             chat_cancel = self.cancelled
             chat_timeout = None
             if deadline is not None:
@@ -2680,7 +2705,8 @@ class Agent:
                         self.ui.end_stream()
                     self.ui.info("↻ context overflowed — compacting and retrying")
                     # Aggressive compaction guarantees the retry is smaller.
-                    self.maybe_compact(force=True, deadline=compact_deadline, tools=tools)
+                    self.maybe_compact(force=True, deadline=compact_deadline, tools=tools,
+                                       trigger="overflow")
                     next_request_reason = "context_retry"
                     continue
                 if held_final_messages:
@@ -4074,36 +4100,118 @@ class Agent:
         before = self.estimate_tokens()
         if before < _RESUME_COMPACT_RATIO * window:
             return
-        self.maybe_compact(force=True, deadline=time.monotonic())
-        after = self.estimate_tokens()
-        if after < before:
-            self.ui.info(f"compacted the resumed session to fit the window "
-                         f"(~{before:,} → ~{after:,} tokens of {window:,})")
+        self.maybe_compact(force=True, deadline=time.monotonic(), trigger="resume")
+
+    def _publish_compaction(self, result: dict[str, object]) -> None:
+        """Publish one truthful post-persistence outcome to any frontend.
+
+        Headless frontends receive a structured event.  The CLI/TUI seam intentionally falls back
+        to one concise status line, so a failed save can never be preceded by a false success.
+        """
+        # Inspect the class, not a permissive ``__getattr__`` test/dummy UI: only a frontend that
+        # deliberately implements the structured callback should suppress the human status line.
+        callback = getattr(type(self.ui), "context_compacted", None)
+        if callable(callback):
+            callback(self.ui, dict(result))
+            return
+        before = int(result.get("before_tokens", 0) or 0)
+        after = int(result.get("after_tokens", 0) or 0)
+        size = int(result.get("context_size", 0) or 0)
+        status = str(result.get("status") or "unchanged")
+        strategy = str(result.get("strategy") or "none")
+        reason = str(result.get("fallback_reason") or "")
+        if status == "unchanged":
+            message = f"context unchanged — no older turns could be reduced (~{after:,} / {size:,})"
+        elif strategy == "tool_prune":
+            message = f"context pruned locally · ~{before:,} → ~{after:,} / {size:,} tokens"
+        elif strategy == "provider_native":
+            message = f"context compacted natively · ~{before:,} → ~{after:,} / {size:,} tokens"
+        elif strategy == "model_summary":
+            message = f"context compacted · ~{before:,} → ~{after:,} / {size:,} tokens"
+        else:
+            why = f"; {reason}" if reason else ""
+            message = (f"context compacted locally · ~{before:,} → ~{after:,} / {size:,} tokens "
+                       f"(safe fallback{why})")
+        self.ui.info(message)
+
+    def compaction_status(self) -> dict[str, object]:
+        return dict(getattr(self, "_last_compaction", {}) or {})
 
     def maybe_compact(self, force: bool = False, *, deadline: float | None = None,
-                      tools=_AUTO_CONTEXT_TOOLS) -> bool:
-        """Compact transactionally and persist the exact generation before reporting success."""
+                      tools=_AUTO_CONTEXT_TOOLS, trigger: str = "manual",
+                      notify: bool = True) -> bool:
+        """Compact transactionally and report only after the exact generation is persisted."""
+        try:
+            context_size = self.context_size()
+            before_tokens = self.estimate_tokens(tools=tools)
+        except Exception:
+            context_size = int(self.config.get("context_size", 32768))
+            before_tokens = 0
         with self._session_turn_scope() as reserved:
             if not reserved:
                 self._last_persist_error = (
                     "Compaction stopped because this session has an active turn in another DGC process.")
+                self._last_compaction = {
+                    "status": "failed", "strategy": "none", "trigger": trigger,
+                    "before_tokens": before_tokens, "after_tokens": before_tokens,
+                    "context_size": context_size, "freed_tokens": 0,
+                    "fallback_reason": self._last_persist_error,
+                }
                 return False
             before = copy.deepcopy(self.messages)
             try:
-                self._compact(force=force, deadline=deadline, tools=tools)
+                strategy, fallback_reason = self._compact(
+                    force=force, deadline=deadline, tools=tools)
             except BaseException:
                 self.messages = before
+                self._last_compaction = {
+                    "status": "failed", "strategy": "none", "trigger": trigger,
+                    "before_tokens": before_tokens, "after_tokens": before_tokens,
+                    "context_size": context_size, "freed_tokens": 0,
+                    "fallback_reason": "compaction raised before it could be saved",
+                }
                 raise
             if self.messages == before:
+                if force:
+                    result = {
+                        "status": "unchanged", "strategy": "none", "trigger": trigger,
+                        "before_tokens": before_tokens, "after_tokens": before_tokens,
+                        "context_size": context_size, "freed_tokens": 0,
+                        "fallback_reason": fallback_reason,
+                    }
+                    self._last_compaction = result
+                    if notify:
+                        self._publish_compaction(result)
                 return True
             if self._persist():
+                try:
+                    after_tokens = self.estimate_tokens(tools=tools)
+                except Exception:
+                    after_tokens = before_tokens
+                result = {
+                    "status": "pruned" if strategy == "tool_prune" else "compacted",
+                    "strategy": strategy, "trigger": trigger,
+                    "before_tokens": before_tokens, "after_tokens": after_tokens,
+                    "context_size": context_size,
+                    "freed_tokens": max(0, before_tokens - after_tokens),
+                    "fallback_reason": fallback_reason,
+                }
+                self._last_compaction = result
+                if notify:
+                    self._publish_compaction(result)
                 return True
             self.messages = before
+            self._last_compaction = {
+                "status": "failed", "strategy": strategy, "trigger": trigger,
+                "before_tokens": before_tokens, "after_tokens": before_tokens,
+                "context_size": context_size, "freed_tokens": 0,
+                "fallback_reason": self._last_persist_error or "compaction save was rolled back",
+            }
             self.ui.error(self._last_persist_error or "compaction could not be saved and was rolled back")
             return False
 
     def _compact(self, force: bool = False, *, deadline: float | None = None,
-                 tools=_AUTO_CONTEXT_TOOLS) -> None:
+                 tools=_AUTO_CONTEXT_TOOLS) -> tuple[str, str]:
         # A legacy/interrupted session may already contain an orphan. Repair before choosing groups so
         # the compaction boundary and the next provider request are always valid.
         self.messages, repaired = _repair_tool_transcript(self.messages)
@@ -4119,21 +4227,24 @@ class Agent:
             tools = (self._tool_schemas()
                      if bool(getattr(self.client, "tools_supported", False)) else None)
         if not force and self.estimate_tokens(tools=tools) < budget:
-            return
+            return "none", "below the automatic threshold"
         # Tier 1: prune stale tool outputs first — often enough, and far cheaper than an LLM summary.
-        if (self._mechanical_prune(aggressive=force) and not force
-                and self.estimate_tokens(tools=tools) < budget):
-            self.ui.info("context pruned")
-            return
+        pruned = self._mechanical_prune(aggressive=force)
+        if pruned and not force and self.estimate_tokens(tools=tools) < budget:
+            return "tool_prune", ""
         keep = 2 if force else KEEP_RECENT          # under force (overflow), summarize almost everything
         split = _compaction_split_index(self.messages, keep)
         if split < 3:
+            truncated = False
             if force:                               # too few messages to summarize → hard-truncate the big ones
                 for m in self.messages[1:]:
                     c = m.get("content")
                     if isinstance(c, str) and len(c) > 1200:
                         m["content"] = _bounded_head_tail(c, 1200)
-            return
+                        truncated = True
+            if truncated:
+                return "mechanical", "a single oversized recent message required bounded head/tail relief"
+            return ("tool_prune", "") if pruned else ("none", "no older turn group was reducible")
         # A prior compaction injects two synthetic messages. Merge its brief once, but never feed
         # the wrapper and acknowledgement back as "new transcript" on every later compaction.
         prior = ""
@@ -4192,6 +4303,7 @@ class Agent:
             else now + _COMPACT_TIMEOUT_S
         summary = ""
         used_model = False
+        fallback_reasons: list[str] = []
         # Official Responses endpoints can loss-aware compact the old, group-aligned prefix into
         # opaque continuation state. Keep the deterministic local brief for human resume/history
         # views, but do not send that display-only wrapper back alongside the compacted provider
@@ -4206,6 +4318,7 @@ class Agent:
             provider_items, usage = native_compaction
             self._record_usage(usage, "compaction")
             if provider_continuation_has_secret(provider_items, self._secret_values()):
+                fallback_reasons.append("provider-native output failed the credential-safety check")
                 self.ui.info(
                     "provider-native compaction was unusable; continuing with the local fallback")
             else:
@@ -4223,8 +4336,7 @@ class Agent:
                      compacted_assistant]
                     + self.messages[split:])
                 self.messages, _ = _repair_tool_transcript(self.messages)
-                self.ui.info("context compacted (provider-native)")
-                return
+                return "provider_native", ""
         if not self.cancelled.is_set() and compact_deadline - now >= 1:
             compact_cancel = _DeadlineCancel(self.cancelled, compact_deadline)
             read_timeout = max(1, min(_COMPACT_TIMEOUT_S, int(compact_deadline - now)))
@@ -4242,8 +4354,16 @@ class Agent:
                         and all(heading in candidate for heading in required)):
                     summary = _bounded_head_tail(candidate, _COMPACT_SUMMARY_CHARS)
                     used_model = True
-            except Exception:
-                pass
+                elif compact_cancel.is_set():
+                    fallback_reasons.append("the summary request exceeded its compaction deadline")
+                else:
+                    fallback_reasons.append("the summarizer returned an unusable structured brief")
+            except Exception as exc:
+                fallback_reasons.append(f"the summarizer was unavailable ({type(exc).__name__})")
+        elif self.cancelled.is_set():
+            fallback_reasons.append("the turn was stopping, so no summary request was started")
+        else:
+            fallback_reasons.append("less than one second remained for a summary request")
         if not summary:
             summary = fallback
         self.messages = (
@@ -4252,4 +4372,6 @@ class Agent:
              {"role": "assistant", "content": _COMPACT_ACK}]
             + self.messages[split:])              # group-aware: never orphan a native tool call/result
         self.messages, _ = _repair_tool_transcript(self.messages)
-        self.ui.info("context compacted" if used_model else "context compacted (mechanical fallback)")
+        return ("model_summary", "") if used_model else (
+            "mechanical", "; ".join(fallback_reasons[:2])
+            or "the provider compactor and summarizer were unavailable")

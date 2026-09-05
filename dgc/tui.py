@@ -348,6 +348,9 @@ class TUI:
         "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
                    ("Extra-high", "xhigh")],
                   lambda s: s.config.get("thinking", "off")),
+        "ultra": ([("On — deepest reasoning + bounded parallel agents", "on"),
+                    ("Off — use the selected thinking level", "off")],
+                   lambda s: "on" if s.config.get("ultra_mode", False) else "off"),
         "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
                   ("Plan — read-only", "plan"), ("Auto — full access", "auto")],
                  lambda s: s.agent.mode),
@@ -405,6 +408,7 @@ class TUI:
         ],
         "Behaviour": [
             ("mode", "Permission mode", "enum", ["default", "acceptEdits", "plan", "auto"]),
+            ("ultra_mode", "Ultra execution profile", "bool"),
             ("max_turns", "Max tool iterations", "int"), ("bash_timeout", "Bash timeout (s)", "int"),
             ("search_timeout", "Search timeout (s)", "int"),
             ("verify_before_done", "Verify before finishing", "bool"),
@@ -1832,7 +1836,10 @@ class TUI:
         th = style_mod.theme()
         mode = self.agent.mode
         mc = {"default": th.muted, "acceptEdits": th.accent, "plan": th.accent_bright, "auto": th.err}
-        return ANSI(self._rich(f"[{th.faint}]{_esc(self._model_label())}[/]  "
+        profile = "Ultra" if self.config.get("ultra_mode", False) else None
+        extra = (f"  [{th.faint}]{glyphs.MIDDOT}[/]  [{th.accent_bright}]{profile}[/]"
+                 if profile else "")
+        return ANSI(self._rich(f"[{th.faint}]{_esc(self._model_label())}[/]{extra}  "
                                f"[{th.faint}]{glyphs.MIDDOT}[/]  "
                                f"[{mc.get(mode, th.muted)}]{_esc(mode)}[/]",
                                end=""))
@@ -3271,6 +3278,23 @@ class TUI:
                 cfg.set("thinking", rest); self._flash(f"thinking → {rest}")
             else:
                 self._flash(f"thinking: {cfg.get('thinking', 'off')} — /think off|low|medium|high|xhigh")
+        elif cmd == "ultra":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes", "enable", "enabled"):
+                cfg.set("ultra_mode", True)
+                self.agent._refresh_system()
+                from .ultra import summary
+                self._flash(f"{summary(cfg)} · permission mode remains {self.agent.mode}", secs=7)
+            elif val in ("off", "false", "0", "no", "disable", "disabled"):
+                cfg.set("ultra_mode", False)
+                self.agent._refresh_system()
+                self._flash("DGC Ultra → off")
+            elif val in ("", "status"):
+                from .ultra import summary
+                state = "on" if cfg.get("ultra_mode", False) else "off"
+                self._flash(f"{summary(cfg)} → {state} · /ultra on|off", secs=7)
+            else:
+                self._flash("usage: /ultra [on|off]")
         elif cmd in ("thoughts", "reasoning", "reason"):   # display toggle (NOT the model's effort — that's /think)
             val = rest.strip().lower()
             if val in ("show", "on", "true", "1"):
@@ -3323,9 +3347,7 @@ class TUI:
         elif cmd == "context":
             self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
-            if self.agent.maybe_compact(force=True):
-                self._flash("context compacted")
-            else:
+            if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self._flash(getattr(self.agent, "_last_persist_error", "")
                             or "context compaction failed")
         elif cmd == "status":
@@ -3485,8 +3507,10 @@ class TUI:
         host = f"{engine} CLI subscription" if engine else cfg.base_url
         thinking = (str(cfg.get("subscription_effort", "") or "").strip()
                     or "off") if engine else cfg.get("thinking", "off")
+        profile = "Ultra" if cfg.get("ultra_mode", False) else "standard"
         rows = [("model", model), ("host", host), ("mode", self.agent.mode),
-                ("thinking", thinking), ("context", f"{used} / {size} tokens"),
+                ("thinking", thinking), ("profile", profile),
+                ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
                 ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
@@ -4629,12 +4653,15 @@ class TUI:
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
         mode = str(self.config.data.get("mode", "default"))
         model = str(self.config.get("subscription_model", "")).strip()
-        effort = str(self.config.get("subscription_effort", "")).strip()
+        configured_effort = str(self.config.get("subscription_effort", "")).strip()
+        from .ultra import delegated_effort, delegated_prompt
+        effort = delegated_effort(
+            self.config, engine.key, configured_effort, engine.supports_effort())
         session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
 
         def delegate(safe_prompt: str) -> dict:
             result = subs.run_turn(
-                engine, safe_prompt, self.config.project_root,
+                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self._cancel.is_set,
                 model=model, effort=effort)
@@ -4921,7 +4948,8 @@ def _tui_help() -> str:
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
                           ("/subagent", "sub-agent model + host + API transport"),
-                          ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max")]),
+                          ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max"),
+                          ("/ultra on|off", "deepest reasoning + bounded parallel agents")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),

@@ -2318,6 +2318,56 @@ def unit_tests(tmp: Path):
           ["rewound", "history", "context"]
           and rewind_backend.em.events[1]["items"][-1]["text"] == "restored answer")
 
+    compact_backend = object.__new__(Backend)
+    compact_backend.em = type("CompactCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    compact_backend._busy = lambda: False
+    compact_backend.config = type("CompactConfig", (), {
+        "get": lambda self, key, default=None: 4000 if key == "context_size" else default,
+    })()
+    class _CompactAgentStub:
+        usage_totals = {"input_tokens": 900, "output_tokens": 100,
+                        "cached_input_tokens": 250, "reasoning_tokens": 20, "requests": 3}
+        _last_persist_error = ""
+        called = None
+        def maybe_compact(self, **kwargs):
+            self.called = kwargs; return True
+        def compaction_status(self):
+            return {"status": "compacted", "strategy": "mechanical", "trigger": "manual",
+                    "before_tokens": 3500, "after_tokens": 1200, "context_size": 4000,
+                    "freed_tokens": 2300, "fallback_reason": "summarizer unavailable"}
+        def estimate_tokens(self): return 1200
+    compact_backend.agent = _CompactAgentStub()
+    compact_backend.dispatch({"type": "compact", "request_id": "compact-1"})
+    check("headless compaction reports one correlated truthful outcome then the new meter state",
+          compact_backend.agent.called == {"force": True, "trigger": "manual", "notify": False}
+          and [event["type"] for event in compact_backend.em.events] == ["compacted", "context"]
+          and all(event.get("request_id") == "compact-1"
+                  for event in compact_backend.em.events)
+          and compact_backend.em.events[0].get("before_tokens") == 3500
+          and compact_backend.em.events[0].get("after_tokens") == 1200
+          and compact_backend.em.events[1].get("used") == 1200)
+
+    failed_compact = object.__new__(Backend)
+    failed_compact.em = type("FailedCompactCapture", (), {
+        "events": [],
+        "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
+    })()
+    failed_compact._busy = lambda: False
+    failed_compact.config = compact_backend.config
+    failed_compact.agent = type("FailedCompactAgent", (), {
+        "_last_persist_error": "session save conflict",
+        "maybe_compact": lambda self, **kwargs: False,
+    })()
+    failed_compact.dispatch({"type": "compact", "request_id": "compact-fail"})
+    check("failed headless compaction never emits a false success or stale meter",
+          failed_compact.em.events == [{"type": "command_rejected", "command": "compact",
+                                        "reason": "compaction_failed",
+                                        "message": "session save conflict",
+                                        "request_id": "compact-fail"}])
+
     # Headless protocol: IDs correlate same-name tools, failures are explicit, abandoned approvals
     # fail closed, and secrets/state mutations do not race an active turn.
     from dgc.headless import HeadlessUI
@@ -3356,6 +3406,33 @@ def unit_tests(tmp: Path):
           _kinds.index("text") < _kinds.index("tool") and "inspect" in _cu.events[0][1].lower())
     check("native tool calls increment monotonic session activity",
           _ca.activity_totals == {"tool_calls": 1, "edits": 0, "edit_fails": 0})
+
+    class _LongTurnClient:
+        tools_supported = True
+        def __init__(self): self.n = 0
+        def chat(self, *args, **kwargs):
+            self.n += 1
+            if self.n <= 45:
+                return _ChatResult(tool_calls=[_ToolCall(
+                    f"long-{self.n}", "read_file", {"path": f"missing-{self.n}.txt"})])
+            return _ChatResult(content="Long task complete.")
+    _long = _Ag(_Cfg(Path(tempfile.mkdtemp())), _AgUI())
+    _long.config.data.update({"mode": "auto", "max_turns": 0})
+    _long.client = _LongTurnClient()
+    _long._handle_call = lambda call: f"error: {call.arguments['path']} is absent"
+    check("progressing turns continue beyond the historical 40-iteration ceiling",
+          _long.run_turn("inspect every candidate") is True
+          and _long.client.n == 46
+          and _long.messages[-1].get("content") == "Long task complete.")
+
+    _capped = _Ag(_Cfg(Path(tempfile.mkdtemp())), _AgUI())
+    _capped.config.data.update({"mode": "auto", "max_turns": 3, "turn_budget_s": 600})
+    _capped.client = _LongTurnClient()
+    _capped._handle_call = lambda call: f"error: {call.arguments['path']} is absent"
+    check("an explicit positive tool-iteration backstop remains authoritative",
+          _capped.run_turn("inspect only a bounded sample") is False
+          and _capped.client.n == 3
+          and "stopped after 3 tool iterations" in _capped._last_turn_error)
 
     class _TodoNudgeClient:
         tools_supported = True
@@ -5328,6 +5405,24 @@ def test_context_prune():
           and not _tool_transcript_errors(fallback_agent.messages),
           detail=fallback_summary[:500])
 
+    class _StructuredCompactUI(_CompactUI):
+        def __init__(self): super().__init__(); self.compactions = []
+        def context_compacted(self, result): self.compactions.append(result)
+    structured_ui = _StructuredCompactUI()
+    structured_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), structured_ui)
+    structured_agent.messages = [dict(message) for message in history]
+    structured_agent.client = _FailingCompactor()
+    structured_agent.maybe_compact(force=True, trigger="automatic")
+    check("automatic headless compaction publishes one structured post-save outcome",
+          len(structured_ui.compactions) == 1
+          and structured_ui.compactions[0].get("status") == "compacted"
+          and structured_ui.compactions[0].get("strategy") == "mechanical"
+          and structured_ui.compactions[0].get("trigger") == "automatic"
+          and structured_ui.compactions[0].get("after_tokens", 0)
+              < structured_ui.compactions[0].get("before_tokens", 0)
+          and not any("context compacted locally" in message
+                      for message in structured_ui.infos))
+
     bounded_ui = _CompactUI()
     bounded_agent = Agent(_CompactConfig(Path(tempfile.mkdtemp())), bounded_ui)
     bounded_agent.config.data["context_size"] = 2048
@@ -5423,7 +5518,10 @@ def test_context_prune():
           and resumed_native_wire[1].get("encrypted_content") == native_ciphertext
           and sum(item.get("type") == "compaction" for item in resumed_native_wire) == 1
           and native_agent.timing_totals["by_request_reason"] == {"compaction": 1}
-          and "context compacted (provider-native)" in native_ui.infos
+          and any("context compacted natively" in message for message in native_ui.infos)
+          and native_agent.compaction_status().get("strategy") == "provider_native"
+          and native_agent.compaction_status().get("after_tokens", 0)
+              < native_agent.compaction_status().get("before_tokens", 0)
           and not _tool_transcript_errors(native_agent.messages),
           detail=repr((native_agent.messages, native_wire, native_ui.infos)))
 
@@ -5451,7 +5549,10 @@ def test_context_prune():
           and unsafe_agent.timing_totals["by_request_reason"] == {"compaction": 1}
           and any("provider-native compaction was unusable" in message
                   for message in unsafe_ui.infos)
-          and "context compacted (mechanical fallback)" in unsafe_ui.infos,
+          and any("context compacted locally" in message for message in unsafe_ui.infos)
+          and unsafe_agent.compaction_status().get("strategy") == "mechanical"
+          and "summarizer was unavailable" in
+              str(unsafe_agent.compaction_status().get("fallback_reason", "")),
           detail=repr((unsafe_agent.messages, unsafe_ui.infos)))
 
     bounded_agent.messages.extend([
@@ -9206,6 +9307,7 @@ def test_private_config():
     _C.USER_CONFIG.write_text(json.dumps({
         "model": "m", "api_key": "cloud-secret", "search_api_key": "search-secret",
         "fallback_api_key": "fallback-secret",
+        "max_turns": 40,
         "mcp_servers": legacy_servers,
     }))
     try:
@@ -9219,6 +9321,8 @@ def test_private_config():
               cfg.api_key == "cloud-secret" and private.get("search_api_key") == "search-secret"
               and cfg.get("fallback_api_key") == "fallback-secret"
               and private.get("fallback_api_key") == "fallback-secret")
+        check("legacy default tool ceilings migrate to uninterrupted long turns",
+              cfg.get("max_turns") == 0 and public.get("max_turns") == 0)
         provider_identity = private.get("provider_identity", {})
         check("migrated provider credentials are bound to normalized endpoint identities",
               set(provider_identity) == {"api_key", "fallback_api_key"}
@@ -12875,6 +12979,71 @@ def test_thinking_levels_xhigh_selectable():
               for row in _subscription_rows["rows"]))
 
 
+def test_ultra_profile():
+    """Ultra is opt-in, route-safe, bounded, and permission-preserving on every surface."""
+    print("DGC Ultra execution profile:")
+    from dgc.config import DEFAULTS, Config
+    from dgc.ultra import (delegated_effort, delegated_prompt, native_effort,
+                           summary, worker_limit)
+    from dgc.commands import resolve_command
+    from dgc.agent import Agent
+    import dgc.editor_protocol as ep
+
+    class _Cfg:
+        def __init__(self, **values): self.values = values
+        def get(self, key, default=None): return self.values.get(key, default)
+
+    off = _Cfg(ultra_mode=False, max_parallel_tasks=4)
+    on = _Cfg(ultra_mode=True, max_parallel_tasks=99)
+    check("Ultra defaults off, preserving benchmark/native behavior",
+          DEFAULTS.get("ultra_mode") is False)
+    check("Ultra native reasoning reaches xhigh without inventing a provider enum",
+          native_effort(on, "low") == "xhigh" and native_effort(off, "low") == "low")
+    check("Ultra worker budget clamps to the existing hard maximum",
+          worker_limit(on) == 8 and "up to 8 parallel agents" in summary(on))
+    check("Ultra maps delegated effort only to each supported route's strongest value",
+          delegated_effort(on, "codex", "low", True) == "xhigh"
+          and delegated_effort(on, "claude", "low", True) == "max"
+          and delegated_effort(on, "qwen", "low", False) == "low")
+    wrapped = delegated_prompt(on, "fix the parser", "default")
+    check("delegated Ultra policy keeps the user prompt and permission boundary explicit",
+          wrapped.endswith("fix the parser") and "permission mode remains default" in wrapped
+          and "does not grant additional" in wrapped)
+    check("Ultra is advertised on CLI, TUI, and editor surfaces",
+          resolve_command("ultra", "classic") is not None
+          and resolve_command("ultra", "tui") is not None
+          and resolve_command("ultra", "editor").editor_action == "toggleUltra")
+    check("editor protocol reports Ultra as optional v5 state",
+          "ultra_mode" in ep.EVENT_FIELDS["ready"]
+          and "ultra_mode" in ep.EVENT_FIELDS["config"]
+          and "ultra_mode" in ep.EVENT_FIELDS["status"])
+
+    class _UI:
+        def __getattr__(self, _name): return lambda *args, **kwargs: None
+    with tempfile.TemporaryDirectory() as root:
+        cfg = Config(Path(root))
+        cfg.data["ultra_mode"] = True
+        cfg.data["max_parallel_tasks"] = 3
+        cfg.data["tool_profile"] = "adaptive"
+        cfg.data["mode"] = "default"
+        agent = Agent(cfg, _UI())
+        agent._active_tool_intents = {"narrow_scope"}
+        names = {tool.get("function", {}).get("name") for tool in agent._tool_schemas()}
+        prompt = agent.system_prompt()
+        check("adaptive Ultra exposes task even before explicit delegation wording", "task" in names)
+        check("Ultra system policy is bounded and does not elevate default permissions",
+              "# DGC Ultra execution profile" in prompt
+              and "up to 3 parallel workers" in prompt
+              and "permission mode remains default" in prompt)
+
+    from dgc.headless import _validated_config_values
+    valid, problem = _validated_config_values({"ultra_mode": True}, frozenset())
+    invalid, bad_problem = _validated_config_values({"ultra_mode": "yes"}, frozenset())
+    check("headless settings accept only a real Ultra boolean",
+          valid == {"ultra_mode": True} and problem is None and invalid is None
+          and "true or false" in str(bad_problem))
+
+
 def test_preserve_thinking_roundtrip():
     """F2: with preserve_thinking on, the chat_completions history re-embeds prior-turn reasoning."""
     from dgc.agent import _assistant_content_with_thinking as build
@@ -16514,6 +16683,7 @@ def main():
         test_toolcall_recovery()
         test_reasoning_payload()
         test_thinking_levels_xhigh_selectable()
+        test_ultra_profile()
         test_preserve_thinking_roundtrip()
         test_base_url_normalization()
         test_provider_capabilities()

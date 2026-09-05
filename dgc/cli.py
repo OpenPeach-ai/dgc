@@ -598,6 +598,9 @@ class CLI:
                 f"[{DIM}]· {_markup_literal(MODE_DESCRIPTIONS.get(mode, ''))}[/]",
                 highlight=False)
         row("thinking", think)
+        if cfg.get("ultra_mode", False):
+            from .ultra import worker_limit
+            row("profile", f"Ultra · up to {worker_limit(cfg)} parallel agents · permissions unchanged")
         row("project", cfg.project_root)
         if self.agent.skills:
             row("skills", ", ".join(self.agent.skills))
@@ -804,6 +807,23 @@ class CLI:
                 if rest == "off" and is_reasoning_model(cfg.get("model", "")):
                     self.ui.info("  tip: this looks like a reasoning model — /think high often does "
                                  "better on hard tasks")
+        elif cmd == "ultra":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes", "enable", "enabled"):
+                cfg.set("ultra_mode", True)
+                self.agent._refresh_system()
+                from .ultra import summary
+                self.ui.info(f"{summary(cfg)} → on (permission mode remains {self.agent.mode})")
+            elif val in ("off", "false", "0", "no", "disable", "disabled"):
+                cfg.set("ultra_mode", False)
+                self.agent._refresh_system()
+                self.ui.info("DGC Ultra → off")
+            elif val in ("", "status"):
+                state = "on" if cfg.get("ultra_mode", False) else "off"
+                from .ultra import summary
+                self.ui.info(f"{summary(cfg)} → {state}; /ultra on|off")
+            else:
+                self.ui.error("usage: /ultra [on|off]")
         elif cmd == "preserve-thinking":
             val = rest.strip().lower()
             if val in ("on", "true", "1", "show", "yes"):
@@ -908,9 +928,7 @@ class CLI:
             else:
                 self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")
         elif cmd == "compact":
-            if self.agent.maybe_compact(force=True):
-                self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
-            else:
+            if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self.ui.error(self.agent._last_persist_error or "context compaction failed")
         elif cmd in ("clear", "new"):
             self.agent.reset()
@@ -1746,6 +1764,11 @@ def main(argv: list[str] | None = None) -> int | None:
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,
                         help="thinking level for this session (with -p --engine, that delegated turn only)")
+    ultra_group = parser.add_mutually_exclusive_group()
+    ultra_group.add_argument("--ultra", dest="ultra", action="store_true", default=None,
+                             help="use extended reasoning and proactive bounded sub-agents for this session")
+    ultra_group.add_argument("--no-ultra", dest="ultra", action="store_false",
+                             help="disable the Ultra execution profile for this session")
     parser.add_argument("--model",
                         help="model name (persisted natively; with -p --engine, that delegated turn only)")
     parser.add_argument("--engine", metavar="NAME", default=None,
@@ -1819,6 +1842,8 @@ def main(argv: list[str] | None = None) -> int | None:
             config.data["subscription_effort"] = "" if args.think == "off" else args.think
         else:
             config.data["thinking"] = args.think
+    if args.ultra is not None:
+        config.data["ultra_mode"] = args.ultra
     if args.autonomous_gate is not None:
         config.data["autonomous_gate"] = args.autonomous_gate
     if args.autonomous_max_turns is not None:
@@ -1989,10 +2014,12 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
         c.print(f"  [yellow]{terminal_safe_text(engine.short_label)} does not expose a "
                 "reasoning-effort flag; omit --think or choose its reasoning model with --model[/yellow]")
         return 1
+    from .ultra import delegated_effort, delegated_prompt
+    effort = delegated_effort(config, engine.key, effort, engine.supports_effort())
     session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
 
     def delegate(safe_prompt: str) -> dict:
-        result = subs.run_turn(engine, safe_prompt, config.project_root,
+        result = subs.run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
                                cont=bool(cont and session_id), session_id=session_id, mode=mode,
                                timeout=budget, on_event=on_event, model=model, effort=effort)
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):

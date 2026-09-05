@@ -253,7 +253,7 @@ Paste this to any coding agent:
   "mode": "default",
   "thinking": "off",
   "context_size": 32768,
-  "max_turns": 80,
+  "max_turns": 0,
   "max_parallel_tasks": 4,
   "fleet_worktree_root": "",
   "bash_timeout": 120,

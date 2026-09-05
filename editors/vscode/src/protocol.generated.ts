@@ -7,7 +7,7 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "handoff" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
+export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "handoff" | "queued" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
 export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "reload_skills" | "get_skill" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
@@ -63,6 +63,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "high",
         "xhigh"
       ]
+    },
+    "ultra_mode": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     },
     "base_url": {
       "types": [
@@ -594,6 +600,18 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": true
     },
+    "compact_threshold": {
+      "types": [
+        "number"
+      ],
+      "required": false
+    },
+    "compact_at": {
+      "types": [
+        "integer"
+      ],
+      "required": false
+    },
     "input_tokens": {
       "types": [
         "integer"
@@ -621,6 +639,80 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "requests": {
       "types": [
         "integer"
+      ],
+      "required": false
+    }
+  },
+  "compacted": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "status": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "compacted",
+        "pruned",
+        "unchanged"
+      ]
+    },
+    "strategy": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "provider_native",
+        "model_summary",
+        "mechanical",
+        "tool_prune",
+        "none"
+      ]
+    },
+    "trigger": {
+      "types": [
+        "string"
+      ],
+      "required": true,
+      "enum": [
+        "automatic",
+        "manual",
+        "overflow",
+        "resume"
+      ]
+    },
+    "before_tokens": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "after_tokens": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "context_size": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "freed_tokens": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    },
+    "fallback_reason": {
+      "types": [
+        "string"
       ],
       "required": false
     }
@@ -810,6 +902,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       ],
       "required": false
     },
+    "ultra_mode": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
+    },
     "code_action": {
       "types": [
         "boolean"
@@ -925,6 +1023,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
     "subscription_engine": {
       "types": [
         "string"
+      ],
+      "required": false
+    },
+    "ultra_mode": {
+      "types": [
+        "boolean"
       ],
       "required": false
     },

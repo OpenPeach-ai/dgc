@@ -484,8 +484,11 @@ export class DgcBackend extends EventEmitter {
   request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000): Promise<DgcEvent> {
     const rawRequestId = (cmd as any).request_id;
     const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
-      return Promise.reject(new Error("DGC request timeout must be between 1 and 60000ms"));
+    // Manual compaction may use the backend's 120-second summarization deadline. Keep the
+    // transport watchdog bounded, but long enough that the UI does not report a timeout while
+    // a valid compaction request is still running.
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 180000) {
+      return Promise.reject(new Error("DGC request timeout must be between 1 and 180000ms"));
     }
     return new Promise<DgcEvent>((resolve, reject) => {
       let settled = false;

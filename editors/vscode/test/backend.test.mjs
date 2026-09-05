@@ -211,7 +211,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   );
 
   await assert.rejects(
-    backend.request({ type: "compact", request_id: "compact-exact" }, "context", 1000),
+    backend.request({ type: "compact", request_id: "compact-exact" }, "compacted", 1000),
     /synthetic busy/,
     "only the rejection carrying the exact request ID may settle the command",
   );
@@ -231,6 +231,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   );
   assert.equal(backend.listenerCount("event"), eventListeners);
   assert.equal(backend.listenerCount("exit"), exitListeners);
+  const longCompactionWindow = backend.request(
+    { type: "status", request_id: "long-compaction-window" }, "status", 130_000);
+  backend.emit("event", { type: "status", request_id: "long-compaction-window" });
+  assert.equal((await longCompactionWindow).request_id, "long-compaction-window",
+    "manual compaction may wait through the backend's 120-second summary deadline");
+  await assert.rejects(
+    backend.request({ type: "status", request_id: "unbounded-timeout" }, "status", 180_001),
+    /between 1 and 180000ms/,
+  );
   backend.dispose();
 });
 
