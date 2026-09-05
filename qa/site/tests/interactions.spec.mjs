@@ -192,6 +192,28 @@ test("the sticky header spans the viewport while its controls stay container-ali
   expect(runtime.httpErrors).toEqual([]);
 });
 
+test("the header and footer retain the animated DGC wordmark", async ({page}) => {
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+
+  const wordmarks = await page.locator(".site-header .brand,.site-footer .brand").evaluateAll(brands => (
+    brands.map(brand => ({
+      cursorAnimation: getComputedStyle(brand.querySelector(".brand-cursor")).animationName,
+      cursorLabel: brand.textContent.trim(),
+      slashAnimations: [...brand.querySelectorAll("svg path")]
+        .map(path => getComputedStyle(path).animationName),
+    }))
+  ));
+
+  expect(wordmarks).toHaveLength(2);
+  expect(wordmarks.every(wordmark => wordmark.cursorLabel === "DGC")).toBe(true);
+  expect(wordmarks.every(wordmark => wordmark.cursorAnimation === "brand-cursor-blink")).toBe(true);
+  expect(wordmarks.every(wordmark => (
+    wordmark.slashAnimations.length === 3
+      && wordmark.slashAnimations.every(name => name === "brand-slash-pulse")
+  ))).toBe(true);
+});
+
 test("mobile drawers retain viewport gutters without horizontal clipping", async ({page}) => {
   test.skip((page.viewportSize()?.width || 0) > 1040);
   const assertDrawerFits = async drawer => {
@@ -597,6 +619,20 @@ test("benchmark score lines terminate at every plotted point", async ({page}) =>
   expect(rows.every(row => row.lineContent !== "none" && row.delta <= 1.5)).toBe(true);
   expect(rows.every(row => row.transform === "none" || row.transform === "matrix(1, 0, 0, 1, 0, 0)"))
     .toBe(true);
+
+  const dgcLabel = panel.locator(".plot-row.dgc .plot-name");
+  await expect(dgcLabel).toHaveText("DGC");
+  const labelState = await dgcLabel.evaluate(label => {
+    const bounds = label.getBoundingClientRect();
+    const pointX = bounds.left + bounds.width / 2;
+    const pointY = bounds.top + bounds.height / 2;
+    return {
+      painted: document.elementsFromPoint(pointX, pointY).includes(label),
+      rowOverflowX: getComputedStyle(label.parentElement).overflowX,
+    };
+  });
+  expect(labelState.rowOverflowX).toBe("visible");
+  expect(labelState.painted).toBe(true);
 });
 
 test("native pipeline animates in numbered order before its feedback retry", async ({page}, testInfo) => {
