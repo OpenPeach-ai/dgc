@@ -34,7 +34,6 @@ VERSION = json.loads((SITE / "version.json").read_text(encoding="utf-8"))["versi
 
 TEXT_SUFFIXES = {".html", ".css", ".js", ".json", ".xml", ".txt", ".svg", ".sha256", ".webmanifest"}
 LOCAL_HOSTS = {"vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"}
-EXEMPT_PATHS = {"/api/event"}
 LEAK_PATTERNS = {
     "internal audit terminology": re.compile(
         r"FRONTIER_AUDIT|FRONTIER[_ -]ROADMAP|frontier[- ]hardening", re.I,
@@ -131,7 +130,6 @@ class PageParser(HTMLParser):
         self.descriptions = 0
         self.og_images: list[str] = []
         self.videos: list[dict[str, str]] = []
-        self.events: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         data = {name: value or "" for name, value in attrs}
@@ -152,15 +150,10 @@ class PageParser(HTMLParser):
             self.og_images.append(data.get("content", ""))
         if tag == "video":
             self.videos.append(data)
-        for attr in ("data-event", "data-event-play", "data-page-event"):
-            if data.get(attr):
-                self.events.add(data[attr])
 
 
 def served_page(path: str) -> Path | None:
     clean = unquote(path).split("?", 1)[0]
-    if clean in EXEMPT_PATHS:
-        return None
     relative = clean.lstrip("/")
     candidates = [SITE / relative]
     if not Path(relative).suffix:
@@ -229,8 +222,6 @@ def check_pages(errors: list[str]) -> dict[Path, PageParser]:
                     target_path = "/docs" + (target_path if target_path != "/" else "")
                 target_page = served_page(target_path)
                 fragment = unquote(parsed_url.fragment)
-                if parsed_url.path in EXEMPT_PATHS:
-                    continue
                 if target_page is None or not target_page.is_file():
                     errors.append(f"{page.relative_to(SITE)}: broken {tag}[{attr}] {raw}")
                     continue
@@ -262,26 +253,8 @@ def check_css(errors: list[str]) -> None:
                 errors.append(f"{name}: broken CSS url {raw}")
 
 
-def check_analytics_event_contract(parsed: dict[Path, PageParser], errors: list[str]) -> None:
-    """Keep every browser-emitted event synchronized with the Worker allowlist."""
-    used = {event for parser in parsed.values() for event in parser.events}
-    worker = (SITE / "_worker.js").read_text(encoding="utf-8")
-    match = re.search(r"const EVENTS = new Set\(\[(.*?)\]\);", worker, re.DOTALL)
-    if not match:
-        errors.append("_worker.js: could not read the analytics event allowlist")
-        return
-    allowed = set(re.findall(r'"([a-z][a-z0-9_]*)"', match.group(1)))
-    if used != allowed:
-        missing = sorted(used - allowed)
-        dead = sorted(allowed - used)
-        errors.append(
-            "analytics event contract disagrees between HTML and Worker"
-            f" (unhandled={missing}, unused={dead})"
-        )
-
-
 def check_website_intake_retired(errors: list[str]) -> None:
-    """Prevent any retired contact or release-signup data path from returning."""
+    """Prevent retired website intake and first-party event collection from returning."""
     for page in sorted(SITE.rglob("*.html")):
         source = page.read_text(encoding="utf-8")
         if re.search(r"<form\b", source, re.I):
@@ -291,6 +264,7 @@ def check_website_intake_retired(errors: list[str]) -> None:
 
     worker = (SITE / "_worker.js").read_text(encoding="utf-8")
     retired_markers = (
+        "DGC_ANALYTICS", "MEASUREMENT_ORIGINS", "writeDataPoint", "eventRoute", "measure(",
         "DGC_CONTACT_EMAIL", "DGC_FROM_EMAIL", "DGC_RATE_LIMIT_SECRET", "DGC_SITE_DB",
         "RESEND_API_KEY", "commercialRoute", "normalizedCommercial", "validCommercial",
         "subscribeRoute", "subscribeRequestRoute", "subscriptionAction", "sendEmail",
@@ -299,8 +273,15 @@ def check_website_intake_retired(errors: list[str]) -> None:
     for marker in retired_markers:
         if marker in worker:
             errors.append(f"_worker.js: retired website-intake marker remains: {marker}")
+    runtime_bindings = set(re.findall(r"\benv\.([A-Za-z_$][A-Za-z0-9_$]*)", worker))
+    if runtime_bindings != {"ASSETS"} or re.search(r"\benv\s*\[", worker):
+        errors.append(
+            "_worker.js: static Pages Worker may use only the implicit ASSETS binding"
+            f" (found={sorted(runtime_bindings)})"
+        )
     retired_paths = (
-        "/api/commercial", "/api/subscribe", "/api/subscribe/confirm", "/api/unsubscribe",
+        "/api/event", "/api/commercial", "/api/subscribe", "/api/subscribe/confirm",
+        "/api/unsubscribe",
     )
     if "RETIRED_API_PATHS.has(url.pathname)" not in worker \
             or 'response = json({error: "Not found"}, 404);' not in worker:
@@ -309,13 +290,17 @@ def check_website_intake_retired(errors: list[str]) -> None:
         if json.dumps(path) not in worker:
             errors.append(f"_worker.js: retired endpoint tombstone is missing: {path}")
 
-    generated_assets = "\n".join(
-        (SITE / name).read_text(encoding="utf-8")
-        for name in ("assets/site.js", "assets/site.css")
+    generated_client = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(SITE.rglob("*"))
+        if path.is_file() and path.name != "_worker.js" and path.suffix in {".html", ".js", ".css"}
     )
-    for marker in ("data-async-form", "data-subscription-panel", "release-form"):
-        if marker in generated_assets:
-            errors.append(f"generated assets retain retired form marker: {marker}")
+    for marker in (
+        "/api/event", "sendBeacon", "data-event", "data-event-play", "data-page-event",
+        "data-async-form", "data-subscription-panel", "release-form",
+    ):
+        if marker in generated_client:
+            errors.append(f"generated client retains retired dynamic-site marker: {marker}")
 
     config_path = ROOT / "wrangler.json"
     if not config_path.is_file():
@@ -323,10 +308,24 @@ def check_website_intake_retired(errors: list[str]) -> None:
     else:
         try:
             config = json.loads(config_path.read_text(encoding="utf-8"))
-            if config.get("d1_databases"):
-                errors.append("wrangler.json: retired D1 binding remains")
-            if config.get("vars"):
-                errors.append("wrangler.json: website runtime variables are not expected")
+            if not isinstance(config, dict):
+                raise TypeError("top-level value must be an object")
+            allowed = {"$schema", "name", "pages_build_output_dir", "compatibility_date"}
+            missing = allowed - set(config)
+            unexpected = set(config) - allowed
+            if missing or unexpected:
+                errors.append(
+                    "wrangler.json: static Pages config must not declare dynamic bindings or variables"
+                    f" (missing={sorted(missing)}, unexpected={sorted(unexpected)})"
+                )
+            if config.get("name") != "dgc" or config.get("pages_build_output_dir") != "./site":
+                errors.append("wrangler.json: unexpected Pages project name or output directory")
+            if config.get("$schema") != "node_modules/wrangler/config-schema.json":
+                errors.append("wrangler.json: unexpected Wrangler schema reference")
+            compatibility_date = config.get("compatibility_date")
+            if not isinstance(compatibility_date, str) \
+                    or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", compatibility_date):
+                errors.append("wrangler.json: compatibility_date must use YYYY-MM-DD")
         except (OSError, TypeError, json.JSONDecodeError) as exc:
             errors.append(f"wrangler.json: invalid JSON ({exc})")
     migrations = ROOT / "migrations"
@@ -1312,7 +1311,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--require-public-release requires the public source tag")
     errors: list[str] = []
     parsed = check_pages(errors)
-    check_analytics_event_contract(parsed, errors)
     check_website_intake_retired(errors)
     check_blog_retired(errors)
     check_css_minifier(errors)

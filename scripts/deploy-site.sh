@@ -3,28 +3,38 @@
 # DGC_ENV_FILE; credentials are never sourced into the shell or copied into the staged site.
 set -euo pipefail
 
+DEPLOY_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+DEPLOY_ACCOUNT=${CLOUDFLARE_ACCOUNT_ID:-}
+DEPLOY_ENV_FILE=${DGC_ENV_FILE:-}
+# No validation, build, browser, or Git subprocess should inherit deployment credentials.
+unset CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID DGC_ENV_FILE DGC_CLOUDFLARE_PROJECT
+export -n DEPLOY_TOKEN DEPLOY_ACCOUNT DEPLOY_ENV_FILE 2>/dev/null || true
+unset DGC_DEPLOY_ENV_LINE
+export -n DGC_DEPLOY_ENV_LINE 2>/dev/null || true
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WRANGLER_VERSION=4.125.0
-PROJECT=${DGC_CLOUDFLARE_PROJECT:-dgc}
+PROJECT=dgc
 BRANCH=main
 
-if [ -n "${DGC_ENV_FILE:-}" ]; then
-  [ -f "$DGC_ENV_FILE" ] || { echo "DGC_ENV_FILE does not exist: $DGC_ENV_FILE" >&2; exit 1; }
-  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-    line=$(grep -E '^\s*dgc_cloudflare_token\s*=' "$DGC_ENV_FILE" | head -1 || true)
-    export CLOUDFLARE_API_TOKEN
-    CLOUDFLARE_API_TOKEN=$(printf '%s' "${line#*=}" | tr -d '"'"'"'\r' | xargs)
+if [ -n "$DEPLOY_ENV_FILE" ]; then
+  [ -f "$DEPLOY_ENV_FILE" ] || {
+    echo "DGC_ENV_FILE does not exist: $DEPLOY_ENV_FILE" >&2; exit 1;
+  }
+  if [ -z "$DEPLOY_TOKEN" ]; then
+    DGC_DEPLOY_ENV_LINE=$(grep -E '^\s*dgc_cloudflare_token\s*=' "$DEPLOY_ENV_FILE" | head -1 || true)
+    DEPLOY_TOKEN=$(printf '%s' "${DGC_DEPLOY_ENV_LINE#*=}" | tr -d '"'"'"'\r' | xargs)
   fi
-  if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-    line=$(grep -E '^\s*Cloudflare_account_id\s*=' "$DGC_ENV_FILE" | head -1 || true)
-    export CLOUDFLARE_ACCOUNT_ID
-    CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "${line#*=}" | tr -d '"'"'"'\r' | xargs)
+  if [ -z "$DEPLOY_ACCOUNT" ]; then
+    DGC_DEPLOY_ENV_LINE=$(grep -E '^\s*Cloudflare_account_id\s*=' "$DEPLOY_ENV_FILE" | head -1 || true)
+    DEPLOY_ACCOUNT=$(printf '%s' "${DGC_DEPLOY_ENV_LINE#*=}" | tr -d '"'"'"'\r' | xargs)
   fi
 fi
-[ -n "${CLOUDFLARE_API_TOKEN:-}" ] || {
+unset DGC_DEPLOY_ENV_LINE
+[ -n "$DEPLOY_TOKEN" ] || {
   echo "set CLOUDFLARE_API_TOKEN (or explicitly set DGC_ENV_FILE)" >&2; exit 1;
 }
-[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || {
+[ -n "$DEPLOY_ACCOUNT" ] || {
   echo "set CLOUDFLARE_ACCOUNT_ID (or explicitly set DGC_ENV_FILE)" >&2; exit 1;
 }
 
@@ -64,12 +74,13 @@ node --no-warnings "$ROOT/scripts/check-site-worker.mjs"
   exit 1
 }
 jq -e '
-  .name == "dgc"
+  .["$schema"] == "node_modules/wrangler/config-schema.json"
+  and .name == "dgc"
   and .pages_build_output_dir == "./site"
-  and any(.analytics_engine_datasets[];
-    .binding == "DGC_ANALYTICS" and .dataset == "dgc_site_events")
+  and (.compatibility_date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+  and (keys | sort == ["$schema", "compatibility_date", "name", "pages_build_output_dir"])
 ' "$ROOT/wrangler.json" >/dev/null || {
-  echo "wrangler.json does not declare the dgc_site_events analytics binding" >&2
+  echo "wrangler.json must be a static Pages config with no dynamic bindings or variables" >&2
   exit 1
 }
 [ -x "$ROOT/node_modules/.bin/playwright" ] && [ -x "$ROOT/node_modules/.bin/lighthouse" ] || {
@@ -80,6 +91,7 @@ npm run qa:site:release
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 python3 "$ROOT/scripts/check-site.py" --require-public-release --stage "$STAGE"
-npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$STAGE" \
+CLOUDFLARE_API_TOKEN="$DEPLOY_TOKEN" CLOUDFLARE_ACCOUNT_ID="$DEPLOY_ACCOUNT" \
+  npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$STAGE" \
   --project-name="$PROJECT" --branch="$BRANCH" \
   --commit-hash="$COMMIT_HASH" --commit-message="$COMMIT_MESSAGE" --commit-dirty=false

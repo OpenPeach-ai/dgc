@@ -170,8 +170,7 @@ def shell(title: str, description: str, page: str, side: str, body: str, toc_htm
             {"@type": "ListItem", "position": 3, "name": title, "item": context["DOCS_URL"] if page == "index" else f'{context["DOCS_URL"]}/{page}'},
         ],
     }
-    page_event = ' data-page-event="docs_getting_started_reached"' if page == "getting-started" else ""
-    inner = f'''<div class="docs-shell" data-doc-page="{html.escape(page, quote=True)}"{page_event}>
+    inner = f'''<div class="docs-shell" data-doc-page="{html.escape(page, quote=True)}">
   <nav class="docs-sidebar" id="docs-sidebar" aria-label="Documentation navigation">{side}</nav>
   <article class="docs-article">
     <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC {context["VERSION"]}</span><a href="{context["GITHUB_URL"]}/edit/main/{edit_path}">Edit on GitHub ↗</a></div>

@@ -14,14 +14,14 @@
       <h1>Own your coding agent.</h1>
       <p class="lede">A native agentic loop for local and API models, plus delegated turns through supported coding subscriptions. In your terminal and your editor.</p>
       <div class="hero-actions">
-        <a class="button button-primary" href="https://docs.vibedgc.com/getting-started" data-event="get_started">Get started <span aria-hidden="true">→</span></a>
+        <a class="button button-primary" href="https://docs.vibedgc.com/getting-started">Get started <span aria-hidden="true">→</span></a>
         <a class="button" href="/benchmark">See the benchmark</a>
         <a class="quiet-link" href="#product-capture" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Watch it work · {{CAPTURE_CLI_DURATION_LABEL}} <span aria-hidden="true">↗</span></a>
       </div>
       <div class="install-panel" data-install-tabs data-copy-scope>
         <div class="install-inner">
           <div class="os-tabs" role="tablist" aria-label="Install command platform"><button id="install-tab-macos" type="button" role="tab" aria-controls="install-panel" data-os="macos" aria-selected="true">macOS</button><button id="install-tab-linux" type="button" role="tab" aria-controls="install-panel" data-os="linux" aria-selected="false" tabindex="-1">Linux</button><button id="install-tab-windows" type="button" role="tab" aria-controls="install-panel" data-os="windows" aria-selected="false" tabindex="-1">Windows · WSL</button></div>
-          <div class="install-command" id="install-panel" role="tabpanel" aria-labelledby="install-tab-macos"><span class="prompt">$</span><code id="hero-install" data-install-command>curl -fsSL https://vibedgc.com/install.sh | bash</code><button class="copy-button" type="button" data-copy data-copy-target="#hero-install" data-event="install_copy">copy</button></div>
+          <div class="install-command" id="install-panel" role="tabpanel" aria-labelledby="install-tab-macos"><span class="prompt">$</span><code id="hero-install" data-install-command>curl -fsSL https://vibedgc.com/install.sh | bash</code><button class="copy-button" type="button" data-copy data-copy-target="#hero-install">copy</button></div>
           <div class="requirements">Python 3.10+ · no root · local, API, and subscription routes</div>
         </div>
       </div>
@@ -41,7 +41,7 @@
     <div class="marquee-set"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
     <div class="marquee-set" aria-hidden="true"><span>Ollama</span><span>llama.cpp</span><span>vLLM</span><span>LM Studio</span><span>OpenAI</span><span>Anthropic</span><span>OpenRouter</span><span>Groq</span><span>DeepSeek</span><span>Claude Code</span><span>Codex</span><span>Qwen Code</span><span>Kimi</span><span>GitHub Copilot</span></div>
   </div>
-  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="{{MARKETPLACE_URL}}" data-event="marketplace"><span>{{MARKETPLACE_PROOF_LABEL}}</span>{{MARKETPLACE_PROOF_VALUE}} <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence" data-event="benchmark_traces"><span>Evidence</span>{{BENCH_HARNESS_COUNT_WORD}} harness run summaries <b aria-hidden="true">→</b></a></div>
+  <div class="proof-facts"><a href="/pricing"><span>License</span>Free for noncommercial use <b aria-hidden="true">→</b></a><a href="{{MARKETPLACE_URL}}"><span>{{MARKETPLACE_PROOF_LABEL}}</span>{{MARKETPLACE_PROOF_VALUE}} <b aria-hidden="true">↗</b></a><a href="/benchmark#evidence"><span>Evidence</span>{{BENCH_HARNESS_COUNT_WORD}} harness run summaries <b aria-hidden="true">→</b></a></div>
 </section>
 
 <section class="section field field-2" id="cli">
@@ -125,6 +125,6 @@
 
 <dialog class="capture-dialog" id="product-capture" data-capture-dialog aria-labelledby="product-capture-title" aria-describedby="product-capture-note">
   <div class="capture-head"><span class="micro" id="product-capture-title">DGC · real local-model capture · {{CAPTURE_CLI_DURATION_LABEL}}</span><button type="button" data-close-capture aria-label="Close product capture">×</button></div>
-  <video controls playsinline preload="none" data-capture-video data-poster="/assets/cli-capture-poster.jpg" data-event-play="capture_play" aria-describedby="product-capture-note"><source data-src="/assets/cli-capture.webm" type="video/webm"><source data-src="/assets/cli-capture.mp4" type="video/mp4"></video>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/cli-capture-poster.jpg" aria-describedby="product-capture-note"><source data-src="/assets/cli-capture.webm" type="video/webm"><source data-src="/assets/cli-capture.mp4" type="video/mp4"></video>
   <p id="product-capture-note">{{CAPTURE_CLI_PROVENANCE}}</p>
 </dialog>

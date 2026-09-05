@@ -43,7 +43,8 @@ test("release signup and blog publishing surfaces stay retired", async ({request
     expect(response.status(), path).toBe(404);
   }
   for (const path of [
-    "/api/commercial", "/api/subscribe", "/api/subscribe/confirm", "/api/unsubscribe",
+    "/api/event", "/api/commercial", "/api/subscribe", "/api/subscribe/confirm",
+    "/api/unsubscribe",
   ]) {
     const response = await request.post(path, {data: {email: "reader@example.com"}});
     expect(response.status(), path).toBe(404);

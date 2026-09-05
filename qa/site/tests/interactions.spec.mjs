@@ -97,6 +97,43 @@ test("first click-only activation initializes home controls in capture phase", a
   expect(runtime.httpErrors).toEqual([]);
 });
 
+test("install copy handles clipboard failure and preserves exact command bytes", async ({page}) => {
+  await page.addInitScript(() => {
+    window.__clipboardMode = "reject";
+    window.__clipboardWrites = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText(value) {
+          window.__clipboardWrites.push(value);
+          return window.__clipboardMode === "resolve"
+            ? Promise.resolve()
+            : Promise.reject(new Error("Clipboard denied by interaction test"));
+        },
+      },
+    });
+  });
+  const runtime = observeRuntime(page);
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+
+  const copy = page.locator('[data-copy][data-copy-target="#hero-install"]');
+  await copy.click();
+  await expect(copy).toHaveText("select");
+
+  await page.evaluate(() => { window.__clipboardMode = "resolve"; });
+  await copy.click();
+  await expect(copy).toHaveText("copied");
+  await expect.poll(() => page.evaluate(() => window.__clipboardWrites)).toEqual([
+    "curl -fsSL https://vibedgc.com/install.sh | bash",
+    "curl -fsSL https://vibedgc.com/install.sh | bash",
+  ]);
+
+  expect(runtime.consoleErrors).toEqual([]);
+  expect(runtime.pageErrors).toEqual([]);
+  expect(runtime.httpErrors).toEqual([]);
+});
+
 test("a returning visitor's dismissed announcement does not shift layout", async ({page}) => {
   await page.goto("/", {waitUntil: "domcontentloaded"});
   const announcementVersion = await page.locator("[data-announcement]").getAttribute("data-announcement");

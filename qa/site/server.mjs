@@ -36,9 +36,6 @@ const MIME = new Map([
   [".vsix", "application/octet-stream"],
 ]);
 const COMPRESSIBLE = new Set([".css", ".html", ".js", ".json", ".svg", ".txt", ".webmanifest", ".xml"]);
-const API_POST_FIXTURES = new Map([
-  ["/api/event", {status: 204}],
-]);
 
 function routeFile(pathname) {
   if (routes.has(pathname)) {
@@ -109,22 +106,8 @@ const server = createServer((request, response) => {
   }
   if (pathname.startsWith("/api/") && request.method === "POST") {
     request.resume();
-    const fixture = API_POST_FIXTURES.get(pathname);
-    if (!fixture) {
-      const body = JSON.stringify({error: "Unknown QA API endpoint"});
-      response.writeHead(404, {
-        "Cache-Control": "no-store",
-        "Content-Length": Buffer.byteLength(body),
-        "Content-Type": "application/json; charset=utf-8",
-      }).end(body);
-      return;
-    }
-    if (fixture.status === 204) {
-      response.writeHead(204, {"Cache-Control": "no-store"}).end();
-      return;
-    }
-    const body = JSON.stringify(fixture.body);
-    response.writeHead(fixture.status, {
+    const body = JSON.stringify({error: "Unknown QA API endpoint"});
+    response.writeHead(404, {
       "Cache-Control": "no-store",
       "Content-Length": Buffer.byteLength(body),
       "Content-Type": "application/json; charset=utf-8",

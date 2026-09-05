@@ -22,7 +22,7 @@ Training export is initiated by you and writes to a path you choose. DGC removes
 
 The site is delivered through Cloudflare. Cloudflare necessarily processes request information such as IP address, user agent, requested path, timestamps, and security signals to serve and protect the site. Where Cloudflare Web Analytics is enabled, it provides aggregate page-view information without an advertising profile.
 
-The site may also record a small first-party event—for example, a page view; that an install command was copied; a marketplace, benchmark-trace, or getting-started link was selected; that the getting-started documentation was reached; a product capture was played; or a download was requested. The server stores the event name, site hostname, page path, and a coarse class such as desktop, mobile, bot, or DGC update checker. It does not store prompts, repository contents, email addresses, free-form text, a full user-agent string, or a cross-site identifier in that event dataset. These events use no advertising cookie, are not recorded when the request or browser reports `DNT: 1` or Global Privacy Control, and Cloudflare Analytics Engine retains them for three months.
+The website does not expose a custom first-party analytics or interaction-event endpoint, and it does not maintain its own page-view or interaction-event dataset. Cloudflare Web Analytics, where enabled, is the website-usage analytics described here.
 
 ## Forms and email
 
@@ -30,6 +30,6 @@ The website does not operate contact, commercial-enquiry, commercial-license, or
 
 ## Choices and changes
 
-You control the model and integrations DGC connects to and whether to create a training export. Browser Do Not Track disables optional first-party interaction events. Network-level blocking may also prevent website analytics or the version check without stopping an already installed DGC from working with a reachable local model.
+You control the model and integrations DGC connects to and whether to create a training export. Network-level blocking may prevent website analytics or the version check without stopping an already installed DGC from working with a reachable local model.
 
 This notice may change when the product or website data flows change. Material changes will be reflected by a new effective date.
