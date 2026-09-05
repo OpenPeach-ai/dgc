@@ -395,7 +395,7 @@
     "test:host": "node test/run-extension-host.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.4.1",
     "@types/vscode": "^1.84.0",
     "@vscode/vsce": "3.9.2",
     "esbuild": "^0.28.2",
