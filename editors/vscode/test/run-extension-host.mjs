@@ -87,6 +87,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (cmd.type === "set_goal") send({ type: "goal_changed", request_id: cmd.request_id,
     goal: cmd.text || "installed-host goal", status: cmd.status || "active" });
+  if (cmd.type === "prompt" && cmd.text === "host matrix") {
+    send({ type: "turn_start", turn_id: "goal-turn", prompt: cmd.text });
+    send({ type: "text", turn_id: "goal-turn", text: "Goal started." });
+    send({ type: "turn_end", turn_id: "goal-turn", reason: "completed", token_estimate: 2 });
+  }
   if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
     plan: "1. Inspect\\n2. Verify", exists: true });
   if (cmd.type === "status") send({ type: "status", request_id: cmd.request_id,

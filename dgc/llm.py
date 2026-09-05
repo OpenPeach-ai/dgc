@@ -2065,7 +2065,7 @@ class LLMClient:
                 status = response.status_code
                 body = _error_body(response, 400)
                 raise LLMError(f"HTTP {status} from Anthropic Messages: {body}")
-            budget = 0 if overthink > 2 else self.think_budget_chars
+            budget = self.think_budget_chars
             try:
                 result = self._consume_anthropic(
                     response, on_text, on_thinking, cancel, think_budget=budget)
@@ -2073,7 +2073,12 @@ class LLMClient:
                 _close_response(response)
             if result.finish_reason == "overthink":
                 overthink += 1
-                level = lower.get(str(level or "off"), "off")
+                prior_level = str(level or "off").lower()
+                level = lower.get(prior_level, "off")
+                # If an explicit reasoning-off request still produces only hidden thought, hand
+                # the bounded outcome to the Agent instead of launching an unbounded final try.
+                if prior_level in ("none", "off"):
+                    return result
                 continue
             return result
         raise LLMError(f"Anthropic Messages request failed repeatedly: {last_err}")
@@ -2217,9 +2222,12 @@ class LLMClient:
                             on_thinking(chunk)
                     else:
                         result.content += chunk
+                        # Some local templates put reasoning inside ``<think>`` tags in the
+                        # ordinary content field. Only text that survives into the normal channel
+                        # is a user-visible answer and may disarm the reasoning watchdog.
+                        produced = True
                         if on_text:
                             on_text(chunk)
-                produced = True
             calls = message.get("tool_calls") or []
             if not isinstance(calls, list):
                 raise LLMError("Ollama emitted non-list tool_calls")
@@ -2511,14 +2519,17 @@ class LLMClient:
                 status = r.status_code
                 body = _error_body(r, 400)
                 raise LLMError(f"HTTP {status} from {self._ollama_url}: {body}")
-            budget = 0 if overthink > 2 else self.think_budget_chars
+            budget = self.think_budget_chars
             try:
                 result = self._consume_ollama(r, on_text, on_thinking, cancel, think_budget=budget)
             finally:
                 _close_response(r)
             if result.finish_reason == "overthink":
                 overthink += 1
-                level = lower.get(str(level or "off"), "off")
+                prior_level = str(level or "off").lower()
+                level = lower.get(prior_level, "off")
+                if prior_level in ("none", "off"):
+                    return result
                 if self.reasoning_supported:
                     payload["think"] = self._ollama_think(level)
                 continue
@@ -2672,14 +2683,17 @@ class LLMClient:
                 status = r.status_code
                 body = _error_body(r, 400)
                 raise LLMError(f"HTTP {status} from {self._url}: {body}")
-            budget = 0 if overthink > 2 else self.think_budget_chars   # let the last attempt finish
+            budget = self.think_budget_chars
             try:
                 res = self._consume(r, on_text, on_thinking, cancel, think_budget=budget)
             finally:
                 _close_response(r)
             if res.finish_reason == "overthink":          # F4: reasoning ran away → retry with less
                 overthink += 1
-                level = _LOWER.get(level or "off", "off")  # high→medium→low→off (floor)
+                prior_level = str(level or "off").lower()
+                level = _LOWER.get(prior_level, "off")     # high→medium→low→off (floor)
+                if prior_level in ("none", "off"):
+                    return res
                 for k in _REASONING_KEYS:
                     payload.pop(k, None)
                 if self.reasoning_supported:
@@ -3371,6 +3385,7 @@ class LLMClient:
         last_idx: int | None = None    # best-effort continuation when a gateway omits both id + index
 
         def emit(events):
+            nonlocal produced
             for kind, chunk in events:
                 if not chunk:
                     continue
@@ -3380,6 +3395,9 @@ class LLMClient:
                         on_thinking(chunk)
                 else:
                     result.content += chunk
+                    # Raw ``content`` may still be a tagged reasoning stream. Seeing an opening
+                    # tag is not progress; only normal-channel text is visible to the user.
+                    produced = True
                     if on_text:
                         on_text(chunk)
 
@@ -3480,7 +3498,6 @@ class LLMClient:
                     raise LLMError("Chat Completions emitted malformed content text")
                 if content:
                     emit(filt.feed(content))
-                    produced = True
                 raw_calls = delta.get("tool_calls")
                 if raw_calls is None:
                     raw_calls = []

@@ -37,6 +37,10 @@ assert.match(panelSrc,
   "editor model changes must explicitly target the active subscription route");
 assert.match(panelSrc, /async listModels[\s\S]*?if \(this\.routeState\.subscriptionEngine\)[\s\S]*?this\.post\(\{ type: "models"[\s\S]*?return;[\s\S]*?this\.fetchModels\(\)/,
   "subscription composer model listing must return before native endpoint discovery");
+assert.match(panelSrc, /private async stopArtifact[\s\S]*?requestState\([\s\S]*?"artifacts"/,
+  "artifact stop must wait for the correlated backend state before settling the card");
+assert.match(panelSrc, /private async startGoal[\s\S]*?await this\.requestState[\s\S]*?type: "set_goal"[\s\S]*?type: "prompt", text: objective/,
+  "a typed goal must be persisted before its objective starts an agent turn");
 
 function relativeLuminance(hex) {
   const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);
@@ -98,7 +102,11 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.equal(doc.getElementById("pmodel").textContent, "qwen3:8b");
   assert.equal(doc.getElementById("modelname").textContent, "qwen3:8b");
 
-  send({ type: "event", event: { type: "ready", commands: [] } });
+  send({ type: "event", event: { type: "ready", commands: [], session_id: "chat-12345678",
+    session_name: "Answer formatter audit" } });
+  assert.equal(doc.getElementById("thread-title").textContent, "Answer formatter audit");
+  doc.getElementById("thread-title").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/name");
   send({ type: "event", event: { type: "turn_start" } });
 
   // subtle thinking indicator is present
@@ -518,6 +526,10 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.equal(goal.text, "/goal ship the release");
   assert.equal(posted.some((m) => m.type === "prompt" && m.text === goal.text), false,
     "built-in slash commands must not be sent as model prompts");
+  assert.equal(doc.querySelector(".goal-prompt .role").textContent, "goal");
+  assert.equal(doc.querySelector(".goal-prompt .bubble").textContent, "ship the release");
+  assert.equal(doc.getElementById("send").title, "Stop",
+    "a goal objective must immediately look like a running turn while its state is persisted");
 
   input.value = "/viewp";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -566,6 +578,12 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
   ] } });
+  const artifactStop = [...doc.querySelectorAll("[data-artifact-stop]")].at(-1);
+  artifactStop.click(); artifactStop.click();
+  assert.equal(posted.filter((m) => m.type === "stopArtifact" && m.id === "p1").length, 1,
+    "one click owns the artifact stop lifecycle and a disabled button cannot submit twice");
+  assert.equal(artifactStop.disabled, true);
+  assert.equal(artifactStop.textContent, "Stopping…");
   send({ type: "surface_open", surface: "skills" });
   send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
     items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
@@ -595,6 +613,9 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
   assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
+  send({ type: "artifact_stop_state", id: "p1", state: "stopped" });
+  assert.equal(doc.querySelector('[data-artifact-id="p1"]'), null,
+    "the artifact row is removed only after the backend confirms it stopped");
   assert.equal(doc.getElementById("log").querySelector("img"), null,
     "hook activity and handoff metadata must remain inert text");
   assert.equal(doc.getElementById("log").querySelector("script"), null,

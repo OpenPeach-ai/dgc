@@ -114,6 +114,9 @@
               "type": "integer",
               "minimum": -9007199254740991,
               "maximum": 9007199254740991
+            },
+            "session_name": {
+              "type": "string"
             }
           },
           "required": [
@@ -2028,6 +2031,9 @@
               "type": "string"
             },
             "path": {
+              "type": "string"
+            },
+            "name": {
               "type": "string"
             },
             "request_id": {

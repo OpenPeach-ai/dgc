@@ -47,6 +47,8 @@ _VERIFY_INFO_FLAGS = {
 _MAX_CONTINUE = 8       # bounded output-limit/transport-interruption recovery per turn (a weak local
                         #   model debugging a hard problem legitimately hits its output cap several
                         #   times across a long turn; 3 cut it off mid-convergence)
+_MAX_FINALIZATION_RETRIES = 2  # empty reasoning/output-limit responses get two forced, thinking-off
+                               # retries before the turn terminates visibly instead of appearing hung
 _INCOMPLETE_FINISH_REASONS = frozenset(("length", "incomplete"))
 _MAX_PROVIDER_PAUSE_CONTINUE = 5  # bounded exact replay of provider-owned paused turns
 _MAX_TODO_GATE = 2      # times we push the model to finish open todos before letting it stop
@@ -1550,6 +1552,8 @@ class Agent:
             "- ALWAYS finish a turn with a clear final response (normal text, NOT the thinking channel): "
             "lead with the outcome, then mention changed files and verification only when relevant, plus "
             "anything the user should know or do next. Never end with only tool calls or repeat a long log.",
+            "- Once the work or plan is ready, stop exploring and answer immediately in normal text. "
+            "Default to under 600 words; don't spend the output budget only on hidden reasoning.",
         ]
 
         goal = getattr(self, "goal", "")
@@ -2491,6 +2495,7 @@ class Agent:
         verify_nudged = False
         summary_only = False        # budgeted green run → deterministic closeout, no provider request
         continues = 0               # length-truncation auto-continues used this turn
+        finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
         paused_assistant_index: int | None = None
         mutating_total = 0          # landed edits/tasks + bash calls; drives final verifier gating
@@ -2850,6 +2855,40 @@ class Agent:
                         "completion withheld — deferred response exceeded the 512,000-character limit")
                     return self._fail_turn(
                         "stopped — the response awaiting verification exceeded the bounded display limit")
+                if (not (result.content or "").strip()
+                        and result.finish_reason in ("overthink", "length")):
+                    # Local reasoning models can spend an entire generation inside <think> and hit
+                    # max_tokens without ever entering the normal answer channel. A generic
+                    # "continue where you left off" encourages more hidden reasoning and made the
+                    # editor look silently stuck for hours. Force a bounded, thinking-off closeout;
+                    # if the provider still cannot produce text or a call, fail visibly.
+                    if (finalization_retries >= _MAX_FINALIZATION_RETRIES
+                            or (result.finish_reason == "length" and continues >= _MAX_CONTINUE)):
+                        if defer_completion:
+                            withhold_final(
+                                "[Completion withheld by DGC: the model produced no visible answer.]",
+                                "completion withheld — no user-facing response was produced")
+                        return self._fail_turn(
+                            "stopped — the model repeatedly exhausted its reasoning/output budget "
+                            "without producing a user-facing response; progress is saved, but this "
+                            "turn needs another model or a larger output allowance")
+                    finalization_retries += 1
+                    if result.finish_reason == "length":
+                        continues += 1
+                    effort = "off"
+                    self.messages.append({"role": "user", "content":
+                        "<system-reminder>\nYour last generation used its reasoning/output budget "
+                        "without any normal-channel text or complete tool call. Stop hidden reasoning. "
+                        "If the requested work or plan is ready, respond now with a concise final answer "
+                        "of at most 600 words: lead with the outcome, then the essential evidence and "
+                        "next step. If one concrete action is still required, issue only that tool call. "
+                        "Do not continue the private chain of thought.\n</system-reminder>"})
+                    if defer_completion:
+                        withhold_final()
+                    self.ui.info(
+                        "↻ no user-facing output — retrying finalization with thinking off")
+                    next_request_reason = "empty_final"
+                    continue
                 if result.finish_reason in _INCOMPLETE_FINISH_REASONS:
                     if continues < _MAX_CONTINUE:
                         continues += 1
