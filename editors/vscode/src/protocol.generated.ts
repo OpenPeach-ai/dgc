@@ -160,6 +160,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "integer"
       ],
       "required": true
+    },
+    "session_name": {
+      "types": [
+        "string"
+      ],
+      "required": false
     }
   },
   "turn_start": {
@@ -1662,6 +1668,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": false
     },
     "path": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "name": {
       "types": [
         "string"
       ],

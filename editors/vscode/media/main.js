@@ -27,6 +27,18 @@
     cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
   let lastCompaction = null, compacting = false;
 
+  function setThreadTitle(name, sessionId = "", fresh = false) {
+    const safeName = String(name || "").replace(/\s+/g, " ").trim();
+    const safeId = String(sessionId || "").replace(/[^A-Za-z0-9_-]/g, "");
+    const fallback = fresh ? "New chat" : (safeId ? `Chat · ${safeId.slice(-8)}` : "Untitled chat");
+    const title = (safeName || fallback).slice(0, 200);
+    const node = $("thread-title");
+    node.textContent = title;
+    node.title = `${title} — click to rename`;
+    node.setAttribute("aria-label", `Current chat: ${title}. Click to rename`);
+    document.title = `${title} — DGC`;
+  }
+
   function applyMode(m) {
     if (!MODES[m]) return;
     curMode = m;
@@ -476,6 +488,36 @@
     return wrap;
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; appendConversationContent(c); breakText(); return c; }
+  function requestArtifactStop(id, container, button) {
+    if (!id || button.disabled) return;
+    container.dataset.artifactId = String(id);
+    container.classList.add("stopping");
+    button.disabled = true;
+    button.textContent = "Stopping…";
+    vscode.postMessage({ type: "stopArtifact", id });
+  }
+  function settleArtifactStop(message) {
+    const id = String(message.id || "");
+    const targets = [...document.querySelectorAll("[data-artifact-id]")]
+      .filter((node) => node.dataset.artifactId === id);
+    targets.forEach((node) => {
+      const stop = node.querySelector("[data-artifact-stop]");
+      node.classList.remove("stopping");
+      if (message.state === "stopped") {
+        if (node.classList.contains("artifact-list-row")) { node.remove(); return; }
+        node.classList.add("stopped");
+        node.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+        const label = node.querySelector(".anm"); if (label) label.textContent = "Artifact stopped";
+        if (stop) stop.textContent = "Stopped";
+      } else if (message.state === "error" && stop) {
+        stop.disabled = false;
+        stop.textContent = "Retry stop";
+      }
+    });
+    if (message.state === "error") {
+      sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
+    }
+  }
   function requestCard(c, id) { c.dataset.requestId = String(id); return c; }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
@@ -689,6 +731,7 @@
         }
         customCommands = Array.isArray(ev.custom_commands) ? ev.custom_commands
           : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
+        setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         break;
       }
       case "context": {
@@ -706,7 +749,9 @@
         if (ev.kind === "cleared" || ev.kind === "new") {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
+        setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
         break;
+      case "session_named": setThreadTitle(ev.name); break;
       case "config":
         lastConfig = ev;
         curUltra = ev.ultra_mode === true;
@@ -920,13 +965,13 @@
       }
       case "artifact_ready": {
         ensureTurn();
-        const c = el("div", "artifact");
+        const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
         c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
         const row = el("div", "abtns");
         const open = el("button", "abtn primary", "Open in browser"); open.type = "button";
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        const stop = el("button", "abtn", "Stop"); stop.type = "button";
-        stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: ev.id }); c.classList.add("stopped"); };
+        const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
+        stop.onclick = () => requestArtifactStop(ev.id, c, stop);
         row.appendChild(open); row.appendChild(stop); c.appendChild(row);
         c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
         appendTurnContent(c); breakText();
@@ -934,15 +979,20 @@
       }
       case "artifacts": {
         const items = ev.items || [];
-        if (!items.length) { sysLine("No artifact previews are running."); break; }
+        if (!items.length) {
+          if (!String(ev.request_id || "").startsWith("artifact-stop-")) {
+            sysLine("No artifact previews are running.");
+          }
+          break;
+        }
         const c = decisionCard(`<div class="q"><span class="codicon codicon-preview"></span> Artifacts</div><div class="artifact-list"></div>`);
         const list = c.querySelector(".artifact-list");
         items.forEach((a) => {
-          const row = el("div", "abtns");
+          const row = el("div", "abtns artifact-list-row"); row.dataset.artifactId = String(a.id || "");
           const open = el("button", "abtn primary", `${a.name} · open`); open.type = "button";
           open.onclick = () => vscode.postMessage({ type: "openExternal", url: a.url });
-          const stop = el("button", "abtn", "Stop"); stop.type = "button";
-          stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: a.id }); row.remove(); };
+          const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
+          stop.onclick = () => requestArtifactStop(a.id, row, stop);
           row.appendChild(open); row.appendChild(stop); list.appendChild(row);
         });
         break;
@@ -1050,9 +1100,20 @@
     if (text.startsWith("/") && !attachments.length) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
-      if (custom) {
+      const rest = text.slice(name.length + 1).trim();
+      const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
+        "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate"];
+      const startsGoal = name === "goal" && rest && !goalStateCommand.includes(rest.toLowerCase());
+      if (custom || startsGoal) {
         const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
-        m.appendChild(el("div", "bubble", esc(text))); log.appendChild(m); setSending(true);
+        if (startsGoal) {
+          m.classList.add("goal-prompt");
+          m.querySelector(".role").textContent = "goal";
+          m.appendChild(el("div", "bubble", esc(rest)));
+        } else {
+          m.appendChild(el("div", "bubble", esc(text)));
+        }
+        log.appendChild(m); setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
       input.value = ""; input.style.height = "auto"; scroll(); return;
@@ -1203,6 +1264,7 @@
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
+  $("thread-title").onclick = () => vscode.postMessage({ type: "slashText", text: "/name" });
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
@@ -1392,11 +1454,18 @@
     }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
     else if (msg.type === "prompt_rejected") { setSending(false); }
+    else if (msg.type === "goal_start_state") {
+      if (msg.state === "error") {
+        setSending(false);
+        sysLine(String(msg.error || "DGC could not start the goal."), true);
+      }
+    }
     else if (msg.type === "compact_state") {
       compacting = msg.state === "working";
       renderContext();
       if (msg.error) sysLine(String(msg.error), true);
     }
+    else if (msg.type === "artifact_stop_state") settleArtifactStop(msg);
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
       attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
     }

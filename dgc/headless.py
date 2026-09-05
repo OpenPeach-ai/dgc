@@ -318,6 +318,17 @@ def _strip_editor_context(text: str) -> str:
     return text
 
 
+def _prompt_thread_title(text: str) -> str:
+    """Create an immediate, stable editor thread label without another model request."""
+    clean = re.sub(r"\s+", " ", _strip_editor_context(str(text or ""))).strip()
+    clean = re.sub(r"^[#>*`\-\s]+", "", clean).strip()
+    if not clean:
+        return ""
+    if len(clean) <= 60:
+        return clean
+    return clean[:57].rstrip(" ,.;:-") + "…"
+
+
 class _Shutdown(Exception):
     pass
 
@@ -548,6 +559,7 @@ class Backend:
             custom_commands=custom_command_names(self.config.project_root),
             goal={"text": self.agent.goal, "status": self.agent.goal_status,
                   "elapsed_seconds": self._goal_elapsed_seconds()},
+            session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
         for warning in getattr(self.config, "credential_warnings", ()):
             self.em.emit("info", message=str(warning)[:1000])
@@ -699,6 +711,11 @@ class Backend:
                     self, "config", getattr(getattr(self, "agent", None), "config", None))
                 safe_context = redact_value(context, secret_values(active_config))
                 model_text = _format_editor_context(safe_context) + text
+                name_session = getattr(self.agent, "name_session", None)
+                if not getattr(self.agent, "session_name", None) and callable(name_session):
+                    title = _prompt_thread_title(text)
+                    if title and name_session(title):
+                        self.em.emit("session_named", name=title)
                 self.em.emit("turn_start", turn_id=tid, prompt=text)
                 failed = False
                 try:
@@ -1658,7 +1675,8 @@ class Backend:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
-                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
+                         session_id=self.agent.session_file.stem, name="",
+                         **_request_fields(request_id))
             self._emit_context(request_id)
             self._emit_goal()
         elif t == "name_session":
@@ -1678,7 +1696,8 @@ class Backend:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="cleared", message_count=0,
-                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
+                         session_id=self.agent.session_file.stem, name="",
+                         **_request_fields(request_id))
             self.em.emit("history", items=[])
             self._emit_context()
             self._emit_goal()
@@ -1690,6 +1709,8 @@ class Backend:
             if path:
                 n = self.agent.load_session(path)
                 self.em.emit("session", kind="resumed", message_count=n, path=str(path),
+                             session_id=Path(path).stem,
+                             name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
                 self.em.emit("history", items=self._history())
                 self._emit_context()

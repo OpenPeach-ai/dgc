@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 — 2026-09-06
+
+- Added DGC Ultra, the combined model/reasoning control, and a Codex-inspired live activity row that follows the newest response instead of floating above a scrolled transcript.
+- Made `/goal <objective>` persist a visible timed goal and immediately run that exact objective; pause, resume, edit, and clear remain available above the composer.
+- Added the current thread title to the header with automatic first-prompt naming and click-to-rename behavior across new and resumed sessions.
+- Made Artifact Stop a single acknowledgement-driven action with an explicit stopping/error state, eliminating white disabled controls and double-click shutdowns.
+- Bounded hidden-reasoning exhaustion so every turn ends with a visible answer or an explicit saved-progress error instead of appearing to stop silently.
+
 ## 0.12.1 — 2026-09-04
 
 - Rebuilt the protocol-v5 editor against the corrected DGC 0.26.2 cross-platform baseline.

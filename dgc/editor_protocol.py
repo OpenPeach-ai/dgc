@@ -51,6 +51,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "session_id": _NS(False), "tools_supported": _B(False), "provider": _S(False),
         "provider_capabilities": _O(False), "tools": _A(False), "skills": _A(False),
         "goal": _O(), "context_size": _I(),
+        "session_name": _S(False),
     },
     "turn_start": {"turn_id": _S(), "prompt": _S()},
     "turn_end": {
@@ -214,6 +215,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "session": {
         "kind": _f("string", enum=("new", "cleared", "resumed")),
         "message_count": _I(), "session_id": _S(False), "path": _S(False),
+        "name": _S(False),
         "request_id": _S(False),
     },
     "history": {"items": _A()},

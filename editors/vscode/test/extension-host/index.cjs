@@ -215,10 +215,19 @@ async function run() {
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" });
   const correlatedTypes = new Set(["set_mode", "set_think", "set_goal", "get_plan", "status"]);
   await waitFor(() => {
-    const seen = new Set(backendCommands(backendLogPath)
+    const commands = backendCommands(backendLogPath);
+    const seen = new Set(commands
       .filter((command) => correlatedTypes.has(command.type)).map((command) => command.type));
-    return [...correlatedTypes].every((type) => seen.has(type));
+    return [...correlatedTypes].every((type) => seen.has(type))
+      && commands.some((command) => command.type === "prompt" && command.text === "host matrix");
   });
+  const goalStartCommands = backendCommands(backendLogPath);
+  const goalSetIndex = goalStartCommands.findIndex((command) => command.type === "set_goal"
+    && command.text === "host matrix");
+  const goalPromptIndex = goalStartCommands.findIndex((command) => command.type === "prompt"
+    && command.text === "host matrix");
+  assert.ok(goalSetIndex !== -1 && goalPromptIndex > goalSetIndex,
+    "/goal <objective> must persist its tagged goal before starting that exact agent turn");
   const correlated = backendCommands(backendLogPath)
     .filter((command) => correlatedTypes.has(command.type));
   assert.ok(correlated.every((command) =>

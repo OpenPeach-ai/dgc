@@ -246,6 +246,54 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async stopArtifact(id: string): Promise<void> {
+    const artifactId = String(id || "").slice(0, 200);
+    if (!artifactId) { return; }
+    this.post({ type: "artifact_stop_state", id: artifactId, state: "working" });
+    try {
+      const response = await this.requestState(
+        this.ensureBackend(), "artifact-stop", { type: "stop_artifact", id: artifactId },
+        "artifacts", 5000);
+      const items = Array.isArray((response as any).items) ? (response as any).items : [];
+      if (items.some((item: any) => String(item?.id || "") === artifactId)) {
+        throw new Error("The artifact preview is still running.");
+      }
+      this.post({ type: "artifact_stop_state", id: artifactId, state: "stopped" });
+    } catch (err: any) {
+      this.post({ type: "artifact_stop_state", id: artifactId, state: "error",
+                  error: err?.message || "DGC could not stop the artifact preview." });
+    }
+  }
+
+  /** `/goal <objective>` is an action, not only a state mutation: persist the standing goal
+   * first, then run that exact objective as the next agent turn. Awaiting the correlated goal
+   * acknowledgement prevents a failed/busy goal update from launching an untagged prompt. */
+  private async startGoal(text: string): Promise<void> {
+    const objective = String(text || "").trim();
+    if (!objective) { return; }
+    const be = this.ensureBackend();
+    try {
+      await this.requestState(be, "goal", {
+        type: "set_goal", text: objective, status: "active",
+      }, "goal_changed", 10000);
+    } catch (err: any) {
+      this.post({ type: "goal_start_state", state: "error",
+                  error: err?.message || "DGC could not start the goal." });
+      return;
+    }
+    const accepted = be.send({
+      type: "prompt", text: objective, context: this.editorContext(),
+    });
+    if (!accepted) {
+      this.post({ type: "goal_start_state", state: "error",
+                  error: "The goal was saved, but its first turn could not start. Send it again to continue." });
+      return;
+    }
+    // Close the same command/turn_start race as an ordinary composer prompt.
+    this.turnActive = true;
+    this.post({ type: "goal_start_state", state: "started" });
+  }
+
   private activeSubscription(): any | undefined {
     if (!this.routeState.subscriptionEngine) { return undefined; }
     return this.routeState.subscriptionEngines.find(
@@ -916,8 +964,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send(this.stateCommand("artifacts", { type: "list_artifacts" }));
         break;
       case "stopArtifact":
-        be.send(this.stateCommand(
-          "artifact-stop", { type: "stop_artifact", id: msg.id }));
+        void this.stopArtifact(String(msg.id || ""));
         break;
       case "copy":
         vscode.env.clipboard.writeText(String(msg.text || ""));
@@ -1430,8 +1477,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else if (["resume", "active", "reactivate"].includes(low)) {
         be.send(this.stateCommand("goal", { type: "set_goal", status: "active" }));
       } else {
-        be.send(this.stateCommand(
-          "goal", { type: "set_goal", text: rest, status: "active" }));
+        await this.startGoal(rest);
       }
       return;
     }
@@ -2464,7 +2510,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
 </head><body>
-<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
+<header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="surface" class="panel-overlay" role="dialog" aria-modal="true" aria-labelledby="surface-title" hidden>

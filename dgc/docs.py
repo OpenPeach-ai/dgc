@@ -562,6 +562,12 @@ turns keep it in the model's instructions until it is completed, blocked,
 replaced, or cleared. The local record survives `/resume`; delegated vendor turns
 do not receive the DGC goal instruction.
 
+In VS Code/Cursor, entering `/goal <objective>` first saves the tagged goal and
+then immediately starts that exact objective as an agent turn. Its status, active
+time, pause/resume button, and edit/clear controls stay above the composer. In the
+terminal, the slash command records the standing objective for the current session;
+send a normal prompt to begin or continue work toward it.
+
 - `/goal` — inspect the full objective and status.
 - `/goal complete` — retain the objective as an auditable completed record.
 - `/goal blocked` — stop automatic progress while an external blocker exists.

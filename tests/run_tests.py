@@ -1998,6 +1998,24 @@ def unit_tests(tmp: Path):
     check("headless failing turn emits error", "error" in b.em.evs)
     check("headless failing turn still emits turn_end (clears the spinner)", "turn_end" in b.em.evs)
 
+    class _TitledAgent:
+        def __init__(self):
+            self.cancelled = _th.Event(); self.session_name = None; self.named = []
+        def name_session(self, name):
+            self.session_name = name; self.named.append(name); return True
+        def run_turn(self, text, *, reset_cancel=True): return True
+        def estimate_tokens(self): return 0
+    titled = object.__new__(Backend); titled.em = _Em(); titled.agent = _TitledAgent()
+    titled._queue, titled._turn_n, titled._emit_context = [], 0, lambda: None
+    titled._start_turn("  Audit the answer formatter and final response lifecycle in detail  ")
+    titled.em.done.wait(5)
+    titled_events = [row for row in titled.em.rows
+                     if row["type"] in ("session_named", "turn_start", "turn_end")]
+    check("headless editor turns receive a persisted visible thread title before they start",
+          titled.agent.named == ["Audit the answer formatter and final response lifecycle i…"]
+          and [row["type"] for row in titled_events]
+              == ["session_named", "turn_start", "turn_end"])
+
     class _RejectedAgent:
         cancelled = _th.Event()
         _last_persist_error = "session has an active turn elsewhere"
@@ -3279,6 +3297,7 @@ def unit_tests(tmp: Path):
     # --- a sub-agent shares the parent's cancel Event but must NOT clear it on run_turn entry (only a
     #     top-level turn clears), else a cancel arriving during sub construction is silently swallowed.
     from dgc.agent import (Agent as _Ag, _MAX_CONTINUE as _AGENT_MAX_CONTINUE,
+                           _MAX_FINALIZATION_RETRIES as _AGENT_MAX_FINALIZATION_RETRIES,
                            _MAX_PROVIDER_PAUSE_CONTINUE as _AGENT_MAX_PROVIDER_PAUSE,
                            _sampling as _samp, _tool_batch_preamble,
                            _tool_transcript_errors as _tool_errors)
@@ -3603,6 +3622,36 @@ def unit_tests(tmp: Path):
           and "output-token limit" in _length_turn._last_turn_error
           and _length_turn.timing_totals["by_request_reason"] == {
               "user_turn": 1, "output_continue": _AGENT_MAX_CONTINUE})
+
+    class _EmptyBudgetClient:
+        tools_supported = True
+        def __init__(self, recover=True):
+            self.calls = 0; self.recover = recover; self.efforts = []; self.last_messages = []
+        def chat(self, messages, *args, **kwargs):
+            self.calls += 1
+            self.efforts.append(kwargs.get("reasoning_effort"))
+            self.last_messages = messages
+            if self.recover and self.calls == 2:
+                return _ChatResult(content="Concise user-facing outcome.")
+            return _ChatResult(content="", thinking="hidden analysis", finish_reason="length")
+    _empty_budget_cfg = _Cfg(tmp); _empty_budget_cfg.data["thinking"] = "high"
+    _empty_budget_turn = _Ag(_empty_budget_cfg, _AgUI())
+    _empty_budget_turn.client = _EmptyBudgetClient()
+    check("an empty output-limit response gets a concise thinking-off finalization retry",
+          _empty_budget_turn.run_turn("finish visibly") is True
+          and _empty_budget_turn.client.calls == 2
+          and _empty_budget_turn.client.efforts == ["high", "off"]
+          and "at most 600 words" in str(_empty_budget_turn.client.last_messages[-1]["content"])
+          and _empty_budget_turn.timing_totals["by_request_reason"] == {
+              "user_turn": 1, "empty_final": 1})
+
+    _empty_budget_fail = _Ag(_empty_budget_cfg, _AgUI())
+    _empty_budget_fail.client = _EmptyBudgetClient(recover=False)
+    check("repeated empty output-limit responses terminate visibly instead of appearing hung",
+          _empty_budget_fail.run_turn("never disappear silently") is False
+          and _empty_budget_fail.client.calls == _AGENT_MAX_FINALIZATION_RETRIES + 1
+          and "without producing a user-facing response" in _empty_budget_fail._last_turn_error
+          and _empty_budget_fail.client.efforts[1:] == ["off"] * _AGENT_MAX_FINALIZATION_RETRIES)
 
     class _IncompleteOnlyClient:
         tools_supported = True
@@ -14155,6 +14204,16 @@ def test_ollama_adapter():
           and tagged.provider_message == {
               "provider": "ollama", "content": "<think>tagged</think>visible", "thinking": ""})
 
+    class _TaggedRunawayResponse(_NativeResponse):
+        def iter_lines(self, decode_unicode=True):
+            yield json.dumps({"message": {"role": "assistant",
+                                           "content": "<think>" + ("x" * 100)},
+                              "done": False})
+    tagged_runaway = native._consume_ollama(
+        _TaggedRunawayResponse(), None, None, think_budget=40)
+    check("native tagged reasoning cannot masquerade as visible output",
+          tagged_runaway.finish_reason == "overthink" and not tagged_runaway.content)
+
     class _StalledResponse(_NativeResponse):
         def __init__(self):
             self.released = threading.Event()
@@ -15740,6 +15799,14 @@ def test_overthink_watchdog():
     runaway = ['data: {"choices":[{"delta":{"reasoning":"%s"}}]}' % big, "data: [DONE]"]
     r = c._consume(_FakeResp(runaway), None, None, think_budget=c.think_budget_chars)
     check("watchdog fires on runaway reasoning", r.finish_reason == "overthink")
+    tagged = [
+        'data: {"choices":[{"delta":{"content":"<think>%s"}}]}' % big,
+        "data: [DONE]",
+    ]
+    tagged_result = c._consume(
+        _FakeResp(tagged), None, None, think_budget=c.think_budget_chars)
+    check("tagged content-only reasoning cannot disarm the watchdog",
+          tagged_result.finish_reason == "overthink" and not tagged_result.content)
     r2 = c._consume(_FakeResp(runaway), None, None, think_budget=0)                # disabled
     check("watchdog off → no overthink", r2.finish_reason != "overthink")
     ok = ['data: {"choices":[{"delta":{"reasoning":"xx"}}]}',                       # content before budget
