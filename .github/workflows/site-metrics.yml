@@ -6,10 +6,6 @@ on:
     paths:
       - "scripts/site-measurement.py"
       - "scripts/build-site.py"
-      - "scripts/generate-docs-site.py"
-      - "site/_worker.js"
-      - "site-src/assets/site.js"
-      - "site-src/content/privacy.md"
       - "site-src/data/site-metrics.json"
       - "site-src/pages/index.html"
       - ".github/workflows/site-metrics.yml"
@@ -17,10 +13,6 @@ on:
     paths:
       - "scripts/site-measurement.py"
       - "scripts/build-site.py"
-      - "scripts/generate-docs-site.py"
-      - "site/_worker.js"
-      - "site-src/assets/site.js"
-      - "site-src/content/privacy.md"
       - "site-src/data/site-metrics.json"
       - "site-src/pages/index.html"
       - ".github/workflows/site-metrics.yml"
@@ -38,7 +30,7 @@ concurrency:
 
 jobs:
   contract:
-    name: Measurement contract
+    name: Marketplace snapshot contract
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -1,13 +1,7 @@
-const EVENTS = new Set([
-  "install_copy", "marketplace", "get_started", "docs_getting_started_reached",
-  "capture_play", "benchmark_traces",
-]);
-const MEASUREMENT_ORIGINS = new Set([
-  "https://vibedgc.com", "https://www.vibedgc.com", "https://docs.vibedgc.com",
-]);
 const PUBLIC_HOSTS = new Set(["vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"]);
 const RETIRED_API_PATHS = new Set([
   "/api/commercial", "/api/subscribe", "/api/subscribe/confirm", "/api/unsubscribe",
+  "/api/event",
 ]);
 const SECURITY_HEADERS = {
   "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
@@ -104,90 +98,6 @@ async function knownRoutes(env, origin) {
   return routeCache;
 }
 
-function uaClass(value) {
-  if (/dgc-update-check/i.test(value)) return "dgc-update";
-  if (/bot|crawler|spider|preview/i.test(value)) return "bot";
-  if (/mobile|android|iphone/i.test(value)) return "mobile";
-  return "desktop";
-}
-
-function privacyOptOut(request) {
-  return request.headers.get("dnt") === "1" || request.headers.get("sec-gpc") === "1";
-}
-
-function measure(env, event, request, path = "") {
-  if (!env.DGC_ANALYTICS || privacyOptOut(request)) return;
-  try {
-    const url = new URL(request.url);
-    if (!MEASUREMENT_ORIGINS.has(url.origin)) return;
-    env.DGC_ANALYTICS.writeDataPoint({
-      indexes: [event],
-      blobs: [url.hostname, path || url.pathname, uaClass(request.headers.get("user-agent") || "")],
-      doubles: [1],
-    });
-  } catch {}
-}
-
-async function boundedBody(request, maxBytes) {
-  const declared = Number(request.headers.get("content-length") || 0);
-  if (!Number.isFinite(declared) || declared < 0 || declared > maxBytes) {
-    throw new RangeError("Request is too large");
-  }
-  if (!request.body) return new ArrayBuffer(0);
-  const reader = request.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel("Request is too large").catch(() => {});
-      throw new RangeError("Request is too large");
-    }
-    chunks.push(value);
-  }
-  const output = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output.buffer;
-}
-
-function validBrowserPost(request) {
-  const url = new URL(request.url);
-  return request.headers.get("origin") === url.origin
-    && request.headers.get("sec-fetch-site") === "same-origin";
-}
-
-async function eventRoute(request, env) {
-  if (request.method !== "POST"
-      || !MEASUREMENT_ORIGINS.has(new URL(request.url).origin)
-      || privacyOptOut(request)
-      || !validBrowserPost(request)) {
-    return new Response(null, {status: 204});
-  }
-  if (!(request.headers.get("content-type") || "")
-    .toLowerCase().startsWith("application/json")) {
-    return new Response(null, {status: 204});
-  }
-  try {
-    const bodyBytes = await boundedBody(request, 1_024);
-    const body = JSON.parse(new TextDecoder().decode(bodyBytes));
-    const referrer = request.headers.get("referer");
-    const ref = referrer ? new URL(referrer) : null;
-    if (!ref
-        || ref.origin !== new URL(request.url).origin
-        || !EVENTS.has(body.event)) {
-      return new Response(null, {status: 204});
-    }
-    measure(env, body.event, request, cleanPath(ref.pathname));
-  } catch {}
-  return new Response(null, {status: 204});
-}
-
 async function notFound(env, url, docs = false) {
   const path = docs ? "/docs/404.html" : "/404.html";
   const response = await env.ASSETS.fetch(new Request(
@@ -202,7 +112,6 @@ async function notFound(env, url, docs = false) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const requestedPath = cleanPath(url.pathname);
     const hostname = url.hostname;
     const localDev = hostname === "127.0.0.1" || hostname === "localhost";
     let response;
@@ -225,8 +134,6 @@ export default {
         url.hostname = "vibedgc.com";
         url.port = "";
         response = redirect(url.toString(), 301);
-      } else if (url.pathname === "/api/event") {
-        response = await eventRoute(request, env);
       } else if (RETIRED_API_PATHS.has(url.pathname)) {
         response = json({error: "Not found"}, 404);
       } else {
@@ -268,19 +175,10 @@ export default {
               headers,
             });
           }
-          if (request.method === "GET"
-              && ["/install.sh", "/dgc.tar.gz"].includes(url.pathname)) {
-            measure(env, "download", request, url.pathname);
-          }
         }
       }
     } catch {
       response = json({error: "Service temporarily unavailable"}, 503);
-    }
-    if (request.method === "GET"
-        && [200, 304].includes(response.status)
-        && isHtmlPath(new URL(request.url).pathname)) {
-      measure(env, "page_view", request, requestedPath);
     }
     return harden(applyResponsePolicy(response, new URL(request.url).pathname), hostname);
   },

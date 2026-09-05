@@ -70,9 +70,10 @@ artifact is already older than 48 hours, dispatch the workflow again instead of 
 4. The local promotion binding deliberately permits an unpublished tagged source commit; deployment
    and tagged-release gates additionally require that source on public `origin/main`. Deployment is a
    separate final action: `DGC_ENV_FILE=/path/to/private.env scripts/deploy-site.sh`. The script
-   requires a clean `main` exactly equal to `origin/main`, validates an exact allowlisted staging
-   directory, verifies the production D1/Analytics bindings and Pages secrets, applies the reviewed
-   D1 migration, and only then deploys.
+   requires a clean `main` exactly equal to `origin/main`, enforces a binding-free static Pages
+   configuration, runs the complete browser and all-route Lighthouse acceptance gates, and validates
+   an exact allowlisted staging directory. Cloudflare credentials are scoped only to the final pinned
+   Wrangler upload after every local gate passes.
 5. The editor has four deliberately separate phases:
 
    - `scripts/release-extension.sh --build` creates and verifies registry and self-hosted VSIX files
@@ -85,6 +86,7 @@ artifact is already older than 48 hours, dispatch the workflow again instead of 
    There is intentionally no combined `--publish` mode and no extension phase deploys the website.
 
 After promotion, verify the site checksum, installer, `version.json`, Marketplace and Open VSX
-versions, GitHub tag SHA, form delivery/opt-in, and a clean install in a temporary home. If promotion
-fails, do not rebuild: fix the channel and promote the same bytes. Roll back by redeploying prior
-committed site artifacts; never move or rewrite an existing release tag.
+versions, GitHub tag SHA, representative production routes, retired form/blog/API 404s, and a clean
+install in a temporary home. If promotion fails, do not rebuild: fix the channel and promote the
+same bytes. Roll back by redeploying prior committed site artifacts; never move or rewrite an
+existing release tag.

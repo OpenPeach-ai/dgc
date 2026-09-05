@@ -140,21 +140,12 @@
     if (initial && command) select(initial);
   });
 
-  const emit = name => {
-    if (!name || navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.globalPrivacyControl === true) return;
-    const body = JSON.stringify({event:name,path:location.pathname});
-    const queued = navigator.sendBeacon?.('/api/event', new Blob([body], {type:'application/json'})) || false;
-    if (!queued) fetch('/api/event', {method:'POST',headers:{'content-type':'application/json'},body,keepalive:true}).catch(() => {});
-  };
-  document.querySelectorAll('[data-page-event]').forEach(el => emit(el.dataset.pageEvent));
-  document.querySelectorAll('[data-event]:not([data-copy])').forEach(el => el.addEventListener('click', () => emit(el.dataset.event)));
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     const selector = button.dataset.copyTarget; const source = selector ? document.querySelector(selector) : button.closest('[data-copy-scope]')?.querySelector('code');
     const value = source?.dataset.copy || source?.textContent || '';
-    try { await navigator.clipboard.writeText(value.trim()); button.textContent = 'copied'; setTimeout(() => button.textContent = 'copy', 1500); emit(button.dataset.event); }
+    try { await navigator.clipboard.writeText(value.trim()); button.textContent = 'copied'; setTimeout(() => button.textContent = 'copy', 1500); }
     catch { button.textContent = 'select'; }
   }));
-  document.querySelectorAll('[data-event-play]').forEach(media => media.addEventListener('play', () => emit(media.dataset.eventPlay), {once:true}));
 
   document.querySelectorAll('.spotlight').forEach(card => card.addEventListener('pointermove', event => {
     const rect = card.getBoundingClientRect(); card.style.setProperty('--mx', `${event.clientX - rect.left}px`); card.style.setProperty('--my', `${event.clientY - rect.top}px`);

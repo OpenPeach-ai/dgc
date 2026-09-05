@@ -29,7 +29,6 @@ install.sh         curl|bash installer (fetches a tarball, venvs, symlinks `dgc`
 site-src/          vibedgc.com templates, content, data and self-hosted source assets
 site/              generated, exact-allowlist deploy tree plus promoted release artifacts
 scripts/           site generation/checks and explicit, separated release/deploy phases
-migrations/        reviewed Cloudflare D1 schema migrations for the site Worker
 ```
 
 ## Run & test

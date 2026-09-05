@@ -208,7 +208,7 @@ def evidence_rows(bench: dict[str, Any]) -> str:
         filename = f"{key}-{bench['run_version']}.tar.gz"
         checksum_path = SITE / "evidence" / f"{filename}.sha256"
         checksum = checksum_path.read_text(encoding="utf-8").split()[0] if checksum_path.exists() else "missing"
-        rows.append(f'<article class="release reveal"><div><span class="release-version">{html.escape(item["name"])}</span><time>{item["solved"]}/{bench["problems"]} · {item["pass_at_2"]:.1f}%</time></div><div><a href="/evidence/{filename}" data-event="benchmark_traces">Download archive ↓</a><br><a class="table-note" href="/evidence/{filename}.sha256">SHA-256 file</a></div><code class="table-note">{checksum[:16]}…</code></article>')
+        rows.append(f'<article class="release reveal"><div><span class="release-version">{html.escape(item["name"])}</span><time>{item["solved"]}/{bench["problems"]} · {item["pass_at_2"]:.1f}%</time></div><div><a href="/evidence/{filename}">Download archive ↓</a><br><a class="table-note" href="/evidence/{filename}.sha256">SHA-256 file</a></div><code class="table-note">{checksum[:16]}…</code></article>')
     return f'<div class="release-list" style="margin-top:38px">{"".join(rows)}</div>'
 
 

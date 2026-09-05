@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 
 import worker from "../site/_worker.js";
 
-const encoder = new TextEncoder();
 const tests = [];
 const ROUTES = [
   "/", "/benchmark", "/vscode",
@@ -87,20 +86,20 @@ class AssetsMock {
   }
 }
 
-const analytics = () => ({
-  points: [],
-  writeDataPoint(point) {
-    this.points.push(point);
-  },
-});
-
 const sharedAssets = new AssetsMock({failRoutes: 1});
 
 function environment(overrides = {}) {
-  return {
+  const bindings = {
     ASSETS: overrides.ASSETS || sharedAssets,
-    DGC_ANALYTICS: overrides.DGC_ANALYTICS || analytics(),
   };
+  return new Proxy(bindings, {
+    get(target, property, receiver) {
+      if (typeof property === "string" && !Reflect.has(target, property)) {
+        throw new Error(`unexpected dynamic Worker binding: ${property}`);
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }
 
 function request(path, {base = "https://vibedgc.com", method = "GET", headers = {}, body} = {}) {
@@ -110,26 +109,6 @@ function request(path, {base = "https://vibedgc.com", method = "GET", headers = 
     if (body instanceof ReadableStream) init.duplex = "half";
   }
   return new Request(new URL(path, base), init);
-}
-
-function browserPost(path, body, options = {}) {
-  const base = options.base || "https://vibedgc.com";
-  const origin = options.origin === undefined ? new URL(base).origin : options.origin;
-  const headers = {
-    origin,
-    "sec-fetch-site": options.fetchSite || "same-origin",
-    ...(options.headers || {}),
-  };
-  return request(path, {base, method: "POST", headers, body});
-}
-
-function streamOf(size, byte = "x") {
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode(byte.repeat(size)));
-      controller.close();
-    },
-  });
 }
 
 function assertSecurity(response, {preview = false} = {}) {
@@ -260,9 +239,10 @@ register("canonical redirects clear attacker-supplied ports and preview is noind
   assertSecurity(preview, {preview: true});
 });
 
-register("retired website intake and publishing paths are stateless 404s", async () => {
+register("retired dynamic and publishing paths are stateless 404s", async () => {
   const paths = [
-    "/api/commercial", "/api/subscribe", "/api/subscribe/confirm", "/api/unsubscribe",
+    "/api/event", "/api/commercial", "/api/subscribe", "/api/subscribe/confirm",
+    "/api/unsubscribe",
   ];
   for (const path of paths) {
     for (const method of ["GET", "POST"]) {
@@ -275,7 +255,6 @@ register("retired website intake and publishing paths are stateless 404s", async
       assert.equal(response.status, 404, `${method} ${path}`);
       assert.deepEqual(await response.json(), {error: "Not found"}, `${method} ${path}`);
       assert.equal(response.headers.get("cache-control"), "no-store", `${method} ${path}`);
-      assert.equal(env.DGC_ANALYTICS.points.length, 0, `${method} ${path}`);
       assertSecurity(response);
     }
   }
@@ -294,181 +273,12 @@ register("retired website intake and publishing paths are stateless 404s", async
     const response = await worker.fetch(request(path, {headers: {accept: "text/html"}}), env);
     assert.equal(response.status, 404, path);
     assert.equal(await response.text(), "MAIN_404", path);
-    assert.equal(env.DGC_ANALYTICS.points.length, 0, path);
     assertSecurity(response);
   }
   const feedEnv = environment();
   const feed = await worker.fetch(request("/feed.xml"), feedEnv);
   assert.equal(feed.status, 404);
-  assert.equal(feedEnv.DGC_ANALYTICS.points.length, 0);
   assertSecurity(feed);
-});
-
-register("event ingestion is bounded and rejects non-browser or untrusted input", async () => {
-  const cases = [
-    request("/api/event"),
-    browserPost("/api/event", "{}", {headers: {"content-type": "text/plain"}}),
-    browserPost("/api/event", "{}", {
-      origin: "https://attacker.example",
-      headers: {"content-type": "application/json", referer: "https://vibedgc.com/"},
-    }),
-    browserPost("/api/event", "{}", {
-      fetchSite: "cross-site",
-      headers: {"content-type": "application/json", referer: "https://vibedgc.com/"},
-    }),
-    browserPost("/api/event", JSON.stringify({event: "unknown"}), {
-      headers: {"content-type": "application/json", referer: "https://vibedgc.com/"},
-    }),
-    browserPost("/api/event", JSON.stringify({event: "marketplace"}), {
-      headers: {"content-type": "application/json", referer: "https://attacker.example/"},
-    }),
-    browserPost("/api/event", streamOf(1_025), {
-      headers: {"content-type": "application/json", referer: "https://vibedgc.com/"},
-    }),
-  ];
-  for (const candidate of cases) {
-    const env = environment();
-    const response = await worker.fetch(candidate, env);
-    assert.equal(response.status, 204);
-    assert.equal(env.DGC_ANALYTICS.points.length, 0);
-    assertSecurity(response);
-  }
-});
-
-register("canonical HTML GET records one page view and excluded requests record none", async () => {
-  const canonical = environment();
-  const page = await worker.fetch(request("/benchmark?source=qa", {
-    headers: {"user-agent": "Mozilla/5.0"},
-  }), canonical);
-  assert.equal(page.status, 200);
-  assert.deepEqual(canonical.DGC_ANALYTICS.points, [{
-    indexes: ["page_view"],
-    blobs: ["vibedgc.com", "/benchmark", "desktop"],
-    doubles: [1],
-  }]);
-
-  const revalidated = environment({
-    ASSETS: {
-      async fetch(assetRequest) {
-        const pathname = new URL(assetRequest.url).pathname;
-        if (pathname === "/benchmark") return new Response(null, {status: 304});
-        return sharedAssets.fetch(assetRequest);
-      },
-    },
-  });
-  const notModified = await worker.fetch(request("/benchmark", {
-    headers: {"if-none-match": "\"cached-page\"", "user-agent": "Mozilla/5.0"},
-  }), revalidated);
-  assert.equal(notModified.status, 304);
-  assert.deepEqual(revalidated.DGC_ANALYTICS.points, [{
-    indexes: ["page_view"],
-    blobs: ["vibedgc.com", "/benchmark", "desktop"],
-    doubles: [1],
-  }]);
-
-  const excluded = [
-    ["HEAD", request("/benchmark", {method: "HEAD"}), 200],
-    ["redirect", request("/benchmark", {base: "https://www.vibedgc.com"}), 301],
-    ["404", request("/missing-page", {headers: {accept: "text/html"}}), 404],
-    ["preview", request("/benchmark", {base: "https://branch.pages.dev"}), 200],
-    ["DNT", request("/benchmark", {headers: {dnt: "1"}}), 200],
-    ["GPC", request("/benchmark", {headers: {"sec-gpc": "1"}}), 200],
-  ];
-  for (const [label, excludedRequest, expectedStatus] of excluded) {
-    const env = environment();
-    const response = await worker.fetch(excludedRequest, env);
-    assert.equal(response.status, expectedStatus, label);
-    assert.equal(env.DGC_ANALYTICS.points.length, 0, label);
-  }
-});
-
-register("valid analytics derives path from Referer and honors privacy signals", async () => {
-  const env = environment();
-  const eventBody = JSON.stringify({event: "marketplace", path: "/forged"});
-  const valid = await worker.fetch(browserPost("/api/event", eventBody, {
-    headers: {"content-type": "application/json", referer: "https://vibedgc.com/vscode"},
-  }), env);
-  assert.equal(valid.status, 204);
-  assert.equal(env.DGC_ANALYTICS.points.length, 1);
-  assert.equal(env.DGC_ANALYTICS.points[0].blobs[1], "/vscode");
-
-  for (const privacyHeader of ["dnt", "sec-gpc"]) {
-    await worker.fetch(browserPost("/api/event", eventBody, {
-      headers: {
-        "content-type": "application/json",
-        referer: "https://vibedgc.com/vscode",
-        [privacyHeader]: "1",
-      },
-    }), env);
-  }
-  assert.equal(env.DGC_ANALYTICS.points.length, 1);
-});
-
-register("docs getting-started beacon derives its path from the docs Referer", async () => {
-  const env = environment();
-  const response = await worker.fetch(browserPost("/api/event", JSON.stringify({
-    event: "docs_getting_started_reached",
-    path: "/forged-client-path",
-  }), {
-    base: "https://docs.vibedgc.com",
-    headers: {
-      "content-type": "application/json",
-      referer: "https://docs.vibedgc.com/getting-started?source=qa",
-    },
-  }), env);
-  assert.equal(response.status, 204);
-  assert.deepEqual(env.DGC_ANALYTICS.points, [{
-    indexes: ["docs_getting_started_reached"],
-    blobs: ["docs.vibedgc.com", "/getting-started", "desktop"],
-    doubles: [1],
-  }]);
-});
-
-register("preview and attacker hosts cannot record analytics", async () => {
-  const env = environment();
-  const body = JSON.stringify({event: "marketplace"});
-  const preview = await worker.fetch(browserPost("/api/event", body, {
-    base: "https://branch.pages.dev",
-    headers: {
-      "content-type": "application/json",
-      referer: "https://branch.pages.dev/vscode",
-    },
-  }), env);
-  assert.equal(preview.status, 204);
-  assertSecurity(preview, {preview: true});
-  assert.equal(env.DGC_ANALYTICS.points.length, 0);
-
-  const attacker = await worker.fetch(browserPost("/api/event", body, {
-    base: "https://evil.vibedgc.com",
-    headers: {
-      "content-type": "application/json",
-      referer: "https://evil.vibedgc.com/vscode",
-    },
-  }), env);
-  assert.equal(attacker.status, 301);
-  assert.equal(attacker.headers.get("location"), "https://vibedgc.com/api/event");
-  assert.equal(env.DGC_ANALYTICS.points.length, 0);
-
-  const localAnalytics = analytics();
-  const local = environment({DGC_ANALYTICS: localAnalytics});
-  const localDownload = await worker.fetch(request("/install.sh", {
-    base: "http://localhost:8788",
-  }), local);
-  assert.equal(localDownload.status, 200);
-  assert.equal(localAnalytics.points.length, 0);
-});
-
-register("production downloads record without any stateful binding", async () => {
-  const env = environment();
-  const archive = await worker.fetch(request("/dgc.tar.gz", {
-    headers: {"user-agent": "dgc-update-check/0.26.4"},
-  }), env);
-  assert.equal(archive.status, 200);
-  assert.deepEqual(env.DGC_ANALYTICS.points, [{
-    indexes: ["download"],
-    blobs: ["vibedgc.com", "/dgc.tar.gz", "dgc-update"],
-    doubles: [1],
-  }]);
 });
 
 let failures = 0;

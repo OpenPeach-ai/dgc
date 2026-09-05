@@ -31,7 +31,7 @@ Each selected session becomes one JSONL record with an OpenAI-style `messages` a
 
 ## Does DGC collect telemetry?
 
-No product-usage telemetry is sent by the CLI or editor. DGC keeps sessions and operating metrics locally so features such as resume, rewind, and benchmark accounting can work. Interactive CLI launches may check `vibedgc.com/version.json`; successful checks are cached for a day and failed checks may retry later. A self-hosted VSIX checks `/vscode/version.json` at most daily by default, while Marketplace/Open VSX builds skip that request and the setting can be disabled. Neither request contains prompts, code, tool arguments, or credentials. Website measurement is separate and described in the Privacy notice, including Do Not Track handling.
+No product-usage telemetry is sent by the CLI or editor. DGC keeps sessions and operating metrics locally so features such as resume, rewind, and benchmark accounting can work. Interactive CLI launches may check `vibedgc.com/version.json`; successful checks are cached for a day and failed checks may retry later. A self-hosted VSIX checks `/vscode/version.json` at most daily by default, while Marketplace/Open VSX builds skip that request and the setting can be disabled. Neither request contains prompts, code, tool arguments, or credentials. Cloudflare's website-delivery processing and optional aggregate Web Analytics are described separately in the Privacy notice; DGC does not operate a custom website event endpoint or event dataset.
 
 ## How was the benchmark run?
 
