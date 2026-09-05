@@ -173,7 +173,9 @@
     const vio = new IntersectionObserver(entries => entries.forEach(entry => {
       if (!entry.isIntersecting) return; const video = entry.target;
       hydrateVideo(video); vio.unobserve(video);
-    }), {rootMargin:'200px 0px'}); videos.forEach(video => vio.observe(video));
+    // Keep below-fold capture decoding off the critical rendering path. The preview still
+    // hydrates and autoplays as soon as it actually enters the viewport.
+    }), {rootMargin:'0px'}); videos.forEach(video => vio.observe(video));
   } else videos.forEach(hydrateVideo);
 
   const images = [...document.querySelectorAll('img[data-lazy-image]')];
