@@ -29,7 +29,7 @@ h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.035em}
 .announcement a{display:flex;align-items:center;gap:8px}
 .announcement button{position:absolute;right:14px;top:2px;width:28px;height:28px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:18px}
 .status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 12px rgba(91,203,139,.55)}
-.site-header{position:sticky;top:0;z-index:70;height:72px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;width:min(var(--max),calc(100% - (var(--gutter)*2)));margin-inline:auto;background:linear-gradient(to bottom,rgba(11,11,13,.94),rgba(11,11,13,.8));backdrop-filter:blur(18px);border-bottom:1px solid transparent}
+.site-header{position:sticky;top:0;z-index:70;height:72px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding-inline:max(var(--gutter),calc((100% - var(--max))/2));background:linear-gradient(to bottom,rgba(11,11,13,.96),rgba(11,11,13,.86));backdrop-filter:blur(18px);border-bottom:1px solid transparent}
 .brand{display:inline-flex;align-items:center;gap:10px;width:max-content;color:#fff;font:500 14px/1 var(--mono);letter-spacing:.08em}
 .brand svg{width:26px;height:26px;fill:var(--accent)}
 .nav-pill{justify-self:center;display:flex;align-items:center;padding:4px;border:1px solid var(--line);border-radius:999px;background:rgba(18,18,21,.8);box-shadow:var(--e1)}
@@ -42,5 +42,5 @@ h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.035em}
 .nav-toggle{display:none;justify-self:end;width:44px;height:44px;border:1px solid var(--line);border-radius:7px;background:var(--surface);cursor:pointer;padding:13px 11px}
 .nav-toggle span[aria-hidden]{display:block;height:1px;background:var(--text);margin:5px 0}
 @media(max-width:1040px){.site-header{grid-template-columns:1fr auto}.nav-pill,.nav-install{display:none}.nav-toggle{display:block}}
-@media(max-width:760px){body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;backdrop-filter:none}}
+@media(max-width:760px){body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;background:var(--bg);backdrop-filter:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}

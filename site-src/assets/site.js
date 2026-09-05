@@ -153,9 +153,21 @@
 
   const videos = [...document.querySelectorAll('video[data-lazy-video]')];
   const hydrateVideo = video => {
-    if (video.dataset.poster) { video.poster = video.dataset.poster; delete video.dataset.poster; }
+    const captureStatus = video.closest('.capture-card')?.querySelector('[data-capture-status]');
+    const setCaptureStatus = playing => {
+      if (!captureStatus) return;
+      captureStatus.textContent = playing ? captureStatus.dataset.playing : captureStatus.dataset.paused;
+      captureStatus.parentElement?.classList.toggle('is-paused', !playing);
+    };
+    const mobilePoster = matchMedia('(max-width:1040px)').matches ? video.dataset.posterMobile : '';
+    if (mobilePoster || video.dataset.poster) video.poster = mobilePoster || video.dataset.poster;
+    delete video.dataset.poster; delete video.dataset.posterMobile;
     video.querySelectorAll('source[data-src]').forEach(source => { source.src = source.dataset.src; source.removeAttribute('data-src'); });
-    video.load(); if (!reduce) video.play().catch(() => {});
+    video.dataset.hydrated = 'true';
+    if (reduce) { video.autoplay = false; video.removeAttribute('autoplay'); }
+    video.load();
+    if (reduce) { video.pause(); setCaptureStatus(false); }
+    else video.play().then(() => setCaptureStatus(true)).catch(() => setCaptureStatus(false));
   };
   if ('IntersectionObserver' in window) {
     const vio = new IntersectionObserver(entries => entries.forEach(entry => {
@@ -230,10 +242,44 @@
   });
 
   document.querySelectorAll('[data-pipeline]').forEach(panel => {
-    const stages = [...panel.querySelectorAll('.stage')]; if (reduce || !stages.length) { stages.at(-1)?.classList.add('active'); return; }
+    const stages = [...panel.querySelectorAll('.stage')].sort((left, right) => Number(left.dataset.step) - Number(right.dataset.step));
+    const feedback = panel.querySelector('.return-path');
+    const state = panel.querySelector('[data-pipeline-state]');
+    const byStep = new Map(stages.map(stage => [stage.dataset.step, stage]));
+    const sequence = ['01','02','03','04','05','feedback','02','03','04','05','06'];
+    panel.dataset.pipelineSequence = sequence.join(',');
+    const reset = () => {
+      stages.forEach(stage => stage.classList.remove('active'));
+      feedback?.classList.remove('active');
+    };
+    const activate = entry => {
+      reset();
+      panel.dataset.activeStep = entry;
+      if (entry === 'feedback') {
+        feedback?.classList.add('active');
+        if (state) state.textContent = 'feedback · retry';
+        return;
+      }
+      const stage = byStep.get(entry);
+      stage?.classList.add('active');
+      if (state) state.textContent = `step ${entry} · ${(stage?.querySelector('b')?.textContent || '').toLowerCase()}`;
+    };
+    if (reduce || stages.length !== 6) {
+      reset(); panel.dataset.activeStep = 'static';
+      if (state) state.textContent = 'static overview';
+      return;
+    }
     let timer = null, index = 0;
-    const stop = () => { clearInterval(timer); timer = null; stages.forEach(s => s.classList.remove('active')); };
-    const start = () => { if (timer) return; stages[index].classList.add('active'); timer=setInterval(() => { stages[index].classList.remove('active'); index=(index+1)%stages.length; stages[index].classList.add('active'); }, 900); };
+    const stop = () => {
+      clearInterval(timer); timer = null; index = 0; reset();
+      panel.dataset.activeStep = 'idle';
+      if (state) state.textContent = 'native route · 6 stages';
+    };
+    const start = () => {
+      if (timer) return;
+      activate(sequence[index]);
+      timer=setInterval(() => { index=(index+1)%sequence.length; activate(sequence[index]); }, 900);
+    };
     if ('IntersectionObserver' in window) {
       new IntersectionObserver(entries => entries.forEach(e => e.isIntersecting ? start() : stop()), {threshold:.3}).observe(panel);
     } else start();
