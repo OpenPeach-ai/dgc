@@ -457,7 +457,34 @@ test("editor capture preview selects the viewport-sized source", async ({page}) 
   });
   await page.goto("/vscode", {waitUntil: "domcontentloaded"});
   const preview = page.locator('[data-open-capture="editor-capture"] img');
-  if ((page.viewportSize()?.width || 0) <= 1040) {
+  await expect(preview).toBeVisible();
+  await page.evaluate(async () => {
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
+  });
+  await expect.poll(() => preview.evaluate(async image => {
+    const first = image.getBoundingClientRect();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const second = image.getBoundingClientRect();
+    const positive = first.width > 0 && first.height > 0
+      && second.width > 0 && second.height > 0;
+    const stable = Math.abs(first.top - second.top) <= 1
+      && Math.abs(first.left - second.left) <= 1
+      && Math.abs(first.width - second.width) <= 1
+      && Math.abs(first.height - second.height) <= 1;
+    return positive && stable;
+  })).toBe(true);
+  // Font settlement can move the tablet preview across the viewport boundary
+  // for a frame. Treat that narrow prefetch zone as near-viewport; the strict
+  // no-request assertion is meaningful only when the image starts well away.
+  const startsNearViewport = await preview.evaluate(image => {
+    const bounds = image.getBoundingClientRect();
+    const margin = 64;
+    return bounds.bottom >= -margin && bounds.top <= innerHeight + margin
+      && bounds.right >= -margin && bounds.left <= innerWidth + margin;
+  });
+  if ((page.viewportSize()?.width || 0) <= 1040 && !startsNearViewport) {
     await page.waitForTimeout(250);
     expect(posterRequests).toEqual([]);
   }

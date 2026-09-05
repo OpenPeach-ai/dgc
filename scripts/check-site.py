@@ -34,7 +34,7 @@ VERSION = json.loads((SITE / "version.json").read_text(encoding="utf-8"))["versi
 
 TEXT_SUFFIXES = {".html", ".css", ".js", ".json", ".xml", ".txt", ".svg", ".sha256", ".webmanifest"}
 LOCAL_HOSTS = {"vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"}
-EXEMPT_PATHS = {"/api/event", "/api/commercial", "/api/subscribe"}
+EXEMPT_PATHS = {"/api/event", "/api/subscribe"}
 LEAK_PATTERNS = {
     "internal audit terminology": re.compile(
         r"FRONTIER_AUDIT|FRONTIER[_ -]ROADMAP|frontier[- ]hardening", re.I,
@@ -279,6 +279,25 @@ def check_analytics_event_contract(parsed: dict[Path, PageParser], errors: list[
             "analytics event contract disagrees between HTML and Worker"
             f" (unhandled={missing}, unused={dead})"
         )
+
+
+def check_commercial_intake_retired(errors: list[str]) -> None:
+    """Prevent the removed commercial-enquiry data path from returning."""
+    for page in sorted(SITE.rglob("*.html")):
+        source = page.read_text(encoding="utf-8")
+        if re.search(r'<form\b[^>]*\baction=["\']/api/commercial["\']', source, re.I):
+            errors.append(f"{page.relative_to(SITE)}: commercial enquiry form is retired")
+    worker = (SITE / "_worker.js").read_text(encoding="utf-8")
+    for marker in ("DGC_CONTACT_EMAIL", "commercialRoute", "normalizedCommercial", "validCommercial"):
+        if marker in worker:
+            errors.append(f"_worker.js: retired commercial intake marker remains: {marker}")
+    retired_route = re.search(
+        r'url\.pathname === ["\']/api/commercial["\']\)\s*\{\s*'
+        r'response = json\(\{error: ["\']Not found["\']\}, 404\);',
+        worker,
+    )
+    if not retired_route:
+        errors.append("_worker.js: retired commercial endpoint must return an explicit 404")
 
 
 def check_css_minifier(errors: list[str]) -> None:
@@ -1229,6 +1248,7 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     parsed = check_pages(errors)
     check_analytics_event_contract(parsed, errors)
+    check_commercial_intake_retired(errors)
     check_css_minifier(errors)
     check_asset_revision_contract(errors)
     check_leak_pattern_contract(errors)

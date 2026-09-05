@@ -7,7 +7,7 @@ description: Eight practical answers about licensing, data, offline use, platfor
 
 ## Can I use DGC commercially?
 
-The public release is licensed under PolyForm Noncommercial 1.0.0. Qualifying personal, research, educational, charitable, public-interest, and other noncommercial uses are permitted under the license terms. Commercial use requires a separate written agreement. The repository’s [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file controls; if your use supports a business or paid service, send the commercial-use form with your company, expected seats, and use case. We aim to reply within two business days.
+The public release is licensed under PolyForm Noncommercial 1.0.0. Qualifying personal, research, educational, charitable, public-interest, and other noncommercial uses are permitted under the license terms. Commercial use requires a separate written agreement. The repository’s [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file controls; this website does not accept or process commercial licensing requests.
 
 ## What leaves my machine?
 

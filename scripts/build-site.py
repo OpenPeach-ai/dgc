@@ -372,7 +372,7 @@ def build_outputs() -> dict[str, str | bytes]:
         "index.html": ("Vibe DGC — a coding agent for the models you run", "A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor.", page_template("index.html", ctx), "/og-card.png"),
         "benchmark.html": ("Benchmark", f'A transparent same-model comparison of {ctx["BENCH_HARNESS_NAMES"]} on {ctx["BENCH_PROBLEMS"]} real polyglot tasks.', page_template("benchmark.html", ctx), "/og-benchmark.png"),
         "vscode/index.html": ("DGC for VS Code and Cursor", "The DGC coding harness inside VS Code, Cursor, and VSCodium with structured tools, diffs, plans, and goals.", page_template("vscode.html", ctx), "/og-editor.png"),
-        "pricing.html": ("Pricing", "DGC is free for noncommercial use, with a direct route for commercial licensing.", page_template("pricing.html", ctx), "/og-card.png"),
+        "pricing.html": ("Pricing", "DGC is free for qualifying noncommercial use; the repository license controls.", page_template("pricing.html", ctx), "/og-card.png"),
         "changelog.html": ("Changelog", "A build-time record of reviewed DGC CLI and editor releases.", page_template("changelog.html", ctx), "/og-card.png"),
         "blog/index.html": ("DGC engineering notes", "Writing about coding-agent evaluation, permissions, local models, and harness engineering.", page_template("blog.html", ctx), "/og-card.png"),
         "brand.html": ("Brand", "Official DGC naming, marks, colours, clear space, and downloadable vector assets.", page_template("brand.html", ctx), "/og-card.png"),

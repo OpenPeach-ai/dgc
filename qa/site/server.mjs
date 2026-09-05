@@ -38,10 +38,6 @@ const MIME = new Map([
 const COMPRESSIBLE = new Set([".css", ".html", ".js", ".json", ".svg", ".txt", ".webmanifest", ".xml"]);
 const API_POST_FIXTURES = new Map([
   ["/api/event", {status: 204}],
-  ["/api/commercial", {
-    status: 201,
-    body: {message: "Received. We aim to reply within two business days."},
-  }],
   ["/api/subscribe", {
     status: 201,
     body: {message: "Check your inbox to confirm."},

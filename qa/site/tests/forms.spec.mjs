@@ -15,49 +15,17 @@ async function formContract(form) {
   }));
 }
 
-test("commercial form posts its real field contract and renders success", async ({page}) => {
+test("pricing explains the commercial boundary without collecting enquiries", async ({page}) => {
   const runtime = observeRuntime(page);
   await page.goto("/pricing", {waitUntil: "domcontentloaded"});
   await settle(page);
 
-  const form = page.locator('form[data-async-form][action="/api/commercial"]');
-  await expect(form).toHaveCount(1);
-  expect(await formContract(form)).toEqual({
-    action: "/api/commercial",
-    fields: ["company", "email", "name", "seats", "use_case", "website"],
-    method: "post",
-  });
-  await expect(form.locator('select[name="seats"] option')).toHaveText([
-    "Select", "1–10", "11–50", "51–200", "201+",
-  ]);
-
-  await form.locator('[name="name"]').fill("Ada Lovelace");
-  await form.locator('[name="email"]').fill("ada@example.com");
-  await form.locator('[name="company"]').fill("Analytical Engines");
-  await form.locator('[name="seats"]').selectOption({label: "11–50"});
-  await form.locator('[name="use_case"]').fill("Evaluate DGC for a small engineering team.");
-  const sent = page.waitForRequest(request => (
-    request.method() === "POST" && new URL(request.url()).pathname === "/api/commercial"
-  ));
-  await form.getByRole("button", {name: "Send request"}).click();
-  const request = await sent;
-  expect(await request.headerValue("content-type")).toContain("multipart/form-data");
-  const body = request.postData() || "";
-  for (const [name, value] of [
-    ["name", "Ada Lovelace"],
-    ["email", "ada@example.com"],
-    ["company", "Analytical Engines"],
-    ["seats", "11–50"],
-    ["use_case", "Evaluate DGC for a small engineering team."],
-  ]) {
-    expect(body).toContain(`name="${name}"`);
-    expect(body).toContain(value);
-  }
-  await expect(form.locator(".form-status")).toHaveText(
-    "Received. We aim to reply within two business days.",
+  await expect(page.locator('form[action*="commercial"]')).toHaveCount(0);
+  await expect(page.getByRole("heading", {name: "Not offered through this site."})).toBeVisible();
+  await expect(page.getByText("No sales or licensing enquiry form is operated here")).toBeVisible();
+  await expect(page.getByRole("link", {name: "Read the license ↗"})).toHaveAttribute(
+    "href", "https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE",
   );
-  await expect(form.locator('[name="email"]')).toHaveValue("");
-  await expect(form.getByRole("button", {name: "Send request"})).toBeEnabled();
   expect(runtime.consoleErrors).toEqual([]);
   expect(runtime.pageErrors).toEqual([]);
   expect(runtime.httpErrors).toEqual([]);
