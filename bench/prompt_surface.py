@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -84,6 +85,12 @@ def _section_sizes(prompt: str) -> list[dict[str, int | str]]:
     return sections
 
 
+def _canonical_prompt(prompt: str, root: Path) -> str:
+    """Remove host-specific noise from the cross-platform surface measurement."""
+    prompt = prompt.replace(str(root), "/workspace/project")
+    return re.sub(r"(?m)^- OS: .*$", "- OS: benchmark-host", prompt)
+
+
 def run_probe() -> dict:
     with tempfile.TemporaryDirectory(prefix="dgc-prompt-surface-") as raw:
         root = Path(raw)
@@ -101,7 +108,10 @@ def run_probe() -> dict:
                 instr="Implement the documented exercise behavior for all valid inputs.")
             agent._activate_tool_intents(user_prompt, replace=True)
             agent._activate_skill_intents(user_prompt, replace=True)
-            system_prompt = agent.system_prompt()
+            # Temporary-directory and OS-release strings vary substantially between Linux and
+            # macOS. They are real request bytes but not shipped prompt surface; canonicalize
+            # them so this release gate measures product changes instead of runner path length.
+            system_prompt = _canonical_prompt(agent.system_prompt(), root)
             schemas = agent._tool_schemas()
             compact_schemas = json.dumps(schemas, separators=(",", ":"), default=str)
             messages = [
