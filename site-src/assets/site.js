@@ -248,30 +248,6 @@
     } else start();
   });
 
-  const actionPanel = document.querySelector('[data-subscription-panel]');
-  if (actionPanel) {
-    const title = actionPanel.querySelector('[data-subscription-title]');
-    title?.focus({preventScroll:true});
-  }
-
-  document.querySelectorAll('form[data-async-form]').forEach(form => form.addEventListener('submit', async event => {
-    event.preventDefault(); const status = form.querySelector('.form-status'); const button = form.querySelector('[type=submit]');
-    status.textContent = 'Sending…'; button.disabled = true;
-    try {
-      const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 10000);
-      const response = await fetch(form.action, {method:'POST',body:new FormData(form),headers:{accept:'application/json'},signal:controller.signal});
-      clearTimeout(timeout);
-      const result = await response.json().catch(() => ({})); if (!response.ok) throw new Error(result.error || 'Could not send');
-      status.textContent = result.message || 'Received. Thank you.'; form.reset();
-      if (form.hasAttribute('data-subscription-action')) {
-        button.dataset.complete = 'true';
-        const title = form.closest('[data-subscription-panel]')?.querySelector('[data-subscription-title]');
-        if (title) title.textContent = result.message || 'Request complete.';
-      }
-    } catch (error) { status.textContent = `${error.name === 'AbortError' ? 'Request timed out' : error.message}. Please try again.`; }
-    finally { button.disabled = button.dataset.complete === 'true'; }
-  }));
-
   document.querySelectorAll('dialog[data-capture-dialog]').forEach(capture => {
     const openers = [...document.querySelectorAll(`[data-open-capture="${capture.id}"]`)];
     bindDialog(capture, openers, [...capture.querySelectorAll('[data-close-capture]')]);
@@ -287,11 +263,6 @@
     capture.addEventListener('close', () => capture.querySelector('video[data-capture-video]')?.pause());
   });
 
-  const subscription = new URLSearchParams(location.search).get('subscription');
-  const releaseStatus = document.querySelector('#release-notes .form-status');
-  if (releaseStatus && subscription) {
-    releaseStatus.textContent = ({pending:'Check your inbox to confirm.',confirmed:'Subscription confirmed.',removed:'You have been unsubscribed.',invalid:'That subscription link is invalid or expired.'})[subscription] || '';
-  }
   };
 
   if (document.body.classList.contains('page-home') && !location.hash) {

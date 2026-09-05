@@ -54,7 +54,7 @@ compact summary locally and requires performance
 >= 95, accessibility >= 98, desktop LCP <= 1.0 s, tablet/mobile LCP <= 2.0 s, and CLS exactly 0. This
 representative CI check is not the every-page release acceptance gate.
 
-Before a release candidate is approved, run the explicit all-routes mode (35 routes x 3 profiles):
+Before a release candidate is approved, run the explicit all-routes mode (30 routes x 3 profiles):
 
 ```bash
 npm run qa:site:lighthouse:all

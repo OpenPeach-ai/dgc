@@ -8,7 +8,7 @@ const REPRESENTATIVE_ROUTES = [
   "/vscode",
   "/docs",
   "/pricing",
-  "/blog/benchmark-methodology",
+  "/changelog",
 ];
 
 for (const route of REPRESENTATIVE_ROUTES) {
