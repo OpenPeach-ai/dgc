@@ -24,6 +24,17 @@ for (const route of REPRESENTATIVE_ROUTES) {
     await page.addStyleTag({
       content: "main > .section, main > .quote-band { content-visibility: visible !important; contain-intrinsic-size: none !important; }",
     });
+    // The editor preview is intentionally deferred until it enters the viewport.
+    // Bring it into view in this full-page capture so the reviewed baseline records
+    // its deterministic reduced-motion frame instead of an unhydrated black box.
+    if (route === "/vscode") {
+      const preview = page.locator("video[data-editor-preview]");
+      await preview.scrollIntoViewIfNeeded();
+      await expect(preview).toHaveAttribute("data-hydrated", "true");
+      await expect.poll(() => preview.evaluate(video =>
+        performance.getEntriesByName(video.poster).some(entry => entry.responseEnd > 0),
+      )).toBe(true);
+    }
     await page.evaluate(() => document.documentElement.scrollHeight);
     await page.waitForTimeout(100);
     await page.evaluate(() => scrollTo(0, 0));
