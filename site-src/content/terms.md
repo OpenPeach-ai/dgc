@@ -6,7 +6,7 @@ effective_date: 2026-09-05
 
 # Terms
 
-These terms apply to your use of vibedgc.com and its downloads, documentation, and release-note subscription form. The site is operated by Mohit Kalra, who publishes DGC as an OpenPeach project; “DGC”, “we”, and “us” below refer to that project and its operator. By using the site, you agree to these terms. The DGC software is separately governed by the license included with the source and release archive.
+These terms apply to your use of vibedgc.com and its downloads and documentation. The site is operated by Mohit Kalra, who publishes DGC as an OpenPeach project; “DGC”, “we”, and “us” below refer to that project and its operator. By using the site, you agree to these terms. The DGC software is separately governed by the license included with the source and release archive.
 
 ## Software license
 
@@ -22,11 +22,9 @@ DGC can read files, modify a workspace, make network requests, and run commands 
 
 You are also responsible for the models, APIs, subscriptions, MCP servers, search providers, language servers, repositories, and other services you connect to DGC. Their separate terms, acceptable-use rules, data practices, and fees may apply.
 
-## Website and release notes
+## Website use
 
-You may use the site for lawful evaluation, installation, documentation, security reporting, contribution, and release-note subscriptions. Do not attempt to disrupt the service, bypass access controls, submit malware, impersonate another person, or use forms for spam or unlawful content.
-
-The release-note form is only for requesting email release updates. A subscription request is not a commercial license, employment offer, service-level commitment, or other agreement.
+You may use the site for lawful evaluation, installation, documentation, security reporting, and contribution. Do not attempt to disrupt the service, bypass access controls, submit malware, impersonate another person, or use the site for spam or unlawful content. The website does not accept commercial-use requests, contact enquiries, or email subscriptions.
 
 ## Availability and changes
 

@@ -200,38 +200,13 @@ test("content-heavy routes do not reflow while a slow full stylesheet loads", as
     await route.continue();
   });
 
-  for (const path of ["/blog", "/docs", "/docs/getting-started", "/subscription"]) {
+  for (const path of ["/changelog", "/docs", "/docs/getting-started"]) {
     await page.goto(path, {waitUntil: "load"});
     await expect(page.locator("html")).not.toHaveClass(/(?:defer-styles|fh)/);
     await expect(page.locator("body")).toHaveCSS("visibility", "visible");
     await page.waitForTimeout(500);
     const cls = await page.evaluate(() => window.__dgcLayoutShifts.reduce((sum, value) => sum + value, 0));
     expect(cls, path).toBe(0);
-  }
-});
-
-test("subscription state is resolved before first paint when shared JavaScript is late", async ({page}) => {
-  await page.addInitScript(() => {
-    window.__dgcLayoutShifts = [];
-    new PerformanceObserver(list => {
-      for (const entry of list.getEntries()) {
-        if (!entry.hadRecentInput) window.__dgcLayoutShifts.push(entry.value);
-      }
-    }).observe({type: "layout-shift", buffered: true});
-  });
-  await page.route("**/assets/site.js?*", async route => {
-    await new Promise(resolve => setTimeout(resolve, 900));
-    await route.continue();
-  });
-
-  for (const path of ["/subscription", `/subscription#confirm=${"A".repeat(43)}`]) {
-    await page.goto(path, {waitUntil: "load"});
-    await page.waitForTimeout(500);
-    const result = await page.evaluate(() => ({
-      cls: window.__dgcLayoutShifts.reduce((sum, value) => sum + value, 0),
-      ready: document.querySelector("[data-subscription-panel]")?.dataset.subscriptionReady,
-    }));
-    expect(result, path).toEqual({cls: 0, ready: "true"});
   }
 });
 
@@ -251,7 +226,7 @@ test("direct fragments wait for full styles and align below the sticky header", 
 
   for (const path of [
     "/about#work-on-this",
-    "/blog/benchmark-methodology#time-is-part-of-the-claim",
+    "/security#permission-model",
     "/docs/getting-started#install",
   ]) {
     await page.goto(path, {waitUntil: "load"});
@@ -271,28 +246,6 @@ test("direct fragments wait for full styles and align below the sticky header", 
   }
 });
 
-test("the subscription confirmation redirect aligns its footer status after slow styles", async ({page}) => {
-  await page.addInitScript(() => {
-    window.__dgcLayoutShifts = [];
-    new PerformanceObserver(list => {
-      for (const entry of list.getEntries()) {
-        if (!entry.hadRecentInput) window.__dgcLayoutShifts.push(entry.value);
-      }
-    }).observe({type: "layout-shift", buffered: true});
-  });
-  await page.route("**/assets/site.css?*", async route => {
-    await new Promise(resolve => setTimeout(resolve, 900));
-    await route.continue();
-  });
-
-  await page.goto("/?subscription=pending#release-notes", {waitUntil: "load"});
-  await expect(page.locator("#release-notes")).toBeInViewport();
-  await expect(page.locator("#release-notes .form-status")).toHaveText("Check your inbox to confirm.");
-  await page.waitForTimeout(500);
-  const cls = await page.evaluate(() => window.__dgcLayoutShifts.reduce((sum, value) => sum + value, 0));
-  expect(cls).toBe(0);
-});
-
 test("late JavaScript cannot miss final fragment alignment after the CSS fail-open", async ({page}) => {
   const runtime = observeRuntime(page);
   await page.route("**/assets/site.js?*", async route => {
@@ -303,11 +256,6 @@ test("late JavaScript cannot miss final fragment alignment after the CSS fail-op
     await new Promise(resolve => setTimeout(resolve, 3500));
     await route.continue();
   });
-
-  await page.goto("/?subscription=pending#release-notes", {waitUntil: "load"});
-  await expect(page.locator("html")).toHaveAttribute("data-styles-ready", "true");
-  await expect(page.locator("#release-notes .form-status")).toHaveText("Check your inbox to confirm.");
-  await expect(page.locator("#release-notes")).toBeInViewport();
 
   await page.goto("/about#work-on-this", {waitUntil: "load"});
   await expect(page.locator("html")).toHaveAttribute("data-styles-ready", "true");

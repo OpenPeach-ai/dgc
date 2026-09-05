@@ -38,24 +38,12 @@ const MIME = new Map([
 const COMPRESSIBLE = new Set([".css", ".html", ".js", ".json", ".svg", ".txt", ".webmanifest", ".xml"]);
 const API_POST_FIXTURES = new Map([
   ["/api/event", {status: 204}],
-  ["/api/subscribe", {
-    status: 201,
-    body: {message: "Check your inbox to confirm."},
-  }],
-  ["/api/subscribe/confirm", {
-    status: 201,
-    body: {message: "Subscription confirmed."},
-  }],
-  ["/api/unsubscribe", {
-    status: 201,
-    body: {message: "You have been unsubscribed."},
-  }],
 ]);
 
 function routeFile(pathname) {
   if (routes.has(pathname)) {
     if (pathname === "/") return "index.html";
-    if (["/blog", "/docs", "/vscode"].includes(pathname)) {
+    if (["/docs", "/vscode"].includes(pathname)) {
       return `${pathname.slice(1)}/index.html`;
     }
     return `${pathname.slice(1)}.html`;

@@ -227,7 +227,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
         ld.extend(extra_json_ld)
     announcement_key = json.dumps(f"dgc-announcement-{ctx['VERSION_NUMBER']}")
     canonical_page = canonical_path(path)
-    if canonical_page in {"/404", "/subscription"} or canonical_page == "/docs" or canonical_page.startswith("/docs/"):
+    if canonical_page == "/404" or canonical_page == "/docs" or canonical_page.startswith("/docs/"):
         render_guard = "document.documentElement.classList.add('fh');"
     else:
         render_guard = "if(location.hash)document.documentElement.classList.add('fh');"
@@ -248,7 +248,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
 <meta property=\"og:image:width\" content=\"1200\"><meta property=\"og:image:height\" content=\"630\">
 <meta name=\"twitter:card\" content=\"summary_large_image\"><meta name=\"twitter:title\" content=\"{html.escape(full_title, quote=True)}\"><meta name=\"twitter:description\" content=\"{html.escape(description, quote=True)}\"><meta name=\"twitter:image\" content=\"{ctx['SITE_URL']}{html.escape(image, quote=True)}\">
 <link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\"><link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\"><link rel=\"manifest\" href=\"/site.webmanifest\">
-<link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC engineering\" href=\"/feed.xml\"><link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC releases\" href=\"/changelog.xml\">
+<link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC releases\" href=\"/changelog.xml\">
 {f'<link rel="preload" href="{html.escape(preload_mobile_image, quote=True)}" as="image" fetchpriority="high" media="(max-width:800px)">' if preload_mobile_image else ''}
 {f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high" media="(min-width:801px)">' if preload_image and preload_mobile_image else (f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high">' if preload_image else '')}
 <link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>

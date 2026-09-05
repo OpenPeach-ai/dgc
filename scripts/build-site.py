@@ -234,13 +234,6 @@ def release_rows(items: list[dict[str, Any]]) -> str:
     return "".join(rows)
 
 
-def post_cards(posts: list[tuple[Path, dict[str, str], str]]) -> str:
-    cards = []
-    for path, meta, _ in posts:
-        cards.append(f'<a class="card spotlight post-card reveal" href="/blog/{path.stem}"><time datetime="{meta["date"]}">{meta["date"]}</time><h2>{html.escape(meta["title"])}</h2><p>{html.escape(meta["description"])}</p><span class="read">Read note →</span></a>')
-    return "".join(cards)
-
-
 def generic_markdown_page(filename: str, eyebrow: str) -> str:
     meta, raw = read_markdown(CONTENT / filename)
     first = re.search(r"^#\s+(.+)$", raw, re.MULTILINE)
@@ -358,14 +351,10 @@ def build_outputs() -> dict[str, str | bytes]:
     protocol_match = re.search(r"^PROTOCOL_VERSION\s*=\s*(\d+)\s*$", protocol_source, re.MULTILINE)
     if not protocol_match:
         raise ValueError("could not read the editor protocol version")
-    post_items: list[tuple[Path, dict[str, str], str]] = []
-    for path in sorted((CONTENT / "blog").glob("*.md")):
-        meta, raw = read_markdown(path)
-        post_items.append((path, meta, substitute(raw, ctx)))
     ctx.update({
         "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
-        "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"]), "POST_CARDS": post_cards(post_items),
+        "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"]),
         "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": releases["extension"][0]["notes"][0], "EXT_NOTE_2": releases["extension"][0]["notes"][1], "EXT_NOTE_3": releases["extension"][0]["notes"][2],
     })
     pages: dict[str, tuple[str, str, str, str]] = {
@@ -374,13 +363,11 @@ def build_outputs() -> dict[str, str | bytes]:
         "vscode/index.html": ("DGC for VS Code and Cursor", "The DGC coding harness inside VS Code, Cursor, and VSCodium with structured tools, diffs, plans, and goals.", page_template("vscode.html", ctx), "/og-editor.png"),
         "pricing.html": ("Pricing", "DGC is free for qualifying noncommercial use; the repository license controls.", page_template("pricing.html", ctx), "/og-card.png"),
         "changelog.html": ("Changelog", "A build-time record of reviewed DGC CLI and editor releases.", page_template("changelog.html", ctx), "/og-card.png"),
-        "blog/index.html": ("DGC engineering notes", "Writing about coding-agent evaluation, permissions, local models, and harness engineering.", page_template("blog.html", ctx), "/og-card.png"),
         "brand.html": ("Brand", "Official DGC naming, marks, colours, clear space, and downloadable vector assets.", page_template("brand.html", ctx), "/og-card.png"),
         "about.html": ("About DGC", "Why DGC exists, who builds it, and how to help shape the coding-agent harness.", generic_markdown_page("about.md", "About"), "/og-card.png"),
         "security.html": ("Security", "DGC's permission, workspace, sandbox, credential, and vulnerability-reporting boundaries.", generic_markdown_page("security.md", "Security"), "/og-card.png"),
         "privacy.html": ("Privacy", "What DGC stores locally, what reaches a chosen provider, and what the website processes.", generic_markdown_page("privacy.md", "Legal"), "/og-card.png"),
         "terms.html": ("Terms", "Terms for vibedgc.com and the relationship between the website and DGC's software license.", generic_markdown_page("terms.md", "Legal"), "/og-card.png"),
-        "subscription.html": ("Manage release notes", "Confirm or remove a DGC release-notes subscription.", page_template("subscription.html", ctx), "/og-card.png"),
         "404.html": ("Page not found", "No such DGC page.", page_template("404.html", ctx), "/og-card.png"),
         "docs/404.html": ("Documentation page not found", "No such DGC documentation page.", page_template("404.html", ctx), "/og-docs.png"),
     }
@@ -393,18 +380,12 @@ def build_outputs() -> dict[str, str | bytes]:
             body=body,
             body_class="page-home" if path == "index.html" else "",
             image=image,
-            include_announcement=path not in {"404.html", "docs/404.html", "subscription.html"},
-            noindex=path in {"404.html", "docs/404.html", "subscription.html"},
+            include_announcement=path not in {"404.html", "docs/404.html"},
+            noindex=path in {"404.html", "docs/404.html"},
             preload_image="/assets/hero-graded-poster.jpg" if path == "index.html" else None,
             preload_mobile_image="/assets/hero-mobile-poster.webp" if path == "index.html" else None,
         )
-    for path, meta, raw in post_items:
-        url_path = f"blog/{path.stem}.html"
-        article = f'<header class="page-hero field field-2"><div class="container"><div class="eyebrow"><b>Engineering note</b> {meta["date"]}</div><h1>{html.escape(meta["title"])}</h1><p class="lede">{html.escape(meta["description"])}</p></div></header><section class="section"><div class="container"><article class="prose">{markdown_html(raw, drop_first_h1=True)}</article></div></section>'
-        outputs[url_path] = render_shell(title=meta["title"], description=meta["description"], path=url_path, body=article, kind="article", image="/og-card.png")
-    posts_feed = [{"title": meta["title"], "date": meta["date"], "description": meta["description"], "url": f'{ctx["SITE_URL"]}/blog/{path.stem}'} for path, meta, _ in post_items]
     release_feed = [{"title": f'DGC {item["version"]}', "date": item["date"], "description": "; ".join(item["notes"]), "url": item["url"]} for item in releases["cli"]]
-    outputs["feed.xml"] = feed("DGC engineering notes", "The harness, measured and explained.", posts_feed, base=f'{ctx["SITE_URL"]}/feed.xml')
     outputs["changelog.xml"] = feed("DGC releases", "Reviewed DGC release notes.", release_feed, base=f'{ctx["SITE_URL"]}/changelog.xml')
     public_paths = sorted({
         "/" + path.removesuffix("index.html").removesuffix(".html").rstrip("/")
@@ -416,7 +397,7 @@ def build_outputs() -> dict[str, str | bytes]:
         for _, titles in _docs_groups()
         for title in titles
     ]
-    sitemap_paths = [path for path in public_paths if path != "/subscription"]
+    sitemap_paths = public_paths
     outputs["sitemap.xml"] = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f'<url><loc>{ctx["SITE_URL"]}{path or "/"}</loc></url>' for path in sitemap_paths) + "</urlset>\n"
     outputs["llms.txt"] = "\n".join(["# DGC", "", ctx["TAGLINE"] + ".", "", "## Start", f'- Docs: {ctx["DOCS_URL"]}/', f'- Benchmark: {ctx["SITE_URL"]}/benchmark', f'- Source: {ctx["GITHUB_URL"]}', "", "## Product", "DGC is a coding-agent harness for a local model, compatible API, or supported coding subscription. For native local/API routes, DGC owns context, permissions, tools, execution, verification, sessions, plans, goals, MCP, skills, hooks, and terminal/editor presentation. Subscription routes delegate model and tool execution to the supported vendor CLI while DGC retains its session, SessionStart/Stop hooks, mode mapping, and presentation.", "", "## Documentation"] + [f'- {title}: {ctx["DOCS_URL"]}/{slug(title)}' for _, titles in _docs_groups() for title in titles] + [""])
     outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#0B0B0D","theme_color":"#0B0B0D","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"

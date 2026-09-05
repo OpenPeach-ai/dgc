@@ -34,7 +34,7 @@ VERSION = json.loads((SITE / "version.json").read_text(encoding="utf-8"))["versi
 
 TEXT_SUFFIXES = {".html", ".css", ".js", ".json", ".xml", ".txt", ".svg", ".sha256", ".webmanifest"}
 LOCAL_HOSTS = {"vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"}
-EXEMPT_PATHS = {"/api/event", "/api/subscribe"}
+EXEMPT_PATHS = {"/api/event"}
 LEAK_PATTERNS = {
     "internal audit terminology": re.compile(
         r"FRONTIER_AUDIT|FRONTIER[_ -]ROADMAP|frontier[- ]hardening", re.I,
@@ -77,7 +77,6 @@ BENCHMARK_TEMPLATE_FILES = (
     "partials/fig1.html",
     "partials/terminal.html",
     "content/faq.md",
-    "content/blog/benchmark-methodology.md",
     "social/og-card.svg",
     "social/og-benchmark.svg",
 )
@@ -281,23 +280,89 @@ def check_analytics_event_contract(parsed: dict[Path, PageParser], errors: list[
         )
 
 
-def check_commercial_intake_retired(errors: list[str]) -> None:
-    """Prevent the removed commercial-enquiry data path from returning."""
+def check_website_intake_retired(errors: list[str]) -> None:
+    """Prevent any retired contact or release-signup data path from returning."""
     for page in sorted(SITE.rglob("*.html")):
         source = page.read_text(encoding="utf-8")
-        if re.search(r'<form\b[^>]*\baction=["\']/api/commercial["\']', source, re.I):
-            errors.append(f"{page.relative_to(SITE)}: commercial enquiry form is retired")
+        if re.search(r"<form\b", source, re.I):
+            errors.append(f"{page.relative_to(SITE)}: website forms are retired")
+    if (SITE / "subscription.html").exists():
+        errors.append("subscription.html: retired release-signup page must be absent")
+
     worker = (SITE / "_worker.js").read_text(encoding="utf-8")
-    for marker in ("DGC_CONTACT_EMAIL", "commercialRoute", "normalizedCommercial", "validCommercial"):
-        if marker in worker:
-            errors.append(f"_worker.js: retired commercial intake marker remains: {marker}")
-    retired_route = re.search(
-        r'url\.pathname === ["\']/api/commercial["\']\)\s*\{\s*'
-        r'response = json\(\{error: ["\']Not found["\']\}, 404\);',
-        worker,
+    retired_markers = (
+        "DGC_CONTACT_EMAIL", "DGC_FROM_EMAIL", "DGC_RATE_LIMIT_SECRET", "DGC_SITE_DB",
+        "RESEND_API_KEY", "commercialRoute", "normalizedCommercial", "validCommercial",
+        "subscribeRoute", "subscribeRequestRoute", "subscriptionAction", "sendEmail",
+        "pending_subscriptions", "commercial_leads", "form_cooldowns", "subscribers",
     )
-    if not retired_route:
-        errors.append("_worker.js: retired commercial endpoint must return an explicit 404")
+    for marker in retired_markers:
+        if marker in worker:
+            errors.append(f"_worker.js: retired website-intake marker remains: {marker}")
+    retired_paths = (
+        "/api/commercial", "/api/subscribe", "/api/subscribe/confirm", "/api/unsubscribe",
+    )
+    if "RETIRED_API_PATHS.has(url.pathname)" not in worker \
+            or 'response = json({error: "Not found"}, 404);' not in worker:
+        errors.append("_worker.js: retired website-intake endpoints need an explicit JSON 404")
+    for path in retired_paths:
+        if json.dumps(path) not in worker:
+            errors.append(f"_worker.js: retired endpoint tombstone is missing: {path}")
+
+    generated_assets = "\n".join(
+        (SITE / name).read_text(encoding="utf-8")
+        for name in ("assets/site.js", "assets/site.css")
+    )
+    for marker in ("data-async-form", "data-subscription-panel", "release-form"):
+        if marker in generated_assets:
+            errors.append(f"generated assets retain retired form marker: {marker}")
+
+    config_path = ROOT / "wrangler.json"
+    if not config_path.is_file():
+        errors.append("wrangler.json: Pages configuration is missing")
+    else:
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            if config.get("d1_databases"):
+                errors.append("wrangler.json: retired D1 binding remains")
+            if config.get("vars"):
+                errors.append("wrangler.json: website runtime variables are not expected")
+        except (OSError, TypeError, json.JSONDecodeError) as exc:
+            errors.append(f"wrangler.json: invalid JSON ({exc})")
+    migrations = ROOT / "migrations"
+    if migrations.exists() and any(migrations.glob("*.sql")):
+        errors.append("migrations: retired website persistence schema remains")
+
+
+def check_blog_retired(errors: list[str]) -> None:
+    """Keep the removed blog, article feed, and publishing sources out of the site."""
+    retired_page = ROOT / "site-src" / "pages" / "blog.html"
+    retired_content = ROOT / "site-src" / "content" / "blog"
+    if retired_page.exists():
+        errors.append(f"{retired_page.relative_to(ROOT)}: website blog source is retired")
+    if retired_content.exists() and any(path.is_file() for path in retired_content.rglob("*")):
+        errors.append(f"{retired_content.relative_to(ROOT)}: website blog source is retired")
+    generated_blog = SITE / "blog"
+    if generated_blog.exists() and any(path.is_file() for path in generated_blog.rglob("*")):
+        errors.append("site/blog: retired website blog output must be absent")
+    if (SITE / "feed.xml").exists():
+        errors.append("site/feed.xml: retired engineering-notes feed must be absent")
+
+    routes = (SITE / "routes.json").read_text(encoding="utf-8")
+    sitemap = (SITE / "sitemap.xml").read_text(encoding="utf-8")
+    generated_html = "\n".join(
+        page.read_text(encoding="utf-8") for page in sorted(SITE.rglob("*.html"))
+    )
+    retired_reference = re.compile(
+        r"(?:https://vibedgc\.com)?/blog(?:[\"'/<]|$)|/feed\.xml",
+    )
+    for label, text in (
+        ("routes.json", routes),
+        ("sitemap.xml", sitemap),
+        ("generated HTML", generated_html),
+    ):
+        if retired_reference.search(text):
+            errors.append(f"{label}: retired website blog reference remains")
 
 
 def check_css_minifier(errors: list[str]) -> None:
@@ -1161,7 +1226,7 @@ def check_public_tree(errors: list[str]) -> set[str]:
             errors.append(f"vscode/dgc.vsix: invalid extension package ({exc})")
 
     sitemap = (SITE / "sitemap.xml").read_text(encoding="utf-8")
-    for name in ("404.html", "docs/404.html", "subscription.html"):
+    for name in ("404.html", "docs/404.html"):
         page = (SITE / name).read_text(encoding="utf-8")
         if not re.search(r'<meta\s+name="robots"\s+content="noindex(?:,(?:no)?follow)?"', page):
             errors.append(f"{name}: expected a noindex robots directive")
@@ -1248,7 +1313,8 @@ def main(argv: list[str] | None = None) -> int:
     errors: list[str] = []
     parsed = check_pages(errors)
     check_analytics_event_contract(parsed, errors)
-    check_commercial_intake_retired(errors)
+    check_website_intake_retired(errors)
+    check_blog_retired(errors)
     check_css_minifier(errors)
     check_asset_revision_contract(errors)
     check_leak_pattern_contract(errors)

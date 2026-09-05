@@ -8,14 +8,24 @@ WRANGLER_VERSION=4.125.0
 PROJECT=${DGC_CLOUDFLARE_PROJECT:-dgc}
 BRANCH=main
 
-if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${DGC_ENV_FILE:-}" ]; then
+if [ -n "${DGC_ENV_FILE:-}" ]; then
   [ -f "$DGC_ENV_FILE" ] || { echo "DGC_ENV_FILE does not exist: $DGC_ENV_FILE" >&2; exit 1; }
-  line=$(grep -E '^\s*dgc_cloudflare_token\s*=' "$DGC_ENV_FILE" | head -1 || true)
-  export CLOUDFLARE_API_TOKEN
-  CLOUDFLARE_API_TOKEN=$(printf '%s' "${line#*=}" | tr -d '"'"'"'\r' | xargs)
+  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+    line=$(grep -E '^\s*dgc_cloudflare_token\s*=' "$DGC_ENV_FILE" | head -1 || true)
+    export CLOUDFLARE_API_TOKEN
+    CLOUDFLARE_API_TOKEN=$(printf '%s' "${line#*=}" | tr -d '"'"'"'\r' | xargs)
+  fi
+  if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+    line=$(grep -E '^\s*Cloudflare_account_id\s*=' "$DGC_ENV_FILE" | head -1 || true)
+    export CLOUDFLARE_ACCOUNT_ID
+    CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "${line#*=}" | tr -d '"'"'"'\r' | xargs)
+  fi
 fi
 [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || {
   echo "set CLOUDFLARE_API_TOKEN (or explicitly set DGC_ENV_FILE)" >&2; exit 1;
+}
+[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || {
+  echo "set CLOUDFLARE_ACCOUNT_ID (or explicitly set DGC_ENV_FILE)" >&2; exit 1;
 }
 
 cd "$ROOT"
@@ -30,6 +40,8 @@ git fetch --quiet origin main
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || {
   echo "production site deployment requires HEAD to equal origin/main" >&2; exit 1;
 }
+COMMIT_HASH=$(git rev-parse HEAD)
+COMMIT_MESSAGE=$(git log -1 --pretty=%s)
 cmp -s install.sh site/install.sh || {
   echo "site/install.sh differs from the reviewed root installer" >&2; exit 1;
 }
@@ -54,24 +66,12 @@ node --no-warnings "$ROOT/scripts/check-site-worker.mjs"
 jq -e '
   .name == "dgc"
   and .pages_build_output_dir == "./site"
-  and .vars.DGC_ENVIRONMENT == "production"
-  and (.vars.DGC_FROM_EMAIL | type == "string" and length > 0)
-  and any(.d1_databases[]; .binding == "DGC_SITE_DB" and .database_id != "")
   and any(.analytics_engine_datasets[];
     .binding == "DGC_ANALYTICS" and .dataset == "dgc_site_events")
 ' "$ROOT/wrangler.json" >/dev/null || {
-  echo "wrangler.json does not declare production D1, dgc_site_events analytics, and environment bindings" >&2
+  echo "wrangler.json does not declare the dgc_site_events analytics binding" >&2
   exit 1
 }
-secret_list=$(npx --yes "wrangler@$WRANGLER_VERSION" pages secret list \
-  --project-name="$PROJECT" 2>/dev/null) || {
-  echo "could not verify Cloudflare Pages secrets" >&2; exit 1;
-}
-for required_secret in RESEND_API_KEY DGC_RATE_LIMIT_SECRET; do
-  printf '%s\n' "$secret_list" | grep -Eq "(^|[[:space:]│])${required_secret}([[:space:]│]|$)" || {
-    echo "Cloudflare Pages secret is missing: $required_secret" >&2; exit 1;
-  }
-done
 [ -x "$ROOT/node_modules/.bin/playwright" ] && [ -x "$ROOT/node_modules/.bin/lighthouse" ] || {
   echo "site acceptance dependencies are missing; run npm ci and install pinned Chromium" >&2
   exit 1
@@ -80,7 +80,6 @@ npm run qa:site:release
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 python3 "$ROOT/scripts/check-site.py" --require-public-release --stage "$STAGE"
-npx --yes "wrangler@$WRANGLER_VERSION" d1 migrations apply DGC_SITE_DB \
-  --remote --config "$ROOT/wrangler.json"
 npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$STAGE" \
-  --project-name="$PROJECT" --branch="$BRANCH"
+  --project-name="$PROJECT" --branch="$BRANCH" \
+  --commit-hash="$COMMIT_HASH" --commit-message="$COMMIT_MESSAGE" --commit-dirty=false
