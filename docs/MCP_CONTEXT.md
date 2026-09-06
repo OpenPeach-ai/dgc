@@ -83,8 +83,23 @@ not resource attachments or model instructions. The bridge stores OAuth tokens i
 Cold startup remains bounded and does not wait for interactive sign-in. If a first installation or
 expired login fails at startup, use **Reconnect** after the client is ready. An SSH/remote extension
 host runs the bridge remotely: its loopback OAuth callback port must be reachable from the browser
-that completes sign-in. Port forwarding and provider-specific device-code support still need
-dedicated remote-host verification; local HTTP tests do not prove that flow.
+that completes sign-in. Before opening the authorization page, the extension now requests forwarding
+for the bridge's validated callback through the editor's `asExternalUri` API. Generic server-provided
+URL requests cannot request port forwarding. Duplicate acceptance, cancellation, expiration and
+backend replacement cannot acknowledge a pending launch or open its browser page afterward.
+
+The pinned bridge's registered callback must retain its HTTP loopback address, port and path. If the
+editor maps it to another port or a web-hosted address, DGC cancels the attempt and explains how to
+forward the remote callback port to the same local port in the desktop editor's Ports panel, then
+reconnect. DGC does not rewrite an OAuth redirect after registration. Browser-only remote editors
+that require a different callback origin are not supported by this bridge flow. A terminal-only SSH
+session needs equivalent forwarding configured by its user. Provider-specific device-code flows
+remain provider-owned; this check does not claim device-code support for every MCP server.
+
+Forwarding and late-response behavior have extension regression coverage; the actual bridge tests
+exercise HTTP and OAuth locally. Neither establishes that every remote-host/identity-provider
+combination works. The editor API's forwarding contract is described in the
+[official remote-extension guide](https://code.visualstudio.com/api/advanced-topics/remote-extensions#forwarding-localhost).
 
 The real-bridge fixture verifies public HTTP, bearer auth, OAuth authorization-code/PKCE, reuse of a
 cached login, refresh after an expired-token `401`, slow startup without duplicate processes,

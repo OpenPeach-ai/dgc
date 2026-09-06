@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .config import valid_remote_mcp_url
@@ -366,6 +366,23 @@ def validate_elicitation_response(params: dict, response) -> dict:
     if _json_bytes(result) > _MAX_FORM_BYTES:
         raise MCPInputError(f"form response exceeded {_MAX_FORM_BYTES} bytes")
     return result
+
+
+def bridge_callback_url(authorize_url: str) -> str:
+    """Identify only the pinned bridge's exact loopback callback, never arbitrary elicitation data."""
+    try:
+        redirects = parse_qs(urlsplit(authorize_url).query, max_num_fields=32).get("redirect_uri", [])
+        if len(redirects) != 1:
+            raise ValueError("missing or duplicate redirect")
+        value = redirects[0]
+        parsed = urlsplit(value)
+        if (parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
+                or not parsed.port or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path != "/oauth/callback" or any(ord(ch) < 32 for ch in value)):
+            raise ValueError("unexpected callback")
+        return value
+    except ValueError:
+        raise MCPInputError("Remote MCP sign-in did not provide a valid loopback callback.") from None
 
 
 def sanitize_input_request(method: str, params) -> dict:
@@ -949,6 +966,9 @@ class MCPServer:
                                 "mode": "url", "url": line.strip(),
                                 "message": "Sign in to this MCP server in your browser, then continue."
                             })
+                            # Generic server input sanitization strips this private marker. Only
+                            # the local pinned bridge may ask the editor to forward its callback.
+                            params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
                             if auth_count <= 2 and callable(self._auth_handler):
                                 response = self._auth_handler(self.name, "elicitation/create", params,
                                                               self._connection_cancel)

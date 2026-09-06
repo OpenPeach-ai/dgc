@@ -153,6 +153,9 @@ class RemoteMCPTests(unittest.TestCase):
         def authorize(_server, method, params, cancel):
             self.assertEqual(method, "elicitation/create")
             self.assertTrue(params["url"].startswith(self.base + "/authorize?"))
+            from urllib.parse import parse_qs, urlsplit
+            self.assertEqual(params["_dgc_bridge_callback"],
+                             parse_qs(urlsplit(params["url"]).query)["redirect_uri"][0])
             self.authorizations.append(params["host"])
             # The bridge announces the authorization URL just before its callback listener is
             # ready. A human browser naturally takes longer; this automated client retries briefly.
