@@ -38,7 +38,9 @@ def delegated_effort(config, engine_key: str, current: str, supports_effort: boo
 
 
 def delegated_prompt(config, prompt: str, mode: str) -> str:
-    """Add trusted Ultra policy only to the vendor wire prompt, never the persisted user message."""
+    """Apply shared response guidance and optional Ultra policy on the vendor wire only."""
+    from .presentation import delegated_presentation
+    prompt = delegated_presentation(prompt)
     if not enabled(config):
         return prompt
     workers = worker_limit(config)

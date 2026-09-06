@@ -749,10 +749,20 @@ class Backend:
                     est = self.agent.estimate_tokens()
                 except Exception:
                     est = 0
-                self.em.emit("turn_end", turn_id=tid,
-                             reason="cancelled" if cancelled else ("error" if failed else "completed"),
-                             token_estimate=est)
-                self._emit_context()
+                with self._turn_state_lock():
+                    idle = not self._queue
+                    if idle and self._worker is current:
+                        self._worker = None
+                    # Release an idle worker before publishing its terminal event. Goal pause,
+                    # delete, model changes and workspace updates may arrive immediately on that
+                    # acknowledgement. Serialize publication with enqueue so a newer turn_start
+                    # cannot overtake this turn_end or be consumed by the retiring worker.
+                    self.em.emit("turn_end", turn_id=tid,
+                                 reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                                 token_estimate=est)
+                    self._emit_context()
+                if idle:
+                    return
         finally:
             # A broken output stream or unexpected fixture/runtime exception must not leave the
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.

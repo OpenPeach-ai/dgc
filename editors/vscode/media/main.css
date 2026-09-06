@@ -22,8 +22,8 @@
   --accent-soft:rgba(124,92,255,.12);
   --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
   --err:#EB7A83; --err-soft:rgba(235,122,131,.13);
-  --sans: var(--vscode-font-family), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: var(--vscode-editor-font-family), ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace);
 }
 * { box-sizing: border-box; }
 /* The webview is an app shell, not a document page. Keep wheel/touch scrolling inside the
@@ -44,8 +44,6 @@ body {
 }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
-@keyframes ultra-sweep { from { transform: translateX(-135%); } to { transform: translateX(360%); } }
-@keyframes ultra-breathe { 0%,100% { opacity: .42; transform: scale(.88); } 50% { opacity: 1; transform: scale(1.08); } }
 
 /* thin, unobtrusive scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -72,7 +70,22 @@ body {
 .msg.user { align-items: flex-end; }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: 16px; padding: 9px 13px; white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--accent); }
-.text { white-space: pre-wrap; word-break: break-word; line-height: 1.62; color: var(--text); font-family: var(--sans); }
+.text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
+.text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
+.text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
+.text p, .surface-markdown p { margin: 0 0 12px; }
+.text :is(ul, ol), .surface-markdown :is(ul, ol) { margin: 8px 0 12px; padding-left: 24px; }
+.text li + li, .surface-markdown li + li { margin-top: 5px; }
+.text li > p { margin-bottom: 6px; }
+.text :is(h1, h2, h3, h4, h5, h6), .surface-markdown :is(h1, h2, h3, h4, h5, h6) { font-size: 1.08em; font-weight: 650; margin: 18px 0 8px; line-height: 1.4; color: var(--text-strong); }
+.text blockquote, .surface-markdown blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--border-strong); color: var(--muted); }
+.text hr, .surface-markdown hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.md-link:hover { text-decoration-color: currentColor; }
+.response-actions { display: flex; gap: 4px; margin-top: 5px; }
+.response-copy { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 5px; }
+.response-copy:hover { color: var(--text); background: var(--surface2); }
+.code-language { display: block; color: var(--muted); font: 11px/1.5 var(--mono); margin-bottom: 12px; user-select: none; }
 .text b { font-weight: 700; color: var(--text-strong); } .text i { font-style: italic; }
 .text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: 5px; }
 .text .md-heading { display: inline-block; margin-top: 5px; }
@@ -106,7 +119,6 @@ body {
   .thinking .tmark path { opacity: 1; }
   #phead .pm .cur, .tool .dot.run { animation: none; }
   .tool .chev { transition: none; }
-  .power-card.is-ultra::after, .power-card.is-ultra .power-dot { animation: none !important; }
   #btn-ctx.busy .codicon { animation: none !important; }
   .context-track span { transition: none !important; }
 }
@@ -121,6 +133,17 @@ body {
 body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none !important; }
 
 /* tool activity — compact by default; details expand in place */
+.tool-group { margin: 3px 0; min-width: 0; }
+.tool-group > summary { display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  color: var(--muted); cursor: pointer; font: 400 12px/1.5 var(--sans); list-style: none; }
+.tool-group > summary::-webkit-details-marker { display: none; }
+.tool-group > summary::after { content: "›"; color: var(--faint); }
+.tool-group[open] > summary::after { content: "⌄"; }
+.tool-group > summary:hover { color: var(--text); }
+.tool-group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group.running > summary > .codicon { color: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.tool-group > .diff { margin: 6px 0 8px; }
+@media (prefers-reduced-motion: reduce) { .tool-group.running > summary > .codicon { animation: none; } }
 .tool { border: 1px solid transparent; border-radius: 8px; background: transparent; overflow: hidden; }
 .tool:hover, .tool.open { border-color: var(--border); background: var(--term); }
 .tool .head { display: flex; align-items: center; gap: 7px; padding: 0 8px 0 0; font: 500 12px/1.4 var(--mono); }
@@ -306,7 +329,20 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; padding: 5px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: 0 14px 40px -10px rgba(0,0,0,.75); z-index: 20; }
-#modelmenu { width: min(330px, calc(100vw - 20px)); }
+#modelmenu { width: min(260px, calc(100vw - 20px)); min-width: min(240px, calc(100vw - 20px)); }
+.reasoning-card { padding: 2px; }
+.model-summary-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-summary > .codicon:first-child { color: var(--accent); }
+.effort-control { padding: 8px 10px 5px; }
+.effort-slider { appearance: none; display: block; width: 100%; height: 25px; border-radius: 20px; margin: 0;
+  background: linear-gradient(to right, var(--accent) var(--effort), var(--surface2) var(--effort)); cursor: pointer; }
+.effort-slider::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--text-strong); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+.effort-labels { display: flex; justify-content: space-between; margin-top: 7px; color: var(--muted); font-size: 10px; }
+.effort-labels output { color: var(--text); }
+.reasoning-card.is-ultra .effort-slider { background: linear-gradient(100deg, var(--accent), var(--lav), var(--accent)); background-size: 200% 100%; animation: effort-shimmer 3s linear infinite; }
+@keyframes effort-shimmer { to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { .reasoning-card.is-ultra .effort-slider { animation: none; } }
 .cmenu .mhead { padding: 6px 9px 4px; font: 400 11px/1 var(--mono); color: var(--faint); display: flex; justify-content: space-between; align-items: center; }
 .cmenu .mhead kbd { background: var(--code); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font: 400 10px/1 var(--mono); color: var(--muted); }
 .cmenu .mrow { display: flex; align-items: center; gap: 9px; width: calc(100% - 4px); margin: 1px 2px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; font: 400 12.5px/1.3 var(--sans); color: var(--text); }
@@ -319,36 +355,6 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 
 /* Combined model + reasoning selector. The continuous rail reads as one power scale while every
    stop remains a real keyboard-focusable radio item. Ultra gets motion only as status feedback. */
-.power-card { position: relative; isolation: isolate; overflow: hidden; margin: 1px; padding: 10px 9px 9px;
-  border: 1px solid var(--border); border-radius: 9px; background: var(--code); }
-.power-card::after { content: ""; position: absolute; z-index: -1; inset: -40% auto -40% -22%; width: 32%;
-  background: linear-gradient(90deg, transparent, rgba(167,139,250,.18), transparent); opacity: 0; pointer-events: none; }
-.power-card.is-ultra { border-color: rgba(124,92,255,.65); box-shadow: inset 0 0 24px rgba(124,92,255,.07), 0 0 18px rgba(124,92,255,.08); }
-.power-card.is-ultra::after { opacity: 1; animation: ultra-sweep 2.8s linear infinite; }
-.power-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
-.power-head > div { min-width: 0; display: grid; gap: 3px; }
-.power-kicker { color: var(--faint); font: 600 8.5px/1 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
-.power-head strong { color: var(--text-strong); font: 650 13px/1.1 var(--sans); text-transform: capitalize; }
-.power-state { max-width: 120px; color: var(--faint); font: 500 9px/1.25 var(--mono); text-align: right; }
-.power-card.is-ultra .power-head strong, .power-card.is-ultra .power-state { color: var(--lav); }
-.power-rail { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(37px, 1fr);
-  gap: 0; margin: 11px 0 7px; overflow-x: auto; scrollbar-width: none; }
-.power-rail::-webkit-scrollbar { display: none; }
-.power-rail::before { content: ""; position: absolute; top: 5px; right: 18px; left: 18px; height: 1px;
-  background: linear-gradient(90deg, var(--border-strong), var(--accent)); }
-.power-stop { position: relative; z-index: 1; min-width: 36px; display: grid; justify-items: center; gap: 6px;
-  padding: 0 2px; border: 0; background: transparent; color: var(--faint); cursor: pointer;
-  font: 600 8px/1 var(--mono); text-transform: uppercase; }
-.power-stop:hover, .power-stop:focus-visible { color: var(--text); }
-.power-dot { width: 11px; height: 11px; border: 2px solid var(--border-strong); border-radius: 50%;
-  background: var(--code); box-shadow: 0 0 0 2px var(--code); }
-.power-stop.charged .power-dot { border-color: var(--accent); background: var(--accent); }
-.power-stop.selected { color: var(--text); }
-.power-stop.selected .power-dot { box-shadow: 0 0 0 2px var(--code), 0 0 0 4px rgba(124,92,255,.25); }
-.power-stop.ultra .power-dot { border-color: var(--lav); }
-.power-card.is-ultra .power-stop.ultra .power-dot { background: var(--lav); animation: ultra-breathe 1.7s ease-in-out infinite; }
-.power-card p { margin: 8px 1px 0; color: var(--faint); font: 400 9.5px/1.45 var(--sans); }
-
 @media (max-width: 360px) {
   footer { padding-right: 7px; padding-left: 7px; }
   #cfooter { gap: 0; padding-right: 4px; padding-left: 4px; }
@@ -360,9 +366,6 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   /* The context trigger follows two 28px controls. Anchor its wide detail card back to the
      viewport gutter so the right border remains visible even in a 300px Cursor sidebar. */
   .cmenu.context-menu { right: auto; left: -60px; }
-  .power-card { padding-right: 6px; padding-left: 6px; }
-  .power-rail { grid-auto-columns: minmax(32px, 1fr); }
-  .power-stop { min-width: 31px; font-size: 7px; }
 }
 
 /* settings and feature-management overlays */
@@ -470,6 +473,7 @@ button.act.danger { color: var(--err); }
 button.link { font: 400 11px/1 var(--mono); cursor: pointer; background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; color: var(--muted); flex: none; }
 button.link:hover { border-color: var(--accent); color: var(--text); }
 pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px; margin: 8px 0; overflow-x: auto; font: 400 12px/1.55 var(--mono); color: var(--text); white-space: pre; }
+pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
 pre.code .copy { position: absolute; top: 6px; right: 6px; font: 400 10px/1 var(--mono); cursor: pointer; background: var(--surface2); color: var(--muted); border: 1px solid var(--border-strong); border-radius: 5px; padding: 3px 7px; opacity: 0; }
 pre.code:hover .copy { opacity: 1; }
 pre.code .copy:hover { color: var(--text); border-color: var(--accent); }
@@ -510,7 +514,7 @@ pre.code .copy:focus-visible { opacity: 1; }
     outline: 2px solid Highlight !important; outline-offset: 2px;
   }
   .tool, .diff, .card, .todos, .artifact, .md-table, .md-table th, .md-table td, .rail-item,
-  #cbox, .cmenu, .pop, .power-card, .power-dot, .goal-dialog, .change-row,
+  #cbox, .cmenu, .pop, .reasoning-card, .effort-slider, .goal-dialog, .change-row,
   #settings input, #settings select, button.act, button.opt, button.link, .artifact .abtn {
     border-color: CanvasText;
   }

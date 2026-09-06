@@ -16,3 +16,10 @@ published by Microsoft Corporation from
   see `licenses/CODICONS-CODE-MIT.txt`.
 
 Copyright © Microsoft Corporation.
+
+## Markdown renderer
+
+`dist/markdown.js` bundles [markdown-it](https://github.com/markdown-it/markdown-it)
+15.0.1 and its browser dependencies: entities, linkify-it, mdurl, punycode.js, and uc.micro.
+Exact dependency versions are locked in `package-lock.json`. Their copyright notices and licenses
+are included in `licenses/MARKDOWN-LICENSES.txt`.

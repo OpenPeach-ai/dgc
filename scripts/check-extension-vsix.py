@@ -31,12 +31,14 @@ STATIC_MEMBERS = {
     "extension/media/codicon.css": "media/codicon.css",
     "extension/licenses/CODICONS-CODE-MIT.txt": "licenses/CODICONS-CODE-MIT.txt",
     "extension/licenses/CODICONS-CC-BY-4.0.txt": "licenses/CODICONS-CC-BY-4.0.txt",
+    "extension/licenses/MARKDOWN-LICENSES.txt": "licenses/MARKDOWN-LICENSES.txt",
 }
 GENERATED_MEMBERS = {
     "[Content_Types].xml",
     "extension.vsixmanifest",
     "extension/dist/build.json",
     "extension/dist/extension.js",
+    "extension/dist/markdown.js",
 }
 EXPECTED_MEMBERS = frozenset(STATIC_MEMBERS) | GENERATED_MEMBERS
 TEXT_SUFFIXES = frozenset({".css", ".js", ".json", ".md", ".svg", ".txt", ".xml", ".vsixmanifest"})

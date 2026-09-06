@@ -2030,6 +2030,20 @@ def unit_tests(tmp: Path):
     check("headless reports a turn reservation rejection as an error, never completed",
           rejected_end.get("reason") == "error")
 
+    boundary = object.__new__(Backend)
+    class _BoundaryEm(_Em):
+        idle_at_end = False
+        def emit(self, t, **fields):
+            if t == "turn_end":
+                self.idle_at_end = not boundary._busy()
+            super().emit(t, **fields)
+    boundary.em, boundary.agent = _BoundaryEm(), _TitledAgent()
+    boundary._queue, boundary._turn_n, boundary._emit_context = [], 0, lambda: None
+    boundary._start_turn("finish before acknowledging")
+    boundary.em.done.wait(5)
+    check("headless releases an idle worker before acknowledging turn_end for goal controls",
+          boundary.em.idle_at_end)
+
     # One locked FIFO owns the complete busy -> idle transition. A follow-up sent after Cancel but
     # before the cancelled call unwinds must run next; the old per-turn handoff stranded this prompt.
     class _QueuedAgent:
@@ -9891,9 +9905,10 @@ def test_extension_vsix_guard():
         "extension/media/dgc-mark.svg", "extension/media/codicon.ttf",
         "extension/media/codicon.css", "extension/licenses/CODICONS-CODE-MIT.txt",
         "extension/licenses/CODICONS-CC-BY-4.0.txt",
+        "extension/licenses/MARKDOWN-LICENSES.txt", "extension/dist/markdown.js",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 19)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 21)
 
     def write_archive(path, *, duplicate=False, symlink=False, secret=False):
         with _zipfile.ZipFile(path, "w") as archive:
@@ -13055,6 +13070,11 @@ def test_ultra_profile():
           and delegated_effort(on, "claude", "low", True) == "max"
           and delegated_effort(on, "qwen", "low", False) == "low")
     wrapped = delegated_prompt(on, "fix the parser", "default")
+    from dgc.presentation import RESPONSE_GUIDANCE
+    check("native and subscription routes share response guidance without changing the user prompt",
+          RESPONSE_GUIDANCE in wrapped
+          and RESPONSE_GUIDANCE in delegated_prompt(off, "fix the parser", "default")
+          and delegated_prompt(off, "fix the parser", "default").endswith("fix the parser"))
     check("delegated Ultra policy keeps the user prompt and permission boundary explicit",
           wrapped.endswith("fix the parser") and "permission mode remains default" in wrapped
           and "does not grant additional" in wrapped)
@@ -13079,6 +13099,7 @@ def test_ultra_profile():
         agent._active_tool_intents = {"narrow_scope"}
         names = {tool.get("function", {}).get("name") for tool in agent._tool_schemas()}
         prompt = agent.system_prompt()
+        check("native agent includes the same presentation policy", RESPONSE_GUIDANCE in prompt)
         check("adaptive Ultra exposes task even before explicit delegation wording", "task" in names)
         check("Ultra system policy is bounded and does not elevate default permissions",
               "# DGC Ultra execution profile" in prompt

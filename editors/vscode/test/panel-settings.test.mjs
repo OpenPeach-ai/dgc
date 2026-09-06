@@ -1,6 +1,7 @@
 import { after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
@@ -15,6 +16,8 @@ const notices = { warnings: [], errors: [], info: [], warningResponses: [] };
 let configurationInspections = {};
 const statusBar = { text: "", tooltip: "", command: "", show() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
+  Uri: {},
+  commands: {},
   StatusBarAlignment: { Left: 1 },
   ConfigurationTarget: { WorkspaceFolder: 1, Workspace: 2, Global: 3 },
   window: {
@@ -186,6 +189,72 @@ function catalogHarness(catalog) {
   };
   return { provider: new DgcViewProvider(context), updates };
 }
+
+test("workspace changes include initial staged files and literal subfolder scopes", async () => {
+  const root = mkdtempSync(join(scratch, "changes-"));
+  const nested = join(root, "[app]");
+  mkdirSync(nested);
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  git("init", "-q");
+  writeFileSync(join(nested, "new.ts"), "export const first = 1;\n");
+  git("add", ".");
+  const workspace = globalThis.__DGC_TEST_VSCODE.workspace;
+  const original = workspace.workspaceFolders;
+  workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: nested } }];
+  try {
+    const { provider } = catalogHarness([]);
+    const initial = await provider.collectWorkspaceChanges();
+    assert.equal(initial.length, 1, "a staged file in an unborn repository is a real change");
+    assert.equal(initial[0].displayPath, "new.ts");
+    assert.equal(initial[0].additions, 1);
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "initial");
+    writeFileSync(join(nested, "new.ts"), "export const first = 2;\nexport const second = 3;\n");
+    writeFileSync(join(root, "outside.ts"), "outside scoped folder\n");
+    const changed = await provider.collectWorkspaceChanges();
+    assert.equal(changed.length, 1);
+    assert.equal(changed[0].displayPath, "new.ts");
+    assert.equal(changed[0].additions, 2);
+    assert.equal(changed[0].deletions, 1);
+  } finally { workspace.workspaceFolders = original; }
+});
+
+test("change review shows new staged content and never follows an external symlink", async () => {
+  const root = mkdtempSync(join(scratch, "review-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  git("init", "-q");
+  git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "initial");
+  writeFileSync(join(root, "[new].ts"), "export const value = 42;\n");
+  git("add", ".");
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { folders: api.workspace.workspaceFolders, Uri: api.Uri, commands: api.commands };
+  const opened = [];
+  api.workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: root } }];
+  api.Uri = { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) };
+  api.commands = { executeCommand: async (...args) => opened.push(args) };
+  try {
+    const { provider } = catalogHarness([]);
+    provider.workspaceChanges = await provider.collectWorkspaceChanges();
+    await provider.reviewWorkspaceChange("[new].ts");
+    assert.equal(opened[0]?.[0], "vscode.diff");
+    assert.equal(provider.reviewDocuments.get(opened[0][1].toString()), "");
+    assert.equal(provider.reviewDocuments.get(opened[0][2].toString()), "export const value = 42;\n");
+    const external = join(scratch, "private-fixture.txt");
+    writeFileSync(external, "external content must never appear in a diff");
+    symlinkSync(external, join(root, "link.txt"));
+    provider.workspaceChanges = await provider.collectWorkspaceChanges();
+    await provider.reviewWorkspaceChange("link.txt");
+    assert.equal(opened[1]?.[0], "vscode.diff");
+    assert.equal(provider.reviewDocuments.get(opened[1][2].toString()), `${external}\n`);
+    assert.equal(notices.info.length, 0);
+    api.workspace.workspaceFolders = [];
+    await provider.reviewWorkspaceChange("[new].ts");
+    assert.equal(opened.length, 2, "removing the folder revokes review access");
+  } finally {
+    api.workspace.workspaceFolders = original.folders;
+    api.Uri = original.Uri;
+    api.commands = original.commands;
+  }
+});
 
 function mcpTransactionHarness(initialCatalog = []) {
   let catalog = JSON.parse(JSON.stringify(initialCatalog));

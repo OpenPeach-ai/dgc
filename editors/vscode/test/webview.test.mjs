@@ -4,16 +4,19 @@
 // the webview itself in a real DOM: load the exact HTML skeleton that panel.ts ships, eval
 // media/main.js, feed it a scripted `dgc serve` event stream, and assert the rendered interaction
 // and accessibility contract with zero JS errors.
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
+import { buildSync } from "esbuild";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
 const extensionSrc = readFileSync(dir + "../src/extension.ts", "utf8");
 const mainJs = readFileSync(dir + "../media/main.js", "utf8");
+const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
+  format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
 const mainCss = readFileSync(dir + "../media/main.css", "utf8");
 const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
 const contributedSettings = extensionManifest.contributes?.configuration?.properties ?? {};
@@ -78,17 +81,22 @@ const htmlMatch = panelSrc.match(/<!doctype html>[\s\S]*?<\/body><\/html>/i);
 assert.ok(htmlMatch, "could not extract the webview HTML template from panel.ts");
 const html = htmlMatch[0].replace(/\$\{[^}]*\}/g, "");
 
+const activeDoms = new Set();
+afterEach(() => { for (const dom of activeDoms) dom.window.close(); activeDoms.clear(); });
+
 function makeDom() {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on("jsdomError", (e) => errors.push(e));
   const dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
+  activeDoms.add(dom);
   const posted = [];
   dom.window.acquireVsCodeApi = () => ({
     postMessage: (m) => posted.push(m),
     getState: () => undefined,
     setState: () => undefined,
   });
+  dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
   return { dom, errors, posted, send, doc: dom.window.document };
@@ -195,8 +203,8 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.ok(doc.querySelector(".thinking.done"), "turn footer did not settle");
   assert.equal(doc.querySelector(".msg.dgc").lastElementChild, doc.querySelector(".thinking.done"),
     "turn timing should remain below the completed response");
-  assert.ok([...doc.querySelectorAll(".text")].at(-1).classList.contains("final"),
-    "the last assistant segment should be marked as the final answer");
+  assert.equal(doc.querySelector(".text.final"), null,
+    "commentary before tools must not become a final answer");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
   dom.window.close();
@@ -243,7 +251,7 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
   const partial = "# Result\n\n| Name | Value |\n| :--- | ---: |\n"
-    + "| **alpha** | `1|2` |\n\n```html\n"
+    + "| **alpha** | `1\\|2` |\n\n```html\n"
     + "<img src=x onerror=bad()>\n**literal stars**";
   send({ type: "event", event: { type: "text_delta", text: partial } });
 
@@ -251,10 +259,10 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   assert.ok(table, "a complete Markdown table should render before the response ends");
   assert.deepEqual([...table.querySelectorAll("th")].map((cell) => cell.textContent),
     ["Name", "Value"]);
-  assert.equal(table.querySelector("tbody td:first-child b").textContent, "alpha");
+  assert.equal(table.querySelector("tbody td:first-child strong").textContent, "alpha");
   assert.equal(table.querySelector("tbody td:last-child code").textContent, "1|2",
     "an inline-code pipe must not split a table cell");
-  assert.ok(table.querySelector("th:last-child").classList.contains("align-right"));
+  assert.equal(table.querySelector("th:last-child").style.textAlign, "right");
 
   let block = doc.querySelector("pre.code");
   assert.ok(block, "an unterminated streaming fence should already render as code");
@@ -268,10 +276,86 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   block = doc.querySelector("pre.code");
   block.querySelector("button.copy").click();
   const copied = posted.find((message) => message.type === "copy");
-  assert.equal(copied?.text, "<img src=x onerror=bad()>\n**literal stars**",
+  assert.equal(copied?.text, "<img src=x onerror=bad()>\n**literal stars**\n",
     "copy must return the model's source, not HTML entities");
   assert.equal(doc.querySelectorAll("pre.code").length, 1);
   assert.deepEqual(errors, [], "Markdown rendering raised JS errors");
+  dom.window.close();
+});
+
+test("CommonMark preserves semantic structure and only explicit safe navigation", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const text = "## Changes\n\n1. Read the file\n   - Check **inputs**\n2. Run tests\n\n"
+    + "> Verified in a clean workspace.\n\n"
+    + "[app.ts](/project/src/app.ts:42) and [docs](https://example.com/guide_(new))\n\n"
+    + "[run](command:workbench.action.terminal.new) [bad](javascript:alert(1)) "
+    + "![diagram](https://example.com/track.png) <img src=x onerror=alert(1)>";
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "text_delta", text } });
+  assert.equal(doc.querySelector(".text h2").textContent, "Changes");
+  assert.equal(doc.querySelectorAll(".text ol > li").length, 2);
+  assert.equal(doc.querySelector(".text ol ul strong").textContent, "inputs");
+  assert.match(doc.querySelector(".text blockquote").textContent, /Verified/);
+  assert.equal(doc.querySelector(".text img, .text script, .text a[href]"), null);
+  assert.equal(posted.filter(m => ["openFile", "openExternal"].includes(m.type)).length, 0);
+  doc.querySelector('.md-link[data-link-kind="file"]').click();
+  assert.equal(posted.at(-1).path, "/project/src/app.ts");
+  assert.equal(posted.at(-1).line, 42);
+  doc.querySelector('.md-link[data-link-kind="external"]').click();
+  assert.equal(posted.at(-1).url, "https://example.com/guide_(new)");
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  const final = doc.querySelector(".text.final");
+  assert.ok(final);
+  assert.equal(final.previousElementSibling, doc.querySelector(".thinking.done"));
+  doc.querySelector(".response-copy").click();
+  assert.equal(posted.at(-1).text, text, "copy response preserves Markdown source");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("cancelled and failed turns never present unfinished prose as a final answer", () => {
+  const { dom, errors, send, doc } = makeDom();
+  for (const reason of ["cancelled", "error"]) {
+    send({ type: "event", event: { type: "turn_start" } });
+    send({ type: "event", event: { type: "text_delta", text: "I will inspect the implementation." } });
+    send({ type: "event", event: { type: "turn_end", reason } });
+  }
+  assert.equal(doc.querySelector(".text.final, .response-copy"), null);
+  assert.match(doc.querySelectorAll(".thinking.done")[0].textContent, /^Stopped/);
+  assert.match(doc.querySelectorAll(".thinking.done")[1].textContent, /^Failed/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("tool correlation accepts opaque IDs and preserves denial evidence", () => {
+  const { dom, errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "tool_result", call_id: "__proto__", name: "read_file", output: "done" } });
+  send({ type: "event", event: { type: "tool_denied", call_id: "constructor", name: "bash", reason: "Denied by workspace rule" } });
+  assert.equal(doc.querySelectorAll(".tool").length, 2);
+  assert.match(doc.querySelector('.tool[data-status="denied"] .body').textContent, /Denied by workspace rule/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("tool batches collapse without hiding failures or misclassifying preceding commentary", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start" });
+  event({ type: "text_delta", text: "I am checking the implementation." });
+  event({ type: "stream_end" });
+  event({ type: "tool_call", call_id: "one", name: "Read", summary: "app.ts" });
+  event({ type: "tool_result", call_id: "one", name: "Read", output: "source" });
+  event({ type: "tool_call", call_id: "two", name: "Bash", summary: "npm test" });
+  const group = doc.querySelector(".tool-group");
+  assert.match(group.querySelector("summary").textContent, /Running npm test/);
+  assert.equal(group.open, false);
+  event({ type: "tool_result", call_id: "two", name: "Bash", is_error: true, output: "test failed" });
+  assert.equal(group.open, true, "errors must remain visible in collapsed batches");
+  assert.match(group.querySelector("summary").textContent, /1 issue/);
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(doc.querySelector(".text.final"), null, "stream_end before a tool is still commentary");
+  assert.deepEqual(errors, []);
   dom.window.close();
 });
 
@@ -290,6 +374,21 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   send({ type: "prompt_rejected" });
   assert.equal(doc.getElementById("send").title, "Send");
   assert.deepEqual(errors, [], "webview raised JS errors on submit");
+  dom.window.close();
+});
+
+test("IME confirmation does not submit and late model results cannot reopen a dismissed menu", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const input = doc.getElementById("input"); input.value = "检查代码";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+  assert.equal(posted.filter(message => message.type === "prompt").length, 0);
+  doc.getElementById("btn-model").click();
+  const menu = doc.getElementById("modelmenu");
+  menu.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(menu.hidden, true);
+  send({ type: "models", ids: ["delayed-model"], current: "delayed-model" });
+  assert.equal(menu.hidden, true);
+  assert.deepEqual(errors, []);
   dom.window.close();
 });
 
@@ -699,11 +798,13 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: ["opus", "sonnet"], current: "sonnet", subscription: true,
     supportsEffort: true, label: "Claude Code" });
-  assert.ok(modelMenu.querySelector('[data-profile="xhigh"]'), "subscription profile should offer xhigh");
-  assert.ok(modelMenu.querySelector('[data-profile="max"]'), "subscription profile should offer max");
-  assert.ok(modelMenu.querySelector('[data-profile="ultra"]'), "every route should offer DGC Ultra");
-  const high = modelMenu.querySelector('[data-profile="high"]');
-  high.click();
+  const high = modelMenu.querySelector(".effort-slider");
+  assert.ok(high.dataset.profiles.split(",").includes("xhigh"));
+  assert.ok(high.dataset.profiles.split(",").includes("ultra"));
+  assert.equal(high.dataset.profiles.split(",").includes("max"), false,
+    "Codex uses xhigh; its selector must not offer an unsupported max value");
+  high.value = String(high.dataset.profiles.split(",").indexOf("high"));
+  high.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "high");
   // A rejected vendor effort must not leave an optimistic selection behind. Only a backend
@@ -711,8 +812,11 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: [], current: "", subscription: true,
     supportsEffort: true, label: "Codex" });
-  assert.equal(modelMenu.querySelector('[data-profile="high"]').classList.contains("selected"), false);
-  assert.equal(modelMenu.querySelector('[data-profile="off"]').classList.contains("selected"), true);
+  assert.equal(modelMenu.querySelector(".effort-slider").value, "0");
+  assert.equal(modelMenu.querySelector(".effort-slider").getAttribute("aria-valuetext"), "Default");
+  assert.equal(modelMenu.querySelector(".model-options").hidden, true);
+  modelMenu.querySelector(".model-summary").click();
+  assert.equal(modelMenu.querySelector(".model-options").hidden, false);
 
   const modeButton = doc.getElementById("btn-mode");
   modeButton.click();
@@ -727,8 +831,9 @@ test("combined model/reasoning control offers Ultra while permissions stay separ
   doc.getElementById("btn-model").click();
   send({ type: "models", ids: [], current: "", subscription: true,
     supportsEffort: true, label: "Codex" });
-  assert.ok(modelMenu.querySelector(".power-card.is-ultra"));
-  modelMenu.querySelector('[data-profile="off"]').click();
+  assert.ok(modelMenu.querySelector(".reasoning-card.is-ultra"));
+  const off = modelMenu.querySelector(".effort-slider");
+  off.value = "0"; off.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(posted.at(-1).type, "setReasoningProfile");
   assert.equal(posted.at(-1).level, "off");
   assert.deepEqual(errors, []);
