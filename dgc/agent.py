@@ -2654,7 +2654,7 @@ class Agent(GoalLifecycle):
                         "[Completion withheld by DGC: the turn was cancelled before verification.]",
                         "completion withheld — the turn was cancelled before verification")
                 self.ui.info("turn cancelled")
-                return True
+                return False
             if deadline is not None and (deadline - time.monotonic()) <= 0.06 * budget:
                 # ~94% of the budget spent → stop before the external kill; restore the last version that
                 # passed so the on-disk files are self-consistent (a mid-grind kill would leave 0 credit).
@@ -2669,7 +2669,8 @@ class Agent(GoalLifecycle):
                     withhold_final(
                         "[Completion withheld by DGC: the turn ended before verification.]",
                         "completion withheld — the turn ended before verification")
-                return True
+                self._last_turn_error = "The turn reached its time limit before completion."
+                return False
             steered = self._drain_steer(
                 close_if_empty=summary_only)  # an empty green boundary atomically owns closeout
             if steered:
@@ -2811,7 +2812,8 @@ class Agent(GoalLifecycle):
                     self.ui.info("⏱ out of time — restored the exact last test-passing file state")
                 else:
                     self.ui.info("⏱ out of time — stopped the in-flight model request")
-                return True
+                self._last_turn_error = "The turn reached its time limit before completion."
+                return False
             if result.finish_reason == "cancelled" or self.cancelled.is_set():
                 partial = str(result.content or "")
                 if partial.strip():
@@ -2826,7 +2828,7 @@ class Agent(GoalLifecycle):
                 else:
                     self.ui.end_stream()
                 self.ui.info("turn cancelled")
-                return True
+                return False
             # Some local models emit valid tool calls but no user-facing text. Preserve genuine model
             # commentary; otherwise add a deterministic, non-speculative preamble BEFORE tool cards.
             if (result.tool_calls and result.finish_reason not in _INCOMPLETE_FINISH_REASONS
