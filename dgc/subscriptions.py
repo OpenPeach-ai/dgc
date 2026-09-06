@@ -637,8 +637,12 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
         return {"rc": None, "text": "", "timeout": False, "cancelled": True,
                 "events": 0, "seconds": 0.0, "session_id": "", "error": "", "ok": False}
     try:
+        # Prompts are already passed through the engine's argv. The vendor must never inherit
+        # the editor's live NDJSON input pipe or the terminal REPL: some CLIs read it until EOF,
+        # hanging before generation and potentially consuming DGC control/decision frames.
         proc = subprocess.Popen(
-            argv, cwd=str(workdir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            argv, cwd=str(workdir), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=False, bufsize=0, env={**os.environ, **(env or {})}, start_new_session=True)
     except (OSError, ValueError) as exc:
         raise EngineLaunchError(
