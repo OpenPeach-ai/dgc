@@ -1134,6 +1134,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "startGoal":
+        // The webview uses this typed route for `objective /goal`, preserving the objective
+        // exactly even when it happens to equal a /goal state verb such as "pause".
+        void this.startGoal(String(msg.text || ""));
+        break;
       case "permission_response":
         be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule });
         break;

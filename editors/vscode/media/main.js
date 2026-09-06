@@ -1174,6 +1174,12 @@
   $("changes-review").addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
   });
+  function appendGoalPrompt(objective) {
+    const m = el("div", "msg user goal-prompt");
+    m.appendChild(el("div", "role", "goal"));
+    m.appendChild(el("div", "bubble", esc(objective)));
+    log.appendChild(m); setSending(true);
+  }
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
@@ -1187,17 +1193,25 @@
         "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate"];
       const startsGoal = name === "goal" && rest && !goalStateCommand.includes(rest.toLowerCase());
       if (custom || startsGoal) {
-        const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
         if (startsGoal) {
-          m.classList.add("goal-prompt");
-          m.querySelector(".role").textContent = "goal";
-          m.appendChild(el("div", "bubble", esc(rest)));
+          appendGoalPrompt(rest);
         } else {
+          const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
           m.appendChild(el("div", "bubble", esc(text)));
+          log.appendChild(m); setSending(true);
         }
-        log.appendChild(m); setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
+      input.value = ""; input.style.height = "auto"; scroll(); return;
+    }
+    // Codex-style suffix action: `objective /goal` tags and starts the text already in the
+    // composer. Requiring the marker to be the final whitespace-delimited token avoids treating
+    // prose such as "explain /goal syntax" as a command.
+    const trailingGoal = !attachments.length
+      ? /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim() : "";
+    if (trailingGoal) {
+      appendGoalPrompt(trailingGoal);
+      vscode.postMessage({ type: "startGoal", text: trailingGoal });
       input.value = ""; input.style.height = "auto"; scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
@@ -1236,6 +1250,15 @@
       renderAtts();
       input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
     } else if (popMode === "/") {
+      if (popStart > 0) {
+        const end = input.selectionStart;
+        input.value = input.value.slice(0, popStart) + it.label + input.value.slice(end);
+        input.selectionStart = input.selectionEnd = popStart + it.label.length;
+        hidePop(); input.focus();
+        // An inline command is an action on the prompt that is already complete. Activate it on
+        // selection so Enter does not appear to swallow `/goal` and require a second keypress.
+        submit(); return;
+      }
       if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
         input.value = it.label + " ";       // custom command — let the user add args, then Enter
         hidePop(); input.focus(); return;
@@ -1249,14 +1272,18 @@
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
-    const at = upto.lastIndexOf("@"), sl = upto.startsWith("/") ? 0 : -1;
-    if (sl === 0 && !/\s/.test(v)) {
-      popMode = "/"; popStart = 0;
-      const all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
+    const at = upto.lastIndexOf("@"), slashToken = /(^|\s)(\/[^\s]*)$/.exec(upto);
+    const sl = slashToken ? upto.lastIndexOf("/") : -1;
+    if (sl !== -1 && !/\s/.test(upto.slice(sl))) {
+      popMode = "/"; popStart = sl;
+      let all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
         action: c.action, acceptsArgs: c.accepts_args === true,
         aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
         .concat(customCommands.map((c) => ({ label: "/" + c, detail: "custom command", action: "custom:" + c, acceptsArgs: true })));
-      const query = v.toLowerCase();
+      // Only /goal has inline/suffix semantics. Other slash commands remain command-line forms
+      // so inserting one cannot silently replace or discard an in-progress prompt.
+      if (sl > 0) all = all.filter((c) => c.label.toLowerCase() === "/goal");
+      const query = upto.slice(sl).toLowerCase();
       showPop(all.filter((c) => c.label.toLowerCase().startsWith(query)
         || (c.aliases || []).some((alias) => ("/" + alias).toLowerCase().startsWith(query))));
     }
