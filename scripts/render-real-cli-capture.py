@@ -794,7 +794,7 @@ def encode_capture(raw: Path, output_dir: Path, raw_seconds: float,
     subprocess.run(common + ["-c:v", "libx264", "-preset", "slow", "-crf", "27",
                              "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                              str(staged / "cli-capture.mp4")], check=True)
-    poster_at = max(0.0, raw_seconds - 3.0)
+    poster_at = max(0.0, raw_seconds - 0.5)
     subprocess.run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{poster_at:.3f}",
         "-i", str(raw), "-frames:v", "1", "-q:v", "3",

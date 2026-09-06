@@ -43,7 +43,7 @@ class Review:
         self.changes = 0
         self.incomplete = False
         self.skip_worktree: set[str] = set()
-        self.repo = Path(os.fsdecode(self.git(["rev-parse", "--show-toplevel"]))[:-1])
+        self.repo = Path(os.fsdecode(self.git(["rev-parse", "--show-toplevel"]))[:-1]).resolve()
         # A project may be a subdirectory of a larger repository. All enumerations and file
         # reads remain scoped to the approved target, never the rest of that parent repository.
         self.scope = target.relative_to(self.repo).as_posix()

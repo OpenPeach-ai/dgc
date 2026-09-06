@@ -53,6 +53,15 @@ SLASH_COMMANDS: list[tuple[str, str]] = command_pairs("tui")
 _MAX_QUEUED_FOLLOWUPS = 8
 _MAX_QUEUED_FOLLOWUP_CHARS = 64_000
 _MAX_TRANSITIONAL_FOLLOWUP_CHARS = 128_000  # queued + one older accepted steer batch
+_RICH_LINK = re.compile(r"\x1b\]8;[^\x1b\x07]*(?:\x1b\\|\x07)")
+
+
+def _tui_ansi(value: str) -> str:
+    """Retain styled link labels without OSC 8, which prompt_toolkit's ANSI parser
+    treats as visible text. Classic terminal output keeps Rich's clickable links.
+    This applies to generated Rich output; untrusted input is sanitized before rendering.
+    """
+    return _RICH_LINK.sub("", value).rstrip("\n")
 
 
 def _cell_len(value: str) -> int:
@@ -1019,7 +1028,7 @@ class TUI:
     def _rich(self, *renderables, **kw) -> str:
         c = self._console()
         c.print(*renderables, **kw)
-        return c.file.getvalue().rstrip("\n")
+        return _tui_ansi(c.file.getvalue())
 
     def _append(self, ansi: str) -> None:
         self.blocks.append(ansi)
@@ -1532,7 +1541,7 @@ class TUI:
         c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                     width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
         c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md)))
-        ansi = c.file.getvalue().rstrip("\n")
+        ansi = _tui_ansi(c.file.getvalue())
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
         self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
                            footer=footer, back=back)

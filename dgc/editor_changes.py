@@ -32,7 +32,7 @@ class EditorChanges:
     def set_roots(self, roots: list[Path]):
         with self.lock:
             self.generation += 1
-            self.roots = tuple(dict.fromkeys(roots))[:16]
+            self.roots = tuple(dict.fromkeys(root.resolve() for root in roots))[:16]
             self._cancel()
 
     def request(self, command: dict):

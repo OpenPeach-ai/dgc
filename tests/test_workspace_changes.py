@@ -56,6 +56,30 @@ class WorkspaceChangesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             workspace_changes.read_change(self.root / "[app]", "../outside.ts")
 
+    def test_root_aliases_match_git_paths_without_following_child_links(self):
+        alias_directory = tempfile.TemporaryDirectory(prefix="dgc-root-alias-")
+        self.addCleanup(alias_directory.cleanup)
+        alias = Path(alias_directory.name) / "workspace"
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.write("one.py", "original\n")
+        self.commit()
+        self.write("one.py", "changed\n")
+        original_git = workspace_changes.Review.git
+        def aliased_git(review, args, *rest, **kwargs):
+            if args == ["rev-parse", "--show-toplevel"]:
+                return (str(alias) + "\n").encode()
+            return original_git(review, args, *rest, **kwargs)
+        with patch.object(workspace_changes.Review, "git", aliased_git):
+            report = workspace_changes.collect_changes(alias)
+            self.assertTrue(report["complete"], report["notices"])
+            self.assertEqual([row["path"] for row in report["files"]], ["one.py"])
+            preview = workspace_changes.read_change(alias, "one.py")
+            self.assertEqual((preview["before"], preview["after"]), ("original\n", "changed\n"))
+        manager = EditorChanges(self.root, lambda *args, **kwargs: None)
+        self.addCleanup(manager.close)
+        manager.set_roots([alias, self.root])
+        self.assertEqual(manager.roots, (self.root.resolve(),))
+
     def test_symlink_preview_reads_link_text_and_parent_swaps_fail(self):
         self.write("src/one.py", "original\n")
         self.commit()

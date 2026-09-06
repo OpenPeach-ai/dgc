@@ -23,7 +23,9 @@ class SessionRestoreTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(prefix="dgc-session-restore-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        self.enterContext(patch.object(sessions, "SESSIONS_DIR", self.root / "sessions"))
+        session_directory = patch.object(sessions, "SESSIONS_DIR", self.root / "sessions")
+        session_directory.start()
+        self.addCleanup(session_directory.stop)
         config = object.__new__(Config)
         config.project_root, config.project_dir = self.root, self.root / ".dgc"
         config._persist = False
