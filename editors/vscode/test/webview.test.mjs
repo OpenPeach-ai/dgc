@@ -254,6 +254,10 @@ test("MCP command errors and cancellation settle the picker while preserving the
   send({ type: "event", event: { type: "mcp_command_result", request_id: "command-1", output: "", error: "Disconnected fixture" } });
   assert.match(doc.getElementById("surface").textContent, /Disconnected fixture/);
   assert.equal(input.value, "Existing draft");
+  send({ type: "mcp_command_started", requestId: "literal-output" });
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "literal-output", output: "<img src=x onerror=unsafe()>" } });
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
+  assert.match(doc.getElementById("surface").textContent, /<img src=x onerror=unsafe\(\)>/);
   send({ type: "mcp_command_started", requestId: "command-2" });
   doc.getElementById("surface-primary").click();
   assert.equal(posted.at(-1).type, "cancel");
