@@ -524,8 +524,9 @@ def render_help(console, project_root: Path | None = None) -> None:
 class ClassicSlashCompleter(Completer):
     """Live classic-REPL completion derived from the shared command registry."""
 
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, config=None):
         self.project_root = project_root
+        self.config = config
 
     def get_completions(self, document, complete_event):
         del complete_event
@@ -534,7 +535,9 @@ class ClassicSlashCompleter(Completer):
         if token is None or token[0] not in ("/", "$"):
             return
         trigger, query, start, _end = token
-        for row in completion_rows("classic", self.project_root, trigger=trigger, query=query):
+        from .skills import discover_skills
+        skills = discover_skills(self.project_root, disabled_names=self.config.get("disabled_skills", []) if self.config else [])
+        for row in completion_rows("classic", self.project_root, skills=skills, trigger=trigger, query=query):
             yield Completion(row["label"], start_position=start - document.cursor_position,
                              display=row["label"], display_meta=row["desc"])
 
@@ -887,13 +890,13 @@ class CLI:
         elif cmd == "memory":
             self._memory_cmd(rest)
         elif cmd == "skills":
-            if not self.agent.skills:
-                self.ui.info("no skills found — add dirs with SKILL.md under .dgc/skills/ or ~/.dgc/skills/")
-            table = Table("skill", "description", "location")
-            for s in self.agent.skills.values():
-                table.add_row(_literal_cell(s.name), _literal_cell(s.description),
-                              _literal_cell(s.path))
-            self.console.print(table)
+            from .skills import manage_skills
+            try:
+                output = manage_skills(cfg, rest)
+                self.agent.reload_skills()
+                self.console.print(terminal_safe_text(redact_text(output, secret_values(cfg))), markup=False, highlight=False)
+            except (OSError, ValueError) as exc:
+                self.ui.error(str(exc))
         elif cmd == "mcp":
             self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
             self.console.print(terminal_safe_text(self.agent.mcp.summary()), markup=False,
@@ -911,11 +914,14 @@ class CLI:
                 self.ui.error(f"hook configuration has {catalog['invalid']} invalid or unsupported entry(s)")
         elif cmd == "skill":
             args = rest.split(None, 1)
+            self.agent.reload_skills()
             sk = self.agent.skills.get(args[0]) if args else None
             if not sk:
                 self.ui.error(f"unknown skill — try /skills")
+            elif not sk.enabled:
+                self.ui.error(f"Skill ${sk.name} is disabled. Use /skills enable {sk.name} first.")
             else:
-                self.agent.run_turn(sk.render(args[1] if len(args) > 1 else ""))
+                self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "init":
             memory_mod.init_project_memory(cfg.project_root)
             self.agent.run_turn(
@@ -1282,7 +1288,7 @@ class CLI:
         USER_HOME.mkdir(parents=True, exist_ok=True)
         session: PromptSession = PromptSession(
             history=FileHistory(str(USER_HOME / "history")),
-            completer=ClassicSlashCompleter(self.config.project_root),
+            completer=ClassicSlashCompleter(self.config.project_root, self.config),
             complete_while_typing=True)
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
@@ -1753,6 +1759,7 @@ def run_help() -> None:
     c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
+    c.print("  dgc skills             list, create, install and manage skill packages")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
@@ -1761,7 +1768,19 @@ def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in (
             "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
-            "export-training"):
+            "export-training", "skills"):
+        if raw_argv[0] == "skills":
+            from .skills import manage_skills
+            if any(value in ("--help", "-h") for value in raw_argv[1:]):
+                print("dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]")
+                return 0
+            cfg = Config()
+            try:
+                print(terminal_safe_text(redact_text(manage_skills(cfg, shlex.join(raw_argv[1:])), secret_values(cfg))))
+                return 0
+            except (OSError, ValueError) as exc:
+                print(terminal_safe_text(redact_text(str(exc), secret_values(cfg))), file=sys.stderr)
+                return 1
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "export-training":

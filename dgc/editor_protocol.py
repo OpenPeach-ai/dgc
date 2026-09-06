@@ -201,6 +201,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "configured": _I(), "duration_ms": _I(), "message": _NS(False),
     },
     "handoff_started": {"request_id": _S()},
+    "skill_package": {"request_id": _S(), "name": _S(), "path": _S(), "operation": _S(), "files": _I()},
     "handoff": {
         "request_id": _S(),
         "status": _f("string", enum=("completed", "cancelled", "error")),
@@ -270,6 +271,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_skills": {"request_id": _S()},
     "reload_skills": {"request_id": _S()},
     "get_skill": {"request_id": _S(), "name": _S()},
+    "set_skill_enabled": {"request_id": _S(), "name": _S(), "enabled": _B()},
+    "create_skill": {"request_id": _S(), "name": _S(), "description": _S(False), "scope": _S(False)},
+    "install_skill": {"request_id": _S(), "source": _S(), "scope": _S(False), "allow_external": _B(False)},
     "list_docs": {"request_id": _S()},
     "get_doc": {"request_id": _S(), "id": _S()},
     "list_mcp_servers": {"request_id": _S()},

@@ -7,8 +7,8 @@ export const MAX_COMMAND_BYTES = 4194304;
 export const MAX_PENDING_BYTES = 4194304;
 export const MAX_PENDING_COMMANDS = 256;
 
-export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "handoff" | "queued" | "prompt_accepted" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
-export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "reload_skills" | "get_skill" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
+export type DgcEventType = "ready" | "turn_start" | "turn_end" | "text_delta" | "thinking_delta" | "stream_end" | "tool_call" | "tool_progress" | "tool_result" | "tool_denied" | "todos" | "artifact_ready" | "goal_changed" | "info" | "error" | "request_expired" | "permission_request" | "rule_added" | "plan_proposal" | "options_request" | "mcp_input_request" | "context" | "compacted" | "artifacts" | "config" | "status" | "model_changed" | "mode_changed" | "think_changed" | "models" | "mcp_tools" | "mcp_call_complete" | "skill_catalog" | "skill_detail" | "docs_catalog" | "doc" | "mcp_servers" | "permissions" | "memory" | "session_named" | "hook_catalog" | "hook_activity" | "handoff_started" | "skill_package" | "handoff" | "queued" | "prompt_accepted" | "command_rejected" | "workspace_roots" | "saved_plan" | "session" | "history" | "sessions" | "checkpoints" | "rewound" | "retained_tasks";
+export type DgcCommandType = "prompt" | "slash_command" | "set_workspace_roots" | "permission_response" | "plan_response" | "options_response" | "mcp_input_response" | "cancel" | "interrupt" | "set_mode" | "set_model" | "list_models" | "list_mcp_tools" | "call_mcp_tool" | "list_skills" | "reload_skills" | "get_skill" | "set_skill_enabled" | "create_skill" | "install_skill" | "list_docs" | "get_doc" | "list_mcp_servers" | "upsert_mcp_server" | "remove_mcp_server" | "reload_mcp_servers" | "list_permissions" | "add_permission_rule" | "remove_permission_rule" | "get_memory" | "add_memory" | "list_hooks" | "generate_handoff" | "set_think" | "set_goal" | "get_goal" | "get_plan" | "new_session" | "name_session" | "clear_session" | "resume_session" | "list_sessions" | "delete_session" | "list_checkpoints" | "rewind" | "list_retained_tasks" | "resolve_retained_task" | "compact" | "list_artifacts" | "stop_artifact" | "set_config" | "get_config" | "status" | "shutdown";
 export interface DgcEvent { type: DgcEventType; seq: number; [key: string]: any; }
 export interface DgcCommand { type: DgcCommandType; [key: string]: any; }
 
@@ -1531,6 +1531,38 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
       "required": true
     }
   },
+  "skill_package": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "path": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "operation": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "files": {
+      "types": [
+        "integer"
+      ],
+      "required": true
+    }
+  },
   "handoff": {
     "request_id": {
       "types": [
@@ -2107,6 +2139,78 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": true
+    }
+  },
+  "set_skill_enabled": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "enabled": {
+      "types": [
+        "boolean"
+      ],
+      "required": true
+    }
+  },
+  "create_skill": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "name": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "description": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "scope": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    }
+  },
+  "install_skill": {
+    "request_id": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "source": {
+      "types": [
+        "string"
+      ],
+      "required": true
+    },
+    "scope": {
+      "types": [
+        "string"
+      ],
+      "required": false
+    },
+    "allow_external": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "list_docs": {

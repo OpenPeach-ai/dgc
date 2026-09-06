@@ -2899,6 +2899,8 @@ def skill_tool(args: dict, ctx) -> str:
     sk = ctx.skills.get(name)
     if not sk:
         return f"error: unknown skill {name!r}. Available: {', '.join(ctx.skills) or '(none)'}"
+    if not getattr(sk, "enabled", True):
+        return f"error: skill ${name} is disabled. The user can enable it in Skills."
     return f"<skill name={sk.name!r}>\n{sk.render(str(args.get('args', '')))}\n</skill>"
 
 
@@ -2945,11 +2947,14 @@ def add_skill(args: dict, ctx) -> str:
     if candidate is None or candidate.name != name:
         return "error: the downloaded skill has invalid metadata or exceeds the instruction limit"
     try:
-        _atomic_write_bytes(dest / "SKILL.md", content.encode("utf-8"), mode=0o600)
+        _atomic_write_bytes(dest / "SKILL.md", content.encode("utf-8"), mode=0o600, expected=None)
     except (OSError, ValueError, WorkspaceBoundaryError) as e:
         return f"error saving the skill: {e}"
     try:
-        ctx.skills.clear(); ctx.skills.update(discover_skills(ctx.project_root))  # live, usable now
+        ctx.skills.clear()
+        config = getattr(ctx, "config", None)
+        ctx.skills.update(discover_skills(
+            ctx.project_root, disabled_names=config.get("disabled_skills", []) if config else []))
     except Exception:
         pass
     return (f"installed skill '{name}' → {dest / 'SKILL.md'} ({len(content)} bytes). "

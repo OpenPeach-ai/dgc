@@ -194,6 +194,28 @@ test("skill library applies to existing draft and toolbar does not erase selecte
   assert.deepEqual(errors, []);
 });
 
+test("skill library honors enablement metadata and retains the draft through management", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { skill_management: true } } });
+  const input = doc.getElementById("input");
+  input.value = "Existing request";
+  send({ type: "surface_open", surface: "skills" });
+  send({ type: "event", event: { type: "skill_catalog", items: [
+    { name: "fixture", display_name: "Fixture workflow", source: "project", enabled: false,
+      allow_implicit_invocation: false, default_prompt: "Inspect with $fixture", diagnostics: ["Metadata <script>unsafe</script>"] },
+  ] } });
+  assert.equal(doc.querySelector("[data-skill-use]").disabled, true);
+  assert.match(doc.getElementById("surface").textContent, /Fixture workflow.*disabled/s);
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  doc.querySelector("[data-skill-toggle]").click();
+  assert.equal(posted.at(-1).type, "skillToggle");
+  assert.equal(posted.at(-1).enabled, true);
+  assert.equal(input.value, "Existing request");
+  doc.getElementById("surface-secondary").click();
+  assert.equal(posted.at(-1).type, "skillsManage");
+  assert.deepEqual(errors, []);
+});
+
 test("restored history pages and tool disclosure preserve live content and safe output", () => {
   const { dom, doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });

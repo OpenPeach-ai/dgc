@@ -1838,6 +1838,46 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "skill_package"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "files": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "name",
+            "path",
+            "operation",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "handoff"
             },
             "seq": {
@@ -2623,6 +2663,82 @@
             "type",
             "request_id",
             "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "set_skill_enabled"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "create_skill"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "install_skill"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "allow_external": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "source"
           ],
           "additionalProperties": false
         },

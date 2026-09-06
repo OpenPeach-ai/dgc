@@ -13,7 +13,7 @@ def _slash_command_doc() -> str:
     lines = [
         "# Slash commands",
         "",
-        "Type **/** on an empty composer to open the live command palette; filter as you",
+        "Type **/** after a space anywhere in the composer to open the live command palette; filter as you",
         "type, ↑/↓ to select, Enter to run. This is the complete discoverable full-screen TUI surface;",
         "classic and editor clients advertise only the commands they can execute.",
         "",
@@ -400,15 +400,21 @@ count and redacted matchers per event without echoing your commands.
 
 A **skill** is a folder with a `SKILL.md` that teaches the agent how to do a
 particular kind of work — a house style, a workflow, a checklist. DGC ships a
-few built in and you can add your own under `~/.dgc/skills/` or a project's
-`.dgc/skills/`.
+collection of coding workflows. You can add project or personal packages, including
+portable `.agents/skills` directories.
 
-- **/skills** — browse installed skills (built-in + yours), add one by URL,
-  remove a personal copy, or reload the catalog.
-- Adaptive mode injects only an explicitly named or narrowly matching skill for
-  the current turn. `tool_profile: full` exposes the whole loaded catalog.
-- Project skills override personal skills, which override built-in skills. Typed
-  headless/editor listings report that source layer without exposing host paths.
+- **/skills** — browse instructions, source, diagnostics, and enabled state. The
+  editor's **Create / install** action creates or copies a package; the terminal uses **a**.
+- Type **$** or **/** after your draft text to choose skills. The editor attaches removable
+  chips without replacing the draft; the terminal inserts an exact `$name` mention.
+- Explicit selections load the full instructions for native and delegated subscription
+  turns. Up to eight selections share a bounded context allowance. Disabled or removed
+  selections are rejected before model execution. Scripts are never executed on install.
+- Adaptive mode advertises metadata for narrowly matching skills; `tool_profile: full`
+  exposes all enabled skills that permit implicit invocation. Explicit-only skills remain
+  available through `$name`. The user request and normal permissions always take precedence.
+- Project skills override personal skills, which override built-ins. Metadata refreshes
+  at the next turn; use **Reload** to update the picker after external edits.
 - **dgc-design** ships by default but stays dormant for normal coding — artifact
   frontend work activates it automatically.
 
@@ -434,17 +440,52 @@ Describe what changed and why, never how. No trailing period on the subject.
 ```
 
 `name` is how you invoke it, `description` is what the agent matches against
-when deciding whether the skill applies, and the optional `when` field narrows
-that further. `$ARGUMENTS` is replaced with whatever you pass at invocation.
+when deciding whether the skill applies. `$ARGUMENTS` receives the invocation request.
+Known metadata fields support plain, quoted, folded (`>`), and literal (`|`) scalar
+values. DGC does not execute YAML tags, aliases, or objects. The `when` field is not used.
 
 Discovery is project-first, so a repo can override a personal skill of the same
 name:
 
 - `<project>/.dgc/skills/<name>/SKILL.md`
+- `<project>/.agents/skills/<name>/SKILL.md`
 - `~/.dgc/skills/<name>/SKILL.md`
+- `~/.agents/skills/<name>/SKILL.md`
+- DGC's bundled skills
 
-The sixteen built-in skills are worth reading as examples — `/skills` lists them,
-and each is a plain directory you can copy and edit.
+Optional `agents/openai.yaml` metadata can set `interface.display_name`,
+`interface.short_description`, `interface.default_prompt`, and
+`policy.allow_implicit_invocation: false`. Invalid optional metadata is diagnosed
+and fails closed to explicit invocation. Supporting files resolve relative to the skill
+directory and retain normal filesystem permissions.
+
+## Manage packages
+
+```
+dgc skills list
+dgc skills create review-api
+dgc skills install ./team-skills/review-api
+dgc skills disable review-api
+dgc skills enable review-api
+dgc skills show review-api
+```
+
+The same actions work through `/skills ACTION` in the terminal. Use `--user` with
+create/install for a personal package. A source outside the project requires
+`--allow-external`, or an explicit selection in the editor's folder dialog.
+The editor also supports `/skills list|reload|show NAME|enable NAME|disable NAME`.
+Creation produces an explicit-only scaffold; edit `SKILL.md` before using it.
+
+Installation never overwrites or merges an existing destination. A local package can
+contain up to 128 files/directories, 4 MiB total, eight directory levels, and 512 KiB
+per supporting file. `SKILL.md` is limited to 64 KiB and 30,000 instruction characters.
+Symlinks, special files, `.env` files, and generated dependency directories are rejected.
+The terminal also supports raw-URL installation of a single `SKILL.md`; use local
+package installation when supporting files are required. Installed scripts retain
+private file permissions and can be run through their interpreter after normal approval.
+
+Disablement is shared in DGC's configuration. The terminal's **x** disables a skill;
+it does not delete source files. `/skills` lists the built-ins as examples you can copy.
 """.strip()),
 
     ("Multiple agents", "run a fleet of agents at once + the dashboard", """

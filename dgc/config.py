@@ -16,6 +16,7 @@ USER_CONFIG = USER_HOME / "config.json"
 USER_SECRETS = USER_HOME / "secrets.json"
 USER_MEMORY = USER_HOME / "DGC.md"
 USER_SKILLS = USER_HOME / "skills"
+PORTABLE_USER_SKILLS = Path.home() / ".agents" / "skills"
 USER_AGENTS = USER_HOME / "agents"
 BUILTIN_SKILLS = Path(__file__).resolve().parent / "skills_builtin"  # skills shipped with dgc
 SECRET_KEYS = frozenset({"api_key", "search_api_key", "subagent_api_key", "fallback_api_key"})
@@ -328,6 +329,7 @@ DEFAULTS: dict = {
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)
     "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
+    "disabled_skills": [],                     # skill names disabled across native/delegated clients
     "language_servers": {},                     # language/ext -> {command, args, env, extensions}
     "code_intel_timeout": 15,                   # configured LSP request timeout (0.1-60s)
     "code_intel_lsp_idle_s": 120,               # reuse per-project LSP this long; 0 = one-shot
