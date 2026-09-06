@@ -219,6 +219,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
+  private composerSelections = false;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private confirmedTurnActive = false;
@@ -860,6 +861,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
+        this.composerSelections = ev.capabilities?.composer_selections === true;
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = "";
@@ -1190,8 +1192,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           : [];
         const live = text && !text.startsWith("/") ? this.editorContext() : [];
         const requestId = String(msg.requestId || this.nextRequestId("prompt")).slice(0, 128);
+        const selections: { skills?: string[]; templates?: string[] } = {};
+        for (const key of ["skills", "templates"] as const) {
+          if (Array.isArray(msg[key]) && msg[key].length) {
+            if (!this.composerSelections) {
+              this.post({ type: "event", event: { type: "error",
+                message: "Update the DGC CLI to use attached skills and prompt templates." } });
+              this.post({ type: "prompt_rejected", requestId }); return;
+            }
+            selections[key] = msg[key];
+          }
+        }
         const accepted = be.send({ type: "prompt", text, images: msg.images, request_id: requestId,
-                                   context: [...attached, ...live].slice(0, 64) });
+                                   context: [...attached, ...live].slice(0, 64), ...selections });
         if (!accepted) {
           this.post({ type: "prompt_rejected", requestId });
         } else {
@@ -1326,6 +1339,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "getSkill":
         be.send({ type: "get_skill", request_id: this.nextRequestId("skill"), name: String(msg.name || "") });
+        break;
+      case "requestSkills":
+        be.send({ type: "list_skills", request_id: this.nextRequestId("composer-skills") });
         break;
       case "skillsReload":
         be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
@@ -1928,7 +1944,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (name === "skill") {
       if (rest) {
         const [skillName, ...arguments_] = rest.split(/\s+/);
-        this.post({ type: "composer_text", text: `$${skillName}${arguments_.length ? ` ${arguments_.join(" ")}` : ""}` });
+        this.post({ type: "composer_skill", name: skillName, text: arguments_.join(" ") });
       } else { this.openSkills(); }
       return;
     }

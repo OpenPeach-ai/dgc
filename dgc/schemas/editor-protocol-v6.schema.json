@@ -2256,6 +2256,12 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "skills": {
+              "type": "array"
+            },
+            "templates": {
+              "type": "array"
             }
           },
           "required": [

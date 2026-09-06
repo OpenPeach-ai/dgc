@@ -1827,6 +1827,18 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "skills": {
+      "types": [
+        "array"
+      ],
+      "required": false
+    },
+    "templates": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "slash_command": {

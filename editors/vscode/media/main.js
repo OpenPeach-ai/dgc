@@ -8,7 +8,7 @@
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   let pendingImageFiles = 0, pendingImageBytes = 0;
-  let queuedCount = 0, customCommands = [];
+  let queuedCount = 0, customCommands = [], skillRows = [];
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
@@ -282,7 +282,7 @@
     if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
   }
   let files = [];              // workspace files for @-mentions
-  let popMode = null, popItems = [], popIdx = 0, popStart = 0;
+  let popMode = null, popItems = [], popIdx = 0, popStart = 0, popEnd = 0;
   let disclosureId = 0;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
@@ -737,8 +737,15 @@
     });
   }
   function useSkill(name) {
-    input.value = `$${name} `; input.selectionStart = input.selectionEnd = input.value.length;
-    closeSurface(); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true }));
+    attachInvocation("skill", name);
+    closeSurface(); input.focus();
+  }
+  function attachInvocation(kind, name) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return;
+    if (!attachments.some((a) => a[kind] === name)) {
+      attachments.push({ label: `${kind === "skill" ? "$" : "/"}${name}`, [kind]: name });
+    }
+    renderAtts();
   }
   function renderSkills(items) {
     surfaceRows = Array.isArray(items) ? items : [];
@@ -861,6 +868,9 @@
         }
         customCommands = Array.isArray(ev.custom_commands) ? ev.custom_commands
           : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
+        skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
+          typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
+        if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         break;
       }
@@ -1135,7 +1145,9 @@
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "skill_catalog": {
+        skillRows = Array.isArray(ev.items) ? ev.items : [];
         if (surfaceKind === "skills") renderSkills(ev.items);
+        if (popMode === "/" || popMode === "$") onInput();
         break;
       }
       case "skill_detail": if (surfaceKind === "skills") renderSkillDetail(ev); break;
@@ -1271,6 +1283,8 @@
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
+    const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
+    const templates = attachments.filter((a) => a.template).map((a) => a.template);
     if (text.startsWith("/") && !attachments.length) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
@@ -1307,13 +1321,14 @@
     const requestId = `${promptPrefix}-${++promptSequence}`;
     pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
+      skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });   // backend queues it if a turn is running
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
   }
   function renderAtts() {
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
-      const chip = el("span", "chip"), label = el("span", "chip-label"), remove = el("button", "x", "×");
+      const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}`), label = el("span", "chip-label"), remove = el("button", "x", "×");
       label.textContent = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
@@ -1325,35 +1340,56 @@
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}">${esc(it.label)}${it.detail ? ` <span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${esc(it.label)}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
-  function movePop(d) { if (popMode) { popIdx = (popIdx + d + popItems.length) % popItems.length; [...pop.children].forEach((c, i) => { const selected = i === popIdx; c.className = "pi" + (selected ? " sel" : ""); c.setAttribute("aria-selected", String(selected)); }); input.setAttribute("aria-activedescendant", `pop-option-${popIdx}`); } }
+  function movePop(d) {
+    if (!popMode) return;
+    popIdx = (popIdx + d + popItems.length) % popItems.length;
+    [...pop.children].forEach((c, i) => { const selected = i === popIdx; c.className = "pi" + (selected ? " sel" : ""); c.setAttribute("aria-selected", String(selected)); });
+    input.setAttribute("aria-activedescendant", `pop-option-${popIdx}`);
+    pop.children[popIdx]?.scrollIntoView?.({ block: "nearest" });
+  }
+  function replacePopToken(value = "") {
+    input.value = input.value.slice(0, popStart) + value + input.value.slice(popEnd);
+    input.selectionStart = input.selectionEnd = popStart + value.length;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
+    if (it.skill || it.template) {
+      replacePopToken();
+      attachInvocation(it.skill ? "skill" : "template", it.skill || it.template);
+      hidePop(); input.focus(); return;
+    }
     if (popMode === "@") {
       attachments.push({ label: it.label, resource: {
         type: "file_mention", uri: it.uri, path: it.path,
         relative_path: it.relative_path, workspace: it.workspace,
       } });
       renderAtts();
-      input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
+      replacePopToken();
     } else if (popMode === "/") {
-      if (popStart > 0) {
-        const end = input.selectionStart;
-        input.value = input.value.slice(0, popStart) + it.label + input.value.slice(end);
-        input.selectionStart = input.selectionEnd = popStart + it.label.length;
-        hidePop(); input.focus();
-        // An inline command is an action on the prompt that is already complete. Activate it on
-        // selection so Enter does not appear to swallow `/goal` and require a second keypress.
-        submit(); return;
+      if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
+        replacePopToken(); hidePop(); input.focus();
+        if (it.action === "goal" && input.value.trim() && !attachments.length) {
+          const objective = input.value.trim(); goalDraft = input.value;
+          appendGoalPrompt(objective); vscode.postMessage({ type: "startGoal", text: objective });
+          input.value = ""; input.style.height = "auto"; scroll();
+        } else {
+          // Management actions operate independently of the draft. Opening a model, skills,
+          // MCP, or settings picker must not submit or replace the user's unfinished request.
+          vscode.postMessage({ type: "slash", action: it.action });
+        }
+        return;
       }
       if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
-        input.value = it.label + " ";       // custom command — let the user add args, then Enter
+        replacePopToken(it.label + " ");
         hidePop(); input.focus(); return;
       }
-      input.value = "";
+      replacePopToken();
       vscode.postMessage({ type: "slash", action: it.action });
     }
     hidePop(); input.focus();
@@ -1362,28 +1398,36 @@
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
-    const at = upto.lastIndexOf("@"), slashToken = /(^|\s)(\/[^\s]*)$/.exec(upto);
-    const sl = slashToken ? upto.lastIndexOf("/") : -1;
-    if (sl !== -1 && !/\s/.test(upto.slice(sl))) {
-      popMode = "/"; popStart = sl;
-      let all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
+    const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
+    if (!token || input.selectionStart !== input.selectionEnd || input.matches(":disabled")) return hidePop();
+    popStart = caret - token[2].length;
+    popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
+    popMode = token[2][0];
+    const query = token[2].slice(1).toLowerCase();
+    if (popMode === "/" || popMode === "$") {
+      const skillItems = skillRows.filter((s) => s && s.enabled !== false).map((s) => ({
+        label: "$" + s.name, detail: s.description || "Reusable agent instructions",
+        skill: s.name, kind: s.source ? `${s.source} skill` : "skill", aliases: [],
+      }));
+      const all = popMode === "$" ? skillItems : builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
         action: c.action, acceptsArgs: c.accepts_args === true,
+        kind: "command",
         aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
-        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "custom command", action: "custom:" + c, acceptsArgs: true })));
-      // Only /goal has inline/suffix semantics. Other slash commands remain command-line forms
-      // so inserting one cannot silently replace or discard an in-progress prompt.
-      if (sl > 0) all = all.filter((c) => c.label.toLowerCase() === "/goal");
-      const query = upto.slice(sl).toLowerCase();
-      showPop(all.filter((c) => c.label.toLowerCase().startsWith(query)
-        || (c.aliases || []).some((alias) => ("/" + alias).toLowerCase().startsWith(query))));
+        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "Apply this prompt template to your request", template: c, kind: "prompt" })), skillItems);
+      const matches = all.filter((c) => c.label.slice(1).toLowerCase().includes(query)
+        || (c.detail || "").toLowerCase().includes(query)
+        || (c.aliases || []).some((alias) => alias.toLowerCase().includes(query)));
+      if (query) matches.sort((a, b) => Number(!a.label.slice(1).toLowerCase().startsWith(query))
+        - Number(!b.label.slice(1).toLowerCase().startsWith(query)));
+      showPop(matches);
     }
-    else if (at !== -1 && !/\s/.test(upto.slice(at))) {
-      popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();
-      showPop(files.filter((f) => f.label.toLowerCase().includes(q)).slice(0, 8));
+    else if (popMode === "@") {
+      showPop(files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
       if (files.length === 0) vscode.postMessage({ type: "reqFiles" });
     } else hidePop();
   }
   input.addEventListener("input", onInput);
+  input.addEventListener("click", onInput);
   input.addEventListener("keydown", (e) => {
     if (e.isComposing || e.keyCode === 229) return;
     if (popMode) {
@@ -1454,7 +1498,13 @@
     input.selectionStart = input.selectionEnd = p + 1;
     onInput();
   };
-  $("btn-cmd").onclick = () => { input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput(); };
+  function openCommandMenu() {
+    const caret = input.selectionEnd;
+    const prefix = caret && !/\s/.test(input.value[caret - 1]) ? " /" : "/";
+    input.value = input.value.slice(0, caret) + prefix + input.value.slice(caret);
+    input.selectionStart = input.selectionEnd = caret + prefix.length; input.focus(); onInput();
+  }
+  $("btn-cmd").onclick = openCommandMenu;
   $("btn-model").onclick = (e) => {
     e.stopPropagation();
     const mm = $("modelmenu");
@@ -1694,10 +1744,18 @@
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "surface_open") { openSurface(msg.surface); }
     else if (msg.type === "command_menu") {
-      input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput();
+      openCommandMenu();
     }
     else if (msg.type === "composer_text") {
       input.value = String(msg.text || ""); input.selectionStart = input.selectionEnd = input.value.length;
+      input.focus(); onInput();
+    }
+    else if (msg.type === "composer_skill") {
+      attachInvocation("skill", String(msg.name || ""));
+      if (msg.text) {
+        input.value += (input.value && !/\s$/.test(input.value) ? " " : "") + String(msg.text);
+        input.selectionStart = input.selectionEnd = input.value.length;
+      }
       input.focus(); onInput();
     }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }

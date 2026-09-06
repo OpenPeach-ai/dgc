@@ -27,7 +27,8 @@ from .mcp import MCPInputError, MCPManager
 from .redaction import (StreamingRedactor, contains_secret, redact_messages,
                         provider_continuation_has_secret, redact_provider_value,
                         redact_text, redact_value, secret_values)
-from .skills import discover_skills, matching_skill_names
+from .skills import (discover_skills, matching_skill_names, explicit_skill_instructions,
+                     format_skill_instructions)
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 from .presentation import RESPONSE_GUIDANCE
 from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
@@ -1115,6 +1116,14 @@ class Agent(GoalLifecycle):
         if getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active":
             detected |= matching_skill_names(self.skills, self.goal)
         before = set(self._active_skill_names)
+        instructions = {} if replace else dict(getattr(self, "_explicit_skill_instructions", {}))
+        instructions.update(explicit_skill_instructions(self.skills, text))
+        if replace and self.goal:
+            for name, row in explicit_skill_instructions(self.skills, self.goal).items():
+                instructions.setdefault(name, row)
+        # Validate the aggregate before changing the active catalog or starting a model request.
+        format_skill_instructions(instructions, min(96_000, max(4_000, self.context_size() * 2)))
+        self._explicit_skill_instructions = instructions
         self._active_skill_names = detected if replace else before | detected
         return self._active_skill_names != before
 
@@ -1466,6 +1475,7 @@ class Agent(GoalLifecycle):
         self._goal_progress = None
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
+        self._explicit_skill_instructions: dict[str, dict] = {}
         self._active_mcp_tools: set[str] = set()
         self._mcp_query_text = ""
         self.messages = [{"role": "system", "content": self.system_prompt()}]
@@ -1696,6 +1706,10 @@ class Agent(GoalLifecycle):
                       "Reusable instruction packages. Invoke with the skill tool when one matches the task:"]
             parts += [f"- {s.name}: {s.description}" for s in skill_catalog]
 
+        explicit = format_skill_instructions(getattr(self, "_explicit_skill_instructions", {}))
+        if explicit:
+            parts += ["", "# Explicitly selected skills", explicit]
+
         if not self.client.tools_supported:
             parts += ["", self._text_protocol_section()]
         return self._safe_text("\n".join(parts))
@@ -1867,19 +1881,22 @@ class Agent(GoalLifecycle):
                 self.steer_queue.clear()        # drop stale interjections from a prior turn
                 self._accepting_steer = True
             safe_user_text = self._safe_text(user_text)
-            self._mcp_query_text = _trusted_intent_text(safe_user_text)
-            self._active_mcp_tools.clear()
-            self._activate_tool_intents(safe_user_text, replace=True)
-            self._activate_skill_intents(safe_user_text, replace=True)
-            self._refresh_system()
             completed = None
             try:
+                self._mcp_query_text = _trusted_intent_text(safe_user_text)
+                self._active_mcp_tools.clear()
+                self._activate_tool_intents(safe_user_text, replace=True)
+                self._activate_skill_intents(safe_user_text, replace=True)
+                self._refresh_system()
+                if self._explicit_skill_instructions:
+                    self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 completed = self._run_goal_steps(safe_user_text, self._run_turn)
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
                 self._active_tool_intents.clear()
                 self._active_skill_names.clear()
+                self._explicit_skill_instructions = {}
                 self._active_mcp_tools.clear()
                 self._mcp_query_text = ""
                 repaired, changed = _repair_tool_transcript(self.messages)
@@ -1945,7 +1962,8 @@ class Agent(GoalLifecycle):
             def step(prompt):
                 turn_result = None
                 try:
-                    turn_result = runner(prompt)
+                    instructions = format_skill_instructions(self._explicit_skill_instructions)
+                    turn_result = runner(self._safe_text(instructions + "\n\n" + prompt) if instructions else prompt)
                     if not isinstance(turn_result, dict):
                         raise TypeError("external turn runner returned an invalid result")
                     turn_result = self._safe_value(turn_result)
@@ -1957,11 +1975,16 @@ class Agent(GoalLifecycle):
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
                         self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"]))})
             try:
+                self._activate_skill_intents(safe_user_text, replace=True)
+                if self._explicit_skill_instructions:
+                    self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 result = self._run_goal_steps(safe_user_text, step, external=True)
                 if not isinstance(result, dict):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result
             finally:
+                self._explicit_skill_instructions = {}
+                self._active_skill_names.clear()
                 self._refresh_system()
                 saved = self._persist()
                 if not saved and self.depth == 0:

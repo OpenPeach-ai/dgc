@@ -77,15 +77,18 @@ class SlashCompleter(Completer):
     """A live command palette: while the composer holds just `/word`, offer matching commands
     (name + description) as a dropdown. Filters as you type; picks with ↑/↓ + Enter."""
 
+    def __init__(self, project_root=None):
+        self.project_root = project_root
+
     def get_completions(self, document, complete_event):
-        text = document.text_before_cursor
-        if not text.startswith("/") or " " in text:     # only while typing the command word
+        from .composer import composer_token, completion_rows
+        token = composer_token(document.text, document.cursor_position)
+        if token is None or token[0] not in ("/", "$"):
             return
-        word = text[1:].lower()
-        for name, desc in SLASH_COMMANDS:
-            if name.startswith(word):
-                yield Completion("/" + name, start_position=-len(text),
-                                 display="/" + name, display_meta=desc)
+        trigger, query, start, _end = token
+        for row in completion_rows("tui", self.project_root, trigger=trigger, query=query):
+            yield Completion(row["label"], start_position=start - document.cursor_position,
+                             display=row["label"], display_meta=row["desc"])
 
 
 class _NextSuggest(AutoSuggest):
@@ -295,33 +298,54 @@ class TUI:
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
                       keep_input=False, header=None, accent=False, back=None, info=False,
                       reader=False) -> None:
+        previous = getattr(self, "_overlay", None)
+        draft = previous.get("composer_draft") if previous else None
+        if not keep_input and draft is None and self.input_buf.text:
+            draft = self.input_buf.document
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
                          "rebuild": rebuild, "on_submit": on_submit, "header": header,
                          "accent": accent, "sel": 0, "scroll": 0, "back": back, "info": info,
-                         "reader": reader}
+                         "reader": reader, "composer_draft": draft}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
         """The `/` menu as an overlay (same engine as the pickers): the composer holds `/query`,
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
+        from .composer import composer_token, completion_rows
+        from prompt_toolkit.document import Document
+
         def rebuild(ov):
-            q = self.input_buf.text.lstrip("/").strip().lower()
-            rows = command_pairs_with_custom("tui", self.config.project_root)
-            rows = [(n, d) for n, d in rows if not q or q in n.lower() or q in d.lower()]
-            if q:   # rank: exact name, then name-prefix, then name-substring, then description-only
-                rows.sort(key=lambda nd: (nd[0].lower() != q, not nd[0].lower().startswith(q),
-                                          q not in nd[0].lower(), nd[0]))
-            return [{"label": "/" + n, "desc": d, "value": n} for n, d in rows]
+            token = composer_token(self.input_buf.text, self.input_buf.cursor_position)
+            if token is None:
+                return []
+            return completion_rows("tui", self.config.project_root, skills=getattr(getattr(self, "agent", None), "skills", {}),
+                                   trigger=token[0], query=token[1])
 
         def submit(row, typed):
-            if " " in typed:                            # typed args → run verbatim (e.g. /model qwen)
-                self._run_command(typed)
-            elif row:                                   # selected a row → run it
-                self._run_command("/" + row["value"])
+            token = composer_token(self.input_buf.text, self.input_buf.cursor_position)
+            if row and token:
+                before, after = self.input_buf.text[:token[2]], self.input_buf.text[token[3]:]
+                draft = before + after
+                if row["kind"] == "skill":
+                    inserted = "$" + row["value"] + ("" if after.startswith(" ") else " ")
+                    self.input_buf.set_document(Document(before + inserted + after, len(before + inserted)))
+                    return
+                if row["kind"] == "template":
+                    self.input_buf.set_document(Document("/" + row["value"] + " " + draft,
+                                                         len(row["value"]) + 2 + len(draft)))
+                    return
+                self.input_buf.set_document(Document(draft, len(before)))
+                if row["value"] == "goal" and draft.strip():
+                    self.input_buf.reset()
+                    self._run_command("/goal " + draft.strip())
+                else:
+                    self._run_command("/" + row["value"])
+                return
             elif typed.startswith("/") and len(typed) > 1:
+                self.input_buf.reset()
                 self._run_command(typed)
             else:
                 return
@@ -331,6 +355,7 @@ class TUI:
                 self._overlay["back"] = self._palette_back
         self._open_overlay([], on_pick=lambda r: None, rebuild=rebuild, on_submit=submit,
                            footer="↑↓ move · type to filter · Enter run · Esc close", keep_input=True)
+        self._overlay["composer_palette"] = True
 
     def _palette_back(self) -> None:
         """Reopen the `/` palette — the Esc-back target for any menu opened from it."""
@@ -526,8 +551,12 @@ class TUI:
         self._open_settings_cat(cat)            # back to the category page (values refreshed)
 
     def _close_overlay(self) -> None:
+        ov = self._overlay or {}
+        draft = self.input_buf.document if ov.get("composer_palette") else ov.get("composer_draft")
         self._overlay = None
         self.input_buf.reset()
+        if draft is not None:
+            self.input_buf.set_document(draft)
         self._invalidate()
 
     _OVERLAY_CAP = 14                                   # max rows shown at once (fits all built-in skills)
@@ -610,7 +639,7 @@ class TUI:
     def _overlay_select(self) -> None:
         """Commit the current overlay selection (shared by Enter and mouse-click)."""
         ov = self._overlay
-        if not ov or ov.get("tabs") or ov.get("reader"):   # tabbed modals use a/x/r; readers just scroll
+        if not ov or (ov.get("tabs") and not ov.get("selectable")) or ov.get("reader"):
             return
         rows = self._overlay_rows()
         sel = rows[ov["sel"]] if rows else None
@@ -3740,9 +3769,18 @@ class TUI:
             elif key == "r":                            # reload (rebuild happens on render)
                 self._invalidate()
 
-        self._open_overlay([], on_pick=lambda r: None, tabs=["Skills", "MCP Servers"], tab=tab,
-                           footer="Tab switch · ↑↓ move · a add · x remove · r reload · Esc close",
+        def pick(row):
+            kind, name = row["value"]
+            if kind == "skill":
+                prefix = " " if self.input_buf.cursor_position and not self.input_buf.document.text_before_cursor[-1].isspace() else ""
+                self.input_buf.insert_text(prefix + "$" + name + " ")
+            else:
+                self._extensions_modal(tab=1)
+
+        self._open_overlay([], on_pick=pick, tabs=["Skills", "MCP Servers"], tab=tab,
+                           footer="Tab switch · Enter use skill · a add · x remove · r reload · Esc close",
                            rebuild=rebuild, on_action=on_action)
+        self._overlay["selectable"] = True
 
     def _install_skill_url(self, url: str) -> None:
         url = url.strip()
@@ -4249,21 +4287,29 @@ class TUI:
             def _(ev, _game_key=_game_key):
                 self._bored_key(_game_key)
 
+        def open_composer_trigger(trigger):
+            b = self.input_buf
+            prefix = b.document.text_before_cursor
+            if (self._overlay is None and (not prefix or prefix[-1].isspace())
+                    and self._req is None and not self._naming and self._input is None):
+                b.insert_text(trigger)
+                self._open_command_palette()
+            else:
+                b.insert_text(trigger)
+
         @kb.add("/")
         def _(ev):
-            b = self.input_buf
-            if (self._overlay is None and not b.text
-                    and self._req is None and not self._naming and self._input is None):
-                b.insert_text("/")
-                self._open_command_palette()            # `/` on an empty composer → command palette
-                # (works mid-turn too — many commands like /copy, /expand, /thoughts are useful then)
-            else:
-                b.insert_text("/")
+            open_composer_trigger("/")
+
+        @kb.add("$")
+        def _(ev):
+            open_composer_trigger("$")
 
         @kb.add("backspace", filter=Condition(lambda: self._overlay is not None and self._overlay.get("on_submit")))
         def _(ev):
             self.input_buf.delete_before_cursor()
-            if not self.input_buf.text.startswith("/"):  # deleted the leading slash → close palette
+            from .composer import composer_token
+            if not composer_token(self.input_buf.text, self.input_buf.cursor_position):
                 self._close_overlay()
 
         @kb.add("up", filter=ov_open)

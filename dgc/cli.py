@@ -529,14 +529,14 @@ class ClassicSlashCompleter(Completer):
 
     def get_completions(self, document, complete_event):
         del complete_event
-        before = document.text_before_cursor
-        if not before.startswith("/") or any(ch.isspace() for ch in before):
+        from .composer import composer_token, completion_rows
+        token = composer_token(document.text, document.cursor_position)
+        if token is None or token[0] not in ("/", "$"):
             return
-        query = before[1:].casefold()
-        for name, description in command_pairs_with_custom("classic", self.project_root):
-            if name.casefold().startswith(query):
-                yield Completion("/" + name, start_position=-len(before),
-                                 display="/" + name, display_meta=description)
+        trigger, query, start, _end = token
+        for row in completion_rows("classic", self.project_root, trigger=trigger, query=query):
+            yield Completion(row["label"], start_position=start - document.cursor_position,
+                             display=row["label"], display_meta=row["desc"])
 
 
 class CLI:
@@ -1286,6 +1286,7 @@ class CLI:
             complete_while_typing=True)
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
+        draft = ""
         self._followup_queue = queue
         while True:
             mode = self.agent.mode
@@ -1299,7 +1300,8 @@ class CLI:
                 try:                                    # ❯ prefix + right-aligned `model · mode`
                     rp = ANSI(f"{dim}{terminal_safe_text(self.config.model)}  {glyphs.MIDDOT}  "
                               f"{terminal_safe_text(mode)}{rst}")
-                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp).strip()
+                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp, default=draft).strip()
+                    draft = ""
                 except KeyboardInterrupt:
                     continue
                 except EOFError:
@@ -1307,6 +1309,21 @@ class CLI:
             if not line:
                 continue
             try:
+                from .composer import composer_token, compose_prompt
+                token = composer_token(line, len(line))
+                if token and token[0] == "/" and token[2] > 0:
+                    name, prefix = token[1], line[:token[2]].rstrip()
+                    from .commands import resolve_command, discover_commands
+                    if resolve_command(name, "classic"):
+                        if name == "goal":
+                            self.handle_slash("/goal " + prefix)
+                        else:
+                            draft = prefix
+                            self.handle_slash("/" + name)
+                        continue
+                    if name in discover_commands(self.config.project_root):
+                        line = compose_prompt(prefix, templates=[name], catalog=self.agent.skills,
+                                              project_root=self.config.project_root)
                 if line.startswith("/"):
                     self.handle_slash(line)
                 elif line.startswith("#"):
