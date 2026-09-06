@@ -59,7 +59,7 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
-  capabilities: { correlated_state_requests: true, history_snapshot: true }, session_id: currentSession,
+  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
@@ -96,18 +96,19 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     sendConfig(cmd.request_id);
   }
-  if (cmd.type === "set_goal") {
+  if (cmd.type === "set_goal" || cmd.type === "start_goal") {
     if (activeGoalTurn) {
-      send({ type: "command_rejected", request_id: cmd.request_id, command: "set_goal",
+      send({ type: "command_rejected", request_id: cmd.request_id, command: cmd.type,
         reason: "turn_in_progress", message: "'set_goal' is unavailable while a turn is running; cancel or wait" });
       return;
     }
     if (Object.prototype.hasOwnProperty.call(cmd, "text")) standingGoal = String(cmd.text || "");
-    standingGoalStatus = standingGoal ? (cmd.status || standingGoalStatus || "active") : "none";
+    standingGoalStatus = standingGoal ? (cmd.type === "start_goal" ? "active" : cmd.status || standingGoalStatus || "active") : "none";
     send({ type: "goal_changed", request_id: cmd.request_id,
       goal: standingGoal, status: standingGoalStatus });
   }
-  if (cmd.type === "prompt" && cmd.text.startsWith("host matrix")) {
+  if ((cmd.type === "prompt" || cmd.type === "start_goal") && cmd.text.startsWith("host matrix")) {
+    if (cmd.request_id) send({ type: "prompt_accepted", request_id: cmd.request_id, state: "started" });
     goalPromptCount += 1;
     activeGoalTurn = true;
     send({ type: "turn_start", turn_id: "goal-turn", prompt: cmd.text });

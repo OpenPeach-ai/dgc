@@ -281,6 +281,8 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "install_skill": {"request_id": _S(), "source": _S(), "scope": _S(False), "allow_external": _B(False)},
     "list_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S()},
     "get_history": {"request_id": _S()},
+    "start_goal": {"request_id": _S(), "text": _S(), "token_budget": _I(False),
+                   "skills": _A(False), "templates": _A(False), "images": _A(False), "context": _A(False)},
     "mcp_command": {"request_id": _S(), "arguments": _S()},
     "get_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S(), "identifier": _S(), "arguments": _O(False)},
     "set_mcp_enabled": {"request_id": _S(), "name": _S(), "enabled": _B()},

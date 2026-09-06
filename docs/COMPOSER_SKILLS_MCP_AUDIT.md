@@ -39,23 +39,23 @@ unimplemented capability. Document any provider-owned execution boundary explici
 
 ## Completion requirements and evidence
 
-- [ ] Commands: a searchable, keyboard-accessible picker at any whitespace-delimited `/` token;
+- [x] Commands: a searchable, keyboard-accessible picker at any whitespace-delimited `/` token;
   preserve text before and after the caret, attachments, selection, IME input, and canceled menus.
 - [ ] Meaningful inline actions: open management/settings without consuming the draft; attach
   skills and prompt templates; support plan/review/init flows on CLI and extension; retain goals.
-- [ ] Skills: `$` and slash discovery, source/description/instructions, multiple explicit skills,
+- [x] Skills: `$` and slash discovery, source/description/instructions, multiple explicit skills,
   removal, reload, enabled/disabled state, and draft/session handling.
-- [ ] Skill execution: exact selected instructions reach native and delegated models; preserve
+- [x] Skill execution: exact selected instructions reach native and delegated execution inputs; preserve
   the user's original prompt and resource authority; validate missing/disabled skills and bounds.
-- [ ] Portable skills: project/user discovery with deterministic precedence, standard frontmatter
+- [x] Portable skills: project/user discovery with deterministic precedence, standard frontmatter
   and optional metadata, supporting-resource guidance, explicit-only policy, and diagnostics.
-- [ ] Skill authoring/install: usable create/install/manage workflows in both clients, including
+- [x] Skill authoring/install: usable create/install/manage workflows in both clients, including
   local packages with supporting resources; reviewable changes and safe overwrite behavior.
 - [ ] Bundled skills: audit existing packages, add useful missing coding/product workflows with
   appropriate capability requirements, examples, and meaningful validation.
-- [ ] MCP management: shared CLI/editor configuration; add/edit/remove/enable/disable/reconnect;
+- [x] MCP management: shared CLI/editor configuration; add/edit/remove/enable/disable/reconnect;
   useful connection/auth/error state; credentials never enter prompts, logs, or public artifacts.
-- [ ] MCP context: tools, resources, templates, and prompts are discoverable and usable with
+- [x] MCP context: tools, resources, templates, and prompts are discoverable and usable with
   bounded pagination/results, cancellation, per-server authority, and normal permission checks.
 - [ ] MCP authentication: verify remote HTTP/bearer/OAuth behavior and recovery rather than
   relying on an untested bridge; expose only controls supported by the actual implementation.
@@ -144,3 +144,31 @@ unimplemented capability. Document any provider-owned execution boundary explici
   SecretStorage and permission/plan lifecycle checks. The host emitted environment file-watcher
   limit warnings (ENOSPC); this does not constitute a current Cursor UI or live-model verification.
   Setup descriptions that still advertised protocol v5 now correctly describe protocol v6.
+- Goal inputs implemented: prefix/suffix/picker actions submit the same complete composer payload;
+  the backend validates selections, context and images before replacing the goal or starting work.
+  Saved goals retain selected names and snapshots, revalidate skills/templates on resume, reject
+  unsupported delegated images, and expose only attachment summaries in status events. Corrupted
+  saved inputs prevent resumption. Rejected startup preserves the draft. Classic CLI and TUI share
+  template selection, explicit skills, bounded file/image capture and staged MCP snapshot capture;
+  TUI resume no longer rereads a saved file attachment. See [Goals](GOALS.md) for behavior and limits.
+- Goal input hardening: nested reference frames stay outside skill/tool intent selection. Template
+  text loaded after the initial prompt sanitation is redacted again before model/delegated input.
+  Client selection limits and host validation prevent silent truncation; the attachment area scrolls
+  within a bounded height so many files or a long filename cannot push the composer offscreen.
+- Goal verification: 1,387/1,387 Python checks, 73 discovered unittest cases (four optional bridge
+  cases skipped), 86/86 extension tests, TypeScript and the actual VS Code 1.107.1 host test passed.
+  Tests include native/delegated payloads, persistence failures, pause/reopen/resume, removed/disabled
+  packages, template-only redaction, no model start on rejected input, original-goal preservation,
+  CLI/TUI dispatch and exact host payload forwarding. Chromium rendered actual product assets at
+  460×900 with protocol fixtures: inline selected-goal submission, review, and 64 attachments with
+  a long label. The attachment list stayed at 104px, the composer stayed visible, and there was no
+  horizontal overflow. Captures remain ignored development evidence, not promoted product imagery.
+- Regression follow-up: a repeated process-state sample made the MCP descendant-cleanup assertion
+  intermittently disagree with its own diagnostic (child stopped and both readers closed). The
+  check now preserves its first terminal observation and handles Linux's documented zombie/dead
+  states. Eight initial and 50 diagnostic isolated cleanup runs passed; the final full suite passed
+  with this corrected observer. No MCP process-cleanup implementation was relaxed. The editor host
+  still emits environment ENOSPC watcher warnings but completes its checks.
+- Current remaining work: meaningful plan/review/init flows; bundled-skill audit/additions; remote
+  host OAuth behavior; real local/subscription model runs and actual Cursor verification; final
+  docs/site/version updates; reviewed-source/CI gates and publication to every release channel.

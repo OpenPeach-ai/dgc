@@ -751,7 +751,7 @@
   }
 
   // Standing goal — the objective and clock stay attached immediately above the composer.
-  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now(), goalDraft = "";
+  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now();
   function currentGoalElapsed() {
     return goalState.elapsed + (goalState.status === "active" && goalState.running
       ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
@@ -820,6 +820,17 @@
     const status = el("p");
     status.textContent = `${goalState.status} · ${formatDuration(currentGoalElapsed())} worked · ${Number(goalState.cycles || 0)} cycles`;
     body.appendChild(status);
+    const attached = goalState.attachments || {};
+    const labels = [...(Array.isArray(attached.skills) ? attached.skills.map(name => "$" + name) : []),
+      ...(Array.isArray(attached.templates) ? attached.templates.map(name => "/" + name) : [])];
+    if (attached.context) labels.push(`${Number(attached.context)} context attachment${Number(attached.context) === 1 ? "" : "s"}`);
+    if (attached.images) labels.push(`${Number(attached.images)} image${Number(attached.images) === 1 ? "" : "s"}`);
+    if (labels.length || attached.invalid) {
+      const summary = el("p", "goal-attachments");
+      summary.textContent = attached.invalid ? "Saved attachments could not be restored. Replace this goal before resuming."
+        : "Attached to this goal: " + labels.join(" · ");
+      body.appendChild(summary);
+    }
     if (goalState.reason) { const reason = el("p"); reason.textContent = goalState.reason; body.appendChild(reason); }
     if (Array.isArray(goalState.evidence) && goalState.evidence.length) {
       body.appendChild(el("h3", "", "Evidence"));
@@ -894,7 +905,7 @@
   function useSkill(name) {
     const skill = skillRows.find((row) => row.name === name);
     if (skill?.enabled === false) return;
-    attachInvocation("skill", name);
+    if (!attachInvocation("skill", name)) return;
     if (!input.value.trim() && skill?.default_prompt) {
       input.value = String(skill.default_prompt).slice(0, 4096);
       input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
@@ -902,11 +913,21 @@
     closeSurface(); input.focus();
   }
   function attachInvocation(kind, name) {
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return;
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return false;
     if (!attachments.some((a) => a[kind] === name)) {
+      if (attachments.filter(item => item.skill || item.template).length >= 8) {
+        sysLine("Select at most eight skills and prompt templates per message."); return false;
+      }
+      if (!canAttach()) return false;
       attachments.push({ label: `${kind === "skill" ? "$" : "/"}${name}`, [kind]: name });
     }
     renderAtts();
+    return true;
+  }
+  function canAttach() {
+    const waiting = [...pendingImages].filter(owner => owner.session === draftSession).length;
+    if (attachments.length + waiting >= 64) { sysLine("Select at most 64 attachments per message."); return false; }
+    return true;
   }
   function renderSkills(items) {
     const query = surfaceKind === "skills" ? surfaceSearch.value : "";
@@ -1058,7 +1079,7 @@
       const previous = attachments.findIndex((item) => item.resource?.type === "mcp_context" && item.resource.server === ev.server && item.resource.uri === ev.identifier);
       const selected = { label: `${ev.server} · ${ev.identifier}`, resource };
       if (previous >= 0) attachments[previous] = selected;
-      else attachments.push(selected);
+      else { if (!canAttach()) return; attachments.push(selected); }
       renderAtts(); closeSurface(); input.focus();
     });
   }
@@ -1479,7 +1500,7 @@
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
       case "command_rejected":
-        if (ev.command === "prompt") rejectPrompt(ev.request_id);
+        if (ev.command === "prompt" || ev.command === "start_goal") rejectPrompt(ev.request_id);
         sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
@@ -1554,6 +1575,22 @@
     m.appendChild(el("div", "role", "goal"));
     m.appendChild(el("div", "bubble", esc(objective)));
     log.appendChild(m); setSending(true);
+    return m;
+  }
+  function submitGoal(objective, restoreText = input.value) {
+    if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
+      sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
+    }
+    const selected = [...attachments];
+    const node = appendGoalPrompt(objective + selected.map(item => `\n[${item.label}]`).join(""));
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
+    const values = key => selected.filter(item => item[key]).map(item => item[key]);
+    vscode.postMessage({ type: "startGoal", text: objective, requestId,
+      skills: values("skill"), templates: values("template"), context: values("resource"),
+      images: selected.filter(item => item.img).map(item => item.data) });
+    input.value = ""; input.style.height = "auto"; attachments.length = 0;
+    renderAtts(); persistDraft(); scroll();
   }
   function submit() {
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
@@ -1565,35 +1602,27 @@
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
     const templates = attachments.filter((a) => a.template).map((a) => a.template);
+    const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
+    const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
+      "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
+    if (goalPrefix && !goalStateCommand.includes(goalPrefix.toLowerCase())) {
+      submitGoal(goalPrefix); return;
+    }
+    if (goalPrefix || text.toLowerCase() === "/goal") {
+      vscode.postMessage({ type: "slashText", text });
+      input.value = ""; input.style.height = "auto"; persistDraft(); return;
+    }
+    const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
+    if (trailingGoal) { submitGoal(trailingGoal); return; }
     if (text.startsWith("/") && !attachments.length) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
-      const rest = text.slice(name.length + 1).trim();
-      const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
-        "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
-      const startsGoal = name === "goal" && rest && !goalStateCommand.includes(rest.toLowerCase());
-      if (custom || startsGoal) {
-        if (startsGoal) {
-          goalDraft = text;
-          appendGoalPrompt(rest);
-        } else {
+      if (custom) {
           const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
           m.appendChild(el("div", "bubble", esc(text)));
           log.appendChild(m); setSending(true);
-        }
       }
       vscode.postMessage({ type: "slashText", text });
-      input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
-    }
-    // Codex-style suffix action: `objective /goal` tags and starts the text already in the
-    // composer. Requiring the marker to be the final whitespace-delimited token avoids treating
-    // prose such as "explain /goal syntax" as a command.
-    const trailingGoal = !attachments.length
-      ? /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim() : "";
-    if (trailingGoal) {
-      goalDraft = text;
-      appendGoalPrompt(trailingGoal);
-      vscode.postMessage({ type: "startGoal", text: trailingGoal });
       input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
@@ -1609,7 +1638,7 @@
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
       const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}`), label = el("span", "chip-label"), remove = el("button", "x", "×");
-      label.textContent = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
+      label.textContent = a.label; label.title = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
     });
@@ -1642,11 +1671,12 @@
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
     if (it.skill || it.template) {
+      if (!attachInvocation(it.skill ? "skill" : "template", it.skill || it.template)) return;
       replacePopToken();
-      attachInvocation(it.skill ? "skill" : "template", it.skill || it.template);
       hidePop(); input.focus(); return;
     }
     if (popMode === "@") {
+      if (!canAttach()) return;
       attachments.push({ label: it.label, resource: {
         type: "file_mention", uri: it.uri, path: it.path,
         relative_path: it.relative_path, workspace: it.workspace,
@@ -1656,10 +1686,9 @@
     } else if (popMode === "/") {
       if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
         replacePopToken(); hidePop(); input.focus();
-        if (it.action === "goal" && input.value.trim() && !attachments.length) {
-          const objective = input.value.trim(); goalDraft = input.value;
-          appendGoalPrompt(objective); vscode.postMessage({ type: "startGoal", text: objective });
-          input.value = ""; input.style.height = "auto"; scroll();
+        if (it.action === "goal" && input.value.trim()) {
+          const objective = input.value.trim();
+          submitGoal(objective, `${objective} /goal`);
         } else {
           // Management actions operate independently of the draft. Opening a model, skills,
           // MCP, or settings picker must not submit or replace the user's unfinished request.
@@ -1731,6 +1760,7 @@
     for (const it of items) {
       if (it.type && it.type.indexOf("image/") === 0) {
         const file = it.getAsFile(); if (!file) continue;
+        if (!canAttach()) continue;
         if (!SUPPORTED_IMAGE_TYPES.has(String(file.type || "").toLowerCase())) {
           sysLine(`Unsupported pasted image type: ${file.type || "unknown"}.`, true); continue;
         }
@@ -2059,7 +2089,7 @@
       input.focus(); onInput();
     }
     else if (msg.type === "composer_skill") {
-      attachInvocation("skill", String(msg.name || ""));
+      if (!attachInvocation("skill", String(msg.name || ""))) return;
       if (msg.text) {
         input.value += (input.value && !/\s$/.test(input.value) ? " " : "") + String(msg.text);
         input.selectionStart = input.selectionEnd = input.value.length;
@@ -2071,10 +2101,8 @@
     else if (msg.type === "goal_start_state") {
       if (msg.state === "error") {
         setSending(false);
-        if (!input.value && goalDraft) { input.value = goalDraft; onInput(); }
         sysLine(String(msg.error || "DGC could not start the goal."), true);
       }
-      goalDraft = "";
     }
     else if (msg.type === "goal_edit_state") {
       if (msg.state === "saved") closeGoalEditor();
@@ -2093,7 +2121,7 @@
     }
     else if (msg.type === "artifact_stop_state") settleArtifactStop(msg);
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
-      attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
+      if (canAttach()) { attachments.push({ label: msg.label, resource: msg.resource }); renderAtts(); }
     }
     else if (msg.type === "files") {
       files = Array.isArray(msg.files) ? msg.files.filter((file) => file

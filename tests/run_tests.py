@@ -2102,6 +2102,7 @@ def unit_tests(tmp: Path):
         "emit": lambda self, typ, **fields: self.events.append({"type": typ, **fields}),
     })()
     _image_backend = object.__new__(Backend)
+    _image_backend.config = type("ImageConfig", (), {"get": lambda self, key, default=None: default})()
     _image_backend.em = _image_cap; _image_backend._worker = None; _image_backend._queue = []
     _image_starts = []
     _image_backend._start_turn = lambda text, images=None, context=None: (
@@ -6247,7 +6248,10 @@ def test_mcp_protocol():
                         return False
                     os.kill(pid, 0)
                     if sys.platform.startswith("linux"):
-                        return Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+                        # comm is parenthesized and may contain spaces. Both Z (zombie) and X
+                        # (dead) are terminal states; proc_pid_stat(5) also documents legacy x.
+                        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+                        return state not in ("Z", "X", "x")
                     return True
                 except (OSError, IndexError, ProcessLookupError):
                     return False
@@ -6255,13 +6259,23 @@ def test_mcp_protocol():
             alive_before_stop = descendant_alive(child_pid)
             descendant_server.stop()
             deadline = _time.monotonic() + 2
-            while descendant_alive(child_pid) and _time.monotonic() < deadline:
+            alive_after_stop = descendant_alive(child_pid)
+            while alive_after_stop and _time.monotonic() < deadline:
                 _time.sleep(0.01)
+                alive_after_stop = descendant_alive(child_pid)
+            # Preserve the terminal observation instead of sampling the exiting process again
+            # between the wait and assertion (or mistaking a reused PID for this child).
             descendant_reaped = (launched and descendant_proc is not None
                                   and descendant_proc.poll() is not None
-                                  and alive_before_stop and not descendant_alive(child_pid))
+                                  and alive_before_stop and not alive_after_stop)
             descendant_readers_closed = bool(reader_threads) and all(
                 not thread.is_alive() for thread in reader_threads)
+            if not (descendant_reaped and descendant_readers_closed):
+                print("  MCP descendant cleanup diagnostic:", {
+                    "launched": launched, "leader_exited": descendant_proc is not None and descendant_proc.poll() is not None,
+                    "child_pid_recorded": bool(child_pid), "alive_before_stop": alive_before_stop,
+                    "alive_after_stop": alive_after_stop, "reader_count": len(reader_threads),
+                    "readers_closed": descendant_readers_closed})
             # A failing assertion must never strand the hostile fixture on the test host.
             if descendant_proc is not None:
                 try:

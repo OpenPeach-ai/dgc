@@ -788,6 +788,7 @@ class CLI:
                     else:
                         self.ui.info("no standing goal to resume")
                 else:
+                    self.agent._pending_images = None
                     self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
             elif low in ("", "review", "status"):
                 if self.agent.goal:
@@ -796,16 +797,15 @@ class CLI:
                 else:
                     self.ui.info("no standing goal — /goal <objective> to start one")
             elif action:
-                from .goals import parse_start
+                from .goal_inputs import start_terminal_goal
                 try:
-                    objective, budget = parse_start(action)
+                    notices = start_terminal_goal(action, self.agent)
                 except ValueError as exc:
                     self.ui.error(str(exc)); return True
-                if self.agent.set_goal(objective, token_budget=budget, replace=True):
-                    self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
-                    self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
-                else:
-                    self.ui.error(self.agent._last_persist_error or "goal update was not saved")
+                for notice in notices:
+                    self.ui.info(notice)
+                self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+                self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
         elif cmd == "think":
             if not rest:
                 i = THINK_LEVELS.index(cfg.get("thinking", "off"))
@@ -1336,6 +1336,9 @@ class CLI:
                             self.handle_slash("/" + name)
                         continue
                     if name in discover_commands(self.config.project_root):
+                        if re.match(r"(?i)^/goal(?:\s|$)", prefix):
+                            self.handle_slash(line)
+                            continue
                         line = compose_prompt(prefix, templates=[name], catalog=self.agent.skills,
                                               project_root=self.config.project_root)
                 if line.startswith("/"):

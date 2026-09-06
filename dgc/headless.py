@@ -20,6 +20,7 @@ from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
 from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
+from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
@@ -46,13 +47,13 @@ _MAX_MCP_SERVERS = 64
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
-    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
+    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "list_skills", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
-    "prompt",
+    "prompt", "start_goal",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
@@ -180,68 +181,6 @@ def _mcp_url_has_credentials(value: str) -> bool:
 def _request_fields(request_id: str | None) -> dict[str, str]:
     """Attach a correlation ID only when the optional command field was present and valid."""
     return {"request_id": request_id} if request_id else {}
-
-
-def _editor_context_json(value) -> str:
-    """Encode JSON without allowing source text to synthesize our framing delimiter."""
-    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
-
-
-def _format_editor_context(resources) -> str:
-    """Bound and frame typed editor resources as untrusted reference data for the model."""
-    if not isinstance(resources, list):
-        return ""
-    allowed = {"type", "uri", "server", "path", "relative_path", "workspace", "language", "range",
-               "text", "diagnostics"}
-    encoded_items: list[str] = []
-    def bounded(value, depth=0):
-        if depth > 4:
-            return None
-        if isinstance(value, str):
-            return value[:2_000]
-        if isinstance(value, (int, float, bool)) or value is None:
-            return value
-        if isinstance(value, list):
-            return [bounded(part, depth + 1) for part in value[:50]]
-        if isinstance(value, dict):
-            return {str(k)[:80]: bounded(v, depth + 1) for k, v in list(value.items())[:50]}
-        return None
-    for item in resources[:64]:
-        if not isinstance(item, dict):
-            continue
-        resource = {}
-        for key in allowed:
-            value = item.get(key)
-            if value is None:
-                continue
-            if key == "diagnostics" and isinstance(value, list):
-                value = bounded(value)
-            elif isinstance(value, str):
-                value = value[:64_000 if key == "text" and item.get("type") == "mcp_context" else 16_000]
-            elif isinstance(value, (dict, list, int, float, bool)):
-                value = bounded(value)
-            else:
-                continue
-            resource[key] = value
-        encoded = _editor_context_json(resource)
-        # Include the list brackets and separators in the actual wire-size bound.
-        candidate_size = 2 + sum(len(part.encode("utf-8")) for part in encoded_items) \
-            + len(encoded_items) + len(encoded.encode("utf-8"))
-        if candidate_size > _EDITOR_CONTEXT_LIMIT:
-            break
-        encoded_items.append(encoded)
-    if not encoded_items:
-        return ""
-    payload = "[" + ",".join(encoded_items) + "]"
-    return ("<editor-context-json trust=\"untrusted-reference-data\">\n" + payload
-            + "\n</editor-context-json>\n\n")
-
-
-def _strip_editor_context(text: str) -> str:
-    if text.startswith("<editor-context-json ") and "</editor-context-json>\n\n" in text:
-        return text.split("</editor-context-json>\n\n", 1)[1]
-    return text
 
 
 def _prompt_thread_title(text: str) -> str:
@@ -473,7 +412,8 @@ class Backend:
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
-                          "mcp_context": True, "mcp_management": True, "history_snapshot": True},
+                          "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          "goal_inputs": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1219,7 +1159,32 @@ class Backend:
                          **_request_fields(request_id))
             return
 
-        if t == "prompt":
+        if t == "start_goal":
+            # Validate and persist the whole prepared request while no other foreground work can
+            # take the turn slot. A rejected selection must not replace the standing goal.
+            with self._turn_state_lock():
+                if self._busy():
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="Finish or stop the current turn before starting a goal.",
+                                 **_request_fields(request_id))
+                    return
+                text = cmd["text"].strip()
+                inputs = {key: cmd[key] for key in ("skills", "templates", "images", "context") if key in cmd}
+                if not text or not self.agent.set_goal(text, replace=True, token_budget=cmd.get("token_budget"), inputs=inputs):
+                    self.em.emit("command_rejected", command=t, reason="invalid_goal",
+                                 message=self.agent._last_persist_error or "Enter a goal objective.",
+                                 **_request_fields(request_id))
+                    return
+                state, _ = self._start_turn(text)
+                if state != "started":
+                    self.agent.update_goal("paused", reason="The first turn could not start")
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="The goal was saved as paused because its first turn could not start.",
+                                 **_request_fields(request_id))
+                    return
+                self.em.emit("prompt_accepted", request_id=request_id, state=state)
+
+        elif t == "prompt":
             text = str(cmd.get("text", ""))
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
@@ -1243,6 +1208,11 @@ class Backend:
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_images",
                              message=f"prompt images rejected: {exc}", **_request_fields(request_id))
+                return
+            if images and self.config.get("subscription_engine", ""):
+                self.em.emit("command_rejected", command=t, reason="unsupported_images",
+                             message="Subscription CLI delegation does not support DGC image attachments. Use a native vision model.",
+                             **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
             if isinstance(context, list) and any(isinstance(item, dict) and item.get("type") == "mcp_context" for item in context):

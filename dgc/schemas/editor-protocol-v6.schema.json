@@ -2906,6 +2906,43 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "start_goal"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "token_budget": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "skills": {
+              "type": "array"
+            },
+            "templates": {
+              "type": "array"
+            },
+            "images": {
+              "type": "array"
+            },
+            "context": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "mcp_command"
             },
             "request_id": {

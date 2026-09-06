@@ -348,7 +348,7 @@ def explicit_skill_names(skills: dict[str, Skill], text: str) -> list[str]:
     """Recognize exact `$name` mentions in user prose, excluding code and editor attachments."""
     source = str(text or "")
     editor_end = "</editor-context-json>\n\n"
-    if source.startswith("<editor-context-json ") and editor_end in source:
+    while source.startswith("<editor-context-json ") and editor_end in source:
         source = source.split(editor_end, 1)[1]
     selection_line, separator, _rest = source.partition("\n\n")
     if separator and re.fullmatch(r"\$[a-z0-9][a-z0-9._-]{0,63}(?: \$[a-z0-9][a-z0-9._-]{0,63})*", selection_line):
@@ -397,7 +397,7 @@ def matching_skill_names(skills: dict[str, Skill], text: str) -> set[str]:
     """Select prompt-visible skills from explicit names and narrow task-class signals."""
     source = str(text or "")
     editor_end = "</editor-context-json>\n\n"
-    if source.startswith("<editor-context-json ") and editor_end in source:
+    while source.startswith("<editor-context-json ") and editor_end in source:
         source = source.split(editor_end, 1)[1]
     if len(source) > 40_000:
         source = source[:20_000] + "\n" + source[-20_000:]
