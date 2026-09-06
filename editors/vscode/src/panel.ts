@@ -221,6 +221,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private slashAliases = new Map<string, string>();
   private composerSelections = false;
   private skillManagement = false;
+  private mcpContext = false;
+  private mcpManagement = false;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private confirmedTurnActive = false;
@@ -864,6 +866,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
         this.composerSelections = ev.capabilities?.composer_selections === true;
         this.skillManagement = ev.capabilities?.skill_management === true;
+        this.mcpContext = ev.capabilities?.mcp_context === true;
+        this.mcpManagement = ev.capabilities?.mcp_management === true;
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = "";
@@ -1369,6 +1373,26 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "mcpReload":
         await this.reloadMcpServers();
         break;
+      case "mcpToggle":
+        if (this.mcpManagement && typeof msg.enabled === "boolean") {
+          await this.slashText(`/mcp ${msg.enabled ? "enable" : "disable"} ${JSON.stringify(String(msg.name || ""))}`);
+        }
+        break;
+      case "mcpReconnect":
+        if (this.mcpManagement) {
+          await this.slashText(`/mcp reconnect ${JSON.stringify(String(msg.name || ""))}`);
+        }
+        break;
+      case "mcpContextList":
+        if (this.mcpContext) {
+          await this.requestMcpContext(be, msg, true);
+        }
+        break;
+      case "mcpContextGet":
+        if (this.mcpContext) {
+          await this.requestMcpContext(be, msg, false);
+        }
+        break;
       case "permissionAdd":
         be.send({ type: "add_permission_rule", request_id: this.nextRequestId("permission-add"),
                   action: msg.action, rule: String(msg.rule || "") });
@@ -1595,10 +1619,40 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       runtime: { ...common, args: runtimeArgs, env }, persisted: { ...common, args: baseArgs },
     };
     if (setup) { return be.sendSetup(command); }
+    if (this.mcpManagement) {
+      command.interactive = true;
+      this.post({ type: "mcp_command_started", requestId: command.request_id });
+      try {
+        const event = await be.request(command, "mcp_servers", 180000);
+        this.post({ type: "event", event: { type: "mcp_command_result", request_id: command.request_id,
+          output: "", ...((event as any).error ? { error: String((event as any).error) } : {}) } });
+        if ((event as any).error) { throw new Error(String((event as any).error)); }
+      } catch (error) {
+        this.post({ type: "event", event: { type: "mcp_command_result", request_id: command.request_id, output: "",
+          error: error instanceof Error ? error.message : "MCP connection failed" } });
+        throw error;
+      }
+      return true;
+    }
     if (!waitForAck) { return be.send(command); }
-    const event = await be.request(command, "mcp_servers", 10000);
+    const event = await be.request(command, "mcp_servers", this.mcpManagement ? 180000 : 15000);
     if ((event as any).error) { throw new Error(String((event as any).error)); }
     return true;
+  }
+
+  private async requestMcpContext(be: DgcBackend, msg: any, listing: boolean): Promise<void> {
+    const requestId = String(msg.requestId || this.nextRequestId("mcp-context"));
+    const event = listing ? "mcp_context_catalog" : "mcp_context";
+    const fields = { request_id: requestId, server: String(msg.server || ""), kind: String(msg.kind || "") };
+    try {
+      await be.request(listing
+        ? { type: "list_mcp_context", ...fields }
+        : { type: "get_mcp_context", ...fields, identifier: String(msg.identifier || ""), arguments: msg.arguments || {} },
+        event, listing ? 30000 : 180000);
+    } catch (error) {
+      this.post({ type: "event", event: { type: event, ...fields, items: [], text: "", omitted: [],
+        identifier: String(msg.identifier || ""), error: error instanceof Error ? error.message : "MCP request failed" } });
+    }
   }
 
   private async saveMcpServer(values: any): Promise<void> {
@@ -1818,6 +1872,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async reloadMcpServers(): Promise<void> {
+    if (this.mcpManagement) {
+      await this.slashText("/mcp reconnect");
+      return;
+    }
     const be = this.ensureBackend();
     be.send({ type: "reload_mcp_servers", request_id: this.nextRequestId("mcp-reload") });
     for (const item of this.managedMcpServers()) { await this.sendManagedMcp(be, item); }
@@ -1888,6 +1946,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const typedName = match[1].toLowerCase(), rest = (match[2] || "").trim();
     const name = this.slashAliases.get(typedName) || typedName;
     const be = this.ensureBackend();
+    if (name === "mcp" && rest) {
+      if (!this.mcpManagement) {
+        this.post({ type: "event", event: { type: "error", message: "Update the DGC CLI to use MCP commands in the editor." } });
+        return;
+      }
+      const requestId = this.nextRequestId("mcp-command");
+      this.post({ type: "mcp_command_started", requestId });
+      try {
+        await be.request({ type: "mcp_command", request_id: requestId, arguments: rest }, "mcp_command_result", 180000);
+      } catch (error) {
+        this.post({ type: "event", event: { type: "mcp_command_result", request_id: requestId, output: "",
+          error: error instanceof Error ? error.message : "MCP command failed" } });
+      }
+      return;
+    }
     if (name === "goal") {
       const low = rest.toLowerCase();
       if (!rest || ["review", "status"].includes(low)) {

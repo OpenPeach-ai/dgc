@@ -898,9 +898,17 @@ class CLI:
             except (OSError, ValueError) as exc:
                 self.ui.error(str(exc))
         elif cmd == "mcp":
-            self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
-            self.console.print(terminal_safe_text(self.agent.mcp.summary()), markup=False,
-                               highlight=False)
+            from .mcp_management import manage_mcp
+            from .mcp_context import stage_context
+            try:
+                self.agent.cancelled.clear()
+                result = manage_mcp(cfg, self.agent.mcp, rest, agent=self.agent)
+                if isinstance(result, dict):
+                    stage_context(self.agent, result)
+                    result = f"Attached {result['server']} · {result['identifier']} to the next prompt. /mcp context lists snapshots; /mcp clear-context removes them."
+                self.console.print(terminal_safe_text(redact_text(result, secret_values(cfg))), markup=False, highlight=False)
+            except (OSError, ValueError) as exc:
+                self.ui.error(redact_text(str(exc), secret_values(cfg)))
         elif cmd == "hooks":
             from .hooks import hook_catalog
             catalog = hook_catalog(cfg)
@@ -1760,6 +1768,7 @@ def run_help() -> None:
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills             list, create, install and manage skill packages")
+    c.print("  dgc mcp                manage servers, resources, prompts and connections")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
@@ -1768,7 +1777,33 @@ def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in (
             "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
-            "export-training", "skills"):
+            "export-training", "skills", "mcp"):
+        if raw_argv[0] == "mcp":
+            from .mcp_management import manage_mcp, USAGE
+            if any(value in ("--help", "-h") for value in raw_argv[1:]):
+                print("dgc " + USAGE.lstrip("/")); return 0
+            cfg = Config()
+            from .mcp import MCPManager
+            ui = UI()
+            manager = MCPManager(cfg.project_root, disabled_names=cfg.get("disabled_mcp_servers", []),
+                                 client_capabilities=Agent._mcp_client_capabilities(ui))
+            agent = Agent(cfg, ui, mcp=manager)
+            try:
+                if len(raw_argv) >= 3 and raw_argv[1] in ("resources", "templates", "prompts", "read", "prompt"):
+                    runtime = cfg.mcp_runtime_servers()
+                    name = raw_argv[2]
+                    if name not in runtime:
+                        raise ValueError("Unknown MCP server")
+                    manager.connect_all({name: runtime[name]}, cancel=agent.cancelled, input_handler=agent._handle_mcp_input)
+                result = manage_mcp(cfg, agent.mcp, shlex.join(raw_argv[1:]), agent=agent)
+                output = json.dumps(result, ensure_ascii=False, indent=2) if isinstance(result, dict) else result
+                print(terminal_safe_text(redact_text(output, secret_values(cfg))))
+                return 0
+            except (OSError, ValueError) as exc:
+                print(terminal_safe_text(redact_text(str(exc), secret_values(cfg))), file=sys.stderr)
+                return 1
+            finally:
+                agent.mcp.stop_all()
         if raw_argv[0] == "skills":
             from .skills import manage_skills
             if any(value in ("--help", "-h") for value in raw_argv[1:]):

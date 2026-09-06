@@ -114,7 +114,7 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("hooks", "inspect configured lifecycle hooks", _TCE, "hooks",
                 aliases=("hook",)),
     CommandSpec("mcp", "inspect and manage MCP servers", frozenset({"tui", "classic", "editor"}),
-                "mcp"),
+                "mcp", True, usage="mcp [ACTION…]"),
     CommandSpec("agents", "sub-agent configuration", frozenset({"tui", "classic", "editor"}),
                 "subagent"),
     CommandSpec("skills", "browse and manage installed skills", _TCE, "skills", True,

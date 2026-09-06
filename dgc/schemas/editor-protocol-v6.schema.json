@@ -1878,6 +1878,123 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "mcp_context_catalog"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "server",
+            "kind",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mcp_context"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "identifier": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "omitted": {
+              "type": "array"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "server",
+            "kind",
+            "identifier",
+            "text",
+            "omitted"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mcp_command_result"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            },
+            "context": {
+              "type": "object"
+            },
+            "catalog": {
+              "type": "object"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "request_id",
+            "output"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "handoff"
             },
             "seq": {
@@ -2746,6 +2863,125 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "list_mcp_context"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "server",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "mcp_command"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "arguments": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "arguments"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_mcp_context"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "server": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "identifier": {
+              "type": "string"
+            },
+            "arguments": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "server",
+            "kind",
+            "identifier"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "set_mcp_enabled"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name",
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reconnect_mcp_server"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "list_docs"
             },
             "request_id": {
@@ -2811,6 +3047,9 @@
             },
             "persisted": {
               "type": "object"
+            },
+            "interactive": {
+              "type": "boolean"
             }
           },
           "required": [

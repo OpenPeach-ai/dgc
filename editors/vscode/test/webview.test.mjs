@@ -216,6 +216,62 @@ test("skill library honors enablement metadata and retains the draft through man
   assert.deepEqual(errors, []);
 });
 
+test("MCP context can be browsed, previewed and attached without replacing the draft", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { mcp_context: true } } });
+  const input = doc.getElementById("input"); input.value = "Use this resource to check the API";
+  send({ type: "surface_open", surface: "mcp" });
+  send({ type: "event", event: { type: "mcp_servers", items: [{ name: "fixture", state: "connected" }] } });
+  doc.querySelector('[data-mcp-browse="resources"]').click();
+  const listing = posted.at(-1);
+  assert.equal(listing.type, "mcpContextList");
+  send({ type: "event", event: { type: "mcp_context_catalog", request_id: listing.requestId,
+    server: "fixture", kind: "resources", items: [{ name: "API spec", uri: "fixture://api" }] } });
+  doc.querySelector("[data-mcp-context]").click();
+  const get = posted.at(-1);
+  assert.equal(get.type, "mcpContextGet");
+  assert.equal(doc.getElementById("surface").hidden, true, "permission cards stay visible during retrieval");
+  send({ type: "event", event: { type: "mcp_context", request_id: get.requestId, server: "fixture",
+    kind: "resources", identifier: "fixture://api", text: "API **reference** <script>unsafe()</script>", omitted: [] } });
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  doc.getElementById("surface-primary").click();
+  assert.equal(input.value, "Use this resource to check the API");
+  assert.match(doc.getElementById("attachments").textContent, /fixture.*api/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const prompt = posted.findLast((message) => message.type === "prompt");
+  assert.equal(prompt.context[0].type, "mcp_context");
+  assert.equal(prompt.context[0].server, "fixture");
+  assert.equal(prompt.context[0].uri, "fixture://api");
+  assert.deepEqual(errors, []);
+});
+
+test("MCP command errors and cancellation settle the picker while preserving the draft", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  const input = doc.getElementById("input"); input.value = "Existing draft";
+  send({ type: "event", event: { type: "ready", capabilities: { mcp_context: true, mcp_management: true } } });
+  send({ type: "mcp_command_started", requestId: "command-1" });
+  assert.equal(doc.getElementById("surface").hidden, false);
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "command-1", output: "", error: "Disconnected fixture" } });
+  assert.match(doc.getElementById("surface").textContent, /Disconnected fixture/);
+  assert.equal(input.value, "Existing draft");
+  send({ type: "mcp_command_started", requestId: "command-2" });
+  doc.getElementById("surface-primary").click();
+  assert.equal(posted.at(-1).type, "cancel");
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "command-2", context: {
+    server: "fixture", kind: "resources", identifier: "fixture://late", text: "late result", omitted: [] } } });
+  assert.doesNotMatch(doc.getElementById("surface").textContent, /late result/);
+  for (const viaEscape of [true, false]) {
+    send({ type: "mcp_command_started", requestId: "close-command" });
+    if (viaEscape) doc.getElementById("surface-search").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    else doc.getElementById("surface-close").click();
+    assert.equal(posted.at(-1).type, "cancel");
+    send({ type: "event", event: { type: "mcp_command_result", request_id: "close-command", output: "late" } });
+    assert.equal(doc.getElementById("surface").hidden, true);
+  }
+  assert.equal(input.value, "Existing draft");
+  assert.deepEqual(errors, []);
+});
+
 test("restored history pages and tool disclosure preserve live content and safe output", () => {
   const { dom, doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
