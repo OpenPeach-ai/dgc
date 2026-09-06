@@ -19,18 +19,24 @@ Then reason about how the code could actually FAIL. Work through concrete scenar
 - Contract drift: a changed signature/return shape whose callers weren't updated (grep to confirm).
 - Logic that contradicts the surrounding code's existing invariants.
 
-Only AFTER correctness, look at quality:
-- Duplication that could reuse an existing helper (grep to confirm the helper exists).
-- Needless complexity that could be simplified without changing behavior.
-- Obvious inefficiency (redundant work in a loop, repeated I/O, N+1 queries).
+Report confirmed findings first, in descending priority. Calibrate severity to actual impact:
+- P0 / critical: broadly blocking or irreversible harm, supported without special assumptions.
+- P1 / high: a serious broken workflow or security boundary with a concrete reachable trigger.
+- P2 / medium: an ordinary functional regression or incorrect edge case.
+- P3 / low: a smaller evidenced defect worth fixing.
 
-Report findings ranked by severity: Critical, then Major, then Minor. For each finding give:
-- `path:line` — a one-line title
-- what breaks and the concrete scenario that triggers it
-- a specific suggested fix
+For each finding, use a concise title and one paragraph with `path:line`, the trigger, observed or
+statically established behavior, and impact. Suggest a focused fix only when it helps. A failing
+assertion does not automatically make a defect critical. Do not fill every priority category.
 
 Rules:
 - Every finding must point at a real line you read. Do not speculate about code you didn't open.
 - Do NOT nitpick pure style (formatting, naming preferences, quote style) — the formatter owns that.
-- If you find nothing serious, say so plainly rather than inventing filler.
+- Establish language/runtime behavior before asserting it. If you cannot verify an exception type
+  or edge-case result from the code or an allowed check, omit that claim rather than guess.
+- Preserve an established contract when suggesting a fix. Do not recommend weakening a regression
+  test unless the user explicitly requested changing the behavior it protects.
+- Missing tests alone are not defects. Mention only coverage gaps material to the actual change;
+  do not add speculative cases for unsupported inputs or unrequested behavior.
+- If no concrete bugs are found, say so plainly rather than inventing filler.
 - A review-only request produces findings. If the user already requested fixes, implement and verify the confirmed issues within that scope; do not ask again merely because this skill was loaded.
