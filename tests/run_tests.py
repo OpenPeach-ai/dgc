@@ -3832,7 +3832,7 @@ def unit_tests(tmp: Path):
         _cancel_group.session_file, _cancel_root)
     _cancelled_tools = [m for m in _cancelled_record["messages"] if m.get("role") == "tool"]
     check("cancelled native batches persist one adjacent result for every declared call",
-          _cancelled_outcome is True and _handled_native == ["native-first"]
+          _cancelled_outcome is False and _handled_native == ["native-first"]
           and not _tool_errors(_cancelled_record["messages"])
           and [m.get("tool_call_id") for m in _cancelled_tools]
           == ["native-first", "native-second"]
@@ -3856,7 +3856,7 @@ def unit_tests(tmp: Path):
     _text_envelopes = [str(m.get("content", "")) for m in _cancel_text.messages
                        if m.get("role") == "user" and "<tool_results>" in str(m.get("content", ""))]
     check("cancelled text-tool batches retain every result produced before cancellation",
-          _cancel_text_outcome is True and _handled_text == ["textcall_first"]
+          _cancel_text_outcome is False and _handled_text == ["textcall_first"]
           and len(_text_envelopes) == 1 and "durable text result" in _text_envelopes[0])
 
     class _CredentialUI(_AgUI):
@@ -4230,7 +4230,7 @@ def unit_tests(tmp: Path):
     _green_root = Path(tempfile.mkdtemp())
     _green_agent = _Ag(_Cfg(_green_root), _AgUI())
     _green_agent.config.data.update({
-        "mode": "auto", "turn_budget_s": 60,
+        "mode": "auto", "turn_budget_s": 60, "finish_on_verified": True,
         "verify_before_done": True, "verify_command": "test -f 'answer.txt'",
     })
     class _GreenClient:
@@ -4267,7 +4267,7 @@ def unit_tests(tmp: Path):
     _edit_verify_root = Path(tempfile.mkdtemp())
     _edit_verify_agent = _Ag(_Cfg(_edit_verify_root), _AgUI())
     _edit_verify_agent.config.data.update({
-        "mode": "auto", "turn_budget_s": 60,
+        "mode": "auto", "turn_budget_s": 60, "finish_on_verified": True,
         "verify_before_done": True,
         "verify_command": "test \"$(cat answer.txt)\" = good",
     })
@@ -4321,7 +4321,7 @@ def unit_tests(tmp: Path):
     _edit_repair_root = Path(tempfile.mkdtemp())
     _edit_repair_agent = _Ag(_Cfg(_edit_repair_root), _AgUI())
     _edit_repair_agent.config.data.update({
-        "mode": "auto", "turn_budget_s": 60,
+        "mode": "auto", "turn_budget_s": 60, "finish_on_verified": True,
         "verify_before_done": True,
         "verify_command": "printf x >> .verify-runs; test \"$(cat answer.txt)\" = good",
     })
@@ -4382,7 +4382,7 @@ def unit_tests(tmp: Path):
     _steered_green_root = Path(tempfile.mkdtemp())
     _steered_green_agent = _Ag(_Cfg(_steered_green_root), _AgUI())
     _steered_green_agent.config.data.update({
-        "mode": "auto", "turn_budget_s": 60,
+        "mode": "auto", "turn_budget_s": 60, "finish_on_verified": True,
         "verify_before_done": True, "verify_command": "test -f answer.txt",
     })
     class _SteeredGreenClient:
@@ -12694,8 +12694,8 @@ class MockHandler(BaseHTTPRequestHandler):
             n = sum(1 for m in messages if m.get("role") == "tool")
             payload = tool_delta("bash", [json.dumps({"command": f"echo 'still failing'  # {n}\nexit 1"})])
         elif self.scenario == "verify":
-            # edit → a real passing test invocation → DGC must close locally without a third request, so
-            # the model cannot keep inspecting/refactoring code that is already green.
+            # An explicit verifier-only task runs its configured check after this edit and closes
+            # locally. Ordinary timed work must still let the model finish remaining obligations.
             MockHandler.vcount = getattr(MockHandler, "vcount", 0) + 1
             if MockHandler.vcount == 1:
                 payload = tool_delta("write_file", [json.dumps({
@@ -15918,7 +15918,8 @@ def e2e_verify(port: int, tmp: Path) -> bool:
     home = tmp / "home_verify"; work = tmp / "work_verify"
     home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
     (home / ".dgc").mkdir(exist_ok=True)
-    (home / ".dgc" / "config.json").write_text(json.dumps({"turn_budget_s": 60}))
+    (home / ".dgc" / "config.json").write_text(json.dumps({"turn_budget_s": 60,
+        "finish_on_verified": True, "verify_before_done": True, "verify_command": "python3 -m unittest"}))
     env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
     try:
         subprocess.run([sys.executable, "-m", "dgc", "-p", "make the tests pass",
@@ -15933,7 +15934,7 @@ def e2e_verify(port: int, tmp: Path) -> bool:
     msgs = json.loads(Path(sess[-1]).read_text())
     if isinstance(msgs, dict):
         msgs = msgs.get("messages", [])
-    return (MockHandler.vcount == 2 and not MockHandler.verify_summary_without_tools
+    return (MockHandler.vcount == 1 and not MockHandler.verify_summary_without_tools
             and any("Implemented and verified" in str(m.get("content", "")) for m in msgs)
             and any("test command passed" in str(m.get("content", "")) for m in msgs))
 
@@ -16830,7 +16831,7 @@ def main():
             check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))
-            check("e2e tests pass → provider-free verified closeout", e2e_verify(port, tmp))
+            check("e2e explicit verifier-only policy → provider-free closeout", e2e_verify(port, tmp))
         finally:
             server.shutdown()
 

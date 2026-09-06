@@ -315,6 +315,7 @@ DEFAULTS: dict = {
     "verify_before_done": False,                # E: after edits, run verify_command before ending the turn;
     "verify_command": "",                       #   timed auto runs it after edit-only batches so red evidence
                                                 #   skips a model round. e.g. "npm test" / "pytest -q"
+    "finish_on_verified": False,                 # opt-in: the configured verifier defines the whole timed task
     "autonomous_gate": "",                      # "" = OFF. A check command that must exit 0 before the model may
                                                 #   stop; a nonzero exit feeds its output back and continues.
     "autonomous_max_turns": 30,                 # bound on failed autonomous_gate retries before the turn stops
