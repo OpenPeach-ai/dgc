@@ -121,11 +121,17 @@ async function run() {
   const migratedModelCount = modelCommands().filter((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret).length;
   const migratedRootCount = rootsCommands().length;
+  const beforeResumeCount = backendCommands(backendLogPath).filter(command => command.type === "resume_session").length;
   await vscode.commands.executeCommand("dgc.restart");
   await waitFor(() => rootsCommands().length > migratedRootCount);
   await waitFor(() => modelCommands().filter((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret).length
       > migratedModelCount);
+  await waitFor(() => backendCommands(backendLogPath).filter(command => command.type === "resume_session").length > beforeResumeCount);
+  const restored = backendCommands(backendLogPath).filter(command => command.type === "resume_session").at(-1);
+  assert.match(restored.path, /^host-\d+\.json$/,
+    "a restarted host must restore its saved chat after native settings and root setup");
+  assert.equal(typeof restored.request_id, "string");
 
   // Endpoint binding is part of the credential boundary. Moving to another host must send no
   // credential there, but it must not let a workspace/config override erase the user-owned key.

@@ -49,6 +49,7 @@ let standingGoal = "";
 let standingGoalStatus = "none";
 let activeGoalTurn = false;
 let goalPromptCount = 0;
+let currentSession = "host-" + process.pid;
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
 const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
@@ -58,13 +59,19 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
-  capabilities: { correlated_state_requests: true },
+  capabilities: { correlated_state_requests: true, history_snapshot: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  if (cmd.type === "resume_session") {
+    currentSession = cmd.path.replace(/\\.json$/, "");
+    send({ type: "session", kind: "resumed", message_count: 0, session_id: currentSession, request_id: cmd.request_id });
+    send({ type: "history", items: [] });
+  }
+  if (cmd.type === "get_history") send({ type: "history", items: [], request_id: cmd.request_id });
   if (cmd.type === "set_workspace_roots") {
     rootsAcknowledged = false;
     send({ type: "workspace_roots", request_id: "stale-workspace-request", roots: [] });

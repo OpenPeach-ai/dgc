@@ -2252,6 +2252,9 @@
             },
             "items": {
               "type": "array"
+            },
+            "request_id": {
+              "type": "string"
             }
           },
           "required": [
@@ -2880,6 +2883,22 @@
             "request_id",
             "server",
             "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_history"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
           ],
           "additionalProperties": false
         },

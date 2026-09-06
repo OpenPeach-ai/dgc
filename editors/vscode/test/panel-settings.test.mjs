@@ -172,6 +172,82 @@ function requestTypes(timeline) {
     .map((item) => item.slice("request:".length));
 }
 
+function restorationHarness() {
+  const saved = new Map(), posted = [], calls = [];
+  let resolve, reject, released = 0, disposed = 0;
+  const provider = new DgcViewProvider({ subscriptions: [], globalState: { get() {} },
+    workspaceState: { get: key => saved.get(key), async update(key, value) { saved.set(key, value); } },
+  });
+  provider.post = message => posted.push(message);
+  const backend = { ready: true,
+    request(command, response, timeout, setup) {
+      calls.push({ command, response, timeout, setup });
+      return new Promise((yes, no) => { resolve = yes; reject = no; });
+    },
+    completeHandshake() { released++; }, dispose() { disposed++; },
+  };
+  Object.assign(provider, { backend, initializingBackend: backend, nativeSettingsReady: true,
+    workspaceRootsDirty: false, currentSessionId: "new-chat", sessionRestoreCandidate: "saved-chat",
+    correlatedStateRequests: true });
+  return { provider, backend, saved, posted, calls, released: () => released, disposed: () => disposed,
+    complete() {
+      const event = { type: "session", kind: "resumed", session_id: "saved-chat", name: "Saved",
+        message_count: 1, request_id: calls[0].command.request_id };
+      provider.onEvent(event); resolve(event);
+    }, reject: message => reject(new Error(message)),
+  };
+}
+
+test("session restoration keeps setup closed through crossed replies and changing root grants", async () => {
+  const h = restorationHarness();
+  h.provider.workspaceRootsInFlight = { revision: 1, requestId: "roots-1" };
+  h.provider.maybeCompleteHandshake(h.backend);
+  assert.equal(h.calls.length, 0);
+  h.provider.workspaceRootsInFlight = undefined;
+  h.provider.maybeCompleteHandshake(h.backend);
+  h.provider.maybeCompleteHandshake(h.backend);
+  assert.equal(h.calls.length, 1, "only one restore may run during the handshake");
+  assert.equal(h.calls[0].setup, true);
+  assert.equal(h.calls[0].command.path, "saved-chat.json");
+  h.provider.onEvent({ type: "session", kind: "resumed", session_id: "wrong", request_id: "stale" });
+  assert.equal(h.provider.currentSessionId, "new-chat");
+  assert.equal(h.posted.some(message => message.event?.session_id === "wrong"), false);
+  h.provider.workspaceRootsInFlight = { revision: 2, requestId: "roots-2" };
+  h.complete();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.released(), 0, "restoration cannot bypass a newer root grant");
+  h.provider.workspaceRootsInFlight = undefined;
+  h.provider.maybeCompleteHandshake(h.backend);
+  assert.equal(h.released(), 1);
+  assert.equal(h.provider.sessionReady, true);
+  assert.equal(h.saved.get("dgc.activeSession.v1").id, "saved-chat");
+  assert.ok(h.posted.some(message => message.type === "session_ready" && message.sessionId === "saved-chat"));
+});
+
+test("missing saved chats adopt the draft, while timed-out or stale restores release no prompts", async () => {
+  const missing = restorationHarness();
+  missing.provider.maybeCompleteHandshake(missing.backend);
+  missing.reject("no such session");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(missing.released(), 1);
+  assert.ok(missing.posted.some(message => message.type === "session_ready"
+    && message.sessionId === "new-chat" && message.adoptDraftFrom === "saved-chat"));
+  const timeout = restorationHarness();
+  timeout.provider.maybeCompleteHandshake(timeout.backend);
+  timeout.reject("DGC timed out waiting for session");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(timeout.released(), 0);
+  assert.equal(timeout.disposed(), 1);
+  assert.equal(timeout.saved.size, 0);
+  const stale = restorationHarness();
+  stale.provider.maybeCompleteHandshake(stale.backend);
+  stale.provider.sessionHandshakeGeneration++;
+  stale.reject("DGC backend exited while waiting for session");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(stale.released(), 0);
+  assert.equal(stale.disposed(), 0, "an old callback cannot dispose the new backend generation");
+});
+
 function secretMutations(timeline) {
   return timeline.filter((item) => item.startsWith("secret:store:")
     || item.startsWith("secret:delete:"));

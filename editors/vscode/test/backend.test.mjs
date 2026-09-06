@@ -78,6 +78,39 @@ function echoedCommand(event) {
   return JSON.parse(event.message.slice(5));
 }
 
+test("a correlated session restore crosses setup while queued prompts wait for its exact reply", async () => {
+  const command = executable("restore-handshake-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+ready.capabilities.correlated_state_requests = true;
+send(ready);
+let restored = false;
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  if (cmd.type === "resume_session") {
+    send({ type: "session", kind: "resumed", session_id: "wrong", message_count: 0, request_id: "stale" });
+    setTimeout(() => {
+      restored = true;
+      send({ type: "session", kind: "resumed", session_id: "saved", message_count: 0, request_id: cmd.request_id });
+    }, 70);
+  }
+  if (cmd.type === "prompt") send({ type: "info", message: restored ? "restored:" + cmd.text : "WRONG SESSION" });
+});`);
+  const backend = new DgcBackend(scratch, command);
+  let restore;
+  backend.on("ready", () => {
+    restore = backend.request({ type: "resume_session", path: "saved.json", request_id: "restore-1" }, "session", 1000, true);
+    restore.then(() => backend.completeHandshake());
+  });
+  const response = waitFor(backend, "info");
+  backend.send({ type: "prompt", text: "queued" });
+  try {
+    assert.equal((await response).message, "restored:queued");
+    assert.equal((await restore).session_id, "saved");
+  } finally { backend.dispose(); }
+});
+
 test("backend gates startup, survives error events, and restarts on the next command", async () => {
   const backend = new DgcBackend(scratch, echoBackend("healthy-backend"));
   const echoes = [];

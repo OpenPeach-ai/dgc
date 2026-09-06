@@ -266,21 +266,170 @@
   let promptSequence = 0;
   const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const pendingPrompts = new Map();
-  function rejectPrompt(id) {
+  const draftScope = document.documentElement.dataset.draftScope || "";
+  const draftEntries = new Map();
+  const pendingImages = new Set();
+  let draftSession = "unbound", sessionReady = !draftScope, draftTimer = null, restoringDraft = false;
+  let draftWarning = false, unconfirmedDrafts = [];
+  const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
+  function cleanDraft(value) {
+    if (!value || typeof value !== "object" || typeof value.text !== "string" || value.text.length > 1_000_000
+        || !Array.isArray(value.attachments) || value.attachments.length > 64) return null;
+    try {
+      if (JSON.stringify(value).length > 4 * 1024 * 1024) return null;
+      const items = [];
+      for (const source of value.attachments) {
+        if (!source || typeof source !== "object" || typeof source.label !== "string" || source.label.length > 8192) return null;
+        const item = { label: source.label };
+        if (source.skill || source.template) {
+          const key = source.skill ? "skill" : "template";
+          if (typeof source[key] !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(source[key])) return null;
+          item[key] = source[key];
+        } else if (source.img) {
+          if (typeof source.data !== "string" || !/^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/.test(source.data)) return null;
+          item.img = true; item.data = source.data; item.bytes = Math.max(0, Number(source.bytes) || 0);
+        } else if (source.resource && typeof source.resource === "object") {
+          item.resource = JSON.parse(JSON.stringify(source.resource));
+        } else return null;
+        items.push(item);
+      }
+      const text = value.text;
+      const start = Math.max(0, Math.min(text.length, Number(value.start) || 0));
+      const end = Math.max(start, Math.min(text.length, Number(value.end) || start));
+      return { text, attachments: items, start, end, updated: Number(value.updated) || Date.now() };
+    } catch { return null; }
+  }
+  function captureDraft() {
+    return { text: input.value, attachments: [...attachments], start: input.selectionStart,
+      end: input.selectionEnd, updated: Date.now() };
+  }
+  function persistDraft() {
+    if (restoringDraft) return;
+    clearTimeout(draftTimer); draftTimer = null;
+    const current = captureDraft();
+    if (current.text || current.attachments.length) draftEntries.set(draftSession, current);
+    else draftEntries.delete(draftSession);
+    const entries = [], pending = [];
+    let bytes = 0, omitted = false;
+    for (const row of unconfirmedDrafts) {
+      const draft = cleanDraft(row.draft);
+      const clean = draft && { ...row, draft };
+      const size = clean ? new TextEncoder().encode(JSON.stringify(clean)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!clean || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
+      pending.push(clean); bytes += size;
+    }
+    const ordered = [...draftEntries].sort((a, b) => (b[0] === draftSession) - (a[0] === draftSession)
+      || b[1].updated - a[1].updated);
+    for (const [session, draft] of ordered) {
+      const clean = cleanDraft(draft);
+      const size = clean ? new TextEncoder().encode(JSON.stringify(clean)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!clean || entries.length >= 32 || bytes + size > DRAFT_STORAGE_BYTES) { omitted = true; continue; }
+      entries.push([session, clean]); bytes += size;
+    }
+    for (const [id, request] of pendingPrompts) {
+      const draft = cleanDraft({ text: request.text, attachments: request.attachments, start: 0, end: request.text.length });
+      const size = draft ? new TextEncoder().encode(JSON.stringify(draft)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!draft || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
+      pending.push({ id, session: request.session || draftSession, draft }); bytes += size;
+    }
+    try { vscode.setState({ version: 1, scope: draftScope, active: draftSession, entries, pending }); }
+    catch { omitted = true; }
+    if (omitted && !draftWarning) {
+      draftWarning = true;
+      sysLine("Some drafts exceed saved-draft storage limits and remain only in this window. Send or reduce them before reloading.", true);
+    }
+  }
+  function scheduleDraftSave() {
+    if (restoringDraft) return;
+    clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 150);
+  }
+  function selectDraftSession(session, adoptFrom = "") {
+    if (typeof session !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(session)) return;
+    persistDraft();
+    const prior = draftSession;
+    draftSession = session;
+    const source = adoptFrom || (prior === "unbound" ? prior : "");
+    if (!draftEntries.has(session) && source && draftEntries.has(source)) {
+      draftEntries.set(session, draftEntries.get(source)); draftEntries.delete(source);
+    }
+    if (source) for (const row of unconfirmedDrafts) if (row.session === source) row.session = session;
+    if (source) for (const image of pendingImages) if (image.session === source) image.session = session;
+    const draft = cleanDraft(draftEntries.get(session)) || { text: "", attachments: [], start: 0, end: 0 };
+    restoringDraft = true;
+    input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
+    input.selectionStart = draft.start; input.selectionEnd = draft.end;
+    renderAtts(); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    hidePop(); restoringDraft = false; persistDraft();
+  }
+  function loadDraftState() {
+    try {
+      const saved = vscode.getState();
+      if (saved?.version !== 1 || saved.scope !== draftScope || !Array.isArray(saved.entries)
+          || JSON.stringify(saved).length > 12 * 1024 * 1024) return;
+      for (const entry of saved.entries.slice(0, 32)) {
+        if (!Array.isArray(entry) || entry.length !== 2) continue;
+        const [session, raw] = entry;
+        const draft = cleanDraft(raw);
+        if (typeof session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(session) && draft) draftEntries.set(session, draft);
+      }
+      if (typeof saved.active === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(saved.active)) draftSession = saved.active;
+      unconfirmedDrafts = (Array.isArray(saved.pending) ? saved.pending : []).slice(0, 17).flatMap(row => {
+        const draft = cleanDraft(row?.draft);
+        return draft && typeof row.id === "string" && row.id.length <= 128
+          && typeof row.session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(row.session)
+          ? [{ id: row.id, session: row.session, draft, rejected: row.rejected === true }] : [];
+      });
+      const draft = draftEntries.get(draftSession);
+      if (draft) {
+        restoringDraft = true;
+        input.value = draft.text; attachments.push(...draft.attachments);
+        input.selectionStart = draft.start; input.selectionEnd = draft.end;
+        renderAtts(); input.style.height = Math.min(input.scrollHeight, 160) + "px";
+        restoringDraft = false;
+      }
+    } catch { restoringDraft = false; }
+  }
+  function renderUnconfirmedDrafts() {
+    log.querySelectorAll(".draft-delivery-notice").forEach(node => node.remove());
+    for (const row of unconfirmedDrafts.filter(row => row.session === draftSession)) {
+      const node = el("div", "sys draft-delivery-notice");
+      node.textContent = row.rejected ? "A rejected message is available to restore."
+        : "Delivery of a message from the previous connection was not confirmed. Check the chat before retrying.";
+      const button = el("button", "act", "Restore message to draft"); button.type = "button";
+      button.onclick = () => {
+        if (input.value || attachments.length) { sysLine("Send or clear the current draft first."); return; }
+        input.value = row.draft.text; attachments.push(...row.draft.attachments);
+        unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
+        node.remove(); renderAtts(); onInput(); persistDraft();
+      };
+      node.appendChild(button); log.appendChild(node);
+    }
+  }
+  function rejectPrompt(id, confirmed = true) {
     const pending = pendingPrompts.get(id);
     if (!pending) return;
     pendingPrompts.delete(id);
-    pending.node.classList.add("rejected");
+    pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
     const restore = () => {
+      if (pending.session && pending.session !== draftSession) {
+        sysLine("Reopen this message's original chat to restore its draft."); return;
+      }
       if (input.value || attachments.length) {
         sysLine("Send or clear the current draft before restoring this message."); return;
       }
       input.value = pending.text; attachments.push(...pending.attachments);
-      renderAtts(); onInput(); input.focus();
+      unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
+      renderAtts(); onInput(); persistDraft(); input.focus();
     };
-    const retry = el("button", "act", "Restore unsent message"); retry.type = "button";
+    const retry = el("button", "act", confirmed ? "Restore unsent message" : "Review delivery before restoring"); retry.type = "button";
     retry.onclick = restore; pending.node.appendChild(retry);
-    if (!input.value && !attachments.length) restore();
+    if (confirmed && (!pending.session || pending.session === draftSession) && !input.value && !attachments.length) restore();
+    else {
+      unconfirmedDrafts.push({ id, session: pending.session || draftSession, rejected: confirmed,
+        draft: { text: pending.text, attachments: pending.attachments, start: 0,
+          end: pending.text.length, updated: Date.now() } });
+      persistDraft();
+    }
     if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
   }
   let files = [];              // workspace files for @-mentions
@@ -981,6 +1130,7 @@
         mcpManagement = ev.capabilities?.mcp_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
+        if (!draftScope && ev.session_id) selectDraftSession(ev.session_id);
         break;
       }
       case "context": {
@@ -995,10 +1145,12 @@
         }
         break;
       case "session":
-        if (ev.kind === "cleared" || ev.kind === "new") {
+        if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
         setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
+        if (ev.session_id) selectDraftSession(ev.session_id);
+        renderUnconfirmedDrafts();
         break;
       case "session_named": setThreadTitle(ev.name); break;
       case "config":
@@ -1015,7 +1167,7 @@
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
-      case "prompt_accepted": pendingPrompts.delete(ev.request_id); break;
+      case "prompt_accepted": pendingPrompts.delete(ev.request_id); persistDraft(); break;
       case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
@@ -1404,6 +1556,8 @@
     log.appendChild(m); setSending(true);
   }
   function submit() {
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
+    if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     const text = input.value.trim();
     if (!text && !attachments.length) return;
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
@@ -1429,7 +1583,7 @@
         }
       }
       vscode.postMessage({ type: "slashText", text });
-      input.value = ""; input.style.height = "auto"; scroll(); return;
+      input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
     }
     // Codex-style suffix action: `objective /goal` tags and starts the text already in the
     // composer. Requiring the marker to be the final whitespace-delimited token avoids treating
@@ -1440,16 +1594,16 @@
       goalDraft = text;
       appendGoalPrompt(trailingGoal);
       vscode.postMessage({ type: "startGoal", text: trailingGoal });
-      input.value = ""; input.style.height = "auto"; scroll(); return;
+      input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
-    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m });
+    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
       context: resources.length ? resources : undefined });   // backend queues it if a turn is running
-    input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
+    input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
   }
   function renderAtts() {
     atts.innerHTML = "";
@@ -1459,6 +1613,7 @@
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
     });
+    scheduleDraftSave();
   }
 
   // ---- @file / slash popover ----
@@ -1482,6 +1637,7 @@
     input.selectionStart = input.selectionEnd = popStart + value.length;
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    scheduleDraftSave();
   }
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
@@ -1521,6 +1677,7 @@
     hidePop(); input.focus();
   }
   function onInput() {
+    scheduleDraftSave();
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
@@ -1587,10 +1744,12 @@
           sysLine("Pasted images exceed the 2 MiB prompt limit.", true); continue;
         }
         pendingImageFiles += 1; pendingImageBytes += file.size;
+        const owner = { session: draftSession }; pendingImages.add(owner);
         const r = new FileReader();
         let settled = false;
         const release = () => {
           if (settled) return; settled = true;
+          pendingImages.delete(owner);
           pendingImageFiles -= 1; pendingImageBytes -= file.size;
         };
         r.onload = () => {
@@ -1598,8 +1757,16 @@
           if (typeof r.result !== "string" || !r.result.startsWith("data:image/")) {
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
-          attachments.push({ label: "📷 image", img: true, data: r.result,
-            bytes: file.size, text: "" }); renderAtts();
+          const image = { label: "📷 image", img: true, data: r.result, bytes: file.size };
+          if (owner.session === draftSession) {
+            attachments.push(image); renderAtts();
+          } else {
+            const draft = draftEntries.get(owner.session)
+              || { text: "", attachments: [], start: 0, end: 0, updated: Date.now() };
+            draft.attachments.push(image); draft.updated = Date.now();
+            draftEntries.set(owner.session, draft); persistDraft();
+            sysLine("The pasted image was added to its original chat's draft.");
+          }
         };
         r.onerror = () => { release(); sysLine("The pasted image could not be read.", true); };
         r.onabort = release;
@@ -1859,6 +2026,10 @@
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
+    else if (msg.type === "session_ready") {
+      selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
+      renderUnconfirmedDrafts();
+    }
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
       curSubscription = msg.state.subscriptionEngine || "";
@@ -1932,7 +2103,10 @@
       if (popMode === "@") onInput();
     }
     else if (msg.type === "open_goal_review") openGoalReview();
-    else if (msg.type === "backend_exit") { endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "backend_exit") { sessionReady = !draftScope; endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false); renderUnconfirmedDrafts(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
+  loadDraftState();
+  window.addEventListener("pagehide", persistDraft);
+  input.addEventListener("select", scheduleDraftSave);
   vscode.postMessage({ type: "webviewReady" });
 })();

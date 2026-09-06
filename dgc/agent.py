@@ -2323,6 +2323,7 @@ class Agent(GoalLifecycle):
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""
+            self._draft_mcp_context = []
             self.subscription_sessions = sessions.subscription_sessions_of(record)
             self.messages = [{"role": "system", "content": self.system_prompt()}] + loaded
             checkpoint_state = record.get("checkpoints")

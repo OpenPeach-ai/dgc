@@ -481,7 +481,7 @@ export class DgcBackend extends EventEmitter {
    * legacy backend, where installing the listener before `send` still provides a post-send
    * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
    * every listener. */
-  request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000): Promise<DgcEvent> {
+  request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000, setup = false): Promise<DgcEvent> {
     const rawRequestId = (cmd as any).request_id;
     const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
     // Manual compaction may use the backend's 120-second summarization deadline. Keep the
@@ -535,7 +535,7 @@ export class DgcBackend extends EventEmitter {
       this.on("exit", onExit);
       timer = setTimeout(
         () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
-      if (!this.send(cmd)) {
+      if (!(setup ? this.sendSetup(cmd) : this.send(cmd))) {
         fail(`DGC rejected ${cmd.type} before it could run`);
       }
     });
