@@ -1,6 +1,8 @@
 # Composer, skills, and MCP parity audit
 
-Status: implementation and source validation complete; release validation and publication in progress.
+Status at source freeze: implementation and source validation complete; final artifact/site validation
+and publication remain separate release gates. Published versions and checksums are recorded by the
+[GitHub releases](https://github.com/OpenPeach-ai/dgc/releases) and website release manifests.
 This document tracks the requested pass; an unchecked item is not a release claim. Baseline: CLI 0.28.0 / extension 0.15.0 (`de17fac`).
 
 ## Reference and scope
@@ -325,3 +327,24 @@ unimplemented capability. Document any provider-owned execution boundary explici
   keeps clickable links. Real Rich-to-prompt_toolkit regressions cover final and partial Markdown,
   local and web links, and both OSC terminators. The capture poster now selects the final half-second
   rather than a frame that can precede the last answer. The capture is being regenerated.
+- The corrected local suite passes all 1,387 checks and 114 discovered Python cases (four optional
+  bridge skips, separately verified earlier). A capture attempt run concurrently with the suite was
+  rejected by its user-state guard because the tests changed lock/session directory metadata; its
+  media was not promoted. Capture verification must run without concurrent DGC tests.
+- Source release CI now passes Python 3.10/3.13 on Linux/macOS, Windows import/CLI smoke, Python
+  packaging, extension checks and both CodeQL languages. The generated-site contract is intentionally
+  pending the final artifact projection; the prior website browser/performance checks pass.
+- Refreshed public captures passed: installed checksum-verified extension 0.16.0 in VS Code 1.107.1
+  with a clearly labeled deterministic backend, and current CLI 0.29.0 with real local Qwen execution
+  in an isolated workspace. The 47.5-second CLI recording shows the one-line fix, all three passing
+  tests and the clean final answer. The successful run left user DGC state unchanged. Both captures
+  run at real speed, and their displayed paths/content were visually reviewed before promotion.
+- Website visual acceptance passes all 18 comparisons. Six intentional baseline changes—the editor
+  page and changelog at 390, 768 and 1440 pixels—were inspected, including mobile release-note detail.
+  These source-bound captures and reviewed baselines precede the final core archive; the final
+  generated projection must still pass browser, every-route Lighthouse and public-artifact gates.
+- The refreshed website preview passed 248 browser checks (seven viewport-specific skips), covering
+  all 30 routes, interactions, transfer bounds and reduced motion. The pre-freeze privacy scan covered
+  3,184 text items, 84 commits and 30 archives against 42 configured secret values plus credential and
+  private-machine markers. Only deliberate credential-shape test fixtures matched. Final runtime
+  bytes still receive source/provenance, privacy and installed-release checks after this source freeze.
