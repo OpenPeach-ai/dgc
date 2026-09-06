@@ -208,6 +208,8 @@ async function run() {
 
   // Exercise both awaited and fire-and-forget editor state routes. The installed backend advertises
   // correlation, so every optional query/mutation must carry a unique bounded request ID.
+  const turnsBeforeGoal = posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "setMode", mode: "plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/goal host matrix" });
@@ -228,6 +230,50 @@ async function run() {
     && command.text === "host matrix");
   assert.ok(goalSetIndex !== -1 && goalPromptIndex > goalSetIndex,
     "/goal <objective> must persist its tagged goal before starting that exact agent turn");
+  await waitFor(() => posted().some((item) => item.type === "event"
+    && item.eventType === "turn_start"));
+  const initialGoalPrompts = goalStartCommands.filter((command) => command.type === "prompt"
+    && command.text === "host matrix").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "pauseGoal" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.status === "blocked"));
+  const pausedCommands = backendCommands(backendLogPath);
+  const pauseCancelIndex = pausedCommands.findIndex((command) => command.type === "cancel");
+  const pauseSetIndex = pausedCommands.findIndex((command) => command.type === "set_goal"
+    && command.status === "blocked");
+  assert.ok(pauseCancelIndex !== -1 && pauseSetIndex > pauseCancelIndex,
+    "pausing an active goal must stop its turn before crossing the backend's busy mutation gate");
+  assert.equal(posted().filter((item) => item.eventType === "command_rejected"
+    && item.command === "set_goal").length, 0,
+  "the installed-host pause lifecycle must not race a goal mutation into an active turn");
+  await waitFor(() => posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length > turnsBeforeGoal);
+  const turnsBeforeResume = posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "resumeGoal" });
+  await waitFor(() => backendCommands(backendLogPath).filter((command) =>
+    command.type === "prompt" && command.text === "host matrix").length > initialGoalPrompts);
+  const resumed = backendCommands(backendLogPath);
+  const resumeSetIndex = resumed.findLastIndex((command) => command.type === "set_goal"
+    && command.status === "active");
+  const resumePromptIndex = resumed.findLastIndex((command) => command.type === "prompt"
+    && command.text === "host matrix");
+  assert.ok(resumeSetIndex !== -1 && resumePromptIndex > resumeSetIndex,
+    "the goal play control must reactivate the tagged goal before resuming its agent turn");
+  await waitFor(() => posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length > turnsBeforeResume);
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "updateGoal", text: "host matrix refined" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.text === "host matrix refined"));
+  const promptsBeforeEdit = backendCommands(backendLogPath)
+    .filter((command) => command.type === "prompt").length;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(backendCommands(backendLogPath).filter((command) => command.type === "prompt").length,
+    promptsBeforeEdit, "editing an active goal must not synthesize an unrelated agent turn");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "clearGoal" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.text === "" && command.status === "none"));
   const correlated = backendCommands(backendLogPath)
     .filter((command) => correlatedTypes.has(command.type));
   assert.ok(correlated.every((command) =>

@@ -559,21 +559,38 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
     elapsed_seconds: 65 } });
   const goalBar = doc.getElementById("goalbar");
   assert.equal(goalBar.hidden, false);
-  assert.equal(doc.getElementById("goal-status").textContent, "Active goal");
+  assert.equal(doc.getElementById("goal-status").textContent, "Pursuing goal");
   assert.equal(doc.getElementById("goal-time").textContent, "1:05");
   doc.getElementById("goal-toggle").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal pause");
+  assert.equal(posted.filter((m) => m.type === "pauseGoal").length, 1);
   send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
     elapsed_seconds: 67 } });
   assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
   assert.equal(doc.getElementById("goal-time").textContent, "1:07");
-  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume standing goal");
+  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume goal");
   doc.getElementById("goal-toggle").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal resume");
+  assert.equal(posted.filter((m) => m.type === "resumeGoal").length, 1);
   doc.getElementById("goal-edit").click();
-  assert.equal(input.value, "/goal ship the release");
+  assert.equal(doc.getElementById("goal-editor").hidden, false);
+  assert.equal(doc.getElementById("goal-editor-text").value, "ship the release");
+  doc.getElementById("goal-editor-text").value = "ship the verified release";
+  doc.getElementById("goal-editor-save").click();
+  assert.equal(posted.filter((m) => m.type === "updateGoal").at(-1).text, "ship the verified release");
+  send({ type: "goal_edit_state", state: "saved" });
+  assert.equal(doc.getElementById("goal-editor").hidden, true);
   doc.getElementById("goal-clear").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal clear");
+  assert.equal(posted.filter((m) => m.type === "clearGoal").length, 1);
+  send({ type: "workspace_changes", total: 2, additions: 7, deletions: 3, files: [
+    { path: "src/a.ts", additions: 5, deletions: 3 },
+    { path: "src/new.ts", additions: 2, deletions: 0, untracked: true },
+  ] });
+  assert.equal(doc.getElementById("changesbar").hidden, false);
+  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed");
+  doc.getElementById("changes-review-button").click();
+  assert.equal(doc.getElementById("changes-review").hidden, false);
+  assert.equal(doc.querySelectorAll(".change-row").length, 2);
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.filter((m) => m.type === "reviewChange").at(-1).path, "src/a.ts");
   send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
@@ -608,7 +625,6 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
   send({ type: "event", event: { type: "handoff", request_id: "handoff-1", status: "completed",
     markdown: "# Handoff\n\nContinue with **tests**. <script>bad()</script>", path: "HANDOFF-safe.md" } });
-  assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
   assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
