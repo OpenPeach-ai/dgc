@@ -281,3 +281,14 @@ unimplemented capability. Document any provider-owned execution boundary explici
   Real-process regressions cover repeated successful/failed commands and a retained background
   result; the full 1,387-check / 110-case run above includes these checks without the earlier pipe
   ResourceWarning. Existing timeout, cancellation, process-tree and bounded-output checks remain green.
+- Live subscription-editor audit found a critical execution boundary defect: vendor processes
+  inherited the editor's open NDJSON stdin. A vendor reading piped input could wait indefinitely
+  before generation or consume frontend control frames. Noninteractive vendor launches now use
+  closed stdin; their prompts already travel through their engine arguments. A real subprocess
+  regression keeps the parent's control pipe open and proves its pending frame remains unread.
+- After the stdin correction, actual VS Code 1.107.1 + source DGC + Codex subscription completed the
+  same MCP-resource/two-skill goal in one cycle (32 seconds). Independent contract assertions, the
+  selected skill's verification note and both generated tests passed. The vendor reported 105,462
+  tokens during its single turn, exceeding the test's 60,000-token budget as permitted by the
+  documented between-vendor-turn budget boundary; this is not an in-flight hard token cap.
+  Full regression passed 1,387/1,387 checks and 111 discovered Python cases (four bridge skips).
