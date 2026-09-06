@@ -10,6 +10,7 @@
   let pendingImageFiles = 0, pendingImageBytes = 0;
   let queuedCount = 0, customCommands = [], skillRows = [];
   let skillManagement = false;
+  let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
@@ -726,6 +727,10 @@
       ? surfaceReturnFocus : input;
     surfaceReturnFocus = null; target.focus();
   }
+  function dismissSurface() {
+    if (mcpContextPending) { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; }
+    closeSurface();
+  }
   function surfaceButtons(primary, primaryAction, secondary, secondaryAction) {
     const p = $("surface-primary"), s = $("surface-secondary");
     p.hidden = !primary; p.textContent = primary || ""; p.onclick = primaryAction || null;
@@ -806,21 +811,107 @@
         clear_secrets: $("mcp-clear-secrets").checked,
         log_level: $("mcp-log").value,
       } });
-      surfaceBody.innerHTML = '<div class="surface-empty">Saving and connecting…</div>';
+      closeSurface(); // Keep browser sign-in and permission cards visible while the host connects.
     };
     surfaceButtons(); $("mcp-name").focus();
   }
   function renderMcp() {
+    mcpView = "servers";
     openSurface("mcp");
     const servers = mcpRows.length ? mcpRows.map((item, i) =>
       `<article class="surface-card" data-filter="${esc(`${item.name} ${item.state} ${item.command} ${item.url}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(item.name)}</strong><span class="surface-state ${mcpStateClass(item.state)}">${esc(item.state || "configured")}</span></div><div class="surface-meta">${esc(item.transport === "remote" ? item.url : [item.command, ...(item.args || [])].join(" "))}</div><p>${Number(item.tool_count || 0)} tool(s)${item.protocol_era ? ` · ${esc(item.protocol_era)}` : ""}</p>${item.error ? `<div class="err">${esc(item.error)}</div>` : ""}<div class="surface-actions"><button type="button" class="act" data-mcp-edit="${i}">Edit</button><button type="button" class="act danger" data-mcp-remove="${i}">Remove</button></div></article>`).join("")
       : '<div class="surface-empty">No MCP servers configured.</div>';
     const tools = mcpTools.length ? `<h2 class="surface-subtitle">Available tools · ${mcpTools.length}</h2>${mcpTools.map((tool) => `<article class="surface-card compact" data-filter="${esc(`${tool.name} ${tool.description}`.toLowerCase())}"><strong>${esc(tool.name)}</strong><p>${esc(tool.description || "")}</p></article>`).join("")}` : "";
     surfaceBody.innerHTML = servers + tools;
+    if (mcpManagement) {
+      surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => {
+        const item = mcpRows[+button.dataset.mcpEdit];
+        const toggle = el("button", "act", item.enabled === false ? "Enable" : "Disable"); toggle.type = "button";
+        toggle.dataset.mcpToggle = item.name;
+        toggle.onclick = () => { toggle.disabled = true;
+          vscode.postMessage({ type: "mcpToggle", name: item.name, enabled: item.enabled === false }); };
+        const reconnect = el("button", "act", "Reconnect"); reconnect.type = "button";
+        reconnect.disabled = item.enabled === false;
+        reconnect.onclick = () => { reconnect.disabled = true;
+          vscode.postMessage({ type: "mcpReconnect", name: item.name }); };
+        button.parentElement.append(toggle, reconnect);
+      });
+    }
+    if (mcpContextSupported) {
+      surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => {
+        const item = mcpRows[+button.dataset.mcpEdit];
+        if (item.state !== "connected") return;
+        for (const [kind, label] of [["resources", "Resources"], ["templates", "Resource templates"], ["prompts", "Prompts"]]) {
+          const browse = el("button", "act", label); browse.type = "button";
+          browse.dataset.mcpBrowse = kind;
+          browse.onclick = () => browseMcpContext(item.name, kind);
+          button.parentElement.appendChild(browse);
+        }
+      });
+    }
     surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => button.onclick = () => showMcpForm(mcpRows[+button.dataset.mcpEdit]));
     surfaceBody.querySelectorAll("[data-mcp-remove]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "mcpRemove", name: mcpRows[+button.dataset.mcpRemove].name }));
     surfaceButtons("Add server", () => showMcpForm(), "Reload", () => vscode.postMessage({ type: "mcpReload" }));
     filterSurface();
+  }
+  function browseMcpContext(server, kind) {
+    mcpView = "context"; openSurface("mcp");
+    mcpContextPending = `mcp-context-${Date.now()}-${++mcpContextSequence}`;
+    vscode.postMessage({ type: "mcpContextList", requestId: mcpContextPending, server, kind });
+    surfaceButtons("Cancel", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
+  }
+  function requestMcpContext(server, kind, identifier, args = {}) {
+    mcpContextPending = `mcp-context-${Date.now()}-${++mcpContextSequence}`;
+    closeSurface();
+    vscode.postMessage({ type: "mcpContextGet", requestId: mcpContextPending, server, kind, identifier, arguments: args });
+  }
+  function renderMcpContextCatalog(ev) {
+    if (ev.request_id !== mcpContextPending) return;
+    mcpContextPending = ""; mcpView = "context"; openSurface("mcp");
+    const rows = Array.isArray(ev.items) ? ev.items : [];
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><h2>${esc(ev.server)} · ${esc(ev.kind)}</h2>`
+      + (ev.error ? `<div class="err">${esc(ev.error)}</div>` : rows.length ? rows.map((row, i) =>
+        `<button type="button" class="surface-card surface-list-button" data-mcp-context="${i}" data-filter="${esc(`${row.name} ${row.description}`.toLowerCase())}"><strong>${esc(row.title || row.name)}</strong><span>${esc(row.description || row.uri || row.uriTemplate || "Preview prompt")}</span></button>`).join("") : '<p class="muted">This server returned no entries for this category.</p>');
+    surfaceBody.querySelector(".surface-back").onclick = renderMcp;
+    surfaceBody.querySelectorAll("[data-mcp-context]").forEach((button) => button.onclick = () => {
+      const row = rows[+button.dataset.mcpContext];
+      if (ev.kind === "resources") requestMcpContext(ev.server, "resources", row.uri);
+      else renderMcpContextForm(ev.server, ev.kind, row);
+    });
+    surfaceButtons("Refresh", () => browseMcpContext(ev.server, ev.kind)); filterSurface();
+  }
+  function renderMcpContextForm(server, kind, row) {
+    const args = Array.isArray(row.arguments) ? row.arguments : [];
+    const fields = kind === "templates" ? [{ name: "uri", required: true, description: "Fill in a concrete URI using the server's template." }] : args;
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← ${esc(kind)}</button><h2>${esc(row.title || row.name)}</h2><form id="mcp-context-form" class="surface-form">`
+      + fields.map((arg, i) => `<label>${esc(arg.name)}${arg.required ? " *" : ""}<span class="set-hint">${esc(arg.description || "")}</span><input data-context-argument="${i}"${arg.required ? " required" : ""} maxlength="8000" value="${kind === "templates" ? esc(row.uriTemplate) : ""}"></label>`).join("")
+      + '<button type="submit" class="act primary">Preview context</button></form>';
+    surfaceBody.querySelector(".surface-back").onclick = () => browseMcpContext(server, kind);
+    $("mcp-context-form").onsubmit = (event) => {
+      event.preventDefault(); if (!event.target.reportValidity()) return;
+      const values = Object.create(null);
+      fields.forEach((arg, i) => { const value = surfaceBody.querySelector(`[data-context-argument="${i}"]`).value;
+        if (value || arg.required) values[arg.name] = value; });
+      requestMcpContext(server, kind === "templates" ? "resources" : kind,
+        kind === "templates" ? values.uri : row.name, kind === "templates" ? {} : values);
+    };
+    surfaceButtons();
+  }
+  function renderMcpContext(ev) {
+    if (ev.request_id !== mcpContextPending) return;
+    mcpContextPending = ""; mcpView = "context"; openSurface("mcp");
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><h2>${esc(ev.server)}</h2><p class="muted">${esc(ev.identifier)}</p>`
+      + (ev.error ? `<div class="err">${esc(ev.error)}</div>` : `<div class="surface-markdown">${md(ev.text || "")}</div>`)
+      + (Array.isArray(ev.omitted) ? ev.omitted.map((line) => `<p class="muted">${esc(line)}</p>`).join("") : "");
+    surfaceBody.querySelector(".surface-back").onclick = renderMcp;
+    surfaceButtons(!ev.error && ev.text ? "Attach to draft" : "", () => {
+      const resource = { type: "mcp_context", server: ev.server, uri: ev.identifier, text: ev.text };
+      const previous = attachments.findIndex((item) => item.resource?.type === "mcp_context" && item.resource.server === ev.server && item.resource.uri === ev.identifier);
+      const selected = { label: `${ev.server} · ${ev.identifier}`, resource };
+      if (previous >= 0) attachments[previous] = selected;
+      else attachments.push(selected);
+      renderAtts(); closeSurface(); input.focus();
+    });
   }
   function renderDocs(items) {
     surfaceRows = Array.isArray(items) ? items : []; openSurface("docs");
@@ -860,9 +951,9 @@
     surfaceButtons("Reload", () => vscode.postMessage({ type: "slash", action: "hooks" })); filterSurface();
   }
   surfaceSearch.addEventListener("input", filterSurface);
-  $("surface-close").onclick = closeSurface;
+  $("surface-close").onclick = dismissSurface;
   $("surface").addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); closeSurface(); return; }
+    if (event.key === "Escape") { event.preventDefault(); dismissSurface(); return; }
     if (event.key !== "Tab") return;
     const focusable = [...$("surface").querySelectorAll("button, input, select, textarea, [tabindex]")]
       .filter((node) => !node.disabled && !node.hidden && !node.closest("[hidden]")
@@ -886,6 +977,8 @@
         skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
         skillManagement = ev.capabilities?.skill_management === true;
+        mcpContextSupported = ev.capabilities?.mcp_context === true;
+        mcpManagement = ev.capabilities?.mcp_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         break;
@@ -1013,6 +1106,7 @@
         break;
       }
       case "mcp_input_request": {
+        closeSurface();
         ensureTurn();
         const p = ev.payload || {};
         const title = `MCP server ${ev.server} requests input`;
@@ -1171,7 +1265,7 @@
       case "doc": if (surfaceKind === "docs") renderDoc(ev); break;
       case "mcp_servers":
         mcpRows = Array.isArray(ev.items) ? ev.items : [];
-        if (surfaceKind === "mcp") renderMcp();
+        if (surfaceKind === "mcp" && mcpView === "servers") renderMcp();
         if (ev.error && surfaceKind === "mcp") {
           const warning = el("div", "err surface-notice", esc(ev.error));
           surfaceBody.insertBefore(warning, surfaceBody.firstChild);
@@ -1179,8 +1273,23 @@
         break;
       case "mcp_tools":
         mcpTools = Array.isArray(ev.tools) ? ev.tools : [];
-        if (surfaceKind === "mcp") renderMcp();
+        if (surfaceKind === "mcp" && mcpView === "servers") renderMcp();
         break;
+      case "mcp_context_catalog": renderMcpContextCatalog(ev); break;
+      case "mcp_context": renderMcpContext(ev); break;
+      case "mcp_command_result": {
+        if (ev.request_id !== mcpContextPending) break;
+        if (ev.context) renderMcpContext({ ...ev.context, request_id: ev.request_id });
+        else if (ev.catalog) renderMcpContextCatalog({ ...ev.catalog, request_id: ev.request_id });
+        else {
+          mcpContextPending = ""; renderMcp();
+          if (ev.error || ev.output) {
+            const result = el("pre", ev.error ? "err" : "surface-meta", ev.error || ev.output);
+            surfaceBody.prepend(result);
+          }
+        }
+        break;
+      }
       case "permissions": if (surfaceKind === "permissions") renderPermissions(ev.items); break;
       case "memory": if (surfaceKind === "memory") renderMemory(ev); break;
       case "hook_catalog": {
@@ -1446,6 +1555,9 @@
   input.addEventListener("click", onInput);
   input.addEventListener("keydown", (e) => {
     if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Escape" && mcpContextPending) {
+      e.preventDefault(); doStop(); mcpContextPending = ""; return;
+    }
     if (popMode) {
       if (e.key === "ArrowDown") { e.preventDefault(); movePop(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); movePop(-1); return; }
@@ -1758,7 +1870,15 @@
     else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
-    else if (msg.type === "surface_open") { openSurface(msg.surface); }
+    else if (msg.type === "mcp_command_started") {
+      mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");
+      surfaceBody.innerHTML = '<div class="surface-empty">Working with MCP…</div>';
+      surfaceButtons("Cancel", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
+    }
+    else if (msg.type === "surface_open") {
+      if (msg.surface === "mcp") mcpView = "servers";
+      openSurface(msg.surface);
+    }
     else if (msg.type === "command_menu") {
       openCommandMenu();
     }

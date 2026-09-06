@@ -31,6 +31,11 @@ unimplemented capability. Document any provider-owned execution boundary explici
   and individual reconnect controls are absent from the editor management surface.
 - An extension/CLI update skew caused a startup protocol error in the previous rollout. This
   release must verify compatibility and the actual installed Cursor extension, not just VS Code.
+- The webview has no persisted draft state. Skills/context can remain in memory across a session
+  change instead of belonging to the draft's session, and a webview reload can lose them.
+- Goal submission explicitly excludes drafts with attachments, so adding a skill or MCP snapshot
+  prevents the inline goal action from starting that prepared request. Goal start needs the same
+  validated prompt payload and rejected-draft recovery as a normal send.
 
 ## Completion requirements and evidence
 
@@ -89,3 +94,37 @@ unimplemented capability. Document any provider-owned execution boundary explici
   include native/delegated disabled/removed selections, source edits, source precedence, unsafe
   sidecars, package links/private files/size limits, and preserving supporting files without executing
   them. Real editor/model verification and the remaining MCP/composer work are still pending.
+- MCP context and management implemented: bounded live resources/templates/prompts catalogs;
+  shared modern MRTR and legacy request completion; exact server-owned resource reads; prompt
+  argument validation; safe text/media handling; normal MCP permission/hook/redaction boundaries;
+  editor preview and removable draft snapshots; terminal snapshot staging. CLI, TUI and editor
+  `/mcp` commands share add/edit/remove/enable/disable/reconnect and context operations. Interactive
+  editor operations run off the stdin loop so input decisions and cancellation remain available.
+- Remote MCP startup fix: the reviewed `mcp-remote@0.8.3` bridge uses its known initialize handshake
+  and is no longer killed by the three-second modern probe. Explicit connects have a cancellable
+  OAuth window and transient browser sign-in cards. Separate disablement preserves credential
+  identity; runtime credentials remain available to a same-server reconnect.
+- Real-bridge evidence: four isolated loopback tests passed against the actual 0.8.3 package,
+  covering public HTTP, bearer auth, slow startup without process restart, OAuth PKCE, cached login,
+  expired-token 401 refresh, cancellation, declining sign-in and owner-private token files. A
+  proactive-refresh issue in the bridge's path-specific resource/issuer comparison remains recorded
+  in [MCP context and authentication](MCP_CONTEXT.md). SSH callback forwarding and provider-specific
+  OAuth/device-code behavior still need actual remote-host verification.
+- Current MCP tests also prove deny rules prevent server execution, fetched text is redacted before
+  preview, native/delegated turns receive inert snapshots, headless completion releases its worker
+  before the response, and the standalone CLI can add/read/disable/remove a real subprocess without
+  invoking a model. Chromium rendered the actual webview HTML/CSS/JS at 460×900: browse, Markdown
+  preview, attachment, and inline `/` selection preserved the draft and snapshot without horizontal
+  overflow. This used protocol fixtures, not an actual extension host or a live model. Browser
+  artifacts stay in ignored `output/playwright`; they are not promoted product captures.
+- MCP regression verification: 1,387/1,387 Python checks, with 60 discovered unittest cases (four
+  optional bridge cases skipped there and run separately), 73/73 extension tests, TypeScript and
+  whitespace checks passed. A final deadline test also verifies that a modern input decision cannot
+  be sent after its originating request expires. Escape and the panel close button cancel pending
+  context operations and ignore their late results. Initial broad runs caught old fixture assumptions
+  about runtime arguments and a removed terminal preflight; these were corrected before the green
+  run. This evidence is a development checkpoint, not a release or full-goal completion claim.
+- Remaining before release: draft/session persistence and goal interaction for selected skills and
+  context; meaningful plan/review/init flows; the bundled-skill audit/additions; real local and
+  subscription model runs; actual editor/Cursor host verification; remote-host authentication;
+  final documentation/site/version updates; source/artifact review, CI and multi-channel publication.

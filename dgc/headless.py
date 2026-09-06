@@ -23,10 +23,11 @@ from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import Config, mcp_url_has_credentials, persisted_mcp_args_safe, valid_remote_mcp_url
+from .config import Config, mcp_url_has_credentials
 from .editor_protocol import (MAX_COMMAND_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
 from .permissions import Rule, rule_for
+from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
@@ -43,15 +44,11 @@ _MAX_MCP_LIST_BYTES = 1024 * 1024
 _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
-_MCP_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
-_MCP_LOG_LEVELS = frozenset({
-    "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency", "off",
-})
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
     "resolve_retained_task", "list_skills", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
-    "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
@@ -62,6 +59,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory",
 })
@@ -179,79 +177,6 @@ def _mcp_url_has_credentials(value: str) -> bool:
     return mcp_url_has_credentials(value)
 
 
-def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
-    """Validate one bounded editor MCP spec; persisted specs can never carry secret values."""
-    if not isinstance(value, dict):
-        return None, "server specification must be an object"
-    allowed = {"transport", "command", "args", "env", "env_names", "auth_env", "url", "log_level",
-               "defer_until_setup"}
-    if set(value) - allowed:
-        return None, "server specification contains unsupported fields"
-    command = value.get("command")
-    if not isinstance(command, str) or not command.strip() or len(command) > 4096 or "\x00" in command:
-        return None, "server command must contain 1-4096 safe characters"
-    args = value.get("args", [])
-    if (not isinstance(args, list) or len(args) > 128
-            or any(not isinstance(arg, str) or len(arg) > 8192 or "\x00" in arg for arg in args)):
-        return None, "server arguments must be an array of at most 128 bounded strings"
-    transport = str(value.get("transport") or "stdio")
-    if transport not in ("stdio", "remote"):
-        return None, "server transport must be stdio or remote"
-    url = str(value.get("url") or "")
-    if transport == "remote":
-        if not valid_remote_mcp_url(url):
-            return None, "remote MCP servers require HTTPS (or loopback HTTP) without URL credentials"
-    log_level = str(value.get("log_level") or "warning").lower()
-    if log_level not in _MCP_LOG_LEVELS:
-        return None, "server log level is unsupported"
-    env_names = value.get("env_names", [])
-    if (not isinstance(env_names, list) or len(env_names) > 64
-            or any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
-                   for name in env_names)):
-        return None, "env_names must contain at most 64 environment variable names"
-    auth_env = value.get("auth_env", "")
-    if not isinstance(auth_env, str) or (auth_env and not _MCP_ENV_RE.fullmatch(auth_env)):
-        return None, "auth_env must be a valid environment variable name"
-    if auth_env and auth_env not in env_names:
-        return None, "auth_env must also be declared in env_names"
-    remote_bridge = (transport == "remote" and command.strip() == "npx"
-                     and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
-                     and args[2] == url)
-    if transport == "remote" and not remote_bridge:
-        return None, ("remote MCP servers must use the standard npx -y mcp-remote bridge "
-                      "with the same validated URL")
-    if auth_env and not remote_bridge:
-        return None, "auth_env is supported only by the standard remote MCP bridge"
-    env = value.get("env", {})
-    if not isinstance(env, dict) or len(env) > 64:
-        return None, "server env must be an object with at most 64 entries"
-    if persisted and env:
-        return None, "persisted MCP specifications cannot contain environment values"
-    if persisted and not persisted_mcp_args_safe(args):
-        return None, ("persisted MCP specifications cannot contain inline secrets; "
-                      "declare tokens, headers, or credentials via env_names")
-    if any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
-           or not isinstance(item, str) or len(item) > 16_384 or "\x00" in item
-           for name, item in env.items()):
-        return None, "server env contains an invalid name or value"
-    if set(env) - set(env_names):
-        return None, "runtime env keys must be declared in env_names"
-    defer_until_setup = value.get("defer_until_setup", False)
-    if not isinstance(defer_until_setup, bool):
-        return None, "defer_until_setup must be true or false"
-    clean = {"transport": transport, "command": command.strip(), "args": list(args),
-             "env_names": list(dict.fromkeys(env_names)), "log_level": log_level}
-    if auth_env:
-        clean["auth_env"] = auth_env
-    if defer_until_setup:
-        clean["defer_until_setup"] = True
-    if url:
-        clean["url"] = url
-    if env:
-        clean["env"] = dict(env)
-    return clean, None
-
-
 def _request_fields(request_id: str | None) -> dict[str, str]:
     """Attach a correlation ID only when the optional command field was present and valid."""
     return {"request_id": request_id} if request_id else {}
@@ -267,7 +192,7 @@ def _format_editor_context(resources) -> str:
     """Bound and frame typed editor resources as untrusted reference data for the model."""
     if not isinstance(resources, list):
         return ""
-    allowed = {"type", "uri", "path", "relative_path", "workspace", "language", "range",
+    allowed = {"type", "uri", "server", "path", "relative_path", "workspace", "language", "range",
                "text", "diagnostics"}
     encoded_items: list[str] = []
     def bounded(value, depth=0):
@@ -293,7 +218,7 @@ def _format_editor_context(resources) -> str:
             if key == "diagnostics" and isinstance(value, list):
                 value = bounded(value)
             elif isinstance(value, str):
-                value = value[:16_000]
+                value = value[:64_000 if key == "text" and item.get("type") == "mcp_context" else 16_000]
             elif isinstance(value, (dict, list, int, float, bool)):
                 value = bounded(value)
             else:
@@ -547,7 +472,8 @@ class Backend:
                           "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
-                          "ultra_profile": True, "composer_selections": True, "skill_management": True},
+                          "ultra_profile": True, "composer_selections": True, "skill_management": True,
+                          "mcp_context": True, "mcp_management": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -866,6 +792,28 @@ class Backend:
             "mcp_call_complete", request_id=request_id, call_id=call_id,
             name=name, status=status, output=str(output))
 
+    def _mcp_context_operation(self, command: dict):
+        from .mcp_context import list_catalog
+        server_name, kind = command["server"], command["kind"]
+        fields = {"request_id": command["request_id"], "server": server_name, "kind": kind}
+        listing = command["type"] == "list_mcp_context"
+        event = "mcp_context_catalog" if listing else "mcp_context"
+        fields.update({"items": []} if listing else {"identifier": command["identifier"], "text": "", "omitted": []})
+        try:
+            server = self.agent.mcp.servers.get(server_name)
+            if server is None:
+                raise ValueError("This MCP server is disconnected. Reconnect it before selecting context.")
+            if listing:
+                fields["items"] = list_catalog(server, kind, cancel=self.agent.cancelled)
+            else:
+                fields.update(self.agent.execute_mcp_context(server_name, kind, command["identifier"],
+                    command.get("arguments", {}), "context-" + command["request_id"]))
+        except (OSError, ValueError) as exc:
+            fields["error"] = str(exc)
+        except Exception as exc:
+            fields["error"] = f"MCP context operation failed ({type(exc).__name__})"
+        return lambda: self.em.emit(event, **fields)
+
     def _emit_skill_catalog(self, request_id: str) -> None:
         rows = skill_catalog(self.agent.skills, self.config.project_root)
         self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
@@ -897,63 +845,8 @@ class Backend:
             markdown=entry[2][:120_000] if entry else "")
 
     @staticmethod
-    def _public_mcp_spec(raw) -> dict:
-        spec = raw if isinstance(raw, dict) else {}
-        raw_args = spec.get("args") if isinstance(spec.get("args"), list) else []
-        auth_env = (spec.get("auth_env") if isinstance(spec.get("auth_env"), str)
-                    and _MCP_ENV_RE.fullmatch(spec.get("auth_env")) else "")
-        legacy_auth_env = ""
-        for index, raw_arg in enumerate(raw_args[:-1]):
-            if raw_arg != "--header" or not isinstance(raw_args[index + 1], str):
-                continue
-            match = re.fullmatch(
-                r"Authorization:\s*Bearer\s+\$\{([A-Za-z_][A-Za-z0-9_]{0,127})\}",
-                raw_args[index + 1], re.IGNORECASE)
-            if match:
-                legacy_auth_env = match.group(1)
-        args, skip = [], False
-        for arg in raw_args[:128]:
-            text = str(arg)[:8192]
-            if skip:
-                skip = False
-                continue
-            if text == "--header":
-                skip = True
-                continue
-            if text.lower().startswith("authorization:"):
-                continue
-            if text.lower().startswith(("http://", "https://")) and _mcp_url_has_credentials(text):
-                text = "<credential-bearing URL hidden>"
-            args.append(text)
-        env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
-        declared = spec.get("env_names") if isinstance(spec.get("env_names"), list) else []
-        env_names = [name for name in [*declared, *env, *([legacy_auth_env] if legacy_auth_env else [])]
-                     if isinstance(name, str) and _MCP_ENV_RE.fullmatch(name)][:64]
-        transport = str(spec.get("transport") or "")
-        url = str(spec.get("url") or "")
-        if not transport:
-            transport = ("remote" if len(raw_args) >= 3 and raw_args[:2] == ["-y", "mcp-remote"]
-                         else "stdio")
-        if transport == "remote" and not url and len(raw_args) >= 3:
-            url = str(raw_args[2])[:4096]
-        if url and _mcp_url_has_credentials(url):
-            url = ""
-        exact_bridge = (transport == "remote" and spec.get("command") == "npx"
-                        and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
-                        and args[2] == url)
-        if not auth_env and legacy_auth_env:
-            auth_env = legacy_auth_env
-        if not exact_bridge or auth_env not in env_names:
-            auth_env = ""
-        public = {
-            "transport": transport if transport in ("stdio", "remote") else "stdio",
-            "command": str(spec.get("command") or "")[:4096], "args": args,
-            "env_names": list(dict.fromkeys(env_names)), "url": url[:4096],
-            "log_level": str(spec.get("log_level") or "warning")[:16],
-        }
-        if auth_env:
-            public["auth_env"] = auth_env
-        return public
+    def _public_mcp_spec(spec) -> dict:
+        return public_mcp_spec(spec)
 
     def _emit_mcp_servers(self, request_id: str, error: str | None = None) -> None:
         configured = self.config.get("mcp_servers", {}) or {}
@@ -961,13 +854,16 @@ class Backend:
         statuses = {str(row.get("name")): row for row in self.agent.mcp.status()
                     if isinstance(row, dict)}
         items = []
+        disabled = self.config.get("disabled_mcp_servers", [])
+        disabled = disabled if isinstance(disabled, list) else []
         for index, (raw_name, raw_spec) in enumerate(configured.items()):
             if index >= _MAX_MCP_SERVERS:
                 break
             name = str(raw_name)[:128]
             status = statuses.pop(name, {})
             items.append({"name": name, **self._public_mcp_spec(raw_spec),
-                          "state": str(status.get("state") or "configured")[:32],
+                          "enabled": name not in disabled,
+                          "state": "disabled" if name in disabled else str(status.get("state") or "configured")[:32],
                           "tool_count": int(status.get("tool_count") or 0),
                           "protocol_version": str(status.get("protocol_version") or "")[:64],
                           "protocol_era": str(status.get("protocol_era") or "")[:32],
@@ -983,11 +879,59 @@ class Backend:
         self.em.emit("mcp_servers", request_id=request_id, items=items,
                      total=len(items), **fields)
 
+    def _mcp_control(self, command: dict):
+        from .mcp_management import set_server_enabled
+        error = None
+        try:
+            name = command["name"]
+            if not _MCP_NAME_RE.fullmatch(name) or name not in self.config.get("mcp_servers", {}):
+                raise ValueError("Choose an existing MCP server")
+            if command["type"] == "set_mcp_enabled":
+                set_server_enabled(self.config, self.agent.mcp, name, command["enabled"], cancel=self.agent.cancelled,
+                                   input_handler=self.agent._handle_mcp_input)
+            else:
+                runtime = self.config.mcp_runtime_servers()
+                self.agent.mcp.reconnect(name, runtime[name], cancel=self.agent.cancelled,
+                                         input_handler=self.agent._handle_mcp_input)
+        except (OSError, ValueError) as exc:
+            error = str(exc)
+        except Exception as exc:
+            error = f"MCP connection operation failed ({type(exc).__name__})"
+        return lambda: self._emit_mcp_servers(command["request_id"], error)
+
+    def _mcp_command(self, command: dict):
+        import shlex
+        from .mcp_management import manage_mcp
+        fields = {"request_id": command["request_id"], "output": ""}
+        try:
+            arguments = command["arguments"]
+            if len(arguments) > 32_000:
+                raise ValueError("MCP command exceeds 32,000 characters")
+            parts = shlex.split(arguments)
+            result = manage_mcp(self.config, self.agent.mcp, arguments, agent=self.agent)
+            if isinstance(result, dict):
+                fields["context"] = result
+            elif parts and parts[0] in ("resources", "templates", "prompts"):
+                fields["catalog"] = {"server": parts[1], "kind": parts[0], "items": json.loads(result)}
+            else:
+                fields["output"] = result
+        except (OSError, ValueError) as exc:
+            fields["error"] = str(exc)
+        except Exception as exc:
+            fields["error"] = f"MCP command failed ({type(exc).__name__})"
+        def terminal():
+            self._emit_mcp_servers(command["request_id"])
+            self.em.emit("mcp_command_result", **fields)
+        return terminal
+
     def _upsert_mcp_server(self, request_id: str, name: str,
-                           runtime_value, persisted_value) -> None:
+                           runtime_value, persisted_value, *, interactive: bool = False):
+        def finish(error=None):
+            terminal = lambda: self._emit_mcp_servers(request_id, error)
+            return terminal if interactive else terminal()
+
         if not _MCP_NAME_RE.fullmatch(name):
-            self._emit_mcp_servers(request_id, "server name must use 1-64 letters, digits, ., _, or -")
-            return
+            return finish("server name must use 1-64 letters, digits, ., _, or -")
         runtime, runtime_error = _mcp_spec(runtime_value, persisted=False)
         persisted, persisted_error = _mcp_spec(persisted_value, persisted=True)
         problem = runtime_error or persisted_error
@@ -1012,12 +956,10 @@ class Backend:
             elif extra is None:
                 problem = "runtime arguments must preserve the persisted argument prefix"
         if problem or runtime is None or persisted is None:
-            self._emit_mcp_servers(request_id, problem or "invalid MCP server specification")
-            return
+            return finish(problem or "invalid MCP server specification")
         servers = dict(self.config.get("mcp_servers", {}) or {})
         if name not in servers and len(servers) >= _MAX_MCP_SERVERS:
-            self._emit_mcp_servers(request_id, f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
-            return
+            return finish(f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
         if hasattr(self.config, "drop_mcp_secrets"):
             # An editor upsert may replace a SecretStorage value without changing the public
             # server identity.  Never let an older CLI-migrated value win on the next launch.
@@ -1027,8 +969,13 @@ class Backend:
         secret_candidates = list(runtime.get("env", {}).values())
         existing = list(getattr(self.config, "_session_secret_values", ()))
         self.config._session_secret_values = tuple((existing + secret_candidates)[-256:])
-        self.agent.mcp.connect_all({name: runtime})
-        self._emit_mcp_servers(request_id)
+        try:
+            self.agent.mcp.connect_all({name: runtime},
+                                      cancel=self.agent.cancelled if interactive else None,
+                                      input_handler=self.agent._handle_mcp_input if interactive else None)
+        except Exception as exc:
+            return finish(f"MCP connection failed ({type(exc).__name__})")
+        return finish()
 
     def _emit_permissions(self, request_id: str) -> None:
         items = [{"action": action, "rule": str(rule)[:1000]}
@@ -1298,6 +1245,18 @@ class Backend:
                              message=f"prompt images rejected: {exc}", **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
+            if isinstance(context, list) and any(isinstance(item, dict) and item.get("type") == "mcp_context" for item in context):
+                safe = redact_value(context, secret_values(self.config))
+                formatted = _format_editor_context(safe)
+                retained = json.loads(formatted.split("\n", 2)[1]) if formatted else []
+                if any(not any(row.get("type") == "mcp_context" and row.get("server") == item.get("server")
+                               and row.get("uri") == item.get("uri") and row.get("text") == item.get("text")
+                               for row in retained) for item in safe
+                       if isinstance(item, dict) and item.get("type") == "mcp_context"):
+                    self.em.emit("command_rejected", command=t, reason="invalid_selection",
+                                 message="The selected MCP context exceeds the attachment limit. Remove an attachment or choose a smaller resource.",
+                                 **_request_fields(request_id))
+                    return
             if text.startswith("/"):               # render a custom slash-command template
                 parts = text[1:].split(None, 1)
                 custom = discover_commands(self.config.project_root)
@@ -1394,6 +1353,17 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                              message="a prompt or MCP operation is already running; cancel or wait")
 
+        elif t in ("list_mcp_context", "get_mcp_context"):
+            if (len(cmd["server"]) > 128 or len(cmd["kind"]) > 32
+                    or len(str(cmd.get("identifier", ""))) > 4096
+                    or len(json.dumps(cmd.get("arguments", {}))) > 32_000):
+                self.em.emit("command_rejected", command=t, reason="invalid_mcp_context",
+                             message="MCP context selection exceeds its input limit", request_id=cmd["request_id"])
+                return
+            if not self._start_foreground_worker(lambda: self._mcp_context_operation(cmd), label="mcp-context"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="A turn or MCP operation is already running; cancel or wait", request_id=cmd["request_id"])
+
         elif t == "list_skills":
             request_id = str(cmd.get("request_id") or "")
             if not request_id or len(request_id) > 128:
@@ -1453,10 +1423,27 @@ class Backend:
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))
 
+        elif t == "mcp_command":
+            if not self._start_foreground_worker(lambda: self._mcp_command(cmd), label="mcp-command"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd["request_id"],
+                             message="A turn or MCP operation is already running; cancel or wait")
+
+        elif t in ("set_mcp_enabled", "reconnect_mcp_server"):
+            if not self._start_foreground_worker(lambda: self._mcp_control(cmd), label="mcp-connection"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd["request_id"],
+                             message="A turn or MCP operation is already running; cancel or wait")
+
         elif t == "upsert_mcp_server":
-            self._upsert_mcp_server(
-                str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
-                cmd.get("runtime"), cmd.get("persisted"))
+            if cmd.get("interactive"):
+                if not self._start_foreground_worker(lambda: self._upsert_mcp_server(
+                        cmd["request_id"], cmd["name"], cmd["runtime"], cmd["persisted"],
+                        interactive=True), label="mcp-connection"):
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 request_id=cmd["request_id"], message="A turn or MCP operation is already running")
+            else:
+                self._upsert_mcp_server(
+                    str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
+                    cmd.get("runtime"), cmd.get("persisted"))
 
         elif t == "remove_mcp_server":
             request_id = str(cmd.get("request_id") or "")
@@ -1475,6 +1462,11 @@ class Backend:
             if live is not None:
                 live.stop()
             self.agent.mcp._rebuild_routes()
+            getattr(self.agent.mcp, "_runtime_specs", {}).pop(name, None)
+            disabled = self.config.get("disabled_mcp_servers", [])
+            if isinstance(disabled, list) and name in disabled:
+                self.config.set("disabled_mcp_servers", [value for value in disabled if value != name])
+            getattr(self.agent.mcp, "disabled_names", set()).discard(name)
             self._emit_mcp_servers(request_id)
 
         elif t == "reload_mcp_servers":

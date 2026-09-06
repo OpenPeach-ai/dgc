@@ -818,7 +818,8 @@ class Agent(GoalLifecycle):
             self.mcp = mcp
         else:
             self.mcp = MCPManager(
-                config.project_root, client_capabilities=self._mcp_client_capabilities(ui))
+                config.project_root, client_capabilities=self._mcp_client_capabilities(ui),
+                disabled_names=config.get("disabled_mcp_servers", []))
             mcp_servers = (config.mcp_runtime_servers()
                            if hasattr(config, "mcp_runtime_servers")
                            else config.get("mcp_servers"))
@@ -1488,6 +1489,7 @@ class Agent(GoalLifecycle):
         self._explicit_skill_instructions: dict[str, dict] = {}
         self._active_mcp_tools: set[str] = set()
         self._mcp_query_text = ""
+        self._draft_mcp_context: list[dict] = []
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         # Vendor thread IDs belong to this DGC session only. They are opaque continuation
         # references, never auth tokens, and are restored only from DGC's private session file.
@@ -1901,7 +1903,8 @@ class Agent(GoalLifecycle):
                 self._refresh_system()
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
-                completed = self._run_goal_steps(safe_user_text, self._run_turn)
+                from .mcp_context import apply_staged_context
+                completed = self._run_goal_steps(apply_staged_context(self, safe_user_text), self._run_turn)
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -1990,7 +1993,8 @@ class Agent(GoalLifecycle):
                 self._activate_skill_intents(safe_user_text, replace=True)
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
-                result = self._run_goal_steps(safe_user_text, step, external=True)
+                from .mcp_context import apply_staged_context
+                result = self._run_goal_steps(apply_staged_context(self, safe_user_text), step, external=True)
                 if not isinstance(result, dict):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result
@@ -3441,7 +3445,19 @@ class Agent(GoalLifecycle):
             return "error: MCP tool arguments must be an object"
         return self._handle_call(ToolCall(id=str(call_id), name=route, arguments=arguments))
 
-    def _handle_call(self, call: ToolCall) -> str:
+    def execute_mcp_context(self, server: str, kind: str, identifier: str, arguments: dict,
+                            call_id: str) -> dict:
+        """Fetch explicit user context through the identical MCP tool security boundary."""
+        route = self.mcp.context_route(server, kind)
+        params = ({"name": identifier, "arguments": arguments} if kind == "prompts" else {"uri": identifier})
+        captured = {}
+        output = self._handle_call(ToolCall(id=call_id, name=route, arguments=params), _context_capture=captured)
+        result = captured.get("result")
+        if not isinstance(result, dict) or not isinstance(result.get("text"), str):
+            raise ValueError(output)
+        return result
+
+    def _handle_call(self, call: ToolCall, *, _context_capture: dict | None = None) -> str:
         name, args = call.name, call.arguments
         call_id = call.id
         secrets = self._secret_values()
@@ -3671,6 +3687,13 @@ class Agent(GoalLifecycle):
             finally:
                 if lease is not None:
                     lease.release()
+        if _context_capture is not None:
+            try:
+                # This opt-in host result retains bounded structured context before the ordinary
+                # transcript display ceiling. It is never populated on denial or a failed call.
+                _context_capture["result"] = redact_value(json.loads(out), secrets)
+            except (ValueError, TypeError):
+                pass
         out = _clamp(redact_text(out, secrets))  # credential boundary before the central ceiling
         _, post = self._run_lifecycle_hooks(
             "PostToolUse", {"tool": name, "args": args, "result": out[:2000]},
@@ -3792,7 +3815,8 @@ class Agent(GoalLifecycle):
             if isolated:
                 isolated_mcp = MCPManager(
                     child_config.project_root,
-                    client_capabilities=self._mcp_client_capabilities(sub_ui))
+                    client_capabilities=self._mcp_client_capabilities(sub_ui),
+                    disabled_names=child_config.get("disabled_mcp_servers", []))
                 child_servers = (child_config.mcp_runtime_servers()
                                  if hasattr(child_config, "mcp_runtime_servers")
                                  else child_config.get("mcp_servers"))

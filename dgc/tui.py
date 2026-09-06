@@ -3403,20 +3403,10 @@ class TUI:
             self._append(self._rich(self._status_block()))
         elif cmd == "mcp":
             sub = rest.strip().split()
-            if sub and sub[0] == "add":
+            if sub == ["add"]:
                 self._mcp_add_flow()
-            elif sub and sub[0] in ("remove", "rm") and len(sub) > 1:
-                servers = dict(cfg.get("mcp_servers", {}) or {})
-                if servers.pop(sub[1], None) is not None:
-                    cfg.set("mcp_servers", servers)
-                    live = self.agent.mcp.servers.pop(sub[1], None)
-                    self.agent.mcp.failures.pop(sub[1], None)
-                    if live:
-                        live.stop()
-                    self.agent.mcp._rebuild_routes()
-                    self._flash(f"removed MCP server '{sub[1]}'")
-                else:
-                    self._flash(f"no MCP server named '{sub[1]}'")
+            elif rest:
+                self._submit_mcp(rest)
             else:
                 self._extensions_modal(tab=1)           # open the tabbed Skills/MCP modal on MCP
         elif cmd == "hooks":
@@ -3744,7 +3734,8 @@ class TUI:
                 failure = getattr(manager, "failures", {}).get(name, "") if manager else ""
                 if server is not None and not live:
                     failure = server.error or server._diagnostic_tail() or "process exited"
-                desc = f"failed: {failure}" if failure else tail
+                disabled = name in self.config.get("disabled_mcp_servers", [])
+                desc = "disabled · " + tail if disabled else f"failed: {failure}" if failure else tail
                 out.append({"label": ("● " if live else "○ ") + name, "desc": desc[:64],
                             "value": ("mcp", name)})
             return out
@@ -3761,16 +3752,9 @@ class TUI:
             elif key == "x" and row:                    # remove
                 kind, name = row["value"]
                 if kind == "mcp":
-                    servers = dict(self.config.get("mcp_servers", {}) or {}); servers.pop(name, None)
-                    self.config.set("mcp_servers", servers)
-                    if hasattr(self.config, "drop_mcp_secrets"):
-                        self.config.drop_mcp_secrets(name)
-                    if getattr(self.agent, "mcp", None):
-                        live = self.agent.mcp.servers.pop(name, None)
-                        self.agent.mcp.failures.pop(name, None)
-                        if live:
-                            live.stop()
-                        self.agent.mcp._rebuild_routes()
+                    self._close_overlay()
+                    self._submit_mcp(shlex.join(["remove", name]), on_result=lambda _: self._extensions_modal(tab=1))
+                    return
                 else:
                     from .skills import set_skill_enabled
                     set_skill_enabled(self.config, name, False)
@@ -3786,7 +3770,11 @@ class TUI:
                     self._flash(str(exc))
                 self._invalidate()
             elif key == "r":                            # reload (rebuild happens on render)
-                if not is_mcp and hasattr(self.agent, "reload_skills"):
+                if is_mcp:
+                    self._close_overlay()
+                    self._submit_mcp("reconnect", on_result=lambda _: self._extensions_modal(tab=1))
+                    return
+                if hasattr(self.agent, "reload_skills"):
                     self.agent.reload_skills()
                 self._invalidate()
 
@@ -3800,7 +3788,7 @@ class TUI:
                 prefix = " " if self.input_buf.cursor_position and not self.input_buf.document.text_before_cursor[-1].isspace() else ""
                 self.input_buf.insert_text(prefix + "$" + name + " ")
             else:
-                self._extensions_modal(tab=1)
+                self._mcp_server_menu(name)
 
         self._open_overlay([], on_pick=pick, tabs=["Skills", "MCP Servers"], tab=tab,
                            footer="Tab switch · Enter use · e enable/disable · a add · x disable skill/remove MCP · r reload · Esc close",
@@ -3832,6 +3820,99 @@ class TUI:
             {"label": "Install a local package", "desc": "Copy SKILL.md and supporting files into this project", "value": "local"},
             {"label": "Install a single-file URL", "desc": "User skill from a raw SKILL.md; no overwrite", "value": "url"},
         ], on_pick=pick, title="Add a skill", footer="Enter select · Esc cancel")
+
+    def _mcp_server_menu(self, name: str) -> None:
+        import shlex
+        disabled = name in self.config.get("disabled_mcp_servers", [])
+        def pick(row):
+            self._close_overlay()
+            action = row["value"]
+            if action in ("resources", "templates", "prompts"):
+                def loaded(result):
+                    rows = json.loads(result)
+                    if not rows:
+                        self._flash("This server returned no entries in that category.")
+                        return
+                    def selected(choice):
+                        self._close_overlay()
+                        item = choice["value"]
+                        if action == "resources":
+                            self._submit_mcp(shlex.join(["read", name, item["uri"]]))
+                        elif action == "templates":
+                            self._ask_input("resource URI using " + item["uriTemplate"] + ":",
+                                            lambda uri: self._submit_mcp(shlex.join(["read", name, uri])))
+                        else:
+                            arguments = item.get("arguments", [])
+                            values = []
+                            def next_argument(index=0):
+                                if index >= len(arguments):
+                                    self._submit_mcp(shlex.join(["prompt", name, item["name"], *values]))
+                                    return
+                                arg = arguments[index]
+                                def supplied(value):
+                                    if value or arg.get("required"):
+                                        values.append(arg["name"] + "=" + value)
+                                    next_argument(index + 1)
+                                self._ask_input(arg["name"] + (" (required)" if arg.get("required") else " (optional)") + ":", supplied)
+                            next_argument()
+                    self._open_overlay([{"label": item.get("title") or item["name"],
+                                         "desc": item.get("description", ""), "value": item} for item in rows],
+                                       on_pick=selected, title=f"{name} · {action}", footer="Enter choose · Esc cancel")
+                self._submit_mcp(shlex.join([action, name]), on_result=loaded)
+            else:
+                self._submit_mcp(shlex.join([action, name]))
+        self._open_overlay([
+            {"label": "Resources", "value": "resources"}, {"label": "Resource templates", "value": "templates"},
+            {"label": "Prompts", "value": "prompts"}, {"label": "Reconnect", "value": "reconnect"},
+            {"label": "Enable" if disabled else "Disable", "value": "enable" if disabled else "disable"},
+        ], on_pick=pick, title=name, footer="Enter select · Esc cancel")
+
+    def _submit_mcp(self, arguments: str, *, on_result=None) -> None:
+        """Run MCP I/O off the UI thread so consent cards, Esc, and session switching stay live."""
+        if self._turn.is_set():
+            self._flash("Finish or cancel the current operation first.")
+            return
+        sess = self._cur_session()
+        self._cancel_auxiliary()
+        self._cancel.clear()
+        self._turn.set()
+        self._turn_t0 = time.monotonic()
+        def work():
+            self._tls.session = sess
+            result = None
+            try:
+                self._foreground_aux_barrier()
+                from .mcp_management import manage_mcp
+                from .mcp_context import stage_context
+                result = manage_mcp(self.config, self.agent.mcp, arguments, agent=self.agent)
+                if isinstance(result, dict):
+                    stage_context(self.agent, result)
+                    result = f"Attached {result['server']} · {result['identifier']} to the next prompt. /mcp context lists snapshots; /mcp clear-context removes them."
+                result = redact_text(result, secret_values(self.config))
+                if on_result is None:
+                    self._append(self._rich(_esc(result)))
+            except Exception as exc:
+                self.error(redact_text(str(exc), secret_values(self.config)))
+            finally:
+                self._settle_running_tools()
+                self._turn.clear()
+                sess.last_activity = time.monotonic()
+                sess._worker_thread = None
+                self._invalidate()
+                if sess._closing:
+                    self._finalize_session_workspace(sess, "MCP operation stopped")
+                    return
+                queued = self._pop_followup(sess)
+                if queued is not None:
+                    queued_text, shown = queued
+                    self._submit(queued_text, echo=not shown)
+                elif result is not None and on_result and sess is self.active:
+                    try:
+                        on_result(result)
+                    except (OSError, ValueError) as exc:
+                        self.error(redact_text(str(exc), secret_values(self.config)))
+        sess._worker_thread = threading.Thread(target=work, name=f"dgc-mcp-{sess.id}", daemon=True)
+        sess._worker_thread.start()
 
     def _install_skill_url(self, url: str) -> None:
         url = url.strip()
@@ -3943,29 +4024,21 @@ class TUI:
                            back=self._palette_back)
 
     def _mcp_save(self, name: str, spec: dict) -> None:
-        cfg = self.config
-        servers = dict(cfg.get("mcp_servers", {}) or {})
+        servers = self.config.get("mcp_servers", {}) or {}
         if name not in servers and len(servers) >= 64:
             self._flash("at most 64 MCP servers are supported")
             return
-        if hasattr(cfg, "drop_mcp_secrets"):
-            # Reusing a server name must not attach a credential migrated for an older target.
-            cfg.drop_mcp_secrets(name)
-        servers[name] = spec
-        cfg.set("mcp_servers", servers)
-        try:                                     # connect just the new one so it's live this session
-            runtime = (cfg.mcp_runtime_servers({name: spec})
-                       if hasattr(cfg, "mcp_runtime_servers") else {name: spec})
-            self.agent.mcp.connect_all(runtime)
-            live = name in getattr(self.agent.mcp, "servers", {})
-        except Exception:
-            live = False
-        tail = redact_text(
-            f"{spec.get('command')} {' '.join(spec.get('args', []))}".strip(),
-            secret_values(cfg),
-        )
-        self._flash((f"MCP '{name}' added + connected" if live
-                     else f"MCP '{name}' saved (connects next launch)") + f" — {tail}"[:52])
+        parts = ["add", name]
+        for env_name in spec.get("env_names", []):
+            parts.extend(["--env", env_name])
+        if spec.get("transport") == "remote":
+            parts.extend(["--url", spec["url"]])
+            if spec.get("auth_env"):
+                parts.extend(["--auth-env", spec["auth_env"]])
+        else:
+            parts.extend(["--", spec["command"], *spec.get("args", [])])
+        self._close_overlay()
+        self._submit_mcp(shlex.join(parts), on_result=lambda _: self._extensions_modal(tab=1))
 
     def _connect_flow(self, rest: str, subagent: bool = False) -> None:
         from .config import PROVIDERS

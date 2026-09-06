@@ -2612,7 +2612,7 @@ def unit_tests(tmp: Path):
             return [{"name": name, "state": "connected", "tool_count": 1,
                      "protocol_version": "fixture", "protocol_era": "modern"}
                     for name in self.servers]
-        def connect_all(self, specs):
+        def connect_all(self, specs, **kwargs):
             self.connected.append(specs)
             for name in specs: self.servers[name] = type("Live", (), {"stop": lambda self: None})()
         def _rebuild_routes(self): pass
@@ -6018,7 +6018,8 @@ def test_mcp_protocol():
             "auth_env": "SERVER_TOKEN",
         })
         check("MCP remote auth materializes only as a runtime environment reference",
-              remote_args[-2:] == ["--header", "Authorization: Bearer ${SERVER_TOKEN}"])
+              remote_args[1] == "mcp-remote@0.8.3"
+              and remote_args[remote_args.index("--header") + 1] == "Authorization: Bearer ${SERVER_TOKEN}")
         proxy_only_args = _runtime_server_args({
             "transport": "remote", "command": "npx",
             "args": ["-y", "mcp-remote", "https://example.invalid/mcp"],
@@ -6026,7 +6027,7 @@ def test_mcp_protocol():
             "env_names": ["HTTPS_PROXY"],
         })
         check("MCP remote environment passthrough is never mistaken for Bearer auth",
-              proxy_only_args == ["-y", "mcp-remote", "https://example.invalid/mcp"])
+              proxy_only_args == ["-y", "mcp-remote@0.8.3", "https://example.invalid/mcp", "--auth-timeout", "120"])
         extra_header_args = _runtime_server_args({
             "transport": "remote", "command": "npx",
             "args": ["-y", "mcp-remote", "https://example.invalid/mcp",
@@ -6035,8 +6036,8 @@ def test_mcp_protocol():
             "env_names": ["SERVER_TOKEN"], "auth_env": "SERVER_TOKEN",
         })
         check("MCP remote auth coexists with an unrelated bridge header",
-              extra_header_args[-2:] ==
-              ["--header", "Authorization: Bearer ${SERVER_TOKEN}"])
+              "Authorization: Bearer ${SERVER_TOKEN}" in extra_header_args
+              and "X-Trace: enabled" in extra_header_args)
         mismatched_args = _runtime_server_args({
             "transport": "remote", "command": "npx",
             "args": ["-y", "mcp-remote", "https://other.invalid/mcp"],
@@ -9438,8 +9439,8 @@ def test_private_config():
               and "legacy-env-plaintext" not in _C.USER_CONFIG.read_text()
               and "legacy-custom-url-secret" not in _C.USER_CONFIG.read_text())
         check("migrated legacy remote auth is reconstructed as an environment reference",
-              _runtime_mcp_args(runtime_mcp["remote-fixture"])[-2:]
-                  == ["--header", f"Authorization: Bearer ${{{remote_env_names[0]}}}"])
+              f"Authorization: Bearer ${{{remote_env_names[0]}}}" in
+                  _runtime_mcp_args(runtime_mcp["remote-fixture"]))
 
         tampered = copy.deepcopy(cfg.data["mcp_servers"]["remote-fixture"])
         cfg.data["mcp_servers"]["remote-fixture"]["url"] = "https://tampered.invalid/mcp"
