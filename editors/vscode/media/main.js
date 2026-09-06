@@ -1284,7 +1284,8 @@
         else {
           mcpContextPending = ""; renderMcp();
           if (ev.error || ev.output) {
-            const result = el("pre", ev.error ? "err" : "surface-meta", ev.error || ev.output);
+            const result = el("pre", ev.error ? "err" : "surface-meta");
+            result.textContent = ev.error || ev.output;
             surfaceBody.prepend(result);
           }
         }
