@@ -51,7 +51,7 @@ must also start in the standalone CLI. Tool execution still passes through DGC's
 
 - `dgc.command` — path to the `dgc` executable (default `dgc`).
 - Native DGC settings provide provider-route defaults. The in-panel page owns live agent behavior,
-  sandbox, artifact, and extension-manager settings exposed by protocol v5.
+  sandbox, artifact, and extension-manager settings exposed by protocol v6.
 
 ## Local verification
 

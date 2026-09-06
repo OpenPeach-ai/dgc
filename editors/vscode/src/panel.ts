@@ -2933,7 +2933,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </div>
 <div id="changes-review" class="panel-overlay" role="dialog" aria-modal="true" aria-labelledby="changes-review-title" hidden>
   <div class="set-head">
-    <span id="changes-review-title" class="set-title"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span> Review changes</span>
+    <span id="changes-review-title" class="set-title"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span> Workspace changes</span>
     <button type="button" id="changes-review-close" class="fbtn" title="Close" aria-label="Close changed files"><span class="codicon codicon-close" aria-hidden="true"></span></button>
   </div>
   <div id="changes-review-summary" class="changes-review-summary"></div>
