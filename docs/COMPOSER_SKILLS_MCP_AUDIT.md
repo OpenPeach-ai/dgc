@@ -276,3 +276,8 @@ unimplemented capability. Document any provider-owned execution boundary explici
   again. The corrected run completed in one cycle (109 seconds, 42,992 reported tokens). An earlier
   run paused truthfully at its 25,000-token boundary and is not counted as a completed run. This uses
   an isolated synthetic workspace/profile and a fixture MCP server with a real model and editor host.
+- Command resource cleanup: foreground and background output readers now close their pipes after
+  drainage. Completed background handles retain their captured output without retaining descriptors.
+  Real-process regressions cover repeated successful/failed commands and a retained background
+  result; the full 1,387-check / 110-case run above includes these checks without the earlier pipe
+  ResourceWarning. Existing timeout, cancellation, process-tree and bounded-output checks remain green.

@@ -1396,6 +1396,11 @@ def bash(args: dict, ctx) -> str:
         except (OSError, ValueError):
             pass
         finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except (OSError, ValueError):
+                    pass
             capture.finish()
 
     reader = _threading.Thread(target=read_output, daemon=True)
@@ -1566,6 +1571,11 @@ def _bash_background(command: str, ctx) -> str:
         except Exception:
             pass
         finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except (OSError, ValueError):
+                    pass
             append(redactor.flush())
         try:
             proc.wait()
