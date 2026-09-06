@@ -30,6 +30,7 @@ from .redaction import (StreamingRedactor, contains_secret, redact_messages,
 from .skills import discover_skills, matching_skill_names
 from .scheduler import acquire_cancellable, workspace_mutation_lock
 from .presentation import RESPONSE_GUIDANCE
+from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clean_report, new_details, record_transition
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
@@ -68,7 +69,7 @@ _PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_f
                    "skill", "bash_output"}
 _MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel"}
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
-_PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options"}
+_PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options", "update_goal"}
 _GOAL_MAX_CHARS = 4000
 _MAX_STEER_MESSAGES = 8
 _MAX_STEER_CHARS = 64_000
@@ -795,7 +796,7 @@ class _SubUI:
         return self._failure.strip()
 
 
-class Agent:
+class Agent(GoalLifecycle):
     @staticmethod
     def _mcp_client_capabilities(ui) -> dict:
         provider = getattr(ui, "mcp_capabilities", None)
@@ -1453,6 +1454,11 @@ class Agent:
         self.goal_status = "none"
         self._goal_elapsed_seconds = 0.0
         self._goal_active_since = 0.0
+        self._goal_details = new_details()
+        self._goal_running = False
+        self._active_goal_request = None
+        self._pending_goal_report = None
+        self._goal_progress = None
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
         self._active_mcp_tools: set[str] = set()
@@ -1512,8 +1518,8 @@ class Agent:
                 "- Use code_intel for exact definitions, references, symbols, and diagnostics "
                 "when that is more targeted than broad text search.")
         parts = [
-            "You are DGC, an interactive coding-agent CLI running on the user's machine, "
-            "powered by a local LLM. You help with software engineering tasks by taking real "
+            "You are DGC, a coding agent in the user's workspace, powered by their selected model. "
+            "You help with software engineering tasks by taking real "
             "action with your tools — reading, writing and editing files, running shell commands — "
             "not by just describing solutions.",
             "",
@@ -1562,9 +1568,9 @@ class Agent:
                 "it's clearly unmet — take the next concrete step. When you believe it is fully met, say "
                 "so plainly and summarize how it was achieved. If it's genuinely blocked, say what's "
                 "blocking it rather than stopping silently.",
-                "When the entire goal is genuinely achieved, call update_goal(status='completed') before "
+                "When the entire goal is achieved, call update_goal(status='completed', summary=..., evidence=[...]) before "
                 "your final response. If an external dependency makes further progress impossible, call "
-                "update_goal(status='blocked') and explain the blocker. Never update it merely because one "
+                "update_goal(status='blocked', summary=..., evidence=[...]) with the observed blocker. Never update it merely because one "
                 "turn or one milestone ended.",
             ]
         elif goal:
@@ -1863,7 +1869,7 @@ class Agent:
             self._refresh_system()
             completed = None
             try:
-                completed = self._run_turn(safe_user_text)
+                completed = self._run_goal_steps(safe_user_text, self._run_turn)
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -1931,15 +1937,26 @@ class Agent:
             safe_user_text = self._safe_text(user_text)
             result = None
             saved = False
+            def step(prompt):
+                turn_result = None
+                try:
+                    turn_result = runner(prompt)
+                    if not isinstance(turn_result, dict):
+                        raise TypeError("external turn runner returned an invalid result")
+                    turn_result = self._safe_value(turn_result)
+                    if isinstance(turn_result.get("usage"), dict):
+                        self._record_usage(turn_result["usage"], "user_turn")
+                    return turn_result
+                finally:
+                    self.messages.append({"role": "user", "content": prompt})
+                    if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
+                        self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"]))})
             try:
-                result = runner(safe_user_text)
+                result = self._run_goal_steps(safe_user_text, step, external=True)
                 if not isinstance(result, dict):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result
             finally:
-                self.messages.append({"role": "user", "content": safe_user_text})
-                if isinstance(result, dict) and str(result.get("text") or "").strip():
-                    self.messages.append({"role": "assistant", "content": str(result["text"])})
                 self._refresh_system()
                 saved = self._persist()
                 if not saved and self.depth == 0:
@@ -1979,8 +1996,8 @@ class Agent:
                 saved = sessions.save(
                     self.session_file, self.messages, self.session_root,
                     name=self.session_name, goal=self.goal, goal_status=self.goal_status,
-                    goal_elapsed_seconds=self._goal_elapsed_seconds,
-                    goal_active_since=self._goal_active_since,
+                    goal_elapsed_seconds=self.goal_elapsed_seconds(),
+                    goal_details=self._goal_details,
                     usage=usage, activity=activity, timing=timing,
                     checkpoints=checkpoint_state,
                     subscription_sessions=self.subscription_sessions,
@@ -2243,21 +2260,22 @@ class Agent:
             self.goal = self._safe_text(str(record.get("goal") or ""))[:_GOAL_MAX_CHARS]
             raw_status = str(record.get("goal_status") or "active")
             self.goal_status = (raw_status if self.goal
-                                and raw_status in ("active", "completed", "blocked")
+                                and raw_status in GOAL_STATUSES
                                 else ("active" if self.goal else "none"))
             try:
                 elapsed = float(record.get("goal_elapsed_seconds") or 0)
             except (TypeError, ValueError, OverflowError):
                 elapsed = 0.0
             self._goal_elapsed_seconds = elapsed if 0 <= elapsed < float("inf") else 0.0
-            try:
-                active_since = float(record.get("goal_active_since") or 0)
-            except (TypeError, ValueError, OverflowError):
-                active_since = 0.0
-            now = time.time()
-            self._goal_active_since = (active_since if self.goal_status == "active"
-                                       and 0 < active_since <= now + 60 else
-                                       (now if self.goal_status == "active" else 0.0))
+            self._goal_details = clean_details(self._safe_value(record.get("goal_details")))
+            # Closed editors cannot perform work. Legacy active-since timestamps must not turn
+            # days spent offline into goal work time, nor silently restart a subscription process.
+            self._goal_active_since = 0.0
+            self._goal_running = False
+            self._active_goal_request = self._pending_goal_report = self._goal_progress = None
+            if self.goal_status == "active":
+                self.goal_status = "paused"
+                record_transition(self._goal_details, "paused", "Session reopened; resume to continue the goal")
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""
@@ -2290,52 +2308,6 @@ class Agent:
         self.subscription_sessions[engine] = {
             "id": session_id, "mode": mode, "model": model, "effort": effort,
         }
-
-    def set_goal(self, text: str, status: str = "active") -> bool:
-        """Set (or clear) a bounded standing objective and persist it immediately."""
-        clean = self._safe_text(text).strip()[:_GOAL_MAX_CHARS]
-        previous = (self.goal, self.goal_status, self._goal_elapsed_seconds,
-                    self._goal_active_since)
-        self.goal = clean
-        self.goal_status = (status if clean and status in ("active", "completed", "blocked")
-                            else ("active" if clean else "none"))
-        self._goal_elapsed_seconds = 0.0
-        self._goal_active_since = time.time() if self.goal_status == "active" else 0.0
-        self._refresh_system()                          # re-emit the system prompt with the # Goal section
-        if self._persist():
-            return True
-        (self.goal, self.goal_status, self._goal_elapsed_seconds,
-         self._goal_active_since) = previous
-        self._refresh_system()
-        return False
-
-    def goal_elapsed_seconds(self, now: float | None = None) -> int:
-        """Return the persisted active-work clock for the standing goal."""
-        elapsed = max(0.0, float(self._goal_elapsed_seconds))
-        if self.goal and self.goal_status == "active" and self._goal_active_since > 0:
-            current = time.time() if now is None else float(now)
-            elapsed += max(0.0, current - self._goal_active_since)
-        return max(0, int(elapsed))
-
-    def update_goal(self, status: str) -> bool:
-        """Transition an existing goal without deleting its auditable objective."""
-        if not self.goal or status not in ("active", "completed", "blocked"):
-            return False
-        previous = (self.goal_status, self._goal_elapsed_seconds, self._goal_active_since)
-        now = time.time()
-        if self.goal_status == "active" and self._goal_active_since > 0:
-            self._goal_elapsed_seconds += max(0.0, now - self._goal_active_since)
-        self.goal_status = status
-        self._goal_active_since = now if status == "active" else 0.0
-        self._refresh_system()
-        if not self._persist():
-            self.goal_status, self._goal_elapsed_seconds, self._goal_active_since = previous
-            self._refresh_system()
-            return False
-        notify = getattr(self.ui, "goal_changed", None)
-        if notify:
-            notify(self.goal, self.goal_status)
-        return True
 
     def _capture_good_snapshot(self, deadline: float | None = None) -> WorkspaceSnapshot | None:
         """Capture exact current state for checkpoint-known project mutations under the write lease."""
@@ -2601,6 +2573,10 @@ class Agent:
         iteration = 0
         while max_turns is None or iteration < max_turns:
             iteration += 1
+            if self.goal_budget_exhausted():
+                if held_final_messages:
+                    withhold_final()
+                return self._fail_turn("goal token budget reached before the next model request")
             if self.cancelled.is_set():
                 if held_final_messages:
                     withhold_final(
@@ -2951,11 +2927,11 @@ class Agent:
                     next_request_reason = "steering"
                     continue
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
-                        and not goal_nudged and did_tools):  # standing /goal gate:
+                        and not self._pending_goal_report and not goal_nudged and did_tools):
                     goal_nudged = True       #   don't stop with the goal unmet if we actually did work
                     self.messages.append({"role": "user", "content":
                         "<system-reminder>\nStanding goal for this session:\n" + self.goal +
-                        "\nBefore you stop: is that goal now FULLY met? If yes, say so and summarize how. "
+                        "\nBefore you stop: is that goal now FULLY met? If yes, call update_goal with completion evidence. "
                         "If not, take the next concrete step toward it now — don't stop with it unmet.\n"
                         "</system-reminder>"})
                     if defer_completion:
@@ -3115,6 +3091,10 @@ class Agent:
                         out = self._handle_call(call)
                         task_integrated = call.name == "task" and self._last_task_integrated
                 out = self._safe_text(out)
+                if call.name != "update_goal":
+                    self._pending_goal_report = None
+                if self._goal_progress is not None:
+                    self._goal_progress.add(call.name, call.arguments, out)
                 # Compaction may replace old tool messages, but it must never erase observable
                 # activity. Count model-issued calls in native and fenced text-tool modes alike;
                 # a file edit counts only after the tool reports that it landed.
@@ -3491,14 +3471,17 @@ class Agent:
             status = str(args.get("status", "")).strip().lower()
             if status == "complete":
                 status = "completed"
-            if not self.goal:
-                return "error: there is no standing goal to update."
+            if not self.goal or self.goal_status != "active":
+                return "error: there is no active goal to update."
             if status not in ("completed", "blocked"):
                 return "error: status must be 'completed' or 'blocked'."
-            if not self.update_goal(status):
-                return "error: " + (self._last_persist_error or "the goal transition was not saved")
-            return (f"Standing goal marked {status}. This transition is visible to the user; now give a "
-                    "concise final explanation of the evidence or blocker.")
+            report = clean_report({"status": status, "summary": args.get("summary"),
+                                   "evidence": args.get("evidence")})
+            if report is None:
+                return "error: include a concise summary and a nonempty evidence list for the entire goal."
+            self._pending_goal_report = self._safe_value(report)
+            return (f"Goal {status} report recorded for review. The transition is applied only after "
+                    "this work cycle finishes successfully. Give the user a concise final explanation.")
 
         if name == "artifact":
             if self.mode == "plan" and not self.config.get("artifact_in_plan", False):

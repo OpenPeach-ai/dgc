@@ -418,7 +418,11 @@ class HeadlessUI:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
     def goal_changed(self, goal: str, status: str) -> None:
-        self.em.emit("goal_changed", goal=goal, status=status)
+        hook = getattr(self, "_goal_hook", None)
+        if callable(hook):
+            hook()
+        else:
+            self.em.emit("goal_changed", goal=goal, status=status)
 
     # notices ------------------------------------------------------------------
     def info(self, message: str) -> None:
@@ -514,6 +518,7 @@ class Backend:
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
         self.agent = Agent(config, self.ui)
+        self.ui._goal_hook = self._emit_goal
         self.ui._rule_hook = self._add_rule
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
@@ -535,7 +540,7 @@ class Backend:
         self.em.emit(
             "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
-                          "goal_state": True, "saved_plan": True, "command_registry": True,
+                          "goal_state": True, "goal_runner": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
                           "headless_feature_management": True,
@@ -557,8 +562,7 @@ class Backend:
             skills=[s.name for s in self.agent.skills.values()],
             commands=editor_command_metadata(),
             custom_commands=custom_command_names(self.config.project_root),
-            goal={"text": self.agent.goal, "status": self.agent.goal_status,
-                  "elapsed_seconds": self._goal_elapsed_seconds()},
+            goal=self._goal_snapshot(),
             session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
         for warning in getattr(self.config, "credential_warnings", ()):
@@ -653,6 +657,8 @@ class Backend:
             elif kind == "tool_result":
                 call_id = str(event.get("id") or "") or None
                 output = diffs.get(call_id or "") or str(event.get("output") or "")
+                if event.get("error"):
+                    output = "error: " + str(event.get("output") or "tool failed")
                 self.ui.tool_result(names.get(call_id or "", ""), output, call_id)
             elif kind == "status" and event.get("text"):
                 self.ui.info(str(event["text"]))
@@ -663,11 +669,14 @@ class Backend:
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
 
         def delegate(safe_prompt: str) -> dict:
+            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+            shown["text"] = False
             result = subs.run_turn(
                 engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self.agent.cancelled.is_set,
-                model=model, effort=effort)
+                model=model, effort=effort, goal_request=self.agent._active_goal_request,
+                redact_secrets=self.agent._secret_values())
             if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
                 self.agent.remember_subscription_session(
                     engine.key, result["session_id"], mode, model, effort)
@@ -1156,9 +1165,7 @@ class Backend:
                      artifact_in_plan=bool(c.get("artifact_in_plan", False)),
                      tool_profile=str(c.get("tool_profile", "adaptive")),
                      max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
-                     goal={"text": getattr(self.agent, "goal", ""),
-                           "status": getattr(self.agent, "goal_status", "none"),
-                           "elapsed_seconds": self._goal_elapsed_seconds()},
+                     goal=self._goal_snapshot(),
                      **_request_fields(request_id))
 
     def _goal_elapsed_seconds(self) -> int:
@@ -1174,7 +1181,14 @@ class Backend:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
                      status=getattr(self.agent, "goal_status", "none"),
                      elapsed_seconds=self._goal_elapsed_seconds(),
+                     details=self._goal_snapshot(),
                      **_request_fields(request_id))
+
+    def _goal_snapshot(self) -> dict:
+        snapshot = getattr(self.agent, "goal_snapshot", None)
+        return snapshot() if callable(snapshot) else {
+            "text": getattr(self.agent, "goal", ""), "status": getattr(self.agent, "goal_status", "none"),
+            "elapsed_seconds": self._goal_elapsed_seconds()}
 
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
@@ -1664,7 +1678,7 @@ class Backend:
                 ok = self.agent.set_goal("")
             elif text:
                 ok = self.agent.set_goal(
-                    text, status if status in ("active", "completed", "blocked") else "active")
+                    text, status, token_budget=cmd.get("token_budget"), replace=bool(cmd.get("replace")))
             else:
                 ok = self.agent.update_goal(status)
             if not ok:
@@ -1931,9 +1945,7 @@ class Backend:
                          think=active_think, base_url=self.config.base_url,
                          subscription_engine=active_engine,
                          ultra_mode=bool(self.config.get("ultra_mode", False)),
-                         goal={"text": getattr(self.agent, "goal", ""),
-                               "status": getattr(self.agent, "goal_status", "none"),
-                               "elapsed_seconds": self._goal_elapsed_seconds()},
+                         goal=self._goal_snapshot(),
                          context_used=self.agent.estimate_tokens(),
                          context_size=self._context_window_size(), **_request_fields(request_id))
         elif t == "shutdown":

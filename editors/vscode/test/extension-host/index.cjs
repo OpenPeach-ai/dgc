@@ -236,11 +236,11 @@ async function run() {
     && command.text === "host matrix").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "pauseGoal" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
-    command.type === "set_goal" && command.status === "blocked"));
+    command.type === "set_goal" && command.status === "paused"));
   const pausedCommands = backendCommands(backendLogPath);
   const pauseCancelIndex = pausedCommands.findIndex((command) => command.type === "cancel");
   const pauseSetIndex = pausedCommands.findIndex((command) => command.type === "set_goal"
-    && command.status === "blocked");
+    && command.status === "paused");
   assert.ok(pauseCancelIndex !== -1 && pauseSetIndex > pauseCancelIndex,
     "pausing an active goal must stop its turn before crossing the backend's busy mutation gate");
   assert.equal(posted().filter((item) => item.eventType === "command_rejected"
@@ -262,15 +262,15 @@ async function run() {
     "the goal play control must reactivate the tagged goal before resuming its agent turn");
   await waitFor(() => posted().filter((item) => item.type === "event"
     && item.eventType === "turn_end").length > turnsBeforeResume);
+  const promptsBeforeEdit = backendCommands(backendLogPath)
+    .filter((command) => command.type === "prompt").length;
   await testApi.testOnlyWebviewMessage(testToken,
     { type: "updateGoal", text: "host matrix refined" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "set_goal" && command.text === "host matrix refined"));
-  const promptsBeforeEdit = backendCommands(backendLogPath)
-    .filter((command) => command.type === "prompt").length;
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(backendCommands(backendLogPath).filter((command) => command.type === "prompt").length,
-    promptsBeforeEdit, "editing an active goal must not synthesize an unrelated agent turn");
+  await waitFor(() => backendCommands(backendLogPath).filter((command) => command.type === "prompt").length > promptsBeforeEdit);
+  assert.equal(backendCommands(backendLogPath).filter((command) => command.type === "prompt").at(-1).text,
+    "host matrix refined", "editing an active goal must continue using the saved revised objective");
   await testApi.testOnlyWebviewMessage(testToken, { type: "clearGoal" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "set_goal" && command.text === "" && command.status === "none"));

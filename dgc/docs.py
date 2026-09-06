@@ -557,26 +557,35 @@ are dropped so each record is a clean, portable conversation.
     ("Standing goals", "persistent objectives with an explicit lifecycle", """
 # Standing goals
 
-`/goal <objective>` records a bounded objective in the session. Native local/API
-turns keep it in the model's instructions until it is completed, blocked,
-replaced, or cleared. The local record survives `/resume`; delegated vendor turns
-do not receive the DGC goal instruction.
+`/goal <objective>` saves the objective and starts work in the terminal or editor.
+DGC continues an active goal across work cycles on native local/API and delegated
+subscription routes. Ordinary prompts do not create goals.
 
 In VS Code/Cursor, entering `/goal <objective>` first saves the tagged goal and
 then immediately starts that exact objective as an agent turn. Its status, active
-time, pause/resume button, and edit/clear controls stay above the composer. In the
-terminal, the slash command records the standing objective for the current session;
-send a normal prompt to begin or continue work toward it.
+time, review button, pause/resume button, and edit/delete controls stay above the composer.
+Editing preserves the goal's identity and accumulated work time. Reopening a saved
+session pauses its goal; time spent offline is not counted as work.
 
-- `/goal` — inspect the full objective and status.
+- `/goal` or `/goal review` — inspect the objective, status, work time, cycles, and evidence.
+- `/goal pause` — stop work and retain the goal for later.
 - `/goal complete` — retain the objective as an auditable completed record.
 - `/goal blocked` — stop automatic progress while an external blocker exists.
-- `/goal resume` — reactivate a completed or blocked goal.
+- `/goal resume` — reactivate the goal and continue work immediately.
 - `/goal clear` — remove it.
 
-On native routes, the model can use the visible `update_goal` tool only for genuine
-whole-goal completion or a real blocker. Ending one turn or finishing one milestone
-is not goal completion. Subscription vendors do not receive that DGC tool.
+Native models use `update_goal` with a summary and evidence. Delegated models submit
+a structured closing report that DGC validates and removes from the displayed answer.
+Completion is applied after the work cycle succeeds; failed or cancelled work cannot
+complete a goal. Three consecutive cycles without distinct tool progress block the
+goal for review. Cancellation or a runtime failure pauses it.
+
+Use `/goal --tokens 100000 <objective>` for an optional token budget, or edit the
+budget in the goal card. Budgets are checked between native requests or delegated
+work cycles, so a request can take usage past the limit. A subscription route that
+does not report usage cannot enforce a token budget; DGC pauses instead of continuing
+with unknown usage. The goal review shows the reported usage and any budget pause.
+Ending one work cycle or finishing one milestone is not whole-goal completion.
 
 ## Autonomous gate
 

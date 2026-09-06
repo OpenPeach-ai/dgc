@@ -53,7 +53,7 @@ RULE_ARG = {
 }
 
 READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search", "todo", "skill",
-                   "bash_output", "propose_options", "mcp_search"}
+                   "bash_output", "propose_options", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 
 # A shell string is not a trustworthy read/write boundary. Redirections, substitutions, interpreters,

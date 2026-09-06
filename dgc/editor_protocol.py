@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v5 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v6 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -79,8 +79,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "artifact_ready": {"id": _S(), "name": _S(), "url": _S(), "rel": _S()},
     "goal_changed": {
         "goal": _S(),
-        "status": _f("string", enum=("none", "active", "completed", "blocked")),
+        "status": _f("string", enum=("none", "active", "paused", "completed", "blocked")),
         "elapsed_seconds": _I(False),
+        "details": _O(False),
         "request_id": _S(False),
     },
     "info": {"message": _S()},
@@ -297,7 +298,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "set_goal": {
         "text": _S(False),
         "status": _f("string", required=False,
-                     enum=("none", "active", "completed", "blocked")),
+                     enum=("none", "active", "paused", "completed", "blocked")),
+        "token_budget": _I(False),
+        "replace": _B(False),
         "request_id": _S(False),
     },
     "get_goal": {"request_id": _S(False)},

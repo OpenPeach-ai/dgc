@@ -318,12 +318,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * first, then run that exact objective as the next agent turn. Awaiting the correlated goal
    * acknowledgement prevents a failed/busy goal update from launching an untagged prompt. */
   private async startGoal(text: string): Promise<void> {
-    const objective = String(text || "").trim();
+    let objective = String(text || "").trim();
+    let tokenBudget: number | undefined;
+    if (objective.startsWith("--tokens")) {
+      const match = /^--tokens\s+(\d{1,13})\s+([\s\S]+)$/.exec(objective);
+      if (!match || Number(match[1]) <= 0 || Number(match[1]) > 1e12) {
+        this.post({ type: "goal_start_state", state: "error", error: "Use /goal --tokens POSITIVE_NUMBER objective" });
+        return;
+      }
+      tokenBudget = Number(match[1]); objective = match[2].trim();
+    }
     if (!objective) { return; }
     const be = this.ensureBackend();
     try {
       await this.requestState(be, "goal", {
-        type: "set_goal", text: objective, status: "active",
+        type: "set_goal", text: objective, status: "active", replace: true,
+        ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}),
       }, "goal_changed", 10000);
     } catch (err: any) {
       this.post({ type: "goal_start_state", state: "error",
@@ -343,14 +353,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "goal_start_state", state: "started" });
   }
 
-  private async updateGoal(text: string): Promise<void> {
+  private async updateGoal(text: string, tokenBudget?: number): Promise<void> {
     const objective = String(text || "").trim();
     if (!objective) { return; }
+    const resume = this.state.goal.status === "active";
+    const status = this.state.goal.status || "paused";
+    const be = this.ensureBackend();
     try {
-      await this.requestState(this.ensureBackend(), "goal", {
-        type: "set_goal", text: objective, status: this.state.goal.status || "active",
+      await this.stopActiveTurn(be);
+      await this.requestState(be, "goal", {
+        type: "set_goal", text: objective, status,
+        ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}),
       }, "goal_changed", 10000);
       this.post({ type: "goal_edit_state", state: "saved" });
+      if (resume) { await this.resumeGoal(); }
     } catch (err: any) {
       this.post({ type: "goal_edit_state", state: "error",
                   error: err?.message || "DGC could not update the goal." });
@@ -362,7 +378,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try {
       await this.stopActiveTurn(be);
       await this.requestState(be, "goal", {
-        type: "set_goal", status: "blocked",
+        type: "set_goal", status: "paused",
       }, "goal_changed", 10000);
     } catch (err: any) {
       this.post({ type: "goal_control_state", state: "error",
@@ -908,6 +924,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "goal_changed":
         this.state.goal = {
+          ...(ev.details || {}),
           text: String(ev.goal || ""), status: String(ev.status || "none"),
           elapsed_seconds: Number.isFinite(ev.elapsed_seconds)
             ? Math.max(0, Number(ev.elapsed_seconds)) : this.state.goal.elapsed_seconds,
@@ -1233,7 +1250,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         await this.clearGoal();
         break;
       case "updateGoal":
-        await this.updateGoal(String(msg.text || ""));
+        await this.updateGoal(String(msg.text || ""), msg.tokenBudget);
+        break;
+      case "reviewGoal":
+        be.send(this.stateCommand("goal", { type: "get_goal" }));
         break;
       case "reviewChange":
         await this.reviewWorkspaceChange(String(msg.path || ""));
@@ -1831,19 +1851,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const be = this.ensureBackend();
     if (name === "goal") {
       const low = rest.toLowerCase();
-      if (!rest) { be.send(this.stateCommand("goal", { type: "get_goal" })); }
-      else if (["clear", "off", "none", "remove"].includes(low)) {
-        be.send(this.stateCommand(
-          "goal", { type: "set_goal", text: "", status: "none" }));
+      if (!rest || ["review", "status"].includes(low)) {
+        be.send(this.stateCommand("goal", { type: "get_goal" }));
+        this.post({ type: "open_goal_review" });
+      }
+      else if (["clear", "off", "none", "remove", "delete"].includes(low)) {
+        await this.clearGoal();
       } else if (["complete", "completed", "done"].includes(low)) {
+        await this.stopActiveTurn(be);
         be.send(this.stateCommand("goal", { type: "set_goal", status: "completed" }));
-      } else if (["blocked", "block", "pause", "paused"].includes(low)) {
+      } else if (["blocked", "block"].includes(low)) {
+        await this.stopActiveTurn(be);
         be.send(this.stateCommand("goal", { type: "set_goal", status: "blocked" }));
-        // Pausing the goal also interrupts any in-flight turn (parity with the
-        // Codex-style pause), not just a status relabel. Harmless when idle.
-        be.send({ type: "cancel" });
+      } else if (["pause", "paused"].includes(low)) {
+        await this.pauseGoal();
       } else if (["resume", "active", "reactivate"].includes(low)) {
-        be.send(this.stateCommand("goal", { type: "set_goal", status: "active" }));
+        await this.resumeGoal();
       } else {
         await this.startGoal(rest);
       }
@@ -2771,7 +2794,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const supportsEffort = !this.routeState.subscriptionEngine
       || subscription?.supports_effort !== false;
     const available = this.routeState.subscriptionEngine && supportsEffort
-      ? [...THINK, { id: "max", detail: "maximum session effort where the active model supports it" }]
+      ? this.routeState.subscriptionEngine === "codex" ? THINK
+        : [...THINK, { id: "max", detail: "maximum session effort where the active model supports it" }]
       : this.routeState.subscriptionEngine ? [THINK[0]] : THINK;
     const profiles = [...available, {
       id: "ultra",
@@ -2911,8 +2935,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <button type="button" id="goal-editor-close" class="fbtn goal-dialog-close" title="Close" aria-label="Close goal editor"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     <h2 id="goal-editor-title">Edit goal</h2>
     <label class="sr-only" for="goal-editor-text">Goal</label>
-    <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="12000"></textarea>
+    <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="4000"></textarea>
+    <label class="goal-budget">Token budget (optional)<input id="goal-editor-budget" type="number" min="0" max="1000000000000" step="1" placeholder="No limit"></label>
     <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act">Cancel</button><button type="button" id="goal-editor-save" class="act primary">Save</button></div>
+  </div>
+</div>
+<div id="goal-review" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="goal-review-title" hidden>
+  <div class="goal-dialog">
+    <button type="button" id="goal-review-close" class="fbtn goal-dialog-close" aria-label="Close goal review"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    <h2 id="goal-review-title">Review goal</h2>
+    <div id="goal-review-body" class="surface-markdown" tabindex="0"></div>
   </div>
 </div>
 <div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
@@ -3045,6 +3077,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>
       <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>
       <div class="goal-actions">
+        <button type="button" id="goal-review-button" class="rail-icon-button" title="Review goal" aria-label="Review goal"><span class="codicon codicon-inspect" aria-hidden="true"></span></button>
         <button type="button" id="goal-clear" class="rail-icon-button" title="Clear goal" aria-label="Clear goal"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
         <button type="button" id="goal-toggle" class="rail-icon-button" title="Pause goal" aria-label="Pause goal"><span class="codicon codicon-debug-pause" aria-hidden="true"></span></button>
         <button type="button" id="goal-edit" class="rail-icon-button" title="Edit goal" aria-label="Edit goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
