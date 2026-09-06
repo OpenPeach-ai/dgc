@@ -24,6 +24,7 @@ purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.2
 | Medium | Subscription output bypassed terminal filtering, dropped terminal-only answers after commentary, and retained unbounded text/tool arguments. | Shared streaming redaction, terminal-control filtering, final-answer recovery, resource cleanup, and bounded output retention. |
 | Medium | Reopened chats dropped tool arguments/results, large histories could exceed the wire limit, and every token reparsed the full response. | Bounded history projection, 50-message pages, lazy tool disclosure, batched streaming renders and bundled syntax highlighting. |
 | Medium | Rejected prompts discarded their drafts and attachments and could leave the editor marked busy. | Correlated acceptance/rejection events, explicit draft restoration and confirmed worker-state tracking. |
+| Medium | Native endpoints that omitted usage could continue a budgeted goal without accounting. | Pause before continuation when native usage is unavailable, with a regression proving no second request is sent. |
 | Medium | Large or failed Git scans presented incomplete totals without disclosure. | Full file counts with a 500-row display bound, partial-scan notices and unavailable-repository state. |
 | Low | Legacy Codex subscription settings could pass unsupported `max` effort. | Map the legacy strongest-effort choice to `xhigh` at the vendor invocation boundary. |
 | Low | Missing host font tokens invalidated the whole font declaration. | Put fallback font families inside each CSS variable's fallback. |
@@ -38,11 +39,11 @@ The exact reference's compact model menu and reasoning slider are now implemente
 purple accent. Ultra remains an explicit DGC option. Codex subscription selections omit `max`, which
 is not that route's supported wire value; its highest normal effort is `xhigh`.
 
-## Release work remaining
+## Release acceptance
 
-- Build and validate the versioned runtime archive and VSIX, review the final artifact contents,
-  refresh public captures and documentation, run release CI and clean-install checks, then publish
-  the reviewed bytes to GitHub, the website and Marketplace. Nothing from this branch is published yet.
+- CLI **0.28.0** and extension **0.15.0** are the release targets. Publication requires the source-bound
+  runtime archive, verified VSIX, green CI, a clean install, and production-channel checksum checks.
+  The release scripts enforce these gates; this source audit is recorded before publication.
 
 ## Scope and known limits
 
@@ -53,8 +54,9 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
   on expansion; very large saved context and messages have explicit display limits. Historical native
   tool results do not carry a reliable success field, so they are labelled saved results rather than
   assigned an invented success status.
-- Subscription budgets are checked between vendor turns and can overshoot in one turn. Unknown usage
-  pauses a budgeted goal. Vendor CLIs own authentication, tool permissions and their internal execution;
+- Budgets are checked between root model requests or vendor turns; in-flight and concurrent/subagent
+  work can overshoot. Missing usage on either native or delegated routes pauses a budgeted goal.
+  Vendor CLIs own authentication, tool permissions and their internal execution;
   DGC's optional native shell sandbox does not confine them.
 - DGC image attachments work on native vision routes. Vendor CLI delegation currently rejects DGC
   image attachments explicitly, preserving the existing documented limitation.
@@ -64,7 +66,7 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 ## Evidence so far
 
 - Baseline: 1,383 Python checks and 51 extension tests passed.
-- Goal checkpoint: 1,387 Python checks passed, including 23 goal lifecycle, editor-state and delegated-stream
+- Goal checkpoint: 1,387 Python checks passed, including 24 goal lifecycle, editor-state and delegated-stream
   regressions. The offline prompt estimate remains 2,283 tokens with no automatically loaded skill.
 - Extension: 66 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
   menu races, and initial staged files have automated regression coverage.
@@ -78,14 +80,18 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 - Actual local Qwen validation completed in two work cycles (65 seconds), and the Codex subscription
   completed in one (25 seconds). Both wrote the requested code, passed two independently rerun tests,
   and restored the completed goal identity and evidence from disk.
-- Source/history privacy review scanned 300 current text files and 1,970 text objects/archive members
-  across 59 reachable commits, including 16 historical runtime/extension archives. No credential,
+- Source/history privacy review scanned 300 current text files and 2,065 text objects/archive members
+  across 61 reachable commits, including commit metadata and 16 historical runtime/extension archives. No credential,
   configured release-secret or machine-path matches were found outside deliberate test fixtures.
 - `npm audit` and `pip-audit` found no reported vulnerabilities in the extension dependency graph and
   11-package locked Python closure. Bandit reported no high-severity findings. Reviewed medium findings
   concern explicit opt-in LAN preview binding, private sandbox temporary paths, and the permission-gated
   persistent Python interpreter's intentional code execution. These are not exposed unauthenticated
   code-evaluation endpoints.
+- Public captures were refreshed using the installed checksum-verified extension and an actual local
+  Qwen CLI run. The editor capture explicitly identifies its deterministic protocol fixture; both
+  captures rerun their fixture tests independently and preserve real elapsed time. Website acceptance
+  passed 248 browser checks with seven intentional skips across mobile, tablet, desktop and reduced motion.
 
 ## References
 

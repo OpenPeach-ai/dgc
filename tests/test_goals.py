@@ -190,6 +190,15 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(self.agent.goal_status, "paused")
         self.assertEqual(self.agent.goal_snapshot()["tokens_used"], 13)
 
+    def test_native_budget_pauses_when_provider_omits_usage(self):
+        self.agent.set_goal("finish the task", token_budget=10000)
+        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="I will inspect the task.")) as chat:
+            self.agent.run_turn("start")
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual(self.agent.goal_status, "paused")
+        self.assertFalse(self.agent.goal_snapshot()["usage_known"])
+        self.assertIn("did not report usage", self.agent.goal_snapshot()["reason"])
+
     def test_report_filter_handles_every_split_without_control_text(self):
         req = request("goal")
         report = {"status": "completed", "summary": "Done", "evidence": ["Verified"]}

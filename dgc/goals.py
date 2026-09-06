@@ -384,7 +384,7 @@ class GoalLifecycle:
                 budget = details["token_budget"]
                 if budget and (not details["usage_known"] or details["tokens_used"] >= budget):
                     reason = ("The goal token budget was reached" if details["usage_known"] else
-                              "This subscription route did not report usage, so its goal token budget cannot be enforced")
+                              "This model route did not report usage, so its goal token budget cannot be enforced")
                     self.ui.info(reason)
                     return finish("paused", result, reason=reason)
                 if not self._persist():
@@ -420,6 +420,8 @@ class GoalLifecycle:
         budget = self._goal_details["token_budget"]
         if not budget or not getattr(self, "_goal_running", False):
             return False
+        if not self._goal_details["usage_known"]:
+            return True
         with self._usage_lock:
             used = self.usage_totals["input_tokens"] + self.usage_totals["output_tokens"]
         used = self._goal_details["tokens_used"] + max(0, used - self._goal_cycle_token_start)

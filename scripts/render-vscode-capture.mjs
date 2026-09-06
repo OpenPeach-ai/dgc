@@ -521,6 +521,7 @@ async function main() {
       "update.mode": "none",
       "extensions.autoUpdate": false,
       "extensions.autoCheckUpdates": false,
+      "extensions.ignoreRecommendations": true,
     }, null, 2) + "\n");
     run(codeProduct.cli, ["--install-extension", extensionPackage, "--force",
       `--user-data-dir=${userData}`, `--extensions-dir=${extensions}`], {
@@ -594,7 +595,8 @@ async function main() {
     await commandPalette(page, "DGC: Focus Chat");
     let frame = await webviewFrame(page);
     await frame.locator("#goalbar").waitFor({ state: "visible", timeout: 12_000 });
-    await frame.locator("#goal-text").waitFor({ state: "visible" });
+    await frame.getByRole("button", { name: "Expand and edit goal: Ship a verified bounds fix" })
+      .waitFor({ state: "visible" });
 
     const sidebar = page.locator(".part.sidebar.right");
     if (await sidebar.count()) {
@@ -628,7 +630,7 @@ async function main() {
     recordingStarted = Date.now();
     await page.waitForTimeout(800);
     await frame.locator("#input").pressSequentially(prompt, { delay: 9 });
-    await frame.locator("#send").click();
+    await frame.locator("#input").press("Enter");
     const approve = frame.getByRole("button", { name: "Approve → acceptEdits" });
     await approve.waitFor({ state: "visible", timeout: 15_000 });
     await page.waitForTimeout(1100);
@@ -643,6 +645,13 @@ async function main() {
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
     await frame.locator('.tool[data-tool-name="edit_file"] .tool-status')
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
+    const editTool = frame.locator('.tool[data-tool-name="edit_file"]').first();
+    const editGroup = editTool.locator('xpath=ancestor::details[contains(@class,"tool-group")][1]');
+    if (await editGroup.count() && await editGroup.getAttribute("open") === null) {
+      await editGroup.locator("summary").click();
+    }
+    const editToggle = editTool.locator(".tool-toggle");
+    if (await editToggle.getAttribute("aria-expanded") !== "true") await editToggle.click();
     const renderedDiff = frame.locator(".diff.open").filter({ hasText: "clamp.py" });
     await renderedDiff.waitFor({ state: "visible", timeout: 10_000 });
     await renderedDiff.getByText("+    return max(lower, min(upper, value))", { exact: true })
