@@ -1,0 +1,3 @@
+interface:
+  display_name: "Address PR feedback"
+  short_description: "Resolve review comments against current code"

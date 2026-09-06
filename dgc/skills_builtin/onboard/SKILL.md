@@ -4,7 +4,8 @@ description: Before changing an unfamiliar codebase, build an accurate mental mo
 ---
 Build a mental model of this codebase before touching it. Focus (optional): $ARGUMENTS
 
-Do NOT edit code. Your job is to understand and report, then offer to save the map.
+For an orientation-only request, understand and report without editing application code. If orientation
+is part of an already authorized implementation task, continue to that work after the relevant survey.
 
 1. Survey top-down. With bash, `ls` the repo root and `git log --oneline -10`. Then read_file on the orientation docs if present: README, AGENTS.md, DGC.md, CONTRIBUTING, docs/. Read the build manifests: package.json, pyproject.toml/setup.py, go.mod, Cargo.toml, pom.xml, Makefile. These name the languages, frameworks, dependencies, and the real build/test/run commands (check `scripts`, `[tool.*]`, Makefile targets).
 
@@ -16,10 +17,10 @@ Do NOT edit code. Your job is to understand and report, then offer to save the m
 
 5. Report a one-screen orientation: (a) what the project does in 1-2 lines, (b) the directory layout, (c) the exact build/test/run commands, (d) the 5-10 files that matter, each with a one-line role, (e) the safe place to start for the task at hand.
 
-6. Offer to persist it: ask if you should write the orientation to DGC.md with write_file (DGC reads DGC.md/AGENTS.md as memory). If yes, write a concise version — commands, key files, gotchas — not a wall of prose.
+6. Persist the map when requested, using the chosen file or DGC.md. Read existing guidance and merge useful, stable facts without overwriting human notes. Keep machine-specific paths, credentials and raw session logs out. If persistence was not requested, report the orientation in chat.
 
 Rules:
 - Read before you claim. Every file and command you cite must come from a file you actually read, never memory or assumption.
-- Do NOT edit any code, config, or manifest in this skill — read_file and grep only; write_file only DGC.md, and only when the user agrees.
+- Keep an orientation-only request read-only unless saving the map was requested; existing authorization remains valid.
 - Trace exactly ONE flow deeply; resist mapping everything. If the repo is huge, scope to $ARGUMENTS.
 - State the real build/test/run commands verbatim from the manifests; if you cannot find them, say so plainly.
