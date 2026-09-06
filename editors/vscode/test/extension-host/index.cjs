@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-const { resolve } = require("node:path");
+const { basename, resolve } = require("node:path");
 const vscode = require("vscode");
 
 async function waitFor(predicate, timeoutMs = 10_000) {
@@ -169,6 +169,23 @@ async function run() {
   // actual buttons emit these messages; this installed-host layer proves that correlated permission
   // and plan requests reach the live webview and that each response reaches the child exactly once.
   const posted = () => testApi.testOnlyPostedMessages(testToken);
+  const beforeChanges = posted().filter(item => item.type === "workspace_changes" && item.fileCount === 1).length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "webviewReady" });
+  try {
+    await waitFor(() => posted().filter(item => item.type === "workspace_changes" && item.fileCount === 1).length > beforeChanges
+      && backendCommands(backendLogPath).some(command => command.type === "get_workspace_changes"));
+  } catch {
+    throw new Error("Change inspection did not complete: " + JSON.stringify({ beforeChanges,
+      changes: posted().filter(item => item.type === "workspace_changes").length,
+      posted: posted().slice(-25), commands: backendCommands(backendLogPath).slice(-25).map(command => command.type) }));
+  }
+  await testApi.testOnlyWebviewMessage(testToken, { type: "reviewChange", path: `${basename(primaryRoot)}/host-change.ts` });
+  await waitFor(() => backendCommands(backendLogPath).some(command =>
+    command.type === "get_workspace_change" && command.root === primaryRoot && command.path === "host-change.ts"));
+  await waitFor(() => vscode.window.visibleTextEditors.some(editor =>
+    editor.document.uri.scheme === "dgc-review" && editor.document.getText() === "export const changed = true;\n"));
+  assert.equal(posted().some(item => ["workspace_changes", "workspace_change"].includes(item.eventType)), false,
+    "raw roots and preview bodies must not be forwarded as webview chat events");
   assert.throws(() => testApi.testOnlyPostedMessages("wrong-token"), /unavailable/,
     "the installed-host bridge must reject a caller outside its isolated test token");
   await assert.rejects(() => testApi.testOnlyWebviewMessage("wrong-token", { type: "cancel" }),

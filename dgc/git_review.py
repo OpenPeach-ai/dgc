@@ -33,15 +33,16 @@ def _label(value) -> str:
 
 
 class Review:
-    def __init__(self, root: Path, target: Path, cancel=None):
+    def __init__(self, root: Path, target: Path, cancel=None, *, deadline=None):
         self.project, self.target, self.cancel = root, target, cancel
         self.cwd = target if target.is_dir() else target.parent
-        self.deadline = time.monotonic() + TIMEOUT
+        self.deadline = min(time.monotonic() + TIMEOUT, deadline) if deadline is not None else time.monotonic() + TIMEOUT
         self.read_bytes = 0
         self.rows: list[str] = []
         self.output_size = 0
         self.changes = 0
         self.incomplete = False
+        self.skip_worktree: set[str] = set()
         self.repo = Path(os.fsdecode(self.git(["rev-parse", "--show-toplevel"]))[:-1])
         # A project may be a subdirectory of a larger repository. All enumerations and file
         # reads remain scoped to the approved target, never the rest of that parent repository.
@@ -82,7 +83,7 @@ class Review:
         return value
 
     def entries(self, tree: str | None = None) -> dict:
-        args = (["ls-tree", "-rz", "--full-tree", tree] if tree else ["ls-files", "--stage", "-z"])
+        args = (["ls-tree", "-rz", "--full-tree", tree] if tree else ["ls-files", "--stage", "-t", "-z"])
         raw = self.git([*args, "--", self.scope])
         records = raw.rstrip(b"\0").split(b"\0") if raw else []
         if len(records) > MAX_FILES:
@@ -90,12 +91,16 @@ class Review:
         entries = {}
         for record in records:
             fields, raw_path = record.split(b"\t", 1)
-            mode, identity, stage = fields.decode("ascii").split(" ")
+            values = fields.decode("ascii").split(" ")
+            tag = "" if tree else values.pop(0)
+            mode, identity, stage = values
             if tree:
                 identity, stage = stage, "0"  # tree records: mode type object-id
             if mode not in _MODES or not _OID.fullmatch(identity):
                 raise ValueError("Git returned an unsupported tree/index entry")
             name = self.path(raw_path)
+            if tag == "S":
+                self.skip_worktree.add(name)
             entries[name] = (mode, identity) if stage == "0" else ("conflict", "")
         return entries
 
@@ -169,6 +174,8 @@ class Review:
             raise ValueError(f"more than {MAX_FILES} files; narrow path and retry")
         for name in sorted(names):
             self.check()
+            if name in self.skip_worktree:
+                continue  # sparse/skip-worktree entries are not missing-file deletions
             old = index.get(name)
             if old and old[0] not in ("100644", "100755"):
                 self.incomplete = True

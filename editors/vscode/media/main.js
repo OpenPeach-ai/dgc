@@ -732,7 +732,7 @@
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
     list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
-      `<button type="button" class="change-row" data-change="${index}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">+${Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">−${Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
+      `<button type="button" class="change-row" data-change="${index}" title="${esc(item.error || (item.staged ? "Includes staged changes" : "Review change"))}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">${item.counted === false || item.binary ? "—" : "+" + Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">${item.counted === false || item.binary ? "—" : "−" + Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
       : '<div class="surface-empty">No workspace changes remain.</div>';
     if (changeState.notices?.length) {
       const note = el("div", "surface-notice"); note.textContent = changeState.notices.join(" ");
@@ -741,7 +741,7 @@
     }
     list.querySelectorAll("[data-change]").forEach((button) => button.onclick = () => {
       const item = changeState.files[Number(button.dataset.change)];
-      if (item) vscode.postMessage({ type: "reviewChange", path: item.path });
+      if (item) vscode.postMessage({ type: "reviewChange", path: item.id || item.path });
     });
   }
   function openChangesReview() {

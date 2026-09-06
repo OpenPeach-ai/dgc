@@ -24,6 +24,7 @@ const testToken = randomUUID();
 
 mkdirSync(workspacePath);
 mkdirSync(secondaryWorkspace);
+writeFileSync(join(workspacePath, "host-change.ts"), "export const changed = true;\n");
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
   { path: workspacePath },
   { path: secondaryWorkspace },
@@ -50,6 +51,7 @@ let standingGoalStatus = "none";
 let activeGoalTurn = false;
 let goalPromptCount = 0;
 let currentSession = "host-" + process.pid;
+let workspaceFolders = [process.cwd()];
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
 const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
@@ -60,13 +62,26 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
   capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true,
-    workflows: true, composer_selections: true }, session_id: currentSession,
+    workflows: true, composer_selections: true, workspace_inspection: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  if (cmd.type === "get_workspace_changes") {
+    send({ type: "workspace_changes", request_id: cmd.request_id, roots: workspaceFolders.map(root => ({
+      root, total: root === process.cwd() ? 1 : 0, complete: true, notices: [],
+      files: root === process.cwd() ? [{ path: "host-change.ts", additions: 1, deletions: 0,
+        binary: false, counted: true, untracked: true, deleted: false, staged: false, error: "" }] : [],
+    })) });
+    return;
+  }
+  if (cmd.type === "get_workspace_change") {
+    send({ type: "workspace_change", request_id: cmd.request_id, root: cmd.root, path: cmd.path,
+      before: "", after: "export const changed = true;\\n", kind: "file" });
+    return;
+  }
   if (cmd.type === "prompt" && cmd.workflow) {
     send({ type: "mode_changed", mode: "plan", workspace_trusted: true });
     send({ type: "prompt_accepted", request_id: cmd.request_id, state: "started" });
@@ -86,6 +101,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ type: "workspace_roots", request_id: "stale-workspace-request", roots: [] });
     setTimeout(() => {
       rootsAcknowledged = true;
+      workspaceFolders = cmd.roots;
       send({ type: "workspace_roots", request_id: cmd.request_id, roots: cmd.roots });
     }, 1000);
   }

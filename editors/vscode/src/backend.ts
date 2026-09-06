@@ -497,6 +497,7 @@ export class DgcBackend extends EventEmitter {
         if (timer) { clearTimeout(timer); }
         this.off("event", onEvent);
         this.off("exit", onExit);
+        this.off("disposed", onDisposed);
       };
       const finish = (event: DgcEvent) => {
         if (settled) { return; }
@@ -531,8 +532,10 @@ export class DgcBackend extends EventEmitter {
         }
       };
       const onExit = () => fail(`DGC backend exited while waiting for ${responseType}`);
+      const onDisposed = () => fail(`DGC backend restarted or closed while waiting for ${responseType}`);
       this.on("event", onEvent);
       this.on("exit", onExit);
+      this.on("disposed", onDisposed);
       timer = setTimeout(
         () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
       if (!(setup ? this.sendSetup(cmd) : this.send(cmd))) {
@@ -582,6 +585,7 @@ export class DgcBackend extends EventEmitter {
     this.respondedRequests.clear();
     const p = this.proc;
     this.proc = undefined;
+    this.emit("disposed");
     if (!p) {
       return;
     }

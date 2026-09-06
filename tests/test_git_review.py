@@ -178,6 +178,15 @@ class GitReviewTests(unittest.TestCase):
             self.assertIn("trusted git executable", self.review())
         self.assertFalse((self.root / "ran-fake").exists())
 
+    def test_sparse_checkout_does_not_report_omitted_files_as_deletions(self):
+        self.write("included/one.py", "keep\n")
+        self.write("omitted/two.py", "sparse\n")
+        self.commit()
+        self.git("sparse-checkout", "init", "--cone")
+        self.git("sparse-checkout", "set", "included")
+        self.assertFalse((self.root / "omitted/two.py").exists())
+        self.assertIn("No changes", self.review())
+
 
 if __name__ == "__main__":
     unittest.main()

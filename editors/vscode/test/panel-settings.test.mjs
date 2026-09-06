@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -323,6 +323,26 @@ function catalogHarness(catalog) {
   return { provider: new DgcViewProvider(context), updates };
 }
 
+function changesHarness() {
+  const harness = catalogHarness([]);
+  const program = `import json, sys
+from pathlib import Path
+from dgc.workspace_changes import collect_changes, read_change
+command = json.loads(sys.argv[1])
+if command["type"] == "get_workspace_changes":
+    result = {"type": "workspace_changes", "roots": [collect_changes(Path(root).resolve()) for root in command["roots"]]}
+else:
+    result = {"type": "workspace_change", **read_change(Path(command["root"]).resolve(), command["path"])}
+print(json.dumps({"request_id": command["request_id"], **result}))`;
+  harness.provider.lastReadyEvent = { capabilities: { workspace_inspection: true } };
+  harness.provider.workspaceRootsDirty = false;
+  harness.provider.backend = { ready: true, request: async command => JSON.parse(execFileSync(
+    process.env.DGC_TEST_PYTHON || "python3", ["-c", program, JSON.stringify({ ...command,
+      roots: globalThis.__DGC_TEST_VSCODE.workspace.workspaceFolders.map(folder => folder.uri.fsPath) })],
+    { cwd: resolve(here, "../../.."), encoding: "utf8", timeout: 30000, maxBuffer: 4 * 1024 * 1024 })) };
+  return harness;
+}
+
 test("workspace changes include initial staged files and literal subfolder scopes", async () => {
   const root = mkdtempSync(join(scratch, "changes-"));
   const nested = join(root, "[app]");
@@ -335,7 +355,7 @@ test("workspace changes include initial staged files and literal subfolder scope
   const original = workspace.workspaceFolders;
   workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: nested } }];
   try {
-    const { provider } = catalogHarness([]);
+    const { provider } = changesHarness();
     const { files: initial } = await provider.collectWorkspaceChanges();
     assert.equal(initial.length, 1, "a staged file in an unborn repository is a real change");
     assert.equal(initial[0].displayPath, "new.ts");
@@ -365,7 +385,7 @@ test("change review shows new staged content and never follows an external symli
   api.Uri = { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) };
   api.commands = { executeCommand: async (...args) => opened.push(args) };
   try {
-    const { provider } = catalogHarness([]);
+    const { provider } = changesHarness();
     provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
     await provider.reviewWorkspaceChange("[new].ts");
     assert.equal(opened[0]?.[0], "vscode.diff");
@@ -402,7 +422,7 @@ test("change review handles the first commit and reads a literal committed blob"
   api.Uri = { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) };
   api.commands = { executeCommand: async (...args) => opened.push(args) };
   try {
-    const { provider } = catalogHarness([]);
+    const { provider } = changesHarness();
     provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
     await provider.reviewWorkspaceChange("[literal].ts");
     assert.equal(opened[0]?.[0], "vscode.diff");
@@ -430,7 +450,7 @@ test("large change scans expose true totals, bounded line reads, and unavailable
   const workspace = globalThis.__DGC_TEST_VSCODE.workspace, original = workspace.workspaceFolders;
   workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: root } }];
   try {
-    const { provider } = catalogHarness([]), result = await provider.collectWorkspaceChanges();
+    const { provider } = changesHarness(), result = await provider.collectWorkspaceChanges();
     assert.equal(result.total, 505); assert.equal(result.files.length, 500);
     assert.ok(result.files.every(file => file.additions === 1));
     assert.match(result.notices.join(" "), /500 of 505/);
@@ -438,6 +458,39 @@ test("large change scans expose true totals, bounded line reads, and unavailable
     const missing = await provider.collectWorkspaceChanges();
     assert.equal(missing.total, 0); assert.match(missing.notices.join(" "), /unavailable/);
   } finally { workspace.workspaceFolders = original; }
+});
+
+test("change previews use distinct identities for same-named workspace folders", async () => {
+  const roots = ["one-", "two-"].map(prefix => mkdtempSync(join(scratch, prefix)));
+  for (const [index, root] of roots.entries()) {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    writeFileSync(join(root, "same.ts"), `workspace ${index}\n`);
+  }
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { folders: api.workspace.workspaceFolders, Uri: api.Uri, commands: api.commands };
+  const opened = [];
+  api.workspace.workspaceFolders = roots.map(root => ({ name: "same", uri: { fsPath: root } }));
+  api.Uri = { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) };
+  api.commands = { executeCommand: async (...args) => opened.push(args) };
+  try {
+    const { provider } = changesHarness();
+    provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
+    assert.equal(provider.workspaceChanges.length, 2);
+    assert.notEqual(provider.workspaceChanges[0].id, provider.workspaceChanges[1].id);
+    await provider.reviewWorkspaceChange("same/same.ts");
+    assert.equal(opened.length, 0, "ambiguous display names must never select a different workspace");
+    await provider.reviewWorkspaceChange(provider.workspaceChanges[1].id);
+    assert.equal(provider.reviewDocuments.get(opened[0][2].toString()), "workspace 1\n");
+    if (provider.changesRefreshTimer) clearTimeout(provider.changesRefreshTimer);
+    provider.backend.request = async () => ({ type: "workspace_changes", roots: [] });
+    assert.match((await provider.collectWorkspaceChanges()).notices.join(" "), /no change report/);
+    provider.lastReadyEvent.capabilities.workspace_inspection = false;
+    assert.match((await provider.collectWorkspaceChanges()).notices.join(" "), /Update the DGC CLI/);
+  } finally {
+    api.workspace.workspaceFolders = original.folders;
+    api.Uri = original.Uri;
+    api.commands = original.commands;
+  }
 });
 
 function mcpTransactionHarness(initialCatalog = []) {
