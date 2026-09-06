@@ -400,6 +400,7 @@
     "@vscode/vsce": "3.9.2",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
+    "markdown-it": "15.0.1",
     "ovsx": "1.1.1",
     "typescript": "^5.4.0"
   },

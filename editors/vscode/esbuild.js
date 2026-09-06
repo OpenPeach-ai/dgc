@@ -30,6 +30,12 @@ function sourceCommit() {
 }
 
 async function main() {
+  await esbuild.build({
+    entryPoints: ["src/markdown.ts"], bundle: true, format: "iife",
+    globalName: "DgcMarkdown", platform: "browser", target: "chrome108",
+    outfile: "dist/markdown.js", minify: production, sourcemap: false,
+    legalComments: "inline",
+  });
   const ctx = await esbuild.context({
     entryPoints: ["src/extension.ts"],
     bundle: true,

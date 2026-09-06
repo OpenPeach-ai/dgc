@@ -122,30 +122,40 @@
     menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
     $("ctx-compact").focus();
   }
+  function effortLabel(value, subscription = curSubscription) {
+    return ({ off: subscription ? "Default" : "Off", low: "Low", medium: "Medium",
+      high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" })[value] || value;
+  }
   function profileMenu(subscription, supportsEffort) {
-    const levels = subscription
-      ? (supportsEffort === false ? ["off"] : [...THINK, "max"])
-      : THINK;
+    const levels = subscription && supportsEffort === false ? ["off"]
+      : subscription && curSubscription !== "codex" ? [...THINK, "max"] : THINK;
     const profiles = [...levels, "ultra"];
     const selected = curUltra ? "ultra" : curThink;
-    const selectedRank = Math.max(0, profiles.indexOf(selected));
-    const buttons = profiles.map((profile, index) => {
-      const display = profile === "ultra" ? "Ultra"
-        : subscription && profile === "off" ? "Default"
-          : profile === "xhigh" ? "XHigh" : profile[0].toUpperCase() + profile.slice(1);
-      const description = profile === "ultra"
-        ? "Deep reasoning + bounded parallel agents"
-        : profile === "off" ? (subscription ? "Vendor default" : "No extra reasoning")
-          : profile === "max" ? "Vendor maximum" : `${display} reasoning`;
-      return `<button type="button" role="menuitemradio" aria-checked="${profile === selected}" aria-label="${display}: ${description}" class="power-stop${index <= selectedRank ? " charged" : ""}${profile === selected ? " selected" : ""}${profile === "ultra" ? " ultra" : ""}" data-profile="${profile}"><span class="power-dot" aria-hidden="true"></span><span>${display}</span></button>`;
-    }).join("");
-    return `<section class="power-card${curUltra ? " is-ultra" : ""}" aria-label="Reasoning profile"><div class="power-head"><div><span class="power-kicker">Reasoning profile</span><strong>${curUltra ? "Ultra" : (subscription && curThink === "off" ? "Default" : curThink)}</strong></div><span class="power-state">${curUltra ? "DGC fleet active" : "Tune model depth"}</span></div><div class="power-rail">${buttons}</div><p>${curUltra ? `Uses the deepest route-safe effort and up to ${curWorkers} bounded sub-agents. Permissions stay unchanged.` : "Higher levels use more time and tokens. Ultra also coordinates independent sub-agents."}</p></section><div class="mdiv" role="separator"></div>`;
+    const index = Math.max(0, profiles.indexOf(selected));
+    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div></section>`;
   }
   function bindProfiles(mm) {
-    mm.querySelectorAll("[data-profile]").forEach((button) => button.onclick = () => {
-      vscode.postMessage({ type: "setReasoningProfile", level: button.dataset.profile });
+    const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
+    const options = el("div", "model-options"); options.hidden = true;
+    [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
+    mm.appendChild(options);
+    const toggle = card.querySelector(".model-summary");
+    toggle.onclick = () => {
+      options.hidden = !options.hidden;
+      toggle.setAttribute("aria-expanded", String(!options.hidden));
+      card.querySelector(".effort-control").hidden = !options.hidden;
+      if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
+    };
+    slider.oninput = () => {
+      const profiles = slider.dataset.profiles.split(","), value = profiles[Number(slider.value)];
+      slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
+      slider.setAttribute("aria-valuetext", effortLabel(value));
+      card.querySelector("output").textContent = effortLabel(value);
+    };
+    slider.onchange = () => {
+      vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
       hideModelMenu();
-    });
+    };
   }
   function renderModelMenu(ids, current, err, subscription, label, supportsEffort) {
     const mm = $("modelmenu");
@@ -160,7 +170,7 @@
       mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
       mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-      (mm.querySelector(".sel") || mm.querySelector("button"))?.focus(); return;
+      mm.querySelector(".model-summary")?.focus(); return;
     }
     if (err || !ids.length) {
       mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
@@ -173,7 +183,7 @@
     bindProfiles(mm);
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-    (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
+    mm.querySelector(".model-summary")?.focus();
   }
 
   function updateModelControl() {
@@ -187,7 +197,9 @@
   }
 
   function menuKeys(menu, close, trigger, e) {
-    const items = [...menu.querySelectorAll("button[role^='menuitem']")];
+    if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
+    if (e.target.matches?.("input[type=range]")) return;
+    const items = [...menu.querySelectorAll("button[role^='menuitem']")].filter(item => !item.closest("[hidden]"));
     if (!items.length) return;
     const current = Math.max(0, items.indexOf(document.activeElement));
     let next = null;
@@ -195,7 +207,6 @@
     else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = items.length - 1;
-    else if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
     if (next !== null) { e.preventDefault(); items[next].focus(); }
   }
   $("modemenu").addEventListener("keydown", (e) => menuKeys($("modemenu"), hideModeMenu, $("btn-mode"), e));
@@ -216,7 +227,12 @@
     grep: "✱", web_search: "✱", web_fetch: "✱",
     present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
   };
-  const glyphFor = (name) => GLYPH[name] || "▸";
+  function canonicalTool(name) {
+    const plain = String(name || "").replace(/^functions\./, "").toLowerCase();
+    return ({ read: "read_file", write: "write_file", edit: "edit_file", shell: "bash",
+      exec_command: "bash", shell_command: "bash", search: "grep" })[plain] || plain;
+  }
+  const glyphFor = (name) => GLYPH[canonicalTool(name)] || "▸";
   const TOOL_COPY = {
     read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
     write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
@@ -225,7 +241,7 @@
     present_plan: ["Preparing plan", "Prepared plan"], task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
   };
   function toolCopy(name) {
-    const known = TOOL_COPY[name];
+    const known = TOOL_COPY[canonicalTool(name)];
     if (known) return { present: known[0], past: known[1], target: "" };
     if (String(name).startsWith("mcp__")) {
       return { present: "Calling MCP tool", past: "Called MCP tool",
@@ -254,110 +270,15 @@
   }[c]));
   function speak(message) { announcer.textContent = String(message || ""); }
 
-  // Small dependency-free Markdown renderer. Every model byte is escaped before becoming markup;
-  // fenced/inline code is parsed as an opaque block so Markdown-looking source code cannot be
-  // reinterpreted. An unterminated final fence is rendered immediately while it is still streaming.
-  function inlineMd(source) {
-    return String(source).split(/(`[^`\n]*`)/g).map((part) => {
-      if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
-        return `<code>${esc(part.slice(1, -1))}</code>`;
-      }
-      let safe = esc(part);
-      // Links remain inert inside the webview: show their label but never synthesize navigation.
-      safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
-      safe = safe.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-      safe = safe.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
-      return safe;
-    }).join("");
-  }
-
-  function tableCells(line) {
-    let source = String(line).trim();
-    if (source.startsWith("|")) source = source.slice(1);
-    if (source.endsWith("|") && !source.endsWith("\\|")) source = source.slice(0, -1);
-    const cells = [];
-    let cell = "", inCode = false;
-    for (let i = 0; i < source.length; i++) {
-      const ch = source[i];
-      if (ch === "\\" && source[i + 1] === "|") { cell += "|"; i++; continue; }
-      if (ch === "`") { inCode = !inCode; cell += ch; continue; }
-      if (ch === "|" && !inCode) { cells.push(cell.trim()); cell = ""; continue; }
-      cell += ch;
-    }
-    cells.push(cell.trim());
-    return cells;
-  }
-
-  function tableAlignment(cell) {
-    const marker = String(cell).replace(/\s/g, "");
-    if (!/^:?-{3,}:?$/.test(marker)) return null;
-    if (marker.startsWith(":") && marker.endsWith(":")) return "center";
-    return marker.endsWith(":") ? "right" : "left";
-  }
-
-  function textMd(source) {
-    const lines = String(source).split("\n"), rendered = [];
-    for (let i = 0; i < lines.length;) {
-      const headers = lines[i].includes("|") ? tableCells(lines[i]) : [];
-      const dividers = i + 1 < lines.length && lines[i + 1].includes("|")
-        ? tableCells(lines[i + 1]) : [];
-      const alignment = dividers.map(tableAlignment);
-      if (headers.length && headers.length === dividers.length
-          && alignment.every((value) => value !== null)) {
-        const rows = [];
-        i += 2;
-        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
-          const cells = tableCells(lines[i]);
-          if (cells.length !== headers.length) break;
-          rows.push(cells); i++;
-        }
-        const head = headers.map((cell, index) =>
-          `<th class="align-${alignment[index]}">${inlineMd(cell)}</th>`).join("");
-        const body = rows.map((row) => `<tr>${row.map((cell, index) =>
-          `<td class="align-${alignment[index]}">${inlineMd(cell)}</td>`).join("")}</tr>`).join("");
-        rendered.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
-        continue;
-      }
-      const heading = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
-      const bullet = /^(\s*)[-*]\s+(.*)$/.exec(lines[i]);
-      if (heading) rendered.push(`<b class="md-heading md-h${heading[1].length}">${inlineMd(heading[2])}</b>`);
-      else if (bullet) rendered.push(`${bullet[1]}• ${inlineMd(bullet[2])}`);
-      else rendered.push(inlineMd(lines[i]));
-      i++;
-    }
-    return rendered.join("\n");
-  }
-
-  function codeBlock(code, language) {
-    const lang = language ? ` data-language="${language}"` : "";
-    return `<pre class="code"${lang}><button type="button" class="copy" data-c="${encodeURIComponent(code)}" aria-label="Copy code">copy</button><code>${esc(code)}</code></pre>`;
-  }
-
-  function md(source) {
-    const lines = String(source).replace(/\r\n?/g, "\n").split("\n");
-    const rendered = [], text = [];
-    const flushText = () => {
-      if (text.length) { rendered.push(textMd(text.join("\n"))); text.length = 0; }
-    };
-    for (let i = 0; i < lines.length;) {
-      const opening = /^\s*```([A-Za-z0-9_+.-]*)\s*$/.exec(lines[i]);
-      if (!opening) { text.push(lines[i]); i++; continue; }
-      flushText(); i++;
-      const code = [];
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
-      if (i < lines.length) i++; // closing fence; absence means this is the live partial block
-      rendered.push(codeBlock(code.join("\n"), opening[1]));
-    }
-    flushText();
-    return rendered.join("\n");
-  }
+  // One CommonMark renderer for live answers, history, skills, and documentation.
+  const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; }
 
   // ---- turn lifecycle ----
   function startTurn() {
-    if (turn) endTurn();
+    if (turn) endTurn("cancelled");
     speak("DGC is working");
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
@@ -369,8 +290,9 @@
     }, 200);
     scroll();
   }
-  function endTurn() {
+  function endTurn(reason = "completed") {
     if (!turn) return;
+    finishReasoning();
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
       setToolStatus(card, "stopped");
@@ -379,9 +301,18 @@
     });
     clearInterval(turn.timer);
     const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
-    if (lastText) { lastText.classList.remove("commentary"); lastText.classList.add("final"); }
+    if (lastText && !lastText.classList.contains("commentary") && reason === "completed") {
+      lastText.classList.add("final");
+      const actions = el("div", "response-actions");
+      const copy = el("button", "response-copy codicon codicon-copy");
+      copy.type = "button"; copy.title = "Copy response"; copy.setAttribute("aria-label", "Copy response");
+      copy.onclick = () => vscode.postMessage({ type: "copy", text: lastText._markdown || lastText.textContent });
+      actions.appendChild(copy); lastText.after(actions);
+      // The work summary separates the collapsed activity from the final response.
+      turn.block.insertBefore(turn.act, lastText);
+    }
     turn.act.classList.add("done");
-    turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
+    turn.act.textContent = `${reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked"} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     turn = null;
   }
   function discardTurn() {
@@ -403,6 +334,51 @@
   }
   function textBlock() { if (!turn.textEl) { turn.textEl = appendTurnContent(el("div", "text")); } return turn.textEl; }
   function breakText() { if (turn) { turn.textEl = null; turn._buf = ""; } }
+
+  function finishReasoning() {
+    if (!turn?.reasonEl) return;
+    const button = turn.reasonEl.previousElementSibling;
+    const seconds = Math.max(0, Math.round((Date.now() - turn.reasonStarted) / 1000));
+    button.dataset.label = `Thought for ${seconds}s`;
+    button.textContent = `${turn.reasonEl.classList.contains("show") ? "▾" : "▸"} ${button.dataset.label}`;
+    turn.reasonEl = null;
+  }
+
+  function refreshToolGroup(group) {
+    if (!group) return;
+    const cards = [...group.querySelectorAll(".tool")];
+    const running = cards.filter(card => card.dataset.status === "running");
+    const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status));
+    const summary = group.querySelector(".tool-group-label");
+    group.classList.toggle("running", running.length > 0);
+    if (running.length) {
+      const card = running.at(-1);
+      summary.textContent = `${toolCopy(card.dataset.toolName).present} ${card.dataset.summary || ""}`.trim();
+    } else {
+      const counts = { read: 0, edit: 0, command: 0, other: 0 };
+      for (const card of cards) {
+        const name = canonicalTool(card.dataset.toolName);
+        const key = ["read_file", "glob", "repo_map", "grep"].includes(name) ? "read"
+          : ["write_file", "edit_file", "apply_patch"].includes(name) ? "edit"
+            : name === "bash" ? "command" : "other";
+        counts[key]++;
+      }
+      summary.textContent = [counts.read && "Explored files",
+        counts.edit && `Applied ${counts.edit} ${counts.edit === 1 ? "edit" : "edits"}`,
+        counts.command && `Ran ${counts.command} ${counts.command === 1 ? "command" : "commands"}`,
+        counts.other && `Used ${counts.other} ${counts.other === 1 ? "tool" : "tools"}`].filter(Boolean).join(" · ");
+      if (failures.length) summary.textContent += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
+    }
+    if (failures.length) group.open = true;
+  }
+  function appendTool(card) {
+    if (!turn.toolGroup) {
+      turn.toolGroup = appendTurnContent(el("details", "tool-group"));
+      turn.toolGroup.innerHTML = '<summary><span class="codicon codicon-tools" aria-hidden="true"></span><span class="tool-group-label">Working</span></summary>';
+    }
+    turn.toolGroup.appendChild(card);
+    refreshToolGroup(turn.toolGroup);
+  }
 
   function openFileBtn(path, line) {
     const b = el("button", "link", "⤢ open"); b.type = "button";
@@ -430,11 +406,13 @@
       const elapsed = card.querySelector(".tool-time");
       if (elapsed && card._startedAt) elapsed.textContent = `${((Date.now() - card._startedAt) / 1000).toFixed(1)}s`;
     }
+    refreshToolGroup(card.closest(".tool-group"));
   }
 
   function toolCard(ev) {
     const c = el("div", "tool");
     c.dataset.toolName = String(ev.name || "");
+    c.dataset.summary = String(ev.summary || "");
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
     const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
@@ -446,7 +424,7 @@
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
-    if (turn.textEl) turn.textEl.classList.add("commentary");
+    [...turn.block.querySelectorAll(".text")].at(-1)?.classList.add("commentary");
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
@@ -456,7 +434,7 @@
     const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
     c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
     setToolStatus(c, "running");
-    appendTurnContent(c); breakText(); return c;
+    appendTool(c); breakText(); return c;
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");
@@ -830,22 +808,23 @@
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
-      case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
+      case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock()._markdown = turn._buf; textBlock().innerHTML = md(turn._buf); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
         if (!turn.reasonEl) {
           const d = el("button", "disclosure", "▸ thinking"), r = el("div", "reasoning");
           const reasonId = `reasoning-${++disclosureId}`;
           d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
-          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " thinking"; d.setAttribute("aria-expanded", String(open)); };
+          d.dataset.label = "Thinking"; turn.reasonStarted = Date.now();
+          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " " + d.dataset.label; d.setAttribute("aria-expanded", String(open)); };
           appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
         }
         turn.reasonEl.textContent += ev.text; break;
-      case "stream_end": breakText(); break;
-      case "tool_call": ensureTurn(); turn._tools = turn._tools || {}; turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
+      case "stream_end": finishReasoning(); breakText(); break;
+      case "tool_call": ensureTurn(); finishReasoning(); turn._tools = turn._tools || Object.create(null); turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
       case "tool_progress": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         const numeric = Number.isFinite(ev.progress);
@@ -858,7 +837,7 @@
       }
       case "tool_result": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
@@ -866,17 +845,18 @@
         if (ev.is_error) {
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
-        if (ev.is_diff && ev.diff) appendTurnContent(renderDiff(ev.diff));
+        if (ev.is_diff && ev.diff) { c.querySelector(".body pre").textContent = ev.diff; c.after(renderDiff(ev.diff)); }
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
       }
       case "tool_denied": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny";
         setToolStatus(c, "denied");
+        c.querySelector(".body pre").textContent = String(ev.reason || "Permission denied");
         c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         break;
       }
@@ -1100,11 +1080,11 @@
         ensureTurn();
         const markdown = String(ev.markdown || "");
         turn.chars += markdown.length;
-        textBlock().innerHTML = md(markdown);
+        textBlock()._markdown = markdown; textBlock().innerHTML = md(markdown);
         if (ev.path) sysLine(`Handoff saved to ${ev.path}`);
         if (ev.status !== "completed") sysLine(String(ev.error || `Handoff ${ev.status}`), true);
         speak(ev.status === "completed" ? "Handoff ready" : `Handoff ${ev.status}`);
-        endTurn(); setSending(false);
+        endTurn(ev.status === "completed" ? "completed" : "error"); setSending(false);
         break;
       }
       case "goal_changed": {
@@ -1138,8 +1118,8 @@
         sysLine(`${lead} · ${before} → ${after} estimated tokens`);
         break;
       }
-      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
-      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(); setSending(false); break;
+      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
+      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(ev.reason); setSending(false); break;
     }
     if (stick) scroll();
   }
@@ -1295,6 +1275,7 @@
   }
   input.addEventListener("input", onInput);
   input.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (popMode) {
       if (e.key === "ArrowDown") { e.preventDefault(); movePop(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); movePop(-1); return; }
@@ -1536,8 +1517,23 @@
     log.insertBefore(frag, log.firstChild);   // history above any live user prompt / streaming turn
     scroll();
   }
-  // copy-code (delegated)
-  log.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".copy"); if (b) vscode.postMessage({ type: "copy", text: decodeURIComponent(b.dataset.c) }); });
+  // User clicks are the only route out of model-generated content. Never navigate a webview.
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest?.(".md-link");
+    if (link) {
+      event.preventDefault();
+      const target = DgcMarkdown.linkTarget(link.dataset.target + (link.dataset.line ? `:${link.dataset.line}` : ""));
+      if (target?.kind === "external") vscode.postMessage({ type: "openExternal", url: target.target });
+      else if (target?.kind === "file") vscode.postMessage({ type: "openFile", path: target.target, line: target.line });
+      return;
+    }
+    const copy = event.target.closest?.(".copy");
+    if (copy) {
+      vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c) });
+      copy.textContent = "Copied";
+      setTimeout(() => { if (copy.isConnected) copy.textContent = "Copy"; }, 1600);
+    }
+  });
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
@@ -1551,7 +1547,7 @@
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "surface_open") { openSurface(msg.surface); }
@@ -1596,7 +1592,7 @@
         && typeof file.workspace === "string").slice(0, 600) : [];
       if (popMode === "@") onInput();
     }
-    else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "backend_exit") { endTurn("error"); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
   vscode.postMessage({ type: "webviewReady" });
 })();

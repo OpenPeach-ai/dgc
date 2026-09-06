@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
 import { execFile } from "child_process";
-import { lstat, readFile, readlink } from "fs/promises";
+import { lstat, readFile, readlink, realpath } from "fs/promises";
 import { basename, relative as relativePath, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable } from "./configuration";
+import { workspaceFile } from "./navigation";
 
 const MODES = [
   { id: "default", label: "$(shield) default", detail: "ask before writes and shell commands" },
@@ -73,10 +74,13 @@ type WorkspaceChange = {
 };
 
 function runGit(cwd: string, args: string[], timeout = 5000): Promise<string> {
+  // Automatic review queries must not execute a repository fsmonitor or inherited Git overrides.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+  env.GIT_TERMINAL_PROMPT = "0";
   return new Promise((resolveRun, rejectRun) => {
-    execFile("git", args, {
+    execFile("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", ...args], {
       cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024,
-      windowsHide: true,
+      windowsHide: true, env,
     }, (error, stdout) => {
       if (error) { rejectRun(error); return; }
       resolveRun(String(stdout || ""));
@@ -522,6 +526,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   /** Called by the extension host when folders are added, removed, or reordered. */
   workspaceRootsChanged(): void {
+    this.changesRefreshRevision++;
+    this.workspaceChanges = [];
+    this.reviewDocuments.clear();
     this.workspaceRootsRevision++;
     this.workspaceRootsDirty = true;
     this.syncWorkspaceRoots();
@@ -561,16 +568,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const folders = (vscode.workspace.workspaceFolders || []).slice(0, 16);
     const changes = new Map<string, WorkspaceChange>();
     for (const folder of folders) {
-      const folderPath = resolve(folder.uri.fsPath);
+      const folderPath = await realpath(folder.uri.fsPath).catch(() => "");
+      if (!folderPath) { continue; }
       let root: string;
       try { root = resolve((await runGit(folderPath, ["rev-parse", "--show-toplevel"])).trim()); }
       catch { continue; }
       const scope = relativePath(root, folderPath).replace(/\\/g, "/");
       if (scope === ".." || scope.startsWith("../")) { continue; }
-      const pathspec = scope || ".";
+      const pathspec = `:(literal)${scope || "."}`;
       let numstat = "";
+      let hasHead = true;
+      try { await runGit(root, ["rev-parse", "--verify", "HEAD"]); }
+      catch { hasHead = false; }
       try {
-        numstat = await runGit(root, ["diff", "--numstat", "-z", "--no-renames", "HEAD", "--", pathspec]);
+        if (hasHead) numstat = await runGit(root, ["diff", "--numstat", "-z", "--no-renames",
+          "--no-ext-diff", "--no-textconv", "HEAD", "--", pathspec]);
       } catch {
         // A repository with no first commit has no HEAD. Its files are handled as untracked below.
       }
@@ -594,7 +606,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       let untracked = "";
       try {
-        untracked = await runGit(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec]);
+        untracked = await runGit(root, ["ls-files", ...(hasHead ? [] : ["--cached"]),
+          "--others", "--exclude-standard", "-z", "--", pathspec]);
       } catch { /* not a usable git worktree */ }
       for (const repoPath of untracked.split("\0")) {
         if (!repoPath || changes.has(`${root}\0${repoPath}`)) { continue; }
@@ -636,11 +649,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("That file is no longer in the workspace change set.");
       return;
     }
-    if (change.binary) {
+    const absolute = resolve(change.root, change.path);
+    const liveRoots = await Promise.all(this.workspaceRoots().map(root => realpath(root).catch(() => "")));
+    // Resolve the parent rather than the final component: a changed symlink is reviewed as link
+    // text, never followed into an external directory. Recheck grants on every click.
+    const parent = await realpath(resolve(absolute, "..")).catch(() => "");
+    if (!parent || !liveRoots.some(root => root && (parent === root || parent.startsWith(root + sep)))) {
+      void vscode.window.showInformationMessage("That change is outside the current workspace.");
+      return;
+    }
+    const link = (await lstat(absolute).catch(() => undefined))?.isSymbolicLink();
+    if (change.binary && !link) {
       if (!change.deleted) {
-        const absolute = resolve(change.root, change.path);
-        if (absolute !== change.root && absolute.startsWith(change.root + sep)) {
-          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(absolute), { preview: true });
+        const target = await workspaceFile(absolute, this.workspaceRoots());
+        if (target) {
+          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target), { preview: true });
           return;
         }
       }
@@ -650,7 +673,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     let before = "", after = "";
     if (!change.untracked) {
       try { before = await runGit(change.root, ["show", `HEAD:./${change.path}`], 8000); }
-      catch { before = ""; }
+      catch {
+        // A new staged file has no HEAD blob. A read failure for an existing file is not an
+        // empty baseline: doing that would misrepresent the entire file as an addition.
+        // Verify absence using ls-tree, whose successful empty output is distinguishable from
+        // a missing repository or an oversized/failed blob read.
+        const entry = await runGit(change.root, ["ls-tree", "-z", "HEAD", "--", `:(literal)${change.path}`]).catch(() => undefined);
+        if (entry === undefined || entry.length > 0) {
+          void vscode.window.showInformationMessage("The original file could not be read for review.");
+          return;
+        }
+      }
     }
     if (!change.deleted) {
       const absolute = resolve(change.root, change.path);
@@ -670,7 +703,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
             void vscode.window.showInformationMessage("This change is too large or is not a text file.");
             return;
           }
-        } catch { after = ""; }
+        } catch {
+          void vscode.window.showInformationMessage("The file changed or became unavailable. Refresh changes and try again.");
+          this.scheduleWorkspaceChanges(0);
+          return;
+        }
       }
     }
     this.reviewDocuments.clear();
@@ -1023,7 +1060,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.webviewReady = false;
     view.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")],
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media"),
+        vscode.Uri.joinPath(this.context.extensionUri, "dist")],
     };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((msg) => {
@@ -1249,7 +1287,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.sendFiles();
         break;
       case "openFile":
-        this.openFile(msg.path, msg.line);
+        await this.openFile(msg.path, msg.line);
         break;
       case "openExternal":
         if (msg.url) { void this.openSafeExternal(String(msg.url)); }
@@ -1319,12 +1357,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async openFile(path: string, line?: number): Promise<void> {
-    const uri = vscode.Uri.file(path.startsWith("/") ? path : this.cwd() + "/" + path);
+    const target = await workspaceFile(path, this.workspaceRoots());
+    if (!target) {
+      void vscode.window.showInformationMessage("That file is unavailable in the current workspace.");
+      return;
+    }
+    const uri = vscode.Uri.file(target);
     try {
       const doc = await vscode.workspace.openTextDocument(uri);
       const ed = await vscode.window.showTextDocument(doc, { preview: true });
-      if (line) {
-        const pos = new vscode.Position(Math.max(0, line - 1), 0);
+      if (typeof line === "number" && Number.isSafeInteger(line) && line > 0) {
+        const pos = new vscode.Position(Math.min(doc.lineCount - 1, line - 1), 0);
         ed.selection = new vscode.Selection(pos, pos);
         ed.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
       }
@@ -1335,6 +1378,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private async openSafeExternal(raw: string): Promise<void> {
     try {
+      if (raw.length > 8192 || /[\u0000-\u001f\u007f]/.test(raw)) throw new Error("invalid URL");
       const parsed = new URL(raw);
       if (parsed.username || parsed.password || !["http:", "https:"].includes(parsed.protocol)) {
         throw new Error("unsupported external URL");
@@ -2827,6 +2871,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const nonce = String(Math.random()).slice(2) + String(Date.now());
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
+    const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};`;
     return `<!doctype html><html lang="en"><head>
@@ -3038,6 +3083,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
 </footer>
+<script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${js}"></script>
 </body></html>`;
   }
