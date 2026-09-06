@@ -66,9 +66,9 @@ _FILE_EDIT_SUCCESS_PREFIX = {
     "write_file": "wrote ", "edit_file": "edited ",
     "multi_edit": "applied ", "apply_patch": "patched ",
 }
-_PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search",
+_PARALLEL_READS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search",
                    "skill", "bash_output"}
-_MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel"}
+_MUTATION_SENSITIVE_CALLS = {"bash", "read_file", "glob", "grep", "repo_map", "code_intel", "git_diff"}
 _LOOP_EXEMPT_CALLS = {"bash_output"}  # polling a real background job can legitimately repeat
 _PLAN_TOOLS = _PARALLEL_READS | {"todo", "present_plan", "propose_options", "update_goal"}
 _GOAL_MAX_CHARS = 4000
@@ -123,11 +123,15 @@ _MCP_BROKER_SCHEMA_CHARS = len(json.dumps(_MCP_BROKER_SCHEMAS, default=str))
 # and ``tool_profile: full`` remains an escape hatch.
 _OPTIONAL_TOOL_INTENT = {
     "repo_map": "repo_navigation", "code_intel": "code_navigation",
+    "git_diff": "git_review",
     "web_fetch": "web", "web_search": "web",
     "add_skill": "skill_install", "save_memory": "memory",
     "artifact": "artifact", "task": "delegate",
 }
 _TOOL_INTENT_PATTERNS = {
+    "git_review": re.compile(
+        r"\b(?:git(?:_diff)?|diffs?|reviews?|staged|unstaged|uncommitted|merge[- ]base)\b|"
+        r"\b(?:inspect|check|audit)\b.{0,32}\bchanges?\b", re.IGNORECASE | re.DOTALL),
     "narrow_scope": re.compile(
         r"\bedit(?:ing)?\s+only\s+(?:this|these)\b.{0,24}\bfiles?\b|"
         r"\b(?:edit|modify|change|touch|write|implement)\b.{0,24}\bonly\s+"
@@ -1245,7 +1249,7 @@ class Agent(GoalLifecycle):
                            or (name == "task" and bool(self.config.get("ultra_mode", False)))
                            or (name in {"repo_map", "code_intel"}
                                and "narrow_scope" not in active)
-                           or (self.mode == "plan" and name in {"repo_map", "code_intel"})
+                           or (self.mode == "plan" and name in {"repo_map", "code_intel", "git_diff"})
                            or (name == "artifact" and self.mode == "plan"
                                and self.config.get("artifact_in_plan", False)))]
             if not self._skill_catalog():

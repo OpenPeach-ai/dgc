@@ -223,7 +223,7 @@
     + '<path class="s3" d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>';
   // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
   const GLYPH = {
-    read_file: "→", glob: "→", repo_map: "→",
+    read_file: "→", glob: "→", repo_map: "→", git_diff: "±",
     write_file: "✎", edit_file: "✎", apply_patch: "✎", save_memory: "✎",
     bash: "$", bash_output: "$", bash_kill: "$",
     grep: "✱", web_search: "✱", web_fetch: "✱",
@@ -237,6 +237,7 @@
   const glyphFor = (name) => GLYPH[canonicalTool(name)] || "▸";
   const TOOL_COPY = {
     read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
+    git_diff: ["Inspecting changes", "Inspected changes"],
     write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],

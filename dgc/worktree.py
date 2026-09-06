@@ -136,7 +136,7 @@ def _terminate_git(proc: subprocess.Popen) -> None:
 
 
 def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
-             text: bool) -> subprocess.CompletedProcess:
+             text: bool, read_only: bool = False, cancelled=None) -> subprocess.CompletedProcess:
     executable = _git_executable(cwd)
     display_args = ["git", *args]
     if executable is None:
@@ -155,6 +155,12 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
         "GIT_PAGER": "cat", "PAGER": "cat", "GIT_LITERAL_PATHSPECS": "1",
         "LC_ALL": "C",
     })
+    if read_only:
+        # Object inspection must never fetch missing objects, launch a transport/helper, refresh
+        # the index, or resolve replacement objects. GIT_ALLOW_PROTOCOL also protects older Git
+        # versions that predate GIT_NO_LAZY_FETCH. Callers still restrict argv to read operations.
+        env.update(GIT_NO_LAZY_FETCH="1", GIT_ALLOW_PROTOCOL="", GIT_OPTIONAL_LOCKS="0",
+                   GIT_NO_REPLACE_OBJECTS="1")
     popen_kwargs = {
         "cwd": str(cwd), "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "env": env,
@@ -192,6 +198,9 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
     deadline = time.monotonic() + _git_timeout(timeout)
     failure = ""
     while True:
+        if cancelled is not None and cancelled.is_set():
+            failure = "git cancelled"
+            break
         if stdout.exceeded:
             failure = f"git stdout exceeded {max_stdout} bytes"
             break
@@ -218,6 +227,10 @@ def _run_git(args: list[str], cwd, *, timeout: float, max_stdout: int,
     # ``total`` is the authoritative final count and no extra process termination is needed.
     if not failure and stdout.total > stdout.limit:
         failure = f"git stdout exceeded {max_stdout} bytes"
+
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
 
     out = stdout.bytes()
     err = stderr.bytes()

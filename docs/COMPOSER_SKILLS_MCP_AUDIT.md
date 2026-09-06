@@ -172,3 +172,12 @@ unimplemented capability. Document any provider-owned execution boundary explici
 - Current remaining work: meaningful plan/review/init flows; bundled-skill audit/additions; remote
   host OAuth behavior; real local/subscription model runs and actual Cursor verification; final
   docs/site/version updates; reviewed-source/CI gates and publication to every release channel.
+- Review foundation: added a bounded native `git_diff` tool usable in plan mode. It compares stored
+  Git objects and raw workspace files without running repository filters, diff drivers, or transports.
+  It supports staged/working/untracked changes, branch merge-base review, and individual commits.
+  Scope, symlinks, conflicts, byte/line/output limits and cancellation are explicit. The Git capture
+  helper now also closes successful process pipes instead of relying on garbage collection.
+- Audit follow-up discovered while tracing review: the extension's automatic file-change summary
+  still uses ordinary `git diff --numstat`. Disabling external diff and textconv does not disable
+  clean filters. Its Git executable/environment boundary also needs the same review as native tools.
+  Fix and verify this before release; the native tool alone does not resolve this host-side gap.

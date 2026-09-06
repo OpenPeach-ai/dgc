@@ -167,6 +167,13 @@ TOOL_SCHEMAS = [
         "and language-aware symbol definitions. Use this near the start of unfamiliar multi-file work.",
         {"path": {"type": "string", "description": "Subdirectory to map (default: project root)"},
          "max_files": {"type": "integer", "description": "Maximum files (default 300, max 1000)"}}, []),
+    _fn("git_diff", "Inspect local Git changes without executing shell, filters, or network helpers. "
+        "Defaults to staged + working + untracked changes. Base compares merge-base to HEAD; "
+        "commit compares one commit to its first parent. Narrow path when output is partial. "
+        "Working files are compared as raw bytes, without checkout conversion.",
+        {"path": {"type": "string", "description": "Literal file/directory scope (default project root)"},
+         "view": {"type": "string", "enum": ["uncommitted", "working", "staged", "base", "commit"]},
+         "ref": {"type": "string", "description": "Local branch/tag/commit for base or commit view"}}, []),
     _fn("code_intel", "Find language-aware symbols, exact definitions/references, or diagnostics. "
         "Uses a managed configured language server when available and a bounded dependency-free "
         "static fallback otherwise. Prefer this over broad grep for code navigation.",
@@ -2757,6 +2764,15 @@ def repo_map(args: dict, ctx) -> str:
     return "\n".join(rows)
 
 
+def git_diff(args: dict, ctx) -> str:
+    from .git_review import review_diff
+    target = _resolve(str(args.get("path") or "."), ctx.project_root,
+                      allow_external=_allow_external(args))
+    return _safe_output(review_diff(
+        ctx.project_root, target, view=args.get("view", "uncommitted"),
+        ref=args.get("ref", ""), cancel=getattr(ctx, "cancelled", None)), ctx)
+
+
 def code_intel(args: dict, ctx) -> str:
     target = (_resolve(str(args.get("path", "")), ctx.project_root,
                        allow_external=_allow_external(args))
@@ -2974,6 +2990,7 @@ EXECUTORS = {
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
+    "git_diff": git_diff,
     "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
     "save_memory": save_memory,
