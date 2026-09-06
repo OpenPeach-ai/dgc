@@ -1018,6 +1018,11 @@ class Agent(GoalLifecycle):
 
     def _record_usage(self, raw_usage: dict | None, request_reason: object = "other") -> None:
         usage = normalize_usage(raw_usage)
+        if (getattr(self, "_goal_running", False)
+                and not (usage["input_tokens"] or usage["output_tokens"])):
+            # A successful coding request cannot be accounted for from an empty/all-zero usage
+            # envelope. Keep unbudgeted work available; explicit budgets stop at the next boundary.
+            self._goal_details["usage_known"] = False
         reason = (request_reason if isinstance(request_reason, str)
                   and request_reason in _REQUEST_REASON_LABELS else "other")
         with self._usage_lock:
@@ -2576,7 +2581,9 @@ class Agent(GoalLifecycle):
             if self.goal_budget_exhausted():
                 if held_final_messages:
                     withhold_final()
-                return self._fail_turn("goal token budget reached before the next model request")
+                return self._fail_turn("goal token budget reached before the next model request"
+                                       if self._goal_details["usage_known"] else
+                                       "the model did not report usage; review or remove the goal token budget")
             if self.cancelled.is_set():
                 if held_final_messages:
                     withhold_final(

@@ -582,7 +582,7 @@ goal for review. Cancellation or a runtime failure pauses it.
 
 Use `/goal --tokens 100000 <objective>` for an optional token budget, or edit the
 budget in the goal card. Budgets are checked between native requests or delegated
-work cycles, so a request can take usage past the limit. A subscription route that
+work cycles, so a request or concurrent/subagent work can take usage past the limit. A model route that
 does not report usage cannot enforce a token budget; DGC pauses instead of continuing
 with unknown usage. The goal review shows the reported usage and any budget pause.
 Ending one work cycle or finishing one milestone is not whole-goal completion.

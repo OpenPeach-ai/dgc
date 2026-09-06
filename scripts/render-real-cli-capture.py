@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", type=Path,
                         help="Python executable whose environment contains DGC dependencies "
                              "(default: the interpreter from the installed dgc entrypoint)")
-    parser.add_argument("--model", default="qwen2.5:14b")
+    parser.add_argument("--model", default="qwen3.8:27b-q4km")
     parser.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "site" / "assets")
     parser.add_argument("--keep-work", action="store_true")
