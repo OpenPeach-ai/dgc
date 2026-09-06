@@ -1,26 +1,28 @@
 ---
 name: verify
-description: After a change, drive the affected flow end-to-end with bash to confirm it actually works at runtime — not just that it compiles. Claim success only on observed output.
+description: Verify a code or interface change through the affected runtime boundary and report observed results, including failure paths and environment limits.
 ---
-Verify that the recent change actually works. Focus/flow (optional): $ARGUMENTS
+Verify the affected behavior: $ARGUMENTS
 
-Compiling is not working. Passing types is not working. You must exercise the real behavior and observe the real result.
+Read the change and locate the entry point users actually exercise. Use the project's existing check
+commands and fixtures. Match test depth to risk: a pure transformation can be a unit check; filesystem,
+protocol or service integration needs the relevant boundary; user interaction needs the actual client.
+A successful build proves buildability, not every runtime claim.
 
-1. Identify what changed and what it affects. Use `git diff`/`git status` with bash, or read the files you just edited. Trace outward to the entry point that exercises this code: a test, a CLI command, an HTTP endpoint, a page, a build step, a script.
+Choose checks that could detect the claimed regression. Exercise relevant failure, cancellation and
+recovery states as well as success. Use synthetic data and temporary workspaces. Live external writes
+must stay within the user's authorization; use a local test double when appropriate and label that
+coverage honestly. Confirm dependency/tool availability before attempting browser or remote-service runs.
 
-2. Choose the tightest end-to-end check that proves the behavior:
-   - a function/module → run its unit test, or invoke it from a short bash one-liner and print the result.
-   - a CLI change → run the actual command with real args.
-   - a server/endpoint → start it (background it with bash if it's long-running, then `bash_output`), then `curl` the endpoint and read the response body and status code.
-   - a build/config → run the real build and check it produces the expected artifact.
-   - a UI/logic path → run the flow that triggers it and inspect the output/logs.
+Read exit codes and results, not only command submission. If you start a test server or background
+process, track its handle and stop your own process afterward. Preserve unrelated processes and files.
+Keep credentials, user sessions and raw private logs out of reports and artifacts.
 
-3. Run it with bash and READ the output. Look at exit codes, response bodies, printed values, log lines — the concrete evidence. If you started a background process, capture its output with bash_output and stop it with bash_kill when done.
+If a check fails, distinguish a product defect, invalid fixture, environment limitation or existing
+baseline failure. Correct confirmed issues when implementation/fixes are already authorized, then
+rerun the affected checks. Do not widen tests just to accumulate counts or repeatedly rerun unchanged
+failures without new evidence.
 
-4. Check the failure and edge cases too, not only the happy path. Confirm errors surface the way they should.
-
-5. Report exactly what you observed: the command you ran, the relevant output, and whether it matches the expected behavior. Quote the real output.
-
-Rules:
-- Only claim it works if you SAW it work. If you couldn't run it, say so and say why — never assume success.
-- If the check fails, report the failure plainly; if the fix is small and obvious, offer to apply it (consider invoking the `debug` skill for a stubborn one).
+Report the behavior observed, relevant command/check and result. Distinguish stubbed, real local and
+live provider coverage. If a check could not run, give its specific limitation. Do not claim browser
+rendering from source inspection or a deployed release from a local build.

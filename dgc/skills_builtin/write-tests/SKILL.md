@@ -1,27 +1,26 @@
 ---
 name: write-tests
-description: Author tests for code that has none — pin the contract, match the project's existing framework, and write the fewest tests that catch real breakage. Use when code needs test coverage written, not run or fixed.
+description: Add meaningful regression or missing coverage using the project's test framework and observable contract, rather than copying implementation details into assertions.
 ---
-Write tests for code that lacks them. Target (optional): $ARGUMENTS
+Write tests for: $ARGUMENTS
 
-Do not invent a framework, do not chase a coverage percentage. Pin the contract, match what the project already uses, and write the fewest tests that would actually catch a regression.
+Read the target, callers and nearby tests. Identify promised inputs, outputs, side effects, failures
+and lifecycle ordering. Use the existing runner and fixtures; add a dependency only when the task
+requires a capability the project does not have, following its normal dependency policy.
 
-1. Pin the contract. read_file the target, then grep for its callers to see how it is really invoked. Write down the inputs it accepts, the outputs/return shape it promises, the side-effects it performs (writes, network, state), and the errors it is supposed to raise. That list — not the implementation lines — is what you will test.
+Choose the lowest level that exercises the real contract. Use unit tests for pure logic, actual
+filesystem/protocol integration for boundaries and client flows for user interactions. Prefer a few
+cases that catch plausible breakage over getters, internal spelling checks or a coverage-percentage goal.
+Use disposable files and synthetic credentials; do not depend on private user state or live production.
 
-2. Find the existing test setup and MATCH it. grep for the project's framework and conventions (e.g. `*.test.*`/`*_test.*`/`test_*`, `describe`/`it`, `pytest`, `go test`, `#[test]`) and read one nearby test file. Reuse its runner, imports, assertion style, fixtures/mocks, and file naming. Never introduce a new test framework or dependency.
+Run each new test and inspect failures. Check whether the expectation, fixture or implementation is
+wrong; do not weaken a correct expectation to fit a bug. For a tests-only request, report an exposed
+product defect and leave a faithful reproducer. If fixing is authorized, correct the product and rerun.
 
-3. Pick the level by risk: pure logic → a unit test; a boundary crossing (DB, HTTP, filesystem) → an integration test with the project's existing fixtures/mocks; a real user flow → an e2e test. Choose the lowest level that still exercises the contract.
+Where a test might be vacuous, use a controlled negative case or temporary mutation in an isolated copy
+to show it catches the defect. Do not mutate the user's working tree merely to satisfy a ritual. Restore
+only changes owned by the check and stop its processes. Test public behavior while allowing focused
+internal tests when they are the practical way to establish an otherwise inaccessible invariant.
 
-4. write_file (or edit_file into an existing test file) the tests: one for the happy path, plus the edges that actually break code — empty/null/missing input, min/max boundaries, and each error path from step 1. Skip trivial getters and combinations that add no new signal.
-
-5. Run them with bash using the project's test command and READ the output. Every new test must PASS. Fix your test (not the code under test) until it does.
-
-6. Prove a test isn't vacuous: edit_file to break the code under test in one spot, rerun with bash, confirm a test now FAILS, then revert the mutation exactly and rerun to confirm green again.
-
-7. Report which contract points from step 1 are now covered and which you left untested and why. Report coverage by behavior, never as a percentage.
-
-Rules:
-- Test behavior through the public interface, never private internals or exact log strings.
-- Match the existing framework and file layout exactly; add no new dependency.
-- Leave the code under test unchanged — the only edit you keep is the test file.
-- A test that never fails is worthless: if the mutation in step 6 didn't turn something red, the test is wrong.
+Report the contracts covered, actual results and relevant gaps. Keep deterministic checks independent
+of timing and live services unless the boundary itself requires them; label optional integration runs.

@@ -1,11 +1,12 @@
 ---
 name: code-review
-description: Review a diff, PR, or set of changes for correctness bugs first, then reuse/simplification/efficiency cleanups — ranked by severity with file:line.
+description: Review a diff, pull request or set of changes for concrete correctness defects, ranked by impact with file and line evidence.
 ---
 Review the changes at: $ARGUMENTS (a path, "the current diff", a branch, or a PR). If no target is given, review the current uncommitted diff.
 
 Read the ACTUAL changed code — do not review from the description alone.
-- If the target is a diff/PR/branch, run `git diff`, `git diff --stat`, `git log -p -1`, or `git show <ref>` with bash to see exactly what changed.
+- For local changes, prefer `git_diff` where available: uncommitted, staged, working, merge-base or commit views. State the selected comparison. Subscription routes use their own inspection tools. Do not weaken plan mode to run shell inspection; Git commands may execute repository filters or other configuration.
+- For a PR, establish its current head and base, inspect the actual diff and relevant checks through an available authenticated client. Remote fetching and shell commands retain their normal permissions.
 - If the target is a path, use glob/grep to locate the files and read_file to open them.
 - For each nontrivial change, read enough surrounding context (callers, callees, types) to judge it. Use grep to find every call site of a changed function or signature.
 
@@ -32,4 +33,4 @@ Rules:
 - Every finding must point at a real line you read. Do not speculate about code you didn't open.
 - Do NOT nitpick pure style (formatting, naming preferences, quote style) — the formatter owns that.
 - If you find nothing serious, say so plainly rather than inventing filler.
-- Do NOT edit files during review. Offer to apply fixes only if the user asks; then make the edits with edit_file.
+- A review-only request produces findings. If the user already requested fixes, implement and verify the confirmed issues within that scope; do not ask again merely because this skill was loaded.

@@ -51,7 +51,7 @@ unimplemented capability. Document any provider-owned execution boundary explici
   and optional metadata, supporting-resource guidance, explicit-only policy, and diagnostics.
 - [x] Skill authoring/install: usable create/install/manage workflows in both clients, including
   local packages with supporting resources; reviewable changes and safe overwrite behavior.
-- [ ] Bundled skills: audit existing packages, add useful missing coding/product workflows with
+- [x] Bundled skills: audit existing packages, add useful missing coding/product workflows with
   appropriate capability requirements, examples, and meaningful validation.
 - [x] MCP management: shared CLI/editor configuration; add/edit/remove/enable/disable/reconnect;
   useful connection/auth/error state; credentials never enter prompts, logs, or public artifacts.
@@ -220,3 +220,19 @@ unimplemented capability. Document any provider-owned execution boundary explici
   native diff. Its initial test incorrectly treated a waiting-for-roots notice as a completed
   report; it now waits for the populated summary. A separate regression proves pending requests
   reject immediately on backend disposal and release their listeners. See [Git review](GIT_REVIEW.md).
+- Bundled skills audited: 22 packages now include browser testing, CI diagnosis, PR feedback,
+  skill authoring and MCP server development, with narrow routing and five portable UI labels.
+  Existing guidance no longer recommends blanket shell-prefix allowances, raw secret-value searches,
+  weakening tests to pass, repeated approval gates outside plan mode or DGC branding on other products.
+  All 22 packages pass the skill validator; CLI/editor catalog, selection and nearby nonmatching tasks
+  have runtime tests. A development wheel includes every body and UI metadata file.
+- Skill verification: 1,387/1,387 Python checks and 98 discovered unittest cases passed (four optional
+  bridge skips). Chromium exercised actual UI assets with the real public skill catalog: filtering,
+  labels, attaching without replacing the draft and exact selected-name submission. At 460×900 the
+  composer stayed visible without horizontal overflow. A live Codex subscription one-shot created
+  a project skill and ran local validation; independent DGC discovery and selection checks passed.
+  The local-model one-shot created a package but reached its test time limit before verification,
+  so it is not a successful end-to-end result. That run also exposed a zero CLI exit status on
+  timeout, which requires a separate correction before release. Its generated package overgeneralized
+  temporary authoring restrictions; skill-author now explicitly distinguishes one-off constraints
+  from reusable policy. A repeat with the revised instructions is in progress.

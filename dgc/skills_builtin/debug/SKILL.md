@@ -1,25 +1,26 @@
 ---
 name: debug
-description: Systematically diagnose a failing test or wrong behavior — reproduce, hypothesize, instrument, narrow to root cause, fix, and confirm. No guess-and-check.
+description: Diagnose a failing test, regression, crash or incorrect behavior using reproducible evidence, then fix and verify the cause within the requested scope.
 ---
-Diagnose this symptom: $ARGUMENTS
+Investigate the symptom: $ARGUMENTS
 
-Work the problem methodically. Do NOT start editing code hoping something sticks — every change you make should be motivated by evidence.
+Find the actual entry point, failing command and expected result. Try a small reproducible case in an
+isolated fixture. Capture the relevant error, exit code and timing without dumping private inputs or
+whole logs. For intermittent failures, preserve one observation with its diagnostics; resampling a
+changing process/state can make the assertion disagree with its own evidence.
 
-1. Reproduce it first. Find and run the exact failing command with bash (the test, the script, the request). Capture the full error, stack trace, and exit code. If you cannot reproduce it, you cannot fix it — get a reliable repro before touching anything. For a flaky failure, run it several times.
+Read the failure path and callers. Form concrete hypotheses and choose observations that distinguish
+them. Use bounded instrumentation only when needed; log types, counts and synthetic identifiers instead
+of credentials or user content. Do not change expected behavior just to make the test pass.
 
-2. Read the failure. Open the file:line named in the trace with read_file. Read the function that failed and the code that calls it. Use grep to trace where the bad value originates.
+Narrow concurrency failures using event/request identities and lifecycle ordering, not arbitrary sleeps.
+Check cleanup, cancellation, partial success, retries and the owner of each state transition. Avoid
+broad source disabling or destructive resets as debugging shortcuts.
 
-3. Form explicit hypotheses. Write down 1–3 concrete, testable guesses about the root cause ("X is null because Y never runs", "the loop skips the last element"). Rank them by likelihood.
+Fix the demonstrated cause, preserving existing work and contracts. If the environment cannot reproduce
+the original report, a confirmed static defect plus a meaningful regression can justify a scoped fix;
+state which part remains unverified rather than refusing all progress or claiming the original is solved.
 
-4. Test the cheapest hypothesis. Add targeted instrumentation with edit_file — print/log the suspect variables, inputs, and branch conditions right before the failure point. Re-run with bash and read the actual values. Let the data confirm or kill the hypothesis; don't assume.
-
-5. Narrow. Bisect the failing path — comment out, short-circuit, or add asserts to cut the search space in half each step. Keep going until you can point at the single line or condition that is wrong and explain WHY it produces the observed symptom.
-
-6. Fix the root cause, not the symptom. Make the minimal edit that addresses the actual defect. Avoid masking it with a try/except or a special-case unless that genuinely IS the correct behavior.
-
-7. Remove your instrumentation. Delete the temporary prints/logs you added.
-
-8. Confirm. Re-run the original failing command and show it now passes. Then run the surrounding tests to check you didn't break a neighbor.
-
-Report: the root cause in one or two sentences, the fix you made (file:line), and the command output proving it's resolved. If you get genuinely stuck after narrowing, report the smallest reproducing case and exactly what you've ruled out.
+Remove temporary instrumentation. Rerun the failing flow and the checks affected by the change. Report
+cause, fix and observed evidence. If diagnosis remains incomplete, give the smallest case, what has been
+ruled out and the specific missing observation needed next.

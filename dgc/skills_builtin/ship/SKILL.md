@@ -1,26 +1,31 @@
 ---
 name: ship
-description: Turn a finished, verified change into clean git history and a PR — self-review the diff, stage deliberately, write a conventional commit, and open the PR. Commit/push only when the user asks.
+description: Prepare an authorized commit, push or pull request from a finished change, with deliberate staging, useful review context and verified release scope.
 ---
-Ship the current change as reviewable history. Focus (optional): $ARGUMENTS
+Prepare reviewable history for: $ARGUMENTS
 
-Only do this when the user asked you to commit, push, or open a PR. Otherwise stop and report the change is ready.
+Read the repository's contribution/release instructions, current branch and both staged and unstaged
+changes. Use git_diff where available, then inspect surrounding code for the relevant risks. Preserve
+pre-existing and concurrent work. Follow the repository's branch policy; do not rewrite shared history.
 
-1. See the whole change. Run `git status` and `git diff` (and `git diff --staged`) with bash. Read EVERY hunk as a reviewer, not as the author. For anything nontrivial, invoke the `code-review` skill first and address what it finds before committing.
+Review source, tests, generated output and package contents that will actually be committed. Look for
+accidental debug output, private files, captures and credentials. Use available secret scanners in
+redacted mode; report finding type and location without echoing a matched value. Do not pass secret
+values to grep, Git history searches, command arguments or PR text. A keyword match alone is not a leak.
 
-2. Clean the diff. Grep the changed files for debug leftovers and secrets: `grep -nE 'console\.log|println!|dbg!|TODO|FIXME|API_KEY|SECRET|password|token' <files>`. Remove stray debug output with edit_file. If any real credential is staged, STOP and tell the user — never commit it.
+Run the checks appropriate to this change and read their results. Fix confirmed problems within the
+authorized task. Do not turn an unrelated failing baseline into a false green check or hide it.
+Stage the intended paths or hunks explicitly after reviewing them; verify the staged diff before
+committing. Group coupled changes together and unrelated changes separately.
 
-3. Branch if needed. Run `git branch --show-current`. If it prints `main` or `master`, create a feature branch first: `git checkout -b <type>/<short-topic>`. Never commit straight to the default branch.
+Use the project's commit convention. Explain the concrete problem and resulting behavior in the PR,
+then give relevant validation and limitations. Prefer a body file or structured API field for multiline
+text so shell quoting cannot alter it. Keep internal paths, account details and private logs out.
 
-4. Stage DELIBERATELY. Add only the files that belong in this change, by path: `git add <path> ...`. Never `git add -A` or `git add .`. If the diff does more than one logical thing, make more than one commit — stage and commit each part separately.
+Existing authorization to commit, push or create a PR remains valid. Complete authorized steps without
+asking again. If publication was not requested, finish preparation and report readiness before that
+external action. Check the remote and target branch before pushing; never force-push as routine recovery.
+Do not send review comments, merge, tag or publish packages beyond the user's authorized scope.
 
-5. Commit with a conventional message: `type(scope): imperative summary` on line 1 (≤72 chars; type ∈ feat|fix|refactor|docs|test|chore|perf). Add a blank line, then a body that explains WHY the change was made, not what the diff already shows. Use `git commit -m "..." -m "..."` via bash.
-
-6. Open the PR (only if the user asked to push/PR). Push with `git push -u origin HEAD`, then `gh pr create` with a body in three parts: Problem, Approach, How verified. Print the PR URL as your final output.
-
-Rules:
-- Commit or push ONLY when the user explicitly asked; a finished change is not consent.
-- Never `git add -A`/`git add .`, never `git commit -a`, never `git push --force`.
-- One logical change per commit — split the work rather than bundling unrelated edits.
-- No secrets, no debug leftovers, no commented-out code in what you stage.
-- Do not amend or rebase commits you did not create in this session.
+After an authorized push/PR, verify the returned commit or URL and CI state. A local build does not
+prove a published release exists. Report the actual artifact or PR and checks, including pending CI.

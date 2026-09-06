@@ -1689,9 +1689,9 @@ class Agent(GoalLifecycle):
                 "something, the write_file + artifact tool calls MUST appear in the same turn.",
                 "- Do not tell the user to open a file by hand, and do not start your own server with bash — "
                 "DGC runs one shared server via the `artifact` tool and offers to open it.",
-                "- Before building a frontend, load the `dgc-design` skill (skill tool) and follow it: "
-                "Inter + JetBrains Mono, near-black canvas, one purple accent, clean hierarchy, generous "
-                "spacing, no clutter.",
+                "- Before building a frontend, load the `dgc-design` skill when available. Preserve the "
+                "user's requested brand/theme and the project's existing components. Use DGC's purple "
+                "house style for DGC-branded or otherwise unbranded standalone DGC artifacts.",
                 "- Make it RESPONSIVE — it will be opened on phones and laptops. Include "
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">; the page must "
                 "NEVER scroll sideways: use max-width and relative units (%, rem, min(), clamp()), "

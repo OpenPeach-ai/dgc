@@ -46,6 +46,11 @@ _ALL_SKILLS_RE = re.compile(
     r"\b(?:use|invoke|load|run|choose|show|list|available|which)\b.{0,24}\bskills?\b|"
     r"/(?:skills?|skill)(?:\s|$)", re.IGNORECASE | re.DOTALL)
 _BUILTIN_SKILL_PATTERNS = {
+    "browser-test": re.compile(r"\b(?:browser|playwright) (?:tests?|testing|automation)\b|\btest (?:the |this )?(?:browser|web app)\b", re.I),
+    "fix-ci": re.compile(r"\b(?:fix|debug|diagnose) (?:the |this )?ci\b|\b(?:ci|continuous integration|github actions) (?:fail\w*|job failure)\b|\bfail\w* ci\b", re.I),
+    "pr-feedback": re.compile(r"\b(?:address|resolve|implement) (?:the |this )?(?:(?:pr|review|pull request) )?(?:feedback|comments)\b|\bpr feedback\b", re.I),
+    "skill-author": re.compile(r"\b(?:create|author|write|build|revise|update) (?:a |the |this |an? existing )?(?:dgc |portable )?skill\b|\bskill (?:authoring|package development)\b", re.I),
+    "mcp-builder": re.compile(r"\b(?:build|implement|develop|extend) (?:an? |the |this )?mcp server\b|\bmcp server development\b", re.I),
     "batch": re.compile(r"\b(?:batch|fan[- ]?out|repetitive change|many[- ]file change)\b", re.I),
     "code-review": re.compile(r"\b(?:code review|review (?:the )?(?:diff|changes|pr)|pull request review)\b", re.I),
     "ui-review": re.compile(

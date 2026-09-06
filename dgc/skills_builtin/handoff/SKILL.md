@@ -1,28 +1,23 @@
 ---
 name: handoff
-description: Write a HANDOFF.md from a fixed template so a fresh context or another agent can resume this work — terse, factual, gathered from git, secret-scanned before saving.
+description: Save a concise, factual continuation document with the task, current changes, validation and remaining work so another developer can resume accurately.
 ---
-Produce a handoff document so another agent can pick up exactly where you left off. Focus (optional): $ARGUMENTS
+Prepare the handoff for: $ARGUMENTS
 
-Gather facts with git, don't invent them. Every line must be checkable against the repo.
+Collect the user's objective and constraints, current branch and changes, and the relevant observed
+results. Inspect staged and unstaged changes with git_diff when available. Distinguish work from this
+task from pre-existing edits. Do not infer test success or publication from a commit message.
 
-1. Collect the state with bash: `git branch --show-current`, `git status --short`, `git log --oneline -10`, and `git diff --stat`. Read the full `git diff` (and `git diff --staged`) so you know exactly which files changed and what each change does.
+Use the requested destination; otherwise HANDOFF.md is suitable when saving a file is requested.
+Read an existing document and preserve relevant human notes while updating stale task state. A request
+to generate a handoff can be fulfilled directly; do not introduce a second approval for that same file.
+If the user only requests a chat summary, do not create persistent project instructions.
 
-2. Scan that diff for leaked secrets BEFORE writing anything: grep the diff for `api[_-]?key`, `token`, `secret`, `password`, `BEGIN.*PRIVATE KEY`, and long hex/base64 blobs. If you find one, do NOT put it in the file — note "secret redacted" in its place and flag it in your reply.
+Include the objective, current behavior, important changed components/commits, observed checks,
+remaining steps and a practical resumption point. Use repo-relative paths and verified command syntax.
+Clearly label pending checks and blockers. Keep conversation history only when it explains a decision.
 
-3. Build the document by filling these headers in order, terse and factual, no narrative and no hedging:
-   - **State** — current branch; what actually works right now.
-   - **Changed** — each touched file with a one-line what-and-why; name the key commits by hash.
-   - **Verified** — the exact checks you ran (commands) and their real output; if you ran nothing, write "not verified" — never fake a result.
-   - **Remaining** — the ordered next steps, most-important first.
-   - **Resume** — the literal command to continue (e.g. `dgc --continue`), the verify command to re-run, and the specific files to open.
-
-4. Write it to `HANDOFF.md` at the repo root with write_file. If one already exists, read it first and overwrite with the current state.
-
-5. Report the path you wrote and a one-line summary. Do not commit unless asked.
-
-Rules:
-- Facts come from git and files you read — never guess a branch, commit, or file name.
-- Every claim in **Verified** must be output you actually saw; no assumed passes.
-- Keep it scannable: short lines, no prose paragraphs, no filler.
-- Never write a secret into HANDOFF.md; redact and flag instead.
+Exclude credentials, private account data, local machine paths and raw sensitive logs. Use redacted
+scanner findings or presence-only checks when needed; never print a suspected secret to find it.
+Do not add the handoff to a public commit unless that publication is in scope. Report where it was saved
+and what still needs work; a handoff is not evidence that the goal is complete.

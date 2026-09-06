@@ -1,28 +1,27 @@
 ---
 name: plan
-description: Before a non-trivial or multi-file change, read the real target files and write a bounded ≤6-step plan in plan mode, then execute exactly that — the rail that keeps a change from sprawling. Use whenever the task touches more than one file or is not a mechanical one-liner.
+description: Turn a requested complex change into an evidence-based implementation plan with dependencies, decisions and concrete validation. Use for planning requests or work that needs design decisions.
 ---
-Plan the change before touching code. Task/focus (optional): $ARGUMENTS
+Plan the requested outcome: $ARGUMENTS
 
-A plan written before reading is a guess. Ground every step in a file you have actually opened.
+Read the relevant guidance, entry points, data models and callers. Inspect enough context to identify
+constraints and dependencies; do not require entire large files to be loaded when focused reads suffice.
+State the outcome and the decisions that would materially change implementation. Resolve ordinary
+implementation choices from the project; ask only for missing requirements that affect correctness.
 
-1. Restate the task in ONE sentence — the concrete outcome, not the method. If you cannot say it in one sentence, the task is still fuzzy; ask or narrow it first.
+Describe coherent steps in dependency order, with the affected components and observable done-checks.
+Include migration, compatibility or rollout work only when the change needs it. Scale detail to the
+actual task; an arbitrary step limit must not discard requested work. Track parallel work only if
+available and authorized, with clear ownership and integration checks.
 
-2. Read the REAL files first. Use `grep` to find where the behavior lives (symbols, call sites, config keys), then `read_file` each target in full — the files you will edit AND the ones that call them. Do not plan around a file you have not opened.
+In plan mode, remain read-only and use present_plan if available to request the controller's execution
+transition. Do not edit files or bypass the mode through shell commands. Outside plan mode, a user who
+already requested implementation has authorized ordinary work; planning alone adds no new approval gate.
+Use todo for substantial execution when available. A normal plan is not an instruction to create a goal.
 
-3. Write the plan as ≤6 numbered steps — do NOT edit any file yet. Each step must name the exact file it touches and a one-line done-check (a test that passes, a value that prints, a symbol that now exists). Order the steps so each builds on the last. (If the user has switched you into plan mode with Shift+Tab, you are already read-only until the plan is approved — good; if not, just hold off on edits until step 6.)
+When evidence changes the approach, update the relevant steps and explain the consequence. Continue
+within the authorized outcome; obtain a decision only for a material scope or authority change. Mark
+steps complete on observed results and retain unresolved checks instead of silently dropping them.
 
-4. Add an explicit "NOT doing" list — the scope guard. Name the tempting nearby changes (refactors, renames, unrelated bugs, extra files) that this task will NOT include. This list is as important as the steps.
-
-5. Present the plan with `present_plan` and wait for approval. Do not write or edit any file while in plan mode.
-
-6. On approval, load the steps into the todo tool (one todo per step) and execute in order with `edit_file`/`write_file`. Mark each todo done only after its done-check passes — run it with bash or `read_file`.
-
-7. If reality contradicts the plan mid-execution (a file isn't shaped as assumed, a step is impossible, scope must grow), STOP. Do not improvise past it. Return to plan mode, revise the affected steps and the NOT-doing list, and re-present before continuing.
-
-Rules:
-- No editing before the plan is approved — plan mode is read-only.
-- Every step names a real file you have read. No step may reference a file you only assumed exists.
-- Never exceed 6 steps; if it needs more, the task is two tasks — plan the first, note the second in NOT-doing.
-- When the plan breaks, revise the plan. Never silently work off-plan.
-- Keep to the stated scope; a change the plan didn't list does not get made because it was convenient.
+Example: a protocol migration includes both producer and consumer changes, compatibility behavior,
+a failure/reconnect check, and release coordination; merely updating the version constant is not done.

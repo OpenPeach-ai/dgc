@@ -422,7 +422,7 @@ count and redacted matchers per event without echoing your commands.
 
 A **skill** is a folder with a `SKILL.md` that teaches the agent how to do a
 particular kind of work — a house style, a workflow, a checklist. DGC ships a
-collection of coding workflows. You can add project or personal packages, including
+collection of 22 coding workflows. You can add project or personal packages, including
 portable `.agents/skills` directories.
 
 - **/skills** — browse instructions, source, diagnostics, and enabled state. The
@@ -438,7 +438,26 @@ portable `.agents/skills` directories.
 - Project skills override personal skills, which override built-ins. Metadata refreshes
   at the next turn; use **Reload** to update the picker after external edits.
 - **dgc-design** ships by default but stays dormant for normal coding — artifact
-  frontend work activates it automatically.
+  frontend work activates it automatically. It preserves the requested brand and theme;
+  DGC's purple palette is for DGC-branded or otherwise unbranded standalone DGC artifacts.
+
+## Included workflows
+
+- **browser-test** — real browser flows, failure recovery, responsive and keyboard checks.
+- **fix-ci** — inspect the failed CI job and commit, reproduce the cause and verify a fix.
+- **pr-feedback** — evaluate review comments against current code and address justified changes.
+- **skill-author** — create focused, portable skill packages with meaningful validation.
+- **mcp-builder** — implement and test the tools/resources/prompts an MCP server advertises.
+- Also included: **batch**, **code-review**, **dataviz**, **debug**, **deep-research**,
+  **dgc-design**, **handoff**, **loop**, **onboard**, **plan**, **refactor**,
+  **security-review**, **setup**, **ship**, **ui-review**, **verify**, **write-tests**.
+
+These packages provide instructions, not tools or account access. Browser work needs an
+available browser harness; remote CI/PR work needs the appropriate client and account;
+MCP development uses the project's SDK. Missing capabilities are reported. Skills do not
+install dependencies, change permissions, publish or send messages merely by being selected.
+For example: `Check failed-save recovery $browser-test` or
+`Create a project API migration skill $skill-author`.
 
 ## Writing one
 
@@ -455,7 +474,7 @@ name: commit
 description: Write a conventional commit message for the staged changes
 ---
 
-Read the staged diff with `git diff --staged` and write a single conventional
+Read the staged diff with the native `git_diff` tool's staged view and write a single conventional
 commit message for it. Focus (optional): $ARGUMENTS
 
 Describe what changed and why, never how. No trailing period on the subject.
