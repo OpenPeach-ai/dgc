@@ -256,6 +256,40 @@ test("change review shows new staged content and never follows an external symli
   }
 });
 
+test("change review handles the first commit and reads a literal committed blob", async () => {
+  const root = mkdtempSync(join(scratch, "review-unborn-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  git("init", "-q");
+  writeFileSync(join(root, "[literal].ts"), "export const value = 1;\n");
+  git("add", ".");
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { folders: api.workspace.workspaceFolders, Uri: api.Uri, commands: api.commands };
+  const opened = [];
+  api.workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: root } }];
+  api.Uri = { from: value => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) };
+  api.commands = { executeCommand: async (...args) => opened.push(args) };
+  try {
+    const { provider } = catalogHarness([]);
+    provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
+    await provider.reviewWorkspaceChange("[literal].ts");
+    assert.equal(opened[0]?.[0], "vscode.diff");
+    assert.equal(provider.reviewDocuments.get(opened[0][1].toString()), "");
+    assert.equal(provider.reviewDocuments.get(opened[0][2].toString()), "export const value = 1;\n");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "initial");
+    writeFileSync(join(root, "[literal].ts"), "export const value = 2;\n");
+    provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
+    await provider.reviewWorkspaceChange("[literal].ts");
+    assert.equal(opened[1]?.[0], "vscode.diff");
+    assert.equal(provider.reviewDocuments.get(opened[1][1].toString()), "export const value = 1;\n");
+    assert.equal(provider.reviewDocuments.get(opened[1][2].toString()), "export const value = 2;\n");
+    assert.equal(notices.info.length, 0);
+  } finally {
+    api.workspace.workspaceFolders = original.folders;
+    api.Uri = original.Uri;
+    api.commands = original.commands;
+  }
+});
+
 test("large change scans expose true totals, bounded line reads, and unavailable folders", async () => {
   const root = mkdtempSync(join(scratch, "large-changes-"));
   execFileSync("git", ["init", "-q"], { cwd: root });
