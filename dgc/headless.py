@@ -547,7 +547,7 @@ class Backend:
                           "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
-                          "ultra_profile": True},
+                          "ultra_profile": True, "composer_selections": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1279,6 +1279,16 @@ class Backend:
                              message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
                              **_request_fields(request_id))
                 return
+            if "skills" in cmd or "templates" in cmd:
+                from .composer import compose_prompt
+                try:
+                    text = compose_prompt(text, skills=cmd.get("skills"),
+                                          templates=cmd.get("templates"), catalog=self.agent.skills,
+                                          project_root=self.config.project_root)
+                except ValueError as exc:
+                    self.em.emit("command_rejected", command=t, reason="invalid_selection",
+                                 message=str(exc), **_request_fields(request_id))
+                    return
             try:
                 images = validate_image_data_uris(
                     cmd.get("images"), maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,

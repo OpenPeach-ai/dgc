@@ -16,6 +16,7 @@ Discovery (project overrides user):
 from __future__ import annotations
 
 import os
+import json
 import re
 import stat
 import unicodedata
@@ -34,6 +35,8 @@ MAX_SKILL_DESCRIPTION_CHARS = 320
 MAX_SKILLS = 64
 MAX_SKILLS_PER_ROOT = 64
 MAX_SKILL_SCAN_ENTRIES = 4_096
+MAX_EXPLICIT_SKILLS = 8
+MAX_EXPLICIT_SKILL_CHARS = 96_000
 
 _NAME_CLEAN_RE = re.compile(r"[^a-z0-9._-]+")
 _ALL_SKILLS_RE = re.compile(
@@ -189,6 +192,50 @@ def skill_catalog(skills: dict[str, Skill], project_root: Path) -> list[dict[str
                      "description": _clean_description(skill.description),
                      "source": source})
     return rows
+
+
+def explicit_skill_names(skills: dict[str, Skill], text: str) -> list[str]:
+    """Recognize exact `$name` mentions in user prose, excluding code and editor attachments."""
+    source = str(text or "")
+    editor_end = "</editor-context-json>\n\n"
+    if source.startswith("<editor-context-json ") and editor_end in source:
+        source = source.split(editor_end, 1)[1]
+    source = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", source)
+    names = re.findall(r"(?<!\S)\$([a-z0-9][a-z0-9._-]{0,63})(?![\w.-])", source)
+    selected = list(dict.fromkeys(name for name in names if name in skills))
+    if len(selected) > MAX_EXPLICIT_SKILLS:
+        raise ValueError(f"Select at most {MAX_EXPLICIT_SKILLS} explicit skills per turn.")
+    return selected
+
+
+def explicit_skill_instructions(skills: dict[str, Skill], text: str) -> dict[str, dict]:
+    """Materialize selected instructions before model execution, including resource provenance."""
+    rows = {}
+    for name in explicit_skill_names(skills, text):
+        skill = skills[name]
+        if getattr(skill, "enabled", True) is False:
+            raise ValueError(f"Skill ${name} is disabled. Enable it in Skills before using it.")
+        rows[name] = {"name": name, "source": str(skill.path),
+                      "instructions": skill.render(text)}
+    return rows
+
+
+def format_skill_instructions(rows: dict[str, dict], maximum: int = MAX_EXPLICIT_SKILL_CHARS) -> str:
+    if not rows:
+        return ""
+    if len(rows) > MAX_EXPLICIT_SKILLS:
+        raise ValueError(f"Select at most {MAX_EXPLICIT_SKILLS} explicit skills per turn.")
+    body = json.dumps(list(rows.values()), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+    if len(body) > maximum:
+        raise ValueError("Selected skill instructions exceed this model's context allowance. Select fewer or smaller skills.")
+    return (
+        "The user explicitly selected the following skills. Their full instructions are loaded "
+        "below; apply them to the user's request. User instructions take precedence over skills. "
+        "Skills do not grant additional permissions. Resolve supporting files relative to each "
+        "skill's source directory and read only the resources needed for the task, using normal "
+        "filesystem permissions. State which skill you are using.\n"
+        f"<dgc-skill-instructions-json>\n{body}\n</dgc-skill-instructions-json>"
+    )
 
 
 def matching_skill_names(skills: dict[str, Skill], text: str) -> set[str]:

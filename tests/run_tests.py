@@ -12014,7 +12014,9 @@ def test_slash_palette():
 
         _menu = object.__new__(TUI)
         _menu.config = SimpleNamespace(project_root=_root / "project")
-        _menu.input_buf = SimpleNamespace(text="/", reset=lambda: None)
+        from prompt_toolkit.buffer import Buffer
+        _menu.input_buf = Buffer()
+        _menu.input_buf.insert_text("/")
         _menu._invalidate = lambda: None
         _menu._open_command_palette()
         _rows = _menu._overlay["rebuild"](_menu._overlay)

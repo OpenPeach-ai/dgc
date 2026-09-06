@@ -231,7 +231,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
-    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False)},
+    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
+               "skills": _A(False), "templates": _A(False)},
     "slash_command": {"text": _S()},
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False)},
     "permission_response": {

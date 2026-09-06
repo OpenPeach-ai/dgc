@@ -470,9 +470,12 @@ button.act.danger { color: var(--err); }
 
 /* @file / slash popover */
 .pop { display: none; margin: 0 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; max-height: 210px; overflow-y: auto; box-shadow: 0 -12px 34px -10px rgba(0,0,0,.75); }
-.pop .pi { padding: 6px 11px; cursor: pointer; font: 400 12.5px/1.3 var(--mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 8px 11px; cursor: pointer; font: 500 12.5px/1.3 var(--sans); color: var(--text); }
+.pop .pi-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop .pi-kind { color: var(--faint); font: 400 10px/1.5 var(--sans); }
 .pop .pi.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
-.pop .pd { color: var(--faint); font: 400 11px/1 var(--mono); margin-left: 6px; }
+.pop .pd { grid-column: 1 / -1; color: var(--faint); font: 400 11px/1.4 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invocation-chip { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 
 /* open-file link + code copy */
 button.link { font: 400 11px/1 var(--mono); cursor: pointer; background: transparent; border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; color: var(--muted); flex: none; }

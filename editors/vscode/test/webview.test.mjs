@@ -119,6 +119,81 @@ test("prompt rejection restores matching text and attachments while preserving a
   assert.deepEqual(errors, []);
 });
 
+test("inline slash picker exposes management and skills without consuming the draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "event", event: { type: "ready", capabilities: { headless_skill_catalog: true },
+    commands: [{ name: "skills", description: "Installed skills", action: "skills" },
+      { name: "mcp", description: "Connected tools", action: "mcp" },
+      { name: "model", description: "Choose a model", action: "pickModel" }],
+    skills: ["fixture"], custom_commands: ["check-api"] } });
+  assert.ok(posted.some((m) => m.type === "requestSkills"));
+  input.value = "Review /mcp after this";
+  input.selectionStart = input.selectionEnd = 9;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.match(doc.getElementById("pop").textContent, /Connected tools/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(input.value, "Review  after this");
+  assert.equal(posted.at(-1).action, "mcp");
+  assert.equal(posted.some((m) => m.type === "prompt"), false);
+  input.value = "Keep this /"; input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  for (const expected of ["/skills", "/mcp", "/model", "$fixture", "/check-api"])
+    assert.ok(doc.getElementById("pop").textContent.includes(expected));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  send({ type: "event", event: { type: "skill_catalog", items: [{ name: "fixture", description: "Fresh metadata" }] } });
+  assert.equal(doc.getElementById("pop").style.display, "none", "a late catalog cannot reopen a dismissed picker");
+  assert.equal(input.value, "Keep this /");
+  assert.deepEqual(errors, []);
+});
+
+test("skill and template chips preserve text, travel as selections, and restore on rejection", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "event", event: { type: "ready", skills: ["fixture"], custom_commands: ["check-api"] } });
+  input.value = "Review $fixture after"; input.selectionStart = input.selectionEnd = 10;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  assert.equal(input.value, "Review  after");
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
+  input.value += " /check"; input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
+  assert.equal(posted.some((m) => m.type === "prompt"), false);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const prompt = posted.at(-1);
+  assert.equal(prompt.type, "prompt");
+  assert.equal(prompt.text, "Review  after");
+  assert.deepEqual(Array.from(prompt.skills), ["fixture"]);
+  assert.deepEqual(Array.from(prompt.templates), ["check-api"]);
+  send({ type: "prompt_rejected", requestId: prompt.requestId });
+  assert.equal(input.value, "Review  after");
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
+  doc.querySelector(".invocation-chip .x").click();
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("skill library applies to existing draft and toolbar does not erase selected text", () => {
+  const { dom, doc, send, errors } = makeDom(), input = doc.getElementById("input");
+  input.value = "Existing request"; input.selectionStart = 0; input.selectionEnd = 8;
+  doc.getElementById("btn-cmd").click();
+  assert.equal(input.value, "Existing / request");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  input.value = "Existing request";
+  send({ type: "surface_open", surface: "skills" });
+  send({ type: "event", event: { type: "skill_catalog", items: [{ name: "fixture", source: "project" }] } });
+  doc.querySelector("[data-skill-use]").click();
+  assert.equal(input.value, "Existing request");
+  assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
+  for (const text of ["https://example.test/path", "src/path", "person@example.test"]){
+    input.value = text; input.selectionStart = input.selectionEnd = text.length;
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(doc.getElementById("pop").style.display, "none");
+  }
+  assert.deepEqual(errors, []);
+});
+
 test("restored history pages and tool disclosure preserve live content and safe output", () => {
   const { dom, doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
