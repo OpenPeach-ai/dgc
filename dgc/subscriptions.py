@@ -84,6 +84,10 @@ class SubEngine:
         so one DGC conversation cannot attach to an unrelated terminal conversation.
         """
         validate_engine_mode(self.key, mode)
+        # Older DGC settings offered max for every subscription. Preserve that intent using
+        # Codex's actual highest effort; never pass the unsupported legacy enum to its process.
+        if self.key == "codex" and effort == "max":
+            effort = "xhigh"
         for label, value in (("prompt", prompt), ("session id", session_id),
                              ("model", model), ("effort", effort)):
             if "\x00" in str(value):

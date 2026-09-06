@@ -548,3 +548,12 @@ pre.code .copy:focus-visible { opacity: 1; }
   .disclosure, button.link, .artifact .aurl { color: LinkText; text-decoration: underline; }
   ::-webkit-scrollbar-thumb { background: CanvasText; border-color: Canvas; }
 }
+
+/* Code colors adapt to host theme while keeping DGC's purple emphasis. */
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: var(--vscode-symbolIcon-keywordForeground, #c792ea); }
+.hljs-string, .hljs-regexp, .hljs-addition { color: var(--vscode-debugTokenExpression-string, #a8c98e); }
+.hljs-number, .hljs-built_in, .hljs-type { color: var(--vscode-debugTokenExpression-number, #e4b682); }
+.hljs-title, .hljs-attr, .hljs-attribute, .hljs-selector-class { color: var(--vscode-symbolIcon-functionForeground, #d7b8f3); }
+.hljs-comment, .hljs-quote { color: var(--vscode-descriptionForeground, #93939b); font-style: italic; }
+.hljs-deletion { color: var(--vscode-gitDecoration-deletedResourceForeground, #e58b91); }
+.msg.hist, .msg.dgc:has(.thinking.done), .msg.user { content-visibility: auto; contain-intrinsic-size: auto 120px; }

@@ -102,6 +102,57 @@ function makeDom() {
   return { dom, errors, posted, send, doc: dom.window.document };
 }
 
+test("prompt rejection restores matching text and attachments while preserving a newer draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "attach", label: "app.ts", resource: { type: "file_mention", path: "app.ts" } });
+  input.value = "Review this file";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const first = posted.find(message => message.type === "prompt");
+  input.value = "new draft";
+  send({ type: "event", event: { type: "command_rejected", command: "prompt", request_id: first.requestId, message: "Queue full" } });
+  assert.equal(input.value, "new draft");
+  assert.ok(doc.querySelector(".msg.rejected button"));
+  input.value = ""; doc.querySelector(".msg.rejected button").click();
+  assert.equal(input.value, "Review this file");
+  assert.match(doc.getElementById("attachments").textContent, /app.ts/);
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
+test("restored history pages and tool disclosure preserve live content and safe output", () => {
+  const { dom, doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "text_delta", text: "Live response" } });
+  const items = Array.from({ length: 120 }, (_, i) => ({ role: "user", text: `Saved ${i}` }));
+  items.push({ role: "assistant", text: "Inspecting", tools: ["bash"], commentary: true,
+    tool_details: [{ name: "bash", arguments: "npm test", output: '<script>unsafe()</script>', status: "returned" }] });
+  send({ type: "event", event: { type: "history", items } });
+  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 50);
+  assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/);
+  const detail = doc.querySelector(".history-tools");
+  assert.equal(detail.querySelector(".out"), null);
+  detail.open = true; detail.dispatchEvent(new dom.window.Event("toggle"));
+  assert.match(detail.querySelector(".out").textContent, /<script>unsafe/);
+  assert.equal(detail.querySelector("script"), null);
+  assert.ok(doc.querySelector(".history-pages .text.commentary"));
+  doc.querySelector(".history-older").click();
+  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 100);
+  assert.deepEqual(errors, []);
+});
+
+test("stream batching flushes final text and partial changes stay explicit", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  for (const text of ["Complete ", "answer ", "with **formatting**."]) send({ type: "event", event: { type: "text_delta", text } });
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
+  send({ type: "workspace_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
+  assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
+  doc.getElementById("changes-review-button").click();
+  assert.match(doc.getElementById("changes-review-list").textContent, /Showing 500 of 900/);
+  assert.deepEqual(errors, []);
+});
+
 test("goal review exposes saved evidence, bounded editing, and keyboard focus", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "goal_changed", goal: "Finish the task", status: "completed",
@@ -299,6 +350,7 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   assert.equal(block.querySelector("img"), null, "fenced HTML must remain inert text");
 
   send({ type: "event", event: { type: "text_delta", text: "\n```" } });
+  send({ type: "event", event: { type: "stream_end" } });
   block = doc.querySelector("pre.code");
   block.querySelector("button.copy").click();
   const copied = posted.find((message) => message.type === "copy");

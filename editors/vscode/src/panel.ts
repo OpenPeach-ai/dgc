@@ -221,6 +221,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private slashAliases = new Map<string, string>();
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
+  private confirmedTurnActive = false;
   private workspaceRootsRevision = 0;
   private workspaceRootsDirty = true;
   private workspaceRootsInFlight: { revision: number; requestId?: string } | undefined;
@@ -580,15 +581,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async collectWorkspaceChanges(): Promise<WorkspaceChange[]> {
-    const folders = (vscode.workspace.workspaceFolders || []).slice(0, 16);
+  private async collectWorkspaceChanges(): Promise<{ files: WorkspaceChange[]; total: number; notices: string[] }> {
+    const allFolders = vscode.workspace.workspaceFolders || [];
+    const folders = allFolders.slice(0, 16);
+    const notices: string[] = allFolders.length > 16 ? ["Only the first 16 workspace folders were scanned."] : [];
     const changes = new Map<string, WorkspaceChange>();
     for (const folder of folders) {
       const folderPath = await realpath(folder.uri.fsPath).catch(() => "");
-      if (!folderPath) { continue; }
+      if (!folderPath) { notices.push(`${folder.name}: workspace folder is unavailable.`); continue; }
       let root: string;
       try { root = resolve((await runGit(folderPath, ["rev-parse", "--show-toplevel"])).trim()); }
-      catch { continue; }
+      catch { notices.push(`${folder.name}: Git changes are unavailable. Open Source Control to check the repository.`); continue; }
       const scope = relativePath(root, folderPath).replace(/\\/g, "/");
       if (scope === ".." || scope.startsWith("../")) { continue; }
       const pathspec = `:(literal)${scope || "."}`;
@@ -599,9 +602,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       try {
         if (hasHead) numstat = await runGit(root, ["diff", "--numstat", "-z", "--no-renames",
           "--no-ext-diff", "--no-textconv", "HEAD", "--", pathspec]);
-      } catch {
-        // A repository with no first commit has no HEAD. Its files are handled as untracked below.
-      }
+      } catch { notices.push(`${folder.name}: tracked changes could not be read.`); }
       for (const record of numstat.split("\0")) {
         if (!record) { continue; }
         const match = /^([^\t]+)\t([^\t]+)\t([\s\S]+)$/.exec(record);
@@ -624,13 +625,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       try {
         untracked = await runGit(root, ["ls-files", ...(hasHead ? [] : ["--cached"]),
           "--others", "--exclude-standard", "-z", "--", pathspec]);
-      } catch { /* not a usable git worktree */ }
+      } catch { notices.push(`${folder.name}: new files could not be scanned.`); }
       for (const repoPath of untracked.split("\0")) {
         if (!repoPath || changes.has(`${root}\0${repoPath}`)) { continue; }
         const visiblePath = scope && repoPath.startsWith(scope + "/")
           ? repoPath.slice(scope.length + 1) : repoPath;
         const displayPath = folders.length > 1 ? `${folder.name}/${visiblePath}` : visiblePath;
-        const counted = await this.untrackedAdditions(root, repoPath);
+        const counted = changes.size < 500 ? await this.untrackedAdditions(root, repoPath)
+          : { additions: 0, binary: true };
         changes.set(`${root}\0${repoPath}`, {
           root, folder: folder.name, path: repoPath, displayPath,
           additions: counted.additions, deletions: 0, binary: counted.binary,
@@ -638,17 +640,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         });
       }
     }
-    return [...changes.values()].sort((a, b) => a.displayPath.localeCompare(b.displayPath)).slice(0, 500);
+    if (changes.size > 500) notices.push(`Showing 500 of ${changes.size} changed files. Line totals cover the displayed files only.`);
+    // Keep scanned entries before unscanned ones when capped; all displayed line counts are real.
+    const files = [...changes.values()].slice(0, 500).sort((a, b) => a.displayPath.localeCompare(b.displayPath));
+    return { files, total: changes.size, notices };
   }
 
   private async refreshWorkspaceChanges(): Promise<void> {
     const revision = ++this.changesRefreshRevision;
-    const files = await this.collectWorkspaceChanges();
+    const { files, total, notices } = await this.collectWorkspaceChanges();
     if (revision !== this.changesRefreshRevision) { return; }
     this.workspaceChanges = files;
     this.post({
       type: "workspace_changes",
-      total: files.length,
+      total, notices,
       additions: files.reduce((sum, item) => sum + item.additions, 0),
       deletions: files.reduce((sum, item) => sum + item.deletions, 0),
       files: files.map((item) => ({
@@ -814,7 +819,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("exit", (code: number | null) => {
       this.mcpUrls.clear();
       if (this.backend === be) {
-        this.turnActive = false;
+        this.turnActive = this.confirmedTurnActive = false;
         this.correlatedStateRequests = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
@@ -832,7 +837,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.backend?.dispose();
     this.backend = undefined;
     this.mcpUrls.clear();
-    this.turnActive = false;
+    this.turnActive = this.confirmedTurnActive = false;
     this.correlatedStateRequests = false;
     this.workspaceRootsInFlight = undefined;
     this.workspaceRootsDirty = true;
@@ -849,7 +854,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onEvent(ev: DgcEvent): void {
     switch (ev.type) {
       case "ready":
-        this.turnActive = false;
+        this.turnActive = this.confirmedTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
@@ -970,16 +975,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "turn_start":
-        this.turnActive = true;
+        this.turnActive = this.confirmedTurnActive = true;
         break;
       case "handoff_started":
-        this.turnActive = true;
+        this.turnActive = this.confirmedTurnActive = true;
         break;
       case "handoff":
-        this.turnActive = false;
+        this.turnActive = this.confirmedTurnActive = false;
         this.syncWorkspaceRoots();
         break;
       case "command_rejected":
+        if (ev.command === "prompt") {
+          this.turnActive = this.confirmedTurnActive;
+          this.syncWorkspaceRoots();
+        }
         if (ev.command === "set_workspace_roots" && this.workspaceRootsInFlight !== undefined
             && (this.workspaceRootsInFlight.requestId === undefined
                 || ev.request_id === this.workspaceRootsInFlight.requestId)) {
@@ -997,7 +1006,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "turn_end":
         this.mcpUrls.clear();
-        this.turnActive = false;
+        this.turnActive = this.confirmedTurnActive = false;
         this.syncWorkspaceRoots();
         break;
     }
@@ -1178,10 +1187,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           ? msg.context.filter((item: any) => item && typeof item === "object").slice(0, 64)
           : [];
         const live = text && !text.startsWith("/") ? this.editorContext() : [];
-        const accepted = be.send({ type: "prompt", text, images: msg.images,
+        const requestId = String(msg.requestId || this.nextRequestId("prompt")).slice(0, 128);
+        const accepted = be.send({ type: "prompt", text, images: msg.images, request_id: requestId,
                                    context: [...attached, ...live].slice(0, 64) });
         if (!accepted) {
-          this.post({ type: "prompt_rejected" });
+          this.post({ type: "prompt_rejected", requestId });
         } else {
           // Close the small command/turn_start race so a simultaneous folder removal
           // cannot send a mutation that the backend must reject as newly busy.

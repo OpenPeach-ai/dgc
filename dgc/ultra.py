@@ -28,6 +28,8 @@ def native_effort(config, current: str) -> str:
 
 def delegated_effort(config, engine_key: str, current: str, supports_effort: bool) -> str:
     """Select the strongest vendor effort without leaking an unsupported value to local APIs."""
+    if engine_key == "codex" and current == "max":
+        current = "xhigh"
     if not enabled(config) or not supports_effort:
         return current
     # Ultra is DGC's orchestration profile, not a vendor wire enum. Codex exposes Extra High as

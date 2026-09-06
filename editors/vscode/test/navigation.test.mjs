@@ -48,3 +48,13 @@ test("Markdown URLs reject executable schemes and ambiguous network paths", () =
   assert.deepEqual(linkTarget("C:\\repo\\file.ts:5"), { kind: "file", target: "C:\\repo\\file.ts", line: 5 });
   assert.doesNotThrow(() => render("```text\n\ud800"));
 });
+
+test("highlighted code preserves source and escapes executable markup", () => {
+  const source = 'const value = "<script>alert(1)</script>";\n';
+  const html = render('```javascript\n' + source + '```');
+  assert.match(html, /hljs-keyword/);
+  assert.ok(html.includes(encodeURIComponent(source)));
+  assert.ok(!html.includes('<script>'));
+  assert.ok(!render('```unknown\n' + source + '```').includes('hljs-'));
+  assert.ok(!render('```javascript\n' + 'const x = 1;\n'.repeat(2000) + '```').includes('hljs-'));
+});

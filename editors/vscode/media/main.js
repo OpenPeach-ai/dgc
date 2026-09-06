@@ -261,6 +261,26 @@
 
   let streaming = false, turn = null;
   const attachments = [];
+  let promptSequence = 0;
+  const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const pendingPrompts = new Map();
+  function rejectPrompt(id) {
+    const pending = pendingPrompts.get(id);
+    if (!pending) return;
+    pendingPrompts.delete(id);
+    pending.node.classList.add("rejected");
+    const restore = () => {
+      if (input.value || attachments.length) {
+        sysLine("Send or clear the current draft before restoring this message."); return;
+      }
+      input.value = pending.text; attachments.push(...pending.attachments);
+      renderAtts(); onInput(); input.focus();
+    };
+    const retry = el("button", "act", "Restore unsent message"); retry.type = "button";
+    retry.onclick = restore; pending.node.appendChild(retry);
+    if (!input.value && !attachments.length) restore();
+    if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
+  }
   let files = [];              // workspace files for @-mentions
   let popMode = null, popItems = [], popIdx = 0, popStart = 0;
   let disclosureId = 0;
@@ -292,6 +312,7 @@
   }
   function endTurn(reason = "completed") {
     if (!turn) return;
+    flushText();
     finishReasoning();
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
@@ -318,6 +339,7 @@
   function discardTurn() {
     if (turn) {
       clearInterval(turn.timer);
+      clearTimeout(turn.renderTimer);
       turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
     }
     expireOpenRequests();
@@ -333,7 +355,23 @@
     log.appendChild(node); return node;
   }
   function textBlock() { if (!turn.textEl) { turn.textEl = appendTurnContent(el("div", "text")); } return turn.textEl; }
-  function breakText() { if (turn) { turn.textEl = null; turn._buf = ""; } }
+  function flushText() {
+    if (!turn) return;
+    clearTimeout(turn.renderTimer); turn.renderTimer = null;
+    if (turn.textEl && turn._buf) {
+      turn.textEl._markdown = turn._buf;
+      turn.textEl.innerHTML = md(turn._buf); turn.renderedAt = Date.now();
+    }
+  }
+  function appendText(value) {
+    turn._buf = (turn._buf || "") + value;
+    const node = textBlock(); node._markdown = turn._buf;
+    if (!turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
+    else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
+      const stick = atBottom(); flushText(); if (stick) scroll();
+    }, 48);
+  }
+  function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
 
   function finishReasoning() {
     if (!turn?.reasonEl) return;
@@ -523,9 +561,13 @@
       total: Math.max(0, Number(next?.total) || files.length),
       additions: Math.max(0, Number(next?.additions) || 0),
       deletions: Math.max(0, Number(next?.deletions) || 0), files,
+      notices: Array.isArray(next?.notices) ? next.notices.map(String).slice(0, 34) : [],
     };
-    changesBar.hidden = changeState.total === 0;
-    $("changes-count").textContent = `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`;
+    changesBar.hidden = changeState.total === 0 && !changeState.notices.length;
+    $("changes-count").textContent = changeState.notices.length
+      ? (changeState.total ? `${changeState.total} changed · partial scan` : "Changes unavailable")
+      : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`;
+    changesBar.title = ["Workspace changes since the last commit", ...changeState.notices].join("\n");
     $("changes-add").textContent = `+${changeState.additions}`;
     $("changes-del").textContent = `−${changeState.deletions}`;
     syncComposerRail();
@@ -537,6 +579,11 @@
     list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
       `<button type="button" class="change-row" data-change="${index}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">+${Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">−${Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
       : '<div class="surface-empty">No workspace changes remain.</div>';
+    if (changeState.notices?.length) {
+      const note = el("div", "surface-notice"); note.textContent = changeState.notices.join(" ");
+      list.prepend(note);
+      if (!changeState.files.length) list.querySelector(".surface-empty")?.remove();
+    }
     list.querySelectorAll("[data-change]").forEach((button) => button.onclick = () => {
       const item = changeState.files[Number(button.dataset.change)];
       if (item) vscode.postMessage({ type: "reviewChange", path: item.path });
@@ -849,7 +896,8 @@
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
-      case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock()._markdown = turn._buf; textBlock().innerHTML = md(turn._buf); break;
+      case "prompt_accepted": pendingPrompts.delete(ev.request_id); break;
+      case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
         if (!turn.reasonEl) {
@@ -1140,7 +1188,9 @@
         break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
-      case "command_rejected": sysLine(ev.message || "Command unavailable while a turn is running", true); break;
+      case "command_rejected":
+        if (ev.command === "prompt") rejectPrompt(ev.request_id);
+        sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card);
@@ -1218,6 +1268,7 @@
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
     if (text.startsWith("/") && !attachments.length) {
@@ -1253,7 +1304,9 @@
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
-    vscode.postMessage({ type: "prompt", text, images: imgs.length ? imgs : undefined,
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m });
+    vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
       context: resources.length ? resources : undefined });   // backend queues it if a turn is running
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
   }
@@ -1559,19 +1612,51 @@
     // already sent a prompt (slow session load) — clearing the whole log here used
     // to wipe that just-sent prompt while the turn kept streaming.
     log.querySelectorAll(".hist").forEach((e) => e.remove());
-    const frag = document.createDocumentFragment();
-    items.forEach((it) => {
+    const history = el("div", "hist history-pages");
+    const older = el("button", "act history-older", "Show earlier messages");
+    history.appendChild(older);
+    let cursor = items.length;
+    function page() {
+      const frag = document.createDocumentFragment(), start = Math.max(0, cursor - 50);
+      items.slice(start, cursor).forEach((it) => {
       if (it.role === "user") {
         const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
+      } else if (it.role === "notice") {
+        frag.appendChild(el("div", "sys hist", esc(it.text)));
       } else {
         const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
-        if (it.text) m.appendChild(el("div", "text final", md(it.text)));
-        if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
+        if (it.text) {
+          const text = el("div", it.commentary || it.tools?.length ? "text commentary" : "text final", md(it.text));
+          text._markdown = it.text; m.appendChild(text);
+        }
+        if (it.tools?.length) {
+          const group = el("details", "tool-group history-tools");
+          const summary = el("summary"); summary.textContent = `Used ${it.tools.length} ${it.tools.length === 1 ? "tool" : "tools"} · ${it.tools.join(", ")}`;
+          group.appendChild(summary);
+          // Output is constructed only on expansion, keeping long restored threads responsive.
+          group.addEventListener("toggle", () => {
+            if (!group.open || group.dataset.loaded) return;
+            group.dataset.loaded = "true";
+            (it.tool_details || []).forEach(detail => {
+              const row = el("div", "tool history-tool"), label = el("div", "nm"), pre = el("pre", "out");
+              label.textContent = `${detail.name} · ${detail.status === "returned" ? "saved result" : "result unavailable"}`;
+              pre.textContent = [detail.arguments, detail.output].filter(Boolean).join("\n\n");
+              row.append(label, pre); group.appendChild(row);
+            });
+          });
+          m.appendChild(group);
+        }
         frag.appendChild(m);
       }
-    });
-    log.insertBefore(frag, log.firstChild);   // history above any live user prompt / streaming turn
+      });
+      const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
+      older.after(frag); cursor = start; older.hidden = cursor === 0;
+      log.scrollTop = oldTop + log.scrollHeight - oldHeight;
+    }
+    older.type = "button"; older.onclick = page;
+    log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
+    page();
     scroll();
   }
   // User clicks are the only route out of model-generated content. Never navigate a webview.
@@ -1616,7 +1701,7 @@
       input.focus(); onInput();
     }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
-    else if (msg.type === "prompt_rejected") { setSending(false); }
+    else if (msg.type === "prompt_rejected") { rejectPrompt(msg.requestId); if (!turn) setSending(false); }
     else if (msg.type === "goal_start_state") {
       if (msg.state === "error") {
         setSending(false);
@@ -1652,7 +1737,7 @@
       if (popMode === "@") onInput();
     }
     else if (msg.type === "open_goal_review") openGoalReview();
-    else if (msg.type === "backend_exit") { endTurn("error"); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "backend_exit") { endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
   vscode.postMessage({ type: "webviewReady" });
 })();

@@ -2,7 +2,7 @@
 "use strict";
 
 /*
- * Deterministic protocol-v5 backend used only to record the real DGC extension surface.
+ * Deterministic protocol-v6 backend used only to record the real DGC extension surface.
  * It does not impersonate a model: it drives a deterministic, reviewable protocol fixture. The edit
  * and test below are executed against the disposable workspace, and their exact outputs are
  * emitted to the extension.  Public site copy must preserve that distinction.
@@ -63,7 +63,7 @@ const sendConfig = (requestId) => send({
 send({
   type: "ready",
   version: "capture-fixture",
-  protocol_version: 5,
+  protocol_version: 6,
   capabilities: { correlated_state_requests: true },
   model: "deterministic protocol fixture",
   mode: "plan",
@@ -205,6 +205,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ type: "goal_changed", request_id: command.request_id, goal: goal().text,
       status: "active", elapsed_seconds: 97 });
   } else if (command.type === "prompt") {
+    if (command.request_id) send({ type: "prompt_accepted", request_id: command.request_id, state: "started" });
     beginTrace(command);
   } else if (command.type === "plan_response" && command.id === "capture-plan" && planOpen) {
     planOpen = false;
