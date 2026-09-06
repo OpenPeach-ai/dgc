@@ -813,7 +813,7 @@ class Agent(GoalLifecycle):
         self.config = config
         self.ui = ui
         self.client = self._new_client(config.base_url, config.api_key, config.model)
-        self.skills = discover_skills(config.project_root)
+        self.skills = discover_skills(config.project_root, disabled_names=config.get("disabled_skills", []))
         if mcp is not None:                       # subagents share the parent's MCP servers
             self.mcp = mcp
         else:
@@ -1127,12 +1127,22 @@ class Agent(GoalLifecycle):
         self._active_skill_names = detected if replace else before | detected
         return self._active_skill_names != before
 
+    def reload_skills(self) -> None:
+        """Refresh metadata at a turn/management boundary while preserving the tool context map."""
+        fresh = discover_skills(self.config.project_root,
+                                disabled_names=self.config.get("disabled_skills", []))
+        self.skills.clear()
+        self.skills.update(fresh)
+        if getattr(self, "ctx", None) is not None:
+            self.ctx.skills = self.skills
+
     def _skill_catalog(self):
         profile = str(self.config.get("tool_profile", "adaptive") or "adaptive").lower()
         if profile == "full":
-            return list(self.skills.values())
+            return [skill for skill in self.skills.values() if skill.enabled and
+                    (skill.allow_implicit_invocation or skill.name in self._active_skill_names)]
         active = set(getattr(self, "_active_skill_names", set()))
-        return [skill for name, skill in self.skills.items() if name in active]
+        return [skill for name, skill in self.skills.items() if name in active and skill.enabled]
 
     def _mcp_schema_budget_chars(self) -> int:
         context_size = self.context_size()
@@ -1883,6 +1893,7 @@ class Agent(GoalLifecycle):
             safe_user_text = self._safe_text(user_text)
             completed = None
             try:
+                self.reload_skills()
                 self._mcp_query_text = _trusted_intent_text(safe_user_text)
                 self._active_mcp_tools.clear()
                 self._activate_tool_intents(safe_user_text, replace=True)
@@ -1975,6 +1986,7 @@ class Agent(GoalLifecycle):
                     if isinstance(turn_result, dict) and str(turn_result.get("text") or "").strip():
                         self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"]))})
             try:
+                self.reload_skills()
                 self._activate_skill_intents(safe_user_text, replace=True)
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))

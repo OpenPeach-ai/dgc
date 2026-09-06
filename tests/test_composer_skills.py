@@ -17,7 +17,8 @@ from dgc.composer import compose_prompt, composer_token
 from dgc.config import Config, DEFAULTS
 from dgc.headless import Backend
 from dgc.llm import ChatResult
-from dgc.skills import Skill, explicit_skill_names, format_skill_instructions
+from dgc.skills import (Skill, discover_skills, explicit_skill_names, format_skill_instructions,
+                        matching_skill_names, parse_skill_text, set_skill_enabled)
 from dgc.tui import TUI
 
 
@@ -133,6 +134,7 @@ class SkillExecutionTests(SkillFixture):
         config.data.update(base_url="http://localhost.invalid/v1", model="fixture", mode="default",
                            hooks={}, mcp_servers={}, suggest=False, artifact_autostart=False)
         config._stored_secrets, config._env_secret_keys = {}, set()
+        config._explicit_keys = set()
         config.permissions = {"allow": [], "ask": [], "deny": []}
         class UI:
             def __getattr__(self, name):
@@ -168,8 +170,8 @@ class SkillExecutionTests(SkillFixture):
 
     def test_oversized_explicit_context_does_not_start_a_model_and_cleans_turn_state(self):
         agent = self.agent()
-        agent.skills["fixture"].body = "long instruction " * 1000
-        with patch.object(agent, "context_size", return_value=2000), patch.object(agent.client, "chat") as chat:
+        self.skill.path.write_text("long instruction " * 1000)
+        with patch.object(agent, "context_size", return_value=2000), patch("dgc.llm.LLMClient.chat", side_effect=AssertionError("No model may start")) as chat:
             with self.assertRaises(ValueError):
                 agent.run_turn("$fixture Inspect behavior")
             chat.assert_not_called()
@@ -180,9 +182,120 @@ class SkillExecutionTests(SkillFixture):
         agent = self.agent()
         credential = "sk-proj-composerFixtureCredential12345"
         agent.config.data["api_key"] = credential
-        agent.skills["fixture"].body = "Recorded credential: " + credential
+        self.skill.path.write_text("Recorded credential: " + credential)
         observed = []
         agent.run_external_turn("$fixture Inspect", lambda text: observed.append(text) or
                                 {"ok": True, "text": "done", "rc": 0})
         self.assertNotIn(credential, observed[0])
         self.assertIn("[REDACTED]", observed[0])
+
+    def test_disabling_skill_updates_completions_and_blocks_every_execution_route(self):
+        agent = self.agent()
+        set_skill_enabled(agent.config, "fixture", False)
+        agent.reload_skills()
+        completer = ClassicSlashCompleter(self.root, agent.config)
+        self.assertNotIn("$fixture", [row.text for row in completer.get_completions(Document("$fi", 3), None)])
+        with patch("dgc.llm.LLMClient.chat", side_effect=AssertionError("Must not call the model")):
+            with self.assertRaisesRegex(ValueError, "disabled"):
+                agent.run_turn("$fixture\n\nInspect")
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+        from dgc.tools import skill_tool
+        self.assertIn("disabled", skill_tool({"name": "fixture"}, agent.ctx))
+        set_skill_enabled(agent.config, "fixture", True)
+        agent.run_external_turn("$fixture\n\nInspect", lambda _: {"ok": True, "text": "done", "rc": 0})
+
+    def test_removed_or_edited_skill_is_resolved_at_turn_start(self):
+        agent = self.agent()
+        self.skill.path.write_text("Updated orchid instructions")
+        observed = []
+        agent.run_external_turn("$fixture\n\nInspect", lambda text: observed.append(text) or {"ok": True, "text": "done", "rc": 0})
+        self.assertIn("Updated orchid instructions", observed[0])
+        self.skill.path.unlink()
+        with self.assertRaisesRegex(ValueError, "no longer installed"):
+            agent.run_external_turn("$fixture\n\nInspect", lambda _: self.fail("runner must not start"))
+
+
+class PortableSkillTests(SkillFixture):
+    def config(self):
+        return types.SimpleNamespace(project_root=self.root)
+
+    def test_package_copy_preserves_resources_and_never_overwrites(self):
+        from dgc.skill_packages import install_skill
+        package = self.root / "package"
+        (package / "references").mkdir(parents=True)
+        (package / "scripts").mkdir()
+        (package / "SKILL.md").write_text('---\nname: local-package\ndescription: Inspect fixtures\n---\nRead references/detail.md. Run scripts/check.py only when asked.')
+        (package / "references/detail.md").write_text("Reference body")
+        (package / "scripts/check.py").write_text("raise AssertionError('installation must not execute this')")
+        result = install_skill(self.config(), "package")
+        target = Path(result["path"]).parent
+        self.assertEqual((target / "references/detail.md").read_text(), "Reference body")
+        self.assertEqual(result["files"], 3)
+        with self.assertRaisesRegex(ValueError, "never overwritten"):
+            install_skill(self.config(), "package")
+        self.assertIn("local-package", discover_skills(self.root))
+
+    def test_package_rejects_external_sources_symlinks_private_files_and_oversized_resources(self):
+        from dgc.skill_packages import install_skill, MAX_RESOURCE_BYTES
+        with tempfile.TemporaryDirectory() as external:
+            with self.assertRaisesRegex(ValueError, "outside the project"):
+                install_skill(self.config(), external)
+        package = self.root / "package"
+        package.mkdir()
+        (package / "SKILL.md").write_text('---\nname: unsafe-package\n---\nInstructions')
+        resource = package / "linked"
+        resource.symlink_to(self.skill.path)
+        with self.assertRaisesRegex(ValueError, "links or special files"):
+            install_skill(self.config(), "package")
+        resource.unlink()
+        (package / ".env").write_text("fixture-not-a-secret")
+        with self.assertRaisesRegex(ValueError, "private/generated"):
+            install_skill(self.config(), "package")
+        (package / ".env").unlink()
+        resource.write_bytes(b"x" * (MAX_RESOURCE_BYTES + 1))
+        with self.assertRaises(OSError):
+            install_skill(self.config(), "package")
+        self.assertFalse((self.root / ".dgc/skills/unsafe-package").exists())
+
+    def test_scaffold_is_explicit_only_and_destination_symlinks_are_rejected(self):
+        from dgc.skill_packages import create_skill
+        created = create_skill(self.config(), "new-workflow", "Inspect fixtures")
+        self.assertTrue(Path(created["path"]).exists())
+        self.assertFalse(discover_skills(self.root)["new-workflow"].allow_implicit_invocation)
+        linked = self.root / ".dgc/skills/linked"
+        linked.symlink_to(self.root / "elsewhere")
+        with self.assertRaises((ValueError, OSError)):
+            create_skill(self.config(), "linked")
+        self.assertFalse((self.root / "elsewhere/SKILL.md").exists())
+
+    def test_frontmatter_supports_blocks_quotes_and_ignores_nested_names(self):
+        parsed = parse_skill_text('\ufeff---\r\nname: "fixture" # comment\r\ndescription: >-\r\n  Check folded\r\n  descriptions.\r\nmetadata:\r\n  name: "wrong"\r\n---\r\nInstructions', self.skill.path)
+        self.assertEqual(parsed.name, "fixture")
+        self.assertEqual(parsed.description, "Check folded descriptions.")
+        self.assertEqual(parsed.body, "Instructions")
+        for content in ('name: !!python/object evil', 'name: [fixture]', 'name: fixture\nname: other'):
+            self.assertIsNone(parse_skill_text('---\n' + content + '\n---\nbody', self.skill.path))
+
+    def test_portable_precedence_metadata_and_explicit_only_policy(self):
+        portable = self.root / ".agents/skills/portable/SKILL.md"
+        portable.parent.mkdir(parents=True)
+        portable.write_text('---\nname: portable\ndescription: "Quasar choreography conventions"\n---\nPortable body')
+        sidecar = portable.parent / "agents/openai.yaml"
+        sidecar.parent.mkdir()
+        sidecar.write_text('interface:\n  display_name: "Portable workflow"\n  short_description: >\n    A portable workflow\n  default_prompt: "Use $portable to inspect this project"\npolicy:\n  allow_implicit_invocation: false\n')
+        catalog = discover_skills(self.root)
+        self.assertEqual(catalog["portable"].display_name, "Portable workflow")
+        self.assertEqual(catalog["portable"].source, "project")
+        self.assertNotIn("portable", matching_skill_names(catalog, "quasar choreography"))
+        self.assertIn("portable", matching_skill_names(catalog, "$portable inspect"))
+        portable.write_text('---\nname: fixture\n---\nLower precedence')
+        self.assertEqual(discover_skills(self.root)["fixture"].body, self.skill.body)
+
+    def test_unsafe_sidecar_fails_closed_without_following_symlinks(self):
+        sidecar = self.skill.path.parent / "agents/openai.yaml"
+        sidecar.parent.mkdir()
+        sidecar.symlink_to(self.skill.path)
+        row = discover_skills(self.root)["fixture"]
+        self.assertFalse(row.allow_implicit_invocation)
+        self.assertTrue(row.diagnostics)

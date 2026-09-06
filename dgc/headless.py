@@ -50,7 +50,7 @@ _MCP_LOG_LEVELS = frozenset({
 _BUSY_MUTATIONS = {
     "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
-    "resolve_retained_task", "list_skills", "reload_skills", "generate_handoff", "name_session",
+    "resolve_retained_task", "list_skills", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
@@ -60,7 +60,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
-    "get_config", "status", "name_session", "reload_skills", "get_skill", "list_docs", "get_doc",
+    "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory",
@@ -547,7 +547,7 @@ class Backend:
                           "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
-                          "ultra_profile": True, "composer_selections": True},
+                          "ultra_profile": True, "composer_selections": True, "skill_management": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1408,10 +1408,41 @@ class Backend:
 
         elif t == "reload_skills":
             request_id = str(cmd.get("request_id") or "")
-            self.agent.skills = discover_skills(self.config.project_root)
+            self.agent.skills = discover_skills(self.config.project_root,
+                                                disabled_names=self.config.get("disabled_skills", []))
             if hasattr(getattr(self.agent, "ctx", None), "skills"):
                 self.agent.ctx.skills = self.agent.skills
             self._emit_skill_catalog(request_id)
+
+        elif t in ("create_skill", "install_skill"):
+            from .skill_packages import create_skill, install_skill
+            request_id = str(cmd.get("request_id") or "")
+            try:
+                scope = cmd.get("scope", "project")
+                if t == "create_skill":
+                    result = create_skill(self.config, cmd["name"], cmd.get("description", ""), scope)
+                else:
+                    result = install_skill(self.config, cmd["source"], scope,
+                                           allow_external=cmd.get("allow_external", False))
+                self.agent.reload_skills()
+                self._emit_skill_catalog(request_id)
+                self.em.emit("skill_package", request_id=request_id, name=result["name"],
+                             path=result["path"], operation=t, files=result["files"])
+            except (OSError, ValueError) as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
+                             message=str(exc))
+
+        elif t == "set_skill_enabled":
+            from .skills import set_skill_enabled
+            request_id = str(cmd.get("request_id") or "")
+            try:
+                updated = set_skill_enabled(self.config, str(cmd.get("name") or ""), cmd.get("enabled"))
+                self.agent.skills.clear()
+                self.agent.skills.update(updated)
+                self._emit_skill_catalog(request_id)
+            except ValueError as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
+                             message=str(exc))
 
         elif t == "list_docs":
             self._emit_docs(str(cmd.get("request_id") or ""))

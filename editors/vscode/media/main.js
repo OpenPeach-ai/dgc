@@ -9,6 +9,7 @@
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   let pendingImageFiles = 0, pendingImageBytes = 0;
   let queuedCount = 0, customCommands = [], skillRows = [];
+  let skillManagement = false;
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
@@ -737,7 +738,13 @@
     });
   }
   function useSkill(name) {
+    const skill = skillRows.find((row) => row.name === name);
+    if (skill?.enabled === false) return;
     attachInvocation("skill", name);
+    if (!input.value.trim() && skill?.default_prompt) {
+      input.value = String(skill.default_prompt).slice(0, 4096);
+      input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    }
     closeSurface(); input.focus();
   }
   function attachInvocation(kind, name) {
@@ -748,14 +755,21 @@
     renderAtts();
   }
   function renderSkills(items) {
+    const query = surfaceKind === "skills" ? surfaceSearch.value : "";
     surfaceRows = Array.isArray(items) ? items : [];
     openSurface("skills");
+    surfaceSearch.value = query;
     surfaceBody.innerHTML = surfaceRows.length ? surfaceRows.map((skill, i) =>
-      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">$${esc(skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}</span></div><p>${esc(skill.description || "Reusable agent instructions")}</p><div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}">Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button></div></article>`).join("")
+      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.display_name || ""} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">${esc(skill.display_name || "$" + skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}${skill.enabled === false ? " · disabled" : skill.allow_implicit_invocation === false ? " · explicit only" : ""}</span></div><p>${esc(skill.short_description || skill.description || "Reusable agent instructions")}</p>${(Array.isArray(skill.diagnostics) ? skill.diagnostics : []).map((line) => `<p class="muted">${esc(line)}</p>`).join("")}<div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}"${skill.enabled === false ? " disabled" : ""}>Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button>${skillManagement ? `<button type="button" class="act" data-skill-toggle="${i}" aria-pressed="${skill.enabled !== false}">${skill.enabled === false ? "Enable" : "Disable"}</button>` : ""}</div></article>`).join("")
       : '<div class="surface-empty">No skills are installed. Add a project skill at <code>.dgc/skills/&lt;name&gt;/SKILL.md</code>.</div>';
     surfaceBody.querySelectorAll("[data-skill-use]").forEach((button) => button.onclick = () => useSkill(surfaceRows[+button.dataset.skillUse].name));
     surfaceBody.querySelectorAll("[data-skill-view]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getSkill", name: surfaceRows[+button.dataset.skillView].name }));
-    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }));
+    surfaceBody.querySelectorAll("[data-skill-toggle]").forEach((button) => button.onclick = () => {
+      const skill = surfaceRows[+button.dataset.skillToggle]; button.disabled = true;
+      vscode.postMessage({ type: "skillToggle", name: skill.name, enabled: skill.enabled === false });
+    });
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }),
+      skillManagement ? "Create / install" : "", () => vscode.postMessage({ type: "skillsManage" }));
     filterSurface();
   }
   function renderSkillDetail(ev) {
@@ -763,7 +777,8 @@
     if (!ev.found) { surfaceBody.innerHTML = '<div class="surface-empty">That skill is no longer installed.</div>'; return; }
     surfaceBody.innerHTML = `<button type="button" class="surface-back">← All skills</button><div class="surface-detail-head"><h2>$${esc(ev.name)}</h2><span class="surface-badge">${esc(ev.source)}</span></div><p class="muted">${esc(ev.description || "")}</p><div class="surface-markdown">${md(ev.markdown || "")}</div>`;
     surfaceBody.querySelector(".surface-back").onclick = () => renderSkills(surfaceRows);
-    surfaceButtons("Use skill", () => useSkill(ev.name));
+    const enabled = skillRows.find((skill) => skill.name === ev.name)?.enabled !== false;
+    surfaceButtons(enabled ? "Use skill" : "", () => useSkill(ev.name));
   }
   function mcpStateClass(value) { return ["connected", "configured"].includes(value) ? "ok" : value === "failed" ? "err" : ""; }
   function showMcpForm(item) {
@@ -870,6 +885,7 @@
           : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
         skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
+        skillManagement = ev.capabilities?.skill_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
         setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
         break;

@@ -2640,7 +2640,10 @@ def unit_tests(tmp: Path):
           _skills_event == {"type": "skill_catalog", "request_id": "skills-7", "total": 1,
                             "items": [{"name": "matrix-fixture",
                                        "description": "Independent matrix fixture",
-                                       "source": "project"}]})
+                                       "source": "project", "enabled": True,
+                                       "display_name": "", "short_description": "", "default_prompt": "",
+                                       "allow_implicit_invocation": True, "diagnostics": []}]}
+          and str(_surface_root) not in _json2.dumps(_skills_event))
     _surface_backend.dispatch({"type": "get_skill", "request_id": "skill-7",
                                "name": "matrix-fixture"})
     _skill_detail = _surface_cap.events[-1]
@@ -10926,8 +10929,9 @@ def test_protocol_client():
                        "config-b": ("config-b", 40_002),
                    })
         check("protocol client confirms project skill discovery without exposing absolute paths",
-              any(row == {"name": "matrix-client", "description": "Client fixture skill",
-                          "source": "project"} for row in _skills.get("items", []))
+              any(all(row.get(key) == value for key, value in {
+                  "name": "matrix-client", "description": "Client fixture skill",
+                  "source": "project", "enabled": True}.items()) for row in _skills.get("items", []))
               and str(_real_project) not in json.dumps(_skills))
         check("protocol client correlated waits preserve unrelated events in wire order",
               _retained_ready.get("type") == "ready"

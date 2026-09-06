@@ -371,6 +371,73 @@ def list_directory(path: Path | str, *, limit: int = 200) -> list[str]:
     return [name for name, _info in rows]
 
 
+def create_file_tree(path: Path | str, files: dict[str, bytes], *, marker: str) -> None:
+    """Create an exclusive package directory, publishing its discovery marker last.
+
+    The caller bounds and validates the package before this function. Held directory descriptors
+    prevent late parent symlinks from redirecting writes. Existing directories are never merged.
+    An I/O failure can leave an incomplete directory without its marker; it is never a live package.
+    """
+    target = _absolute_frozen(path)
+    if marker not in files or not files:
+        raise ValueError("package requires its discovery marker")
+    for name, payload in files.items():
+        parts = name.split("/")
+        if (not isinstance(payload, bytes) or any(part in ("", ".", "..") for part in parts)
+                or "\\" in name or "\x00" in name):
+            raise ValueError("invalid package resource")
+    ordered = [name for name in files if name != marker] + [marker]
+    if not _dirfd_supported():
+        _fallback_parent(target, create=True)
+        target.mkdir(mode=0o700, exist_ok=False)
+        for name in ordered:
+            atomic_write_bytes(target / name, files[name], mode=0o600, expected=None)
+        return
+    parent_fd = _open_parent_fd(target, create=True)
+    root_fd = -1
+    try:
+        os.mkdir(target.name, mode=0o700, dir_fd=parent_fd)
+        info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        root_fd = os.open(target.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        if _version(os.fstat(root_fd)) != _version(info):
+            raise WorkspaceBoundaryError("package directory changed before writing")
+        for name in ordered:
+            current = os.dup(root_fd)
+            try:
+                parts = name.split("/")
+                for part in parts[:-1]:
+                    try:
+                        os.mkdir(part, mode=0o700, dir_fd=current)
+                    except FileExistsError:
+                        pass
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                    os.close(current)
+                    current = child
+                write_name = (".package-marker-" + secrets.token_hex(16)) if name == marker else parts[-1]
+                fd = os.open(write_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=current)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(files[name])
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                if name == marker:
+                    # Link is an atomic, exclusive publication of the fully written marker.
+                    os.link(write_name, parts[-1], src_dir_fd=current, dst_dir_fd=current,
+                            follow_symlinks=False)
+                    os.unlink(write_name, dir_fd=current)
+                os.fsync(current)
+            finally:
+                os.close(current)
+        current_info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (current_info.st_dev, current_info.st_ino) != (info.st_dev, info.st_ino):
+            raise WorkspaceBoundaryError("package directory moved during installation")
+        os.fsync(parent_fd)
+    finally:
+        if root_fd >= 0:
+            os.close(root_fd)
+        os.close(parent_fd)
+
+
 def atomic_write_bytes(path: Path | str, data: bytes, *,
                        expected: FileVersion | None | object = _ANY_VERSION,
                        mode: int | None = None) -> FileVersion:

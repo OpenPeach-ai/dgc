@@ -220,6 +220,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private mcpUrls = new Map<string, string>();
   private slashAliases = new Map<string, string>();
   private composerSelections = false;
+  private skillManagement = false;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private confirmedTurnActive = false;
@@ -862,6 +863,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.workspaceRootsDirty = true;
         this.correlatedStateRequests = ev.capabilities?.correlated_state_requests === true;
         this.composerSelections = ev.capabilities?.composer_selections === true;
+        this.skillManagement = ev.capabilities?.skill_management === true;
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = "";
@@ -1345,6 +1347,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "skillsReload":
         be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
+        break;
+      case "skillsManage":
+        await this.manageSkillPackage();
+        break;
+      case "skillToggle":
+        if (this.skillManagement && typeof msg.enabled === "boolean") {
+          be.send({ type: "set_skill_enabled", request_id: this.nextRequestId("skill-toggle"),
+                    name: String(msg.name || ""), enabled: msg.enabled });
+        }
         break;
       case "getDoc":
         be.send({ type: "get_doc", request_id: this.nextRequestId("doc"), id: String(msg.id || "") });
@@ -1946,6 +1957,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const [skillName, ...arguments_] = rest.split(/\s+/);
         this.post({ type: "composer_skill", name: skillName, text: arguments_.join(" ") });
       } else { this.openSkills(); }
+      return;
+    }
+    if (name === "skills" && rest) {
+      const parts = rest.split(/\s+/);
+      this.post({ type: "surface_open", surface: "skills" });
+      if (parts[0] === "reload" && parts.length === 1) {
+        be.send({ type: "reload_skills", request_id: this.nextRequestId("skills-reload") });
+      } else if (parts[0] === "show" && parts.length === 2) {
+        be.send({ type: "get_skill", request_id: this.nextRequestId("skill"), name: parts[1] });
+      } else if (["enable", "disable"].includes(parts[0]) && parts.length === 2 && this.skillManagement) {
+        be.send({ type: "set_skill_enabled", request_id: this.nextRequestId("skill-toggle"),
+                  name: parts[1], enabled: parts[0] === "enable" });
+      } else if (parts[0] === "list" && parts.length === 1) {
+        be.send({ type: "list_skills", request_id: this.nextRequestId("skills") });
+      } else {
+        this.post({ type: "event", event: { type: "error",
+          message: "Usage: /skills [list|reload|show NAME|enable NAME|disable NAME]. Enable/disable requires an updated DGC CLI." } });
+      }
       return;
     }
     if (name === "memory" && rest) {
@@ -2752,6 +2781,38 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       await this.selectModel();
     } catch (err: any) {
       void vscode.window.showErrorMessage(err?.message || "DGC could not connect that provider.");
+    }
+  }
+
+  private async manageSkillPackage(): Promise<void> {
+    if (!this.skillManagement) { return; }
+    const action = await vscode.window.showQuickPick([
+      { label: "Create a skill", description: "Scaffold an explicit-only workflow", value: "create_skill" },
+      { label: "Install a local skill package", description: "Copy SKILL.md and supporting files", value: "install_skill" },
+    ], { placeHolder: "Manage DGC skills" });
+    if (!action) { return; }
+    const scope = await vscode.window.showQuickPick([
+      { label: "This project", value: "project" }, { label: "All projects", value: "user" },
+    ], { placeHolder: "Where should this skill be installed?" });
+    if (!scope) { return; }
+    let command: any;
+    if (action.value === "create_skill") {
+      const name = await vscode.window.showInputBox({ prompt: "Skill name", placeHolder: "review-api",
+        validateInput: (value) => /^[a-z0-9][a-z0-9._-]{0,63}$/.test(value) && !/[._-]$/.test(value)
+          ? undefined : "Use 1–64 lowercase letters, digits, hyphens, underscores or dots." });
+      if (!name) { return; }
+      const description = await vscode.window.showInputBox({ prompt: "When should this skill be used?" });
+      if (description === undefined) { return; }
+      command = { type: action.value, name, description, scope: scope.value };
+    } else {
+      const source = await vscode.window.showOpenDialog({ title: "Select a skill package containing SKILL.md",
+        canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: "Install skill package" });
+      if (!source?.length || source[0].scheme !== "file") { return; }
+      command = { type: action.value, source: source[0].fsPath, scope: scope.value, allow_external: true };
+    }
+    const result = await this.requestState(this.ensureBackend(), "skill-package", command, "skill_package", 30000);
+    if (result.type === "skill_package") {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(result.path)));
     }
   }
 

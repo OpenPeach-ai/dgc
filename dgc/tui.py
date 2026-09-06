@@ -3445,7 +3445,16 @@ class TUI:
                                     f"  named  [{th.faint}]{_esc(defs)}[/]\n"
                                     f"  [{th.faint}]/subagent to change[/]"))
         elif cmd in ("skills", "extensions", "ext"):
-            self._extensions_modal(tab=0)               # open the tabbed Skills/MCP modal on Skills
+            if rest:
+                from .skills import manage_skills
+                try:
+                    output = manage_skills(cfg, rest)
+                    self.agent.reload_skills()
+                    self._append(self._rich(_esc(redact_text(output, secret_values(cfg)))))
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+            else:
+                self._extensions_modal(tab=0)
         elif cmd == "memory":
             match = re.match(r"add\s+(user\s+)?(.+)", rest, re.S) if rest else None
             if rest and rest != "show" and match is None:
@@ -3720,8 +3729,10 @@ class TUI:
 
         def rebuild(ov):
             if ov["tab"] == 0:                          # Skills
-                sk = discover_skills(self.config.project_root)
-                return [{"label": name, "desc": (s.description or "skill"),
+                sk = discover_skills(self.config.project_root, disabled_names=self.config.get("disabled_skills", []))
+                return [{"label": name + (" · disabled" if not s.enabled else ""),
+                         "desc": f"{s.source} · " + (s.short_description or s.description or "skill"),
+                         "enabled": s.enabled,
                          "value": ("skill", name)} for name, s in sk.items()]
             servers = self.config.get("mcp_servers", {}) or {}   # MCP Servers
             out = []
@@ -3746,7 +3757,7 @@ class TUI:
                 if is_mcp:
                     self._mcp_add_flow()
                 else:
-                    self._ask_input("skill URL (a raw SKILL.md or a github link):", self._install_skill_url)
+                    self._skill_add_flow()
             elif key == "x" and row:                    # remove
                 kind, name = row["value"]
                 if kind == "mcp":
@@ -3761,26 +3772,66 @@ class TUI:
                             live.stop()
                         self.agent.mcp._rebuild_routes()
                 else:
-                    import shutil
-                    from .config import USER_SKILLS
-                    shutil.rmtree(USER_SKILLS / name, ignore_errors=True)
+                    from .skills import set_skill_enabled
+                    set_skill_enabled(self.config, name, False)
+                    self.agent.reload_skills()
                 ov["sel"] = 0
                 self._invalidate()
+            elif key == "e" and row and not is_mcp:
+                from .skills import set_skill_enabled
+                try:
+                    set_skill_enabled(self.config, row["value"][1], not row.get("enabled", True))
+                    self.agent.reload_skills()
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+                self._invalidate()
             elif key == "r":                            # reload (rebuild happens on render)
+                if not is_mcp and hasattr(self.agent, "reload_skills"):
+                    self.agent.reload_skills()
                 self._invalidate()
 
         def pick(row):
             kind, name = row["value"]
             if kind == "skill":
+                if row.get("enabled") is False:
+                    self._flash("Enable this skill before using it.")
+                    self._extensions_modal(tab=0)
+                    return
                 prefix = " " if self.input_buf.cursor_position and not self.input_buf.document.text_before_cursor[-1].isspace() else ""
                 self.input_buf.insert_text(prefix + "$" + name + " ")
             else:
                 self._extensions_modal(tab=1)
 
         self._open_overlay([], on_pick=pick, tabs=["Skills", "MCP Servers"], tab=tab,
-                           footer="Tab switch · Enter use skill · a add · x remove · r reload · Esc close",
+                           footer="Tab switch · Enter use · e enable/disable · a add · x disable skill/remove MCP · r reload · Esc close",
                            rebuild=rebuild, on_action=on_action)
         self._overlay["selectable"] = True
+
+    def _skill_add_flow(self) -> None:
+        def pick(row):
+            self._close_overlay()
+            if row["value"] == "url":
+                self._ask_input("raw SKILL.md URL (single-file skills only):", self._install_skill_url)
+                return
+            action = row["value"]
+            def save(value):
+                if not value.strip():
+                    return
+                from .skill_packages import create_skill, install_skill
+                try:
+                    result = (create_skill(self.config, value.strip()) if action == "create" else
+                              install_skill(self.config, value.strip(), allow_external=True))
+                    self.agent.reload_skills()
+                    self._append(self._rich(_esc(f"Skill ${result['name']}: {result['path']} ({result['files']} files)")))
+                    self._extensions_modal(tab=0)
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+            self._ask_input("new skill name:" if action == "create" else "local skill directory to copy (including supporting files):", save)
+        self._open_overlay([
+            {"label": "Create a project skill", "desc": "Scaffold an explicit-only workflow", "value": "create"},
+            {"label": "Install a local package", "desc": "Copy SKILL.md and supporting files into this project", "value": "local"},
+            {"label": "Install a single-file URL", "desc": "User skill from a raw SKILL.md; no overwrite", "value": "url"},
+        ], on_pick=pick, title="Add a skill", footer="Enter select · Esc cancel")
 
     def _install_skill_url(self, url: str) -> None:
         url = url.strip()
@@ -4364,7 +4415,7 @@ class TUI:
             rows = self._overlay_rows()
             ov["on_action"](key, rows[ov["sel"]] if rows else None)
 
-        for _ch in ("a", "x", "r", "p", "b"):
+        for _ch in ("a", "x", "r", "p", "b", "e"):
             @kb.add(_ch, filter=has_actions)
             def _(ev, _ch=_ch):
                 _ov_action(_ch)

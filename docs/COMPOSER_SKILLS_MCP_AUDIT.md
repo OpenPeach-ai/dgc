@@ -76,3 +76,16 @@ unimplemented capability. Document any provider-owned execution boundary explici
   tests, TypeScript checks, and whitespace validation passed. The first broad run exposed an
   outdated terminal test double; the fixture now uses a real prompt-toolkit Buffer. These results
   do not yet prove the remaining skill/MCP requirements or a production/editor-host rollout.
+- Skill management implemented: portable project/user `.agents/skills` discovery; bounded scalar
+  frontmatter/sidecar metadata; explicit-only policy; shared enable/disable commands and controls;
+  refresh before native/delegated execution; create and local-package install in CLI/TUI/editor.
+  Package installation copies supporting resources without execution or overwrite, rejects links,
+  private/generated files and excessive input, and publishes the discovery marker last. The TUI's
+  old name-based personal-directory deletion was replaced with disabling the selected skill.
+- Skill-management verification: 1,387/1,387 Python checks (including 44 unittest cases), 71/71
+  extension tests, TypeScript, and whitespace validation passed. The first broad run caught two
+  assertions tied to the old catalog shape and an overlong help token; metadata assertions now
+  verify enablement and no host paths, and the help token remains readable. Current package tests
+  include native/delegated disabled/removed selections, source edits, source precedence, unsafe
+  sidecars, package links/private files/size limits, and preserving supporting files without executing
+  them. Real editor/model verification and the remaining MCP/composer work are still pending.
