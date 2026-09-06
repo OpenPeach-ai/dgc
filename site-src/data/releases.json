@@ -132,8 +132,8 @@
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.1",
       "status": "current",
       "notes": [
-        "Protocol v5 with a one-Enter `objective /goal` composer action that preserves and runs the exact tagged objective",
-        "Leading goal commands and ordinary inline `/goal` prose remain unambiguous",
+        "Protocol v5 with a one-Enter objective + /goal composer action that preserves and runs the exact tagged objective",
+        "Leading goal commands and ordinary inline /goal prose remain unambiguous",
         "Cursor and VS Code theme-native backgrounds, surfaces, controls, and text instead of a fixed black shell",
         "Real editor-host verification across dark/light themes and wide/narrow panels"
       ]
