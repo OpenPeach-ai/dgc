@@ -17,6 +17,11 @@ purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.2
 | Medium | Diff read errors were shown as empty files, and stale folder grants remained usable. | Recheck current roots and distinguish missing blobs from failed reads. |
 | Medium | Model discovery could reopen a dismissed menu; Escape did not close a loading menu. | Ignore late results while closed and handle Escape before enumerating options. |
 | Medium | Enter could submit a prompt while an input method was still composing text. | Respect composition state; regression for IME confirmation. |
+| High | Standing goals stopped after one turn and were omitted from subscription requests. | Shared durable continuation for native and delegated turns, bounded no-progress handling, explicit evidence reports, and cycle/accounting review. |
+| High | Goal completion could survive a later failed/cancelled work cycle. | Stage the model report; commit completion only after successful cycle termination. |
+| High | Bundled loop/refactor instructions could stage unrelated files or discard existing user edits. | Require exact ownership of changes, deliberate staging, and narrowly scoped correction; add a dedicated UI review skill. |
+| Medium | Pause was represented as a blocker, editing reset elapsed time, and reopened goals counted offline time. | Distinct pause state, preserved identity and work clock, and paused session restoration. |
+| Medium | Subscription output bypassed terminal filtering, dropped terminal-only answers after commentary, and retained unbounded text/tool arguments. | Shared streaming redaction, terminal-control filtering, final-answer recovery, resource cleanup, and bounded output retention. |
 | Low | Missing host font tokens invalidated the whole font declaration. | Put fallback font families inside each CSS variable's fallback. |
 | Low | Failed webview assertions left timers alive and hung the test process. | Close every JSDOM instance in test cleanup. |
 
@@ -31,18 +36,16 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 
 ## Remaining requirements and open findings
 
-- Goals currently store a standing objective and issue one completion nudge. They need a shared,
-  durable continuation controller, genuine pause state, reviewed completion, and explicit accounting.
-  Native and subscription routes, the CLI, and the extension must all follow the same lifecycle.
-- Goal editing currently resets elapsed time; pausing is conflated with a model-reported blocker.
+- Exercise the shared goal runner with actual local and subscription models, including completion,
+  pause/resume, budget limits, and reviewing the evidence after reopening a session.
 - Changed-file totals are capped at 500 without a completeness indicator. Large or failed scans need
   truthful partial-state reporting; non-Git projects and staged/working-tree differences need review.
 - Finish the exact reference comparison of model/reasoning controls, animation, keyboard behavior,
   collapsed history, attachments, and the goal review workflow at wide and narrow sidebar sizes.
 - Audit provider tool/result lifecycles and exercise actual local and subscription model routes.
   Add any missing skills only where they support a verified workflow.
-- The classic subscription CLI writes provider text directly to stdout, bypassing its native
-  terminal-control filtering. Consolidate subscription presentation and lifecycle handling.
+- Long transcripts still need a performance and restored-history audit. Confirm syntax highlighting,
+  tool grouping after resume, rejected-prompt recovery, and attachment behavior against the reference.
 - Complete source/history and artifact privacy review, package validation, clean-install tests,
   release notes and versioning, then publish reviewed bytes to GitHub, the website and Marketplace.
   No release from this branch has been published.
@@ -50,13 +53,15 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 ## Evidence so far
 
 - Baseline: 1,383 Python checks and 51 extension tests passed.
-- Updated backend: 1,386 Python checks passed; the endpoint-free prompt surface remains below
-  its existing 2,300-token ceiling after consolidating the shared response guidance.
-- Extension: 60 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
+- Goal checkpoint: 1,387 Python checks passed, including 19 goal lifecycle and delegated-stream
+  regressions. The offline prompt estimate remains 2,283 tokens with no automatically loaded skill.
+- Extension: 61 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
   menu races, and initial staged files have automated regression coverage.
 - Installed VS Code 1.107.1: activation, 28 commands, handshake, multi-root state, SecretStorage,
   and permission/plan lifecycles passed. Browser-driven editor checks exercised the goal card,
   changes review, native diff, and narrow sidebar.
+- Goal review, pause/resume, edited-goal continuation, and protocol v6 passed the installed-host
+  checks. Browser captures at 560px and 300px sidebar widths show no overflow or webview errors.
 - The host reported exhausted system file watchers during editor checks. Turn-driven refresh and
   manual review were exercised; watcher-driven refresh needs another check with watcher capacity.
 - The initial tracked-file scan found no configured machine-path markers or credential patterns

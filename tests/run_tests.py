@@ -4755,15 +4755,15 @@ def unit_tests(tmp: Path):
     check("goal set → in the system prompt", "# Standing goal" in _g1.system_prompt() and "ship the release" in _g1.system_prompt())
     import dgc.sessions as _Sg
     _gp = _Sg.new_path(_goal_root); _g1.session_file = _gp; _g1.messages = [{"role":"user","content":"x"}]
-    _g1._goal_active_since -= 5; _g1._persist()
+    _g1._goal_active_since = _goal_time.time() - 5; _g1._persist()
     _goal_record = _Sg.load_record(_gp, _g1.config.project_root)
     check("goal persisted to the session file", _Sg.goal_of(_gp, _g1.config.project_root) == "ship the release"
           and _Sg.goal_status_of(_gp, _g1.config.project_root) == "active"
-          and _goal_record.get("goal_active_since", 0) > 0
-          and _goal_record.get("goal_elapsed_seconds") == 0)
+          and _goal_record.get("goal_active_since", 0) == 0
+          and _goal_record.get("goal_elapsed_seconds") >= 4)
     _g2 = _Ag(_Cfg(_goal_root), _AgUI()); _g2.load_session(_gp)
     check("goal restored on resume with its active-work clock", _g2.goal == "ship the release"
-          and _g2.goal_status == "active" and _g2.goal_elapsed_seconds() >= 4)
+          and _g2.goal_status == "paused" and _g2.goal_elapsed_seconds() >= 4)
     check("goal lifecycle records completion without deleting the objective",
           _g2.update_goal("completed") and _g2.goal == "ship the release"
           and _g2.goal_status == "completed" and "# Standing goal" not in _g2.system_prompt()
@@ -4771,11 +4771,14 @@ def unit_tests(tmp: Path):
           and _g2.goal_elapsed_seconds(_goal_time.time() + 60) >= 4)
     _g3 = _Ag(_Cfg(_goal_root), _AgUI()); _g3.load_session(_gp)
     check("completed goal status survives resume", _g3.goal_status == "completed")
-    _g3.set_goal("x" * 5000)
-    check("standing goals are bounded before prompt persistence", len(_g3.goal) == 4000)
-    _goal_tool = _g3._handle_call(_ToolCall("g1", "update_goal", {"status": "blocked"}))
-    check("model goal transition is explicit and user-visible",
-          _g3.goal_status == "blocked" and "visible to the user" in _goal_tool)
+    check("oversized goals are rejected without silently losing the existing objective",
+          not _g3.set_goal("x" * 5000) and _g3.goal == "ship the release")
+    _g3.update_goal("active")
+    _goal_tool = _g3._handle_call(_ToolCall("g1", "update_goal", {
+        "status": "blocked", "summary": "External dependency missing", "evidence": ["Dependency check failed"]}))
+    check("model goal report awaits successful cycle completion before changing state",
+          _g3.goal_status == "active" and _g3._pending_goal_report["status"] == "blocked"
+          and "recorded for review" in _goal_tool)
     check("stale goal mutation rolls back instead of overwriting a newer session generation",
           not _g1.set_goal("") and _g1.goal == "ship the release"
           and "changed in another process" in _g1._last_persist_error)
@@ -16205,6 +16208,8 @@ def test_subscription_engines():
         class _SubscriptionAgent:
             def __init__(self):
                 self.cancelled = threading.Event(); self.remembered = None
+                self._active_goal_request = None
+            def _secret_values(self): return ()
             def subscription_session_id(self, *args): return "prior-thread"
             def remember_subscription_session(self, *args): self.remembered = args
             def run_external_turn(self, prompt, runner, reset_cancel=False): return runner(prompt)
@@ -16741,6 +16746,11 @@ def main():
         unit_dir = tmp / "unit"   # keep .dgc markers out of the e2e project roots
         unit_dir.mkdir()
         unit_tests(unit_dir)
+        import unittest
+        goal_suite = unittest.defaultTestLoader.discover(str(PROJECT / "tests"), pattern="test_goals.py")
+        goal_result = unittest.TextTestRunner(stream=sys.stdout, verbosity=1).run(goal_suite)
+        check(f"goal lifecycle and delegated stream regressions ({goal_result.testsRun} tests)",
+              goal_result.wasSuccessful())
         test_mono_markdown()
         test_logo_stays_in_family()
         test_trust()

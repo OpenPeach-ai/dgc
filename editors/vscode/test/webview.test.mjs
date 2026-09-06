@@ -102,6 +102,32 @@ function makeDom() {
   return { dom, errors, posted, send, doc: dom.window.document };
 }
 
+test("goal review exposes saved evidence, bounded editing, and keyboard focus", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "goal_changed", goal: "Finish the task", status: "completed",
+    elapsed_seconds: 125, details: { cycles: 3, tokens_used: 520, token_budget: 2000,
+      running: false, reason: "Finished after verification", evidence: ["<script>private()</script>", "Build passed"],
+      history: [{ status: "active", reason: "Goal started" }, { status: "completed", reason: "Build passed" }] } } });
+  doc.getElementById("goal-review-button").click();
+  assert.equal(doc.getElementById("goal-review").hidden, false);
+  assert.equal(posted.at(-1).type, "reviewGoal");
+  assert.match(doc.getElementById("goal-review-body").textContent, /3 cycles/);
+  assert.match(doc.getElementById("goal-review-body").textContent, /Build passed/);
+  assert.equal(doc.getElementById("goal-review-body").querySelectorAll("script").length, 0);
+  doc.getElementById("goal-review").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(doc.activeElement.id, "goal-review-button");
+  doc.getElementById("goal-edit").click();
+  assert.equal(doc.getElementById("goal-editor-budget").value, "2000");
+  assert.equal(doc.getElementById("goal-editor-text").maxLength, 4000);
+  doc.getElementById("goal-editor-budget").value = "3000";
+  doc.getElementById("goal-editor-save").focus();
+  doc.getElementById("goal-editor-save").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert.equal(doc.activeElement.id, "goal-editor-close");
+  doc.getElementById("goal-editor-save").click();
+  assert.equal(posted.at(-1).tokenBudget, 3000);
+  assert.deepEqual(errors, []);
+});
+
 test("webview renders a full turn: thinking → text → progress cards → diff → permission round-trip", () => {
   const { dom, errors, posted, send, doc } = makeDom();
 
@@ -688,6 +714,9 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   doc.getElementById("goal-toggle").click();
   assert.equal(posted.filter((m) => m.type === "pauseGoal").length, 1);
   send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
+    elapsed_seconds: 67 } });
+  assert.equal(doc.getElementById("goal-status").textContent, "Blocked goal");
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "paused",
     elapsed_seconds: 67 } });
   assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
   assert.equal(doc.getElementById("goal-time").textContent, "1:07");

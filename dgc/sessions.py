@@ -375,6 +375,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          timing: dict | None = None,
          checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
+         goal_details: dict | None = None,
          subscription_sessions: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
@@ -396,9 +397,13 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["name"] = name
         if goal:
             data["goal"] = goal          # the standing /goal objective, restored on resume
-            status = (goal_status if goal_status in ("active", "completed", "blocked")
+            status = (goal_status if goal_status in ("active", "paused", "completed", "blocked")
                       else "active")
             data["goal_status"] = status
+            if goal_details is not None:
+                from .goals import clean_details
+                from .redaction import redact_value
+                data["goal_details"] = clean_details(redact_value(goal_details, redact_secrets or ()))
             try:
                 elapsed = float(goal_elapsed_seconds or 0)
             except (TypeError, ValueError, OverflowError):
@@ -690,7 +695,7 @@ def goal_status_of(path, project_root) -> str:
         if not data.get("goal"):
             return "none"
         status = str(data.get("goal_status") or "active")
-        return status if status in ("active", "completed", "blocked") else "active"
+        return status if status in ("active", "paused", "completed", "blocked") else "active"
     except (OSError, ValueError):
         return "none"
 

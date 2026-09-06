@@ -42,6 +42,9 @@ _ALL_SKILLS_RE = re.compile(
 _BUILTIN_SKILL_PATTERNS = {
     "batch": re.compile(r"\b(?:batch|fan[- ]?out|repetitive change|many[- ]file change)\b", re.I),
     "code-review": re.compile(r"\b(?:code review|review (?:the )?(?:diff|changes|pr)|pull request review)\b", re.I),
+    "ui-review": re.compile(
+        r"\b(?:ui|interface|visual|accessibility) (?:audit|review)\b|"
+        r"\b(?:audit|review) (?:the |this |our )?(?:ui|interface|visuals|accessibility)\b", re.I),
     "dataviz": re.compile(r"\b(?:data ?viz|visuali[sz]ation|chart|plot|graph)\b", re.I),
     "debug": re.compile(
         r"\b(?:debug|diagnos(?:e|is)|investigate|fix)\b.{0,32}"

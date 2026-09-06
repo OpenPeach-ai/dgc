@@ -57,7 +57,7 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_effort: subscriptionEffort,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
-send({ type: "ready", version: "fixture", protocol_version: 5,
+send({ type: "ready", version: "fixture", protocol_version: 6,
   capabilities: { correlated_state_requests: true },
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
@@ -100,7 +100,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ type: "goal_changed", request_id: cmd.request_id,
       goal: standingGoal, status: standingGoalStatus });
   }
-  if (cmd.type === "prompt" && cmd.text === "host matrix") {
+  if (cmd.type === "prompt" && cmd.text.startsWith("host matrix")) {
     goalPromptCount += 1;
     activeGoalTurn = true;
     send({ type: "turn_start", turn_id: "goal-turn", prompt: cmd.text });

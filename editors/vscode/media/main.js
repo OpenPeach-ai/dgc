@@ -553,9 +553,9 @@
   }
 
   // Standing goal — the objective and clock stay attached immediately above the composer.
-  let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
+  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now(), goalDraft = "";
   function currentGoalElapsed() {
-    return goalState.elapsed + (goalState.status === "active"
+    return goalState.elapsed + (goalState.status === "active" && goalState.running
       ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
   }
   function formatDuration(seconds) {
@@ -570,31 +570,33 @@
     const status = text ? String(next?.status || "active") : "none";
     const priorElapsed = currentGoalElapsed();
     const explicit = Number(next?.elapsed_seconds);
-    goalState = { text, status,
+    goalState = { ...next, text, status, running: next?.running === true,
       elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
         : (text === goalState.text ? priorElapsed : 0) };
     goalObservedAt = Date.now();
     goalBar.hidden = !text;
     syncComposerRail();
-    if (!text) { closeGoalEditor(false); return; }
+    if (!text) { closeGoalEditor(false); closeGoalReview(false); return; }
     $("goal-text").textContent = text;
-    const paused = status === "blocked", completed = status === "completed";
-    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Pursuing goal";
+    const paused = status === "paused", blocked = status === "blocked", completed = status === "completed";
+    $("goal-status").textContent = paused ? "Paused goal" : blocked ? "Blocked goal" : completed ? "Completed goal" : "Pursuing goal";
     goalBar.dataset.status = status;
     const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
     toggle.hidden = false;
-    const resume = paused || completed;
+    const resume = paused || blocked || completed;
     icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
     toggle.title = resume ? "Resume goal" : "Pause goal";
     toggle.setAttribute("aria-label", resume ? "Resume goal" : "Pause goal");
     $("goal-main").title = text;
     $("goal-main").setAttribute("aria-label", `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
+    if (!$("goal-review").hidden) renderGoalReview();
   }
   function openGoalEditor() {
     if (!goalState.text) return;
     const editor = $("goal-editor-text");
     editor.value = goalState.text;
+    $("goal-editor-budget").value = goalState.token_budget || "";
     $("goal-editor-save").disabled = false;
     $("goal-editor").hidden = false;
     editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
@@ -606,8 +608,47 @@
   function saveGoalEditor() {
     const text = $("goal-editor-text").value.trim();
     if (!text) return;
+    const budget = Number($("goal-editor-budget").value || 0);
+    if (!Number.isSafeInteger(budget) || budget < 0 || budget > 1e12) {
+      $("goal-editor-budget").reportValidity(); return;
+    }
     $("goal-editor-save").disabled = true;
-    vscode.postMessage({ type: "updateGoal", text });
+    vscode.postMessage({ type: "updateGoal", text, tokenBudget: budget });
+  }
+  function renderGoalReview() {
+    const body = $("goal-review-body");
+    body.replaceChildren();
+    body.appendChild(el("div", "text", md(goalState.text)));
+    const status = el("p");
+    status.textContent = `${goalState.status} · ${formatDuration(currentGoalElapsed())} worked · ${Number(goalState.cycles || 0)} cycles`;
+    body.appendChild(status);
+    if (goalState.reason) { const reason = el("p"); reason.textContent = goalState.reason; body.appendChild(reason); }
+    if (Array.isArray(goalState.evidence) && goalState.evidence.length) {
+      body.appendChild(el("h3", "", "Evidence"));
+      const list = el("ul");
+      goalState.evidence.forEach(item => { const li = el("li"); li.textContent = String(item); list.appendChild(li); });
+      body.appendChild(list);
+    }
+    const usage = el("p");
+    usage.textContent = goalState.usage_known === false ? "Token usage unavailable for this route"
+      : `${Number(goalState.tokens_used || 0).toLocaleString()} reported tokens${goalState.token_budget ? ` / ${Number(goalState.token_budget).toLocaleString()} budget` : ""}`;
+    body.appendChild(usage);
+    if (Array.isArray(goalState.history) && goalState.history.length) {
+      const history = el("details"), list = el("ul");
+      history.appendChild(el("summary", "", "Goal history"));
+      goalState.history.forEach(item => { const li = el("li");
+        li.textContent = `${String(item.status)} · ${String(item.reason || "")}`; list.appendChild(li); });
+      history.appendChild(list); body.appendChild(history);
+    }
+  }
+  function openGoalReview() {
+    if (!goalState.text) return;
+    renderGoalReview(); $("goal-review").hidden = false; $("goal-review-close").focus();
+    vscode.postMessage({ type: "reviewGoal" });
+  }
+  function closeGoalReview(restoreFocus = true) {
+    $("goal-review").hidden = true;
+    if (restoreFocus) $("goal-review-button").focus();
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
@@ -1089,7 +1130,7 @@
       }
       case "goal_changed": {
         const text = String(ev.goal || "");
-        setGoalState({ text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
+        setGoalState({ ...ev.details, text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
         break;
       }
       case "status":
@@ -1133,6 +1174,20 @@
   $("goal-clear").onclick = () => vscode.postMessage({ type: "clearGoal" });
   $("goal-main").onclick = openGoalEditor;
   $("goal-edit").onclick = openGoalEditor;
+  $("goal-review-button").onclick = openGoalReview;
+  $("goal-review-close").onclick = () => closeGoalReview();
+  $("goal-review").addEventListener("click", event => { if (event.target === $("goal-review")) closeGoalReview(); });
+  $("goal-review").addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); closeGoalReview(); } });
+  for (const dialog of [$("goal-editor"), $("goal-review")]) {
+    dialog.addEventListener("keydown", event => {
+      if (event.key !== "Tab") return;
+      const nodes = [...dialog.querySelectorAll('button, input, textarea, summary, [tabindex="0"]')]
+        .filter(node => !node.disabled && !node.closest("[hidden]"));
+      const first = nodes[0], last = nodes.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+  }
   $("goal-editor-close").onclick = () => closeGoalEditor();
   $("goal-editor-cancel").onclick = () => closeGoalEditor();
   $("goal-editor-save").onclick = saveGoalEditor;
@@ -1170,10 +1225,11 @@
       const custom = customCommands.includes(name);
       const rest = text.slice(name.length + 1).trim();
       const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
-        "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate"];
+        "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
       const startsGoal = name === "goal" && rest && !goalStateCommand.includes(rest.toLowerCase());
       if (custom || startsGoal) {
         if (startsGoal) {
+          goalDraft = text;
           appendGoalPrompt(rest);
         } else {
           const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
@@ -1190,6 +1246,7 @@
     const trailingGoal = !attachments.length
       ? /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim() : "";
     if (trailingGoal) {
+      goalDraft = text;
       appendGoalPrompt(trailingGoal);
       vscode.postMessage({ type: "startGoal", text: trailingGoal });
       input.value = ""; input.style.height = "auto"; scroll(); return;
@@ -1563,8 +1620,10 @@
     else if (msg.type === "goal_start_state") {
       if (msg.state === "error") {
         setSending(false);
+        if (!input.value && goalDraft) { input.value = goalDraft; onInput(); }
         sysLine(String(msg.error || "DGC could not start the goal."), true);
       }
+      goalDraft = "";
     }
     else if (msg.type === "goal_edit_state") {
       if (msg.state === "saved") closeGoalEditor();
@@ -1592,6 +1651,7 @@
         && typeof file.workspace === "string").slice(0, 600) : [];
       if (popMode === "@") onInput();
     }
+    else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "backend_exit") { endTurn("error"); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
   vscode.postMessage({ type: "webviewReady" });

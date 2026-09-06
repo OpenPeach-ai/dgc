@@ -384,6 +384,8 @@ class TUI:
                 # DGC's native scale.  Keep the native menu unchanged when delegation is off.
                 opts = [("Default", "off"), ("Low", "low"), ("Medium", "medium"),
                         ("High", "high"), ("Extra-high", "xhigh"), ("Maximum", "max")]
+                if engine.key == "codex":
+                    opts = [(label, level) for label, level in opts if level != "max"]
                 cur = str(self.config.get("subscription_effort", "")) or "off"
         rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
@@ -924,6 +926,18 @@ class TUI:
         """Run explicitly safe local commands before active-turn steering sees the text."""
         if not text.startswith("/"):
             return False
+        goal_command = text.strip().lower()
+        if goal_command in ("/goal", "/goal review", "/goal status"):
+            from .goals import review_markdown
+            self._open_reader(review_markdown(self.agent.goal_snapshot()), footer="goal review · Esc close")
+            return True
+        if goal_command in ("/goal pause", "/goal clear", "/goal delete"):
+            action = "pause" if goal_command.endswith("pause") else "clear"
+            if self.agent.request_goal_control(action):
+                self._flash("stopping goal…")
+            else:
+                self._flash("stop the current turn before changing its goal")
+            return True
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         spec = resolve_command(name, "tui")
         if spec is None or not spec.available_while_running:
@@ -3121,7 +3135,7 @@ class TUI:
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "goal":
-            if rest.lower() in ("clear", "off", "none", "remove"):
+            if rest.lower() in ("clear", "off", "none", "remove", "delete"):
                 self._flash("standing goal cleared" if self.agent.set_goal("") else
                             (getattr(self.agent, "_last_persist_error", "")
                              or "goal update was not saved"))
@@ -3130,25 +3144,31 @@ class TUI:
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to complete"))
             elif rest.lower() in ("blocked", "block", "pause", "paused"):
-                self._flash("standing goal → paused" if self.agent.update_goal("blocked")
+                state = "blocked" if rest.lower() in ("blocked", "block") else "paused"
+                self._flash(f"standing goal → {state}" if self.agent.update_goal(state)
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
-                self._flash("standing goal → active" if self.agent.update_goal("active")
-                            else (getattr(self.agent, "_last_persist_error", "")
-                                  or "no standing goal to resume"))
-            elif rest:
-                self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}"
-                            if self.agent.set_goal(rest) else
-                            (getattr(self.agent, "_last_persist_error", "")
-                             or "goal update was not saved"))
+                if self.agent.update_goal("active"):
+                    self._submit(self.agent.goal)
+                else:
+                    self._flash(self.agent._last_persist_error or "no standing goal to resume")
+            elif rest and rest.lower() not in ("review", "status"):
+                from .goals import parse_start
+                try:
+                    objective, budget = parse_start(rest)
+                except ValueError as exc:
+                    self._flash(str(exc)); return True
+                if self.agent.set_goal(objective, token_budget=budget, replace=True):
+                    self._submit(self.agent.goal)
+                else:
+                    self._flash(self.agent._last_persist_error or "goal update was not saved")
             else:
                 g = getattr(self.agent, "goal", "")
                 if g:
-                    self._open_reader(
-                        f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{g}\n\n"
-                        "`/goal complete` · `/goal pause` · `/goal resume` · `/goal clear`",
-                        footer="the standing objective · ↑↓ scroll · Esc close")
+                    from .goals import review_markdown
+                    self._open_reader(review_markdown(self.agent.goal_snapshot()),
+                                      footer="the standing objective · ↑↓ scroll · Esc close")
                 else:
                     self._flash("no goal set — /goal <objective> to set one")
         elif cmd == "set":
@@ -4631,7 +4651,7 @@ class TUI:
             kind = ev.get("kind")
             if kind == "text" and ev.get("text"):            # the assistant's answer, streamed
                 shown["text"] = True
-                self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+                self.on_text(ev["text"])
             elif kind == "thinking" and ev.get("text"):      # dimmed reasoning, like a native turn
                 self.on_thinking(ev["text"])
             elif kind == "tool_call":                        # a real tool card (name + args)
@@ -4644,7 +4664,9 @@ class TUI:
                 self.tool_call(nm, ev.get("args") or {}, cid)
             elif kind == "tool_result":                      # fills the card; a diff renders as a diff
                 cid = ev.get("id") or None
-                self.tool_result(names.get(cid, ""), diffs.get(cid) or ev.get("output", ""), cid)
+                output = ("error: " + str(ev.get("output") or "tool failed") if ev.get("error")
+                          else diffs.get(cid) or ev.get("output", ""))
+                self.tool_result(names.get(cid, ""), output, cid)
             elif kind == "result" and not shown["text"] and ev.get("text"):
                 self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
             elif kind == "status" and ev.get("text"):
@@ -4660,11 +4682,14 @@ class TUI:
         session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
 
         def delegate(safe_prompt: str) -> dict:
+            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+            shown["text"] = False
             result = subs.run_turn(
                 engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self._cancel.is_set,
-                model=model, effort=effort)
+                model=model, effort=effort, goal_request=self.agent._active_goal_request,
+                redact_secrets=self.agent._secret_values())
             if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
                 self.agent.remember_subscription_session(
                     engine.key, result["session_id"], mode, model, effort)

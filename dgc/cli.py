@@ -761,7 +761,7 @@ class CLI:
         elif cmd == "goal":
             action = rest.strip()
             low = action.lower()
-            if low in ("clear", "off", "none", "remove"):
+            if low in ("clear", "off", "none", "remove", "delete"):
                 if self.agent.set_goal(""):
                     self.ui.info("standing goal cleared")
                 else:
@@ -773,7 +773,7 @@ class CLI:
                     else:
                         self.ui.info("no standing goal to complete")
             elif low in ("blocked", "block", "pause", "paused"):
-                if not self.agent.update_goal("blocked"):
+                if not self.agent.update_goal("blocked" if low in ("blocked", "block") else "paused"):
                     if self.agent._last_persist_error:
                         self.ui.error(self.agent._last_persist_error)
                     else:
@@ -784,16 +784,25 @@ class CLI:
                         self.ui.error(self.agent._last_persist_error)
                     else:
                         self.ui.info("no standing goal to resume")
+                else:
+                    self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
+            elif low in ("", "review", "status"):
+                if self.agent.goal:
+                    from .goals import review_markdown
+                    self.console.print(render.render_markdown(terminal_safe_text(review_markdown(self.agent.goal_snapshot()))))
+                else:
+                    self.ui.info("no standing goal — /goal <objective> to start one")
             elif action:
-                if self.agent.set_goal(action):
+                from .goals import parse_start
+                try:
+                    objective, budget = parse_start(action)
+                except ValueError as exc:
+                    self.ui.error(str(exc)); return True
+                if self.agent.set_goal(objective, token_budget=budget, replace=True):
                     self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+                    self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
                 else:
                     self.ui.error(self.agent._last_persist_error or "goal update was not saved")
-            elif self.agent.goal:
-                self.console.print(render.render_markdown(terminal_safe_text(
-                    f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}")))
-            else:
-                self.ui.info("no standing goal — /goal <objective> to set one")
         elif cmd == "think":
             if not rest:
                 i = THINK_LEVELS.index(cfg.get("thinking", "off"))
@@ -1277,6 +1286,7 @@ class CLI:
             complete_while_typing=True)
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
+        self._followup_queue = queue
         while True:
             mode = self.agent.mode
             th = style_mod.theme()
@@ -1320,6 +1330,7 @@ class CLI:
         """Run a turn on a worker thread while the main thread watches the keyboard:
         Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
         The reader cleanly hands stdin back when a tool needs an approval prompt."""
+        self._followup_queue = queue
         self.agent.cancelled.clear()
         self.ui._tool_count = 0
         t0 = time.time()
@@ -1377,10 +1388,18 @@ class CLI:
                     buf = ""
                 elif ch in ("\r", "\n"):         # Enter — queue what was typed so far
                     if buf.strip():
-                        queue.append(buf.strip())
-                        self.console.print(
-                            f"[dim]↵ queued: {_markup_literal(buf.strip()[:70])}[/dim]",
-                            highlight=False)
+                        entry = buf.strip()
+                        action = entry.lower()
+                        if action in ("/goal pause", "/goal clear", "/goal delete"):
+                            self.agent.request_goal_control("pause" if action.endswith("pause") else "clear")
+                        elif action in ("/goal", "/goal review", "/goal status"):
+                            from .goals import review_markdown
+                            self.console.print(render.render_markdown(terminal_safe_text(review_markdown(self.agent.goal_snapshot()))))
+                        elif not entry.startswith("/") and self.agent.steer(entry):
+                            self.console.print("↳ applying follow-up", style="dim")
+                        else:
+                            queue.append(entry)
+                            self.console.print(f"[dim]↵ queued: {_markup_literal(entry[:70])}[/dim]", highlight=False)
                     buf = ""
                 elif ch == "\x7f":               # backspace
                     buf = buf[:-1]
@@ -1971,7 +1990,7 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
         return 1
     c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} "
             f"(your subscription) —[/dim]")
-    last = {"text": ""}
+    last = {"text": "", "shown": False}
 
     def on_event(ev: dict) -> None:
         kind = ev.get("kind")
@@ -1980,21 +1999,22 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
             args = ev.get("args") or {}
             summ = terminal_safe_text(str(args.get("command") or args.get("file_path")
                                           or args.get("path") or ""))[:120]
-            c.print(f"[dim]· {name}{(' ' + summ) if summ else ''}[/dim]", highlight=False)
+            c.print(f"· {name}{(' ' + summ) if summ else ''}", style="dim", markup=False, highlight=False)
         elif kind == "thinking" and ev.get("text"):
-            c.print(f"[dim]  {terminal_safe_text(ev['text'][:200])}[/dim]", highlight=False)
+            c.print(f"  {terminal_safe_text(ev['text'][:200])}", style="dim", markup=False, highlight=False)
         elif kind == "status" and ev.get("text"):
-            c.print(f"[dim]· {terminal_safe_text(ev['text'])}[/dim]", highlight=False)
+            c.print(f"· {terminal_safe_text(ev['text'])}", style="dim", markup=False, highlight=False)
         elif kind == "error" and ev.get("text"):
             # Render once after process exit, where it can be paired with the exit status.
             return
         elif kind == "text" and ev.get("text"):
+            last["shown"] = True
             last["text"] = ev["text"]
-            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+            sys.stdout.write(terminal_safe_text(ev["text"]))
             sys.stdout.flush()
-        elif kind == "result" and ev.get("text", "").strip() \
-                and ev["text"].strip() != last["text"].strip():
-            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+        elif kind == "result" and ev.get("text", "").strip() and not last["shown"]:
+            last["shown"] = True
+            sys.stdout.write(terminal_safe_text(ev["text"]))
             sys.stdout.flush()
 
     budget = int(config.get("turn_budget_s") or 0) or 1800
@@ -2019,12 +2039,18 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
 
     def delegate(safe_prompt: str) -> dict:
+        nonlocal session_id
+        last["text"] = ""
+        last["shown"] = False
         result = subs.run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
-                               cont=bool(cont and session_id), session_id=session_id, mode=mode,
-                               timeout=budget, on_event=on_event, model=model, effort=effort)
+                               cont=bool(session_id), session_id=session_id, mode=mode,
+                               timeout=budget, on_event=on_event, model=model, effort=effort,
+                               cancel=agent.cancelled.is_set, goal_request=agent._active_goal_request,
+                               redact_secrets=agent._secret_values())
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
             agent.remember_subscription_session(
                 engine.key, result["session_id"], mode, model, effort)
+            session_id = result["session_id"]
         return result
 
     try:

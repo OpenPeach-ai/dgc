@@ -25,6 +25,8 @@ from typing import Callable
 MODES = ("default", "acceptEdits", "plan", "auto")
 _MAX_STREAM_LINE_BYTES = 4 * 1024 * 1024
 _MAX_DIAGNOSTIC_CHARS = 2_000
+_MAX_TURN_TEXT_CHARS = 4 * 1024 * 1024
+_MAX_PENDING_TOOL_CHARS = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -324,7 +326,7 @@ def _events_claude(obj: dict) -> list[dict]:
         message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
         content = message.get("content", [])
         return [{"kind": "tool_result", "output": _flatten(b.get("content")),
-                 "id": str(b.get("tool_use_id") or "")}
+                 "id": str(b.get("tool_use_id") or ""), **({"error": True} if b.get("is_error") else {})}
                 for b in content if isinstance(content, list)
                 if isinstance(b, dict) and b.get("type") == "tool_result"]
     if t == "result":
@@ -334,6 +336,8 @@ def _events_claude(obj: dict) -> list[dict]:
             out += _text_event("error", message)
         else:
             out += _text_event("result", obj.get("result"))
+            if isinstance(obj.get("usage"), dict):
+                out.append({"kind": "usage", "usage": obj["usage"]})
         return out
     if t in ("error", "fatal"):
         return _text_event("error", _error_text(obj) or "delegated turn failed")
@@ -359,6 +363,8 @@ def _events_codex(obj: dict) -> list[dict]:
         return _session_event(obj.get("thread_id"))
     if top_type in ("turn.failed", "error"):
         return _text_event("error", _error_text(obj) or "Codex turn failed")
+    if top_type == "turn.completed" and isinstance(obj.get("usage"), dict):
+        return [{"kind": "usage", "usage": obj["usage"]}]
     if top_type in ("item.started", "item.completed", "item.updated"):
         item = obj.get("item") if isinstance(obj.get("item"), dict) else {}
         item_type = str(item.get("type") or "")
@@ -394,9 +400,12 @@ def _events_codex(obj: dict) -> list[dict]:
                 output = item.get("result") or item.get("error") or ""
                 return [{"kind": "tool_result", "output": _flatten(output), "id": item_id,
                          "error": bool(item.get("error"))}]
-        if item_type == "web_search" and top_type == "item.started":
-            return [{"kind": "tool_call", "name": "web_search",
-                     "args": {"query": str(item.get("query") or "")}, "id": item_id}]
+        if item_type == "web_search":
+            if top_type == "item.started":
+                return [{"kind": "tool_call", "name": "web_search",
+                         "args": {"query": str(item.get("query") or "")}, "id": item_id}]
+            if completed:
+                return [{"kind": "tool_result", "output": str(item.get("query") or "Search completed"), "id": item_id}]
 
     # Legacy Codex event compatibility (pre item.* JSONL).
     m = obj.get("msg", obj)
@@ -513,7 +522,8 @@ def _events_generic(obj: dict) -> list[dict]:
     if t in ("thinking", "reasoning", "thought"):
         return [{"kind": "thinking", "text": str(obj.get("content") or obj.get("text") or "")}]
     if t in ("content", "assistant", "message", "text", "assistant_message"):
-        return [{"kind": "text", "text": str(obj.get("content") or obj.get("text") or obj.get("delta") or "")}]
+        return [{"kind": "text", "text": str(obj.get("content") or obj.get("text") or obj.get("delta") or ""),
+                 **({"delta": True} if "delta" in obj else {})}]
     if t in ("tool_call", "tool", "tool_use", "function_call"):
         args = obj.get("input") or obj.get("arguments") or {}
         return [{"kind": "tool_call", "name": str(obj.get("name") or obj.get("tool") or "tool"),
@@ -596,7 +606,8 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
              timeout: int = 1800, on_event: Callable[[dict], None] | None = None,
              env: dict | None = None, cancel: Callable[[], bool] | None = None,
              session_id: str = "", mode: str = "default",
-             model: str = "", effort: str = "") -> dict:
+             model: str = "", effort: str = "", goal_request: dict | None = None,
+             redact_secrets: tuple[str, ...] = ()) -> dict:
     """Delegate one turn to the engine's official CLI in ``workdir``, streaming
     normalized events to ``on_event``. Returns {rc, text, timeout, cancelled, events}.
     Raises only for a missing binary / not-authenticated engine (via preflight); a
@@ -608,8 +619,13 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     import subprocess
     import threading
     import time
+    from .goals import Progress, ReportFilter, delegated_instruction, extract_report
+    from .llm import normalize_usage
+    from .redaction import StreamingRedactor, redact_text, redact_value
 
     binary = preflight(engine)
+    if goal_request is not None:
+        prompt = delegated_instruction(prompt, goal_request)
     argv = engine.build_argv(binary, prompt, cont=cont, session_id=session_id,
                              mode=mode, model=model, effort=effort)
     started = time.monotonic()
@@ -673,9 +689,47 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
     poller.start()
 
     final, text_parts, n, vendor_session = "", [], 0, ""
+    usage = None
+    text_length, last_tool_boundary = 0, 0
+    streamed_chars = 0
+    progress = Progress()
+    tool_calls: dict[str, tuple[str, dict, int]] = {}
+    pending_tool_chars = 0
+    report_filter = ReportFilter(goal_request) if goal_request is not None else None
+    text_redactor, thinking_redactor = StreamingRedactor(redact_secrets), StreamingRedactor(redact_secrets)
+    last_stream_kind = ""
     errors: list[str] = []
     diagnostics: list[str] = []
     callback_error: Exception | None = None
+
+    def deliver(event: dict) -> None:
+        nonlocal last_stream_kind
+        if not on_event:
+            return
+        kind = event.get("kind")
+        # Flush at channel boundaries so a held credential prefix never moves past a tool card.
+        if last_stream_kind and last_stream_kind != kind:
+            redactor = text_redactor if last_stream_kind == "text" else thinking_redactor
+            pending = redactor.flush()
+            if pending:
+                if last_stream_kind == "text" and report_filter:
+                    pending = report_filter.feed(pending)
+                if pending:
+                    on_event({"kind": last_stream_kind, "text": pending})
+        last_stream_kind = kind if kind in ("text", "thinking") else ""
+        if kind == "_flush":
+            return
+        clean = redact_value(event, redact_secrets)
+        if kind in ("text", "thinking"):
+            redactor = text_redactor if kind == "text" else thinking_redactor
+            clean["text"] = redactor.feed(event.get("text", ""))
+            if kind == "text" and report_filter:
+                clean["text"] = report_filter.feed(clean["text"])
+            if not clean["text"]:
+                return
+        elif kind == "result" and goal_request:
+            clean["text"], _ = extract_report(str(clean.get("text") or ""), goal_request)
+        on_event(clean)
 
     def _diagnostic(line: str) -> None:
         clean = "".join(ch for ch in line.strip() if ch == "\t" or ord(ch) >= 32)
@@ -704,34 +758,80 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
                     _diagnostic(line)
             for ev in events:
                 n += 1
+                if ev["kind"] in ("text", "thinking", "result"):
+                    streamed_chars += len(str(ev.get("text") or ""))
+                    if streamed_chars > _MAX_TURN_TEXT_CHARS:
+                        errors.append("delegated output exceeded the per-turn text limit")
+                        state["stopped"] = "output_limit"
+                        _kill()
+                        break
                 if ev["kind"] == "result" and ev.get("text"):
                     final = ev["text"]
+                    # Some engines stream commentary but expose the actual answer only in their
+                    # terminal envelope. Deliver that answer once through the normal text path.
+                    if text_parts and not "".join(text_parts).rstrip().endswith(final.rstrip()):
+                        addition = "\n\n" + final
+                        text_parts.append(addition)
+                        text_length += len(addition)
+                        try:
+                            deliver({"kind": "text", "text": addition})
+                        except Exception as exc:
+                            callback_error = exc
+                            state["stopped"] = "callback"
+                            _kill()
+                            break
                 elif ev["kind"] == "text" and ev.get("text"):
-                    if (text_parts and not str(text_parts[-1]).endswith(("\n", " "))
+                    if (not ev.get("delta") and text_parts and not str(text_parts[-1]).endswith(("\n", " "))
                             and not str(ev["text"]).startswith(("\n", " "))):
                         text_parts.append("\n\n")
-                    text_parts.append(ev["text"])
+                        text_length += 2
+                        ev = {**ev, "text": "\n\n" + ev["text"]}
+                        text_parts.append(ev["text"][2:])
+                        text_length += len(ev["text"]) - 2
+                    else:
+                        text_parts.append(ev["text"])
+                        text_length += len(ev["text"])
                 elif ev["kind"] == "session" and ev.get("id"):
                     vendor_session = ev["id"]
                 elif ev["kind"] == "error" and ev.get("text"):
-                    errors.append(str(ev["text"])[:_MAX_DIAGNOSTIC_CHARS])
+                    errors[:] = [*errors[-3:], str(ev["text"])[:_MAX_DIAGNOSTIC_CHARS]]
+                elif ev["kind"] == "usage" and isinstance(ev.get("usage"), dict):
+                    raw_usage = ev["usage"]
+                    if any(isinstance(raw_usage.get(key), int) and not isinstance(raw_usage[key], bool)
+                           and raw_usage[key] >= 0 for key in ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens")):
+                        usage = normalize_usage(raw_usage)
+                elif ev["kind"] == "tool_call":
+                    last_tool_boundary = text_length
+                    key = str(ev.get("id") or ev.get("name"))
+                    size = len(json.dumps(ev.get("args") or {}, ensure_ascii=False))
+                    prior_size = tool_calls.get(key, ("", {}, 0))[2]
+                    if len(tool_calls) >= 256 or pending_tool_chars - prior_size + size > _MAX_PENDING_TOOL_CHARS:
+                        errors.append("delegated output exceeded the pending tool limit")
+                        state["stopped"] = "output_limit"
+                        _kill()
+                        break
+                    pending_tool_chars += size - prior_size
+                    tool_calls[key] = (str(ev.get("name") or "tool"), ev.get("args") or {}, size)
+                elif ev["kind"] == "tool_result":
+                    name, args, size = tool_calls.pop(str(ev.get("id") or ev.get("name")), ("tool", {}, 0))
+                    pending_tool_chars -= size
+                    progress.add(name, args, str(ev.get("output") or ""))
                 if on_event:
                     try:
-                        on_event(ev)
+                        deliver(ev)
                     except Exception as exc:  # UI failure must not orphan the vendor process
                         callback_error = exc
                         state["stopped"] = "callback"
                         _kill()
                         break
-            if callback_error is not None:
+            if callback_error is not None or state["stopped"] == "output_limit":
                 break
     finally:
         stop.set()
-        if callback_error is not None:
-            try:
-                proc.stdout.close()
-            except OSError:
-                pass
+        try:
+            proc.stdout.close()
+        except OSError:
+            pass
         try:
             rc = proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
@@ -745,7 +845,22 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
         raise EngineError(
             f"delegated output renderer failed: {type(callback_error).__name__}: {callback_error}")
 
+    try:
+        deliver({"kind": "_flush"})
+        if report_filter and on_event:
+            tail = report_filter.finish()
+            if tail:
+                on_event({"kind": "text", "text": tail})
+    except Exception as exc:
+        raise EngineError(f"delegated output renderer failed: {type(exc).__name__}: {exc}") from exc
     answer = "".join(str(part) for part in text_parts) or final
+    goal_report = None
+    if goal_request is not None:
+        from .goals import marker
+        report_position = answer.rfind(marker(goal_request))
+        answer, goal_report = extract_report(answer, goal_request)
+        if report_position < last_tool_boundary or tool_calls:
+            goal_report = None
     error = errors[-1] if errors else ""
     if not error and rc != 0 and diagnostics:
         error = "\n".join(diagnostics)[:_MAX_DIAGNOSTIC_CHARS]
@@ -754,7 +869,9 @@ def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
                  "message; its output schema may have changed")
     stopped = state["stopped"]
     ok = stopped is None and rc == 0 and not error and bool(answer.strip())
-    return {"rc": None if stopped in ("timeout", "cancelled") else rc, "text": answer,
+    return redact_value({"rc": None if stopped in ("timeout", "cancelled") else rc, "text": answer,
             "timeout": stopped == "timeout", "cancelled": stopped == "cancelled",
             "events": n, "seconds": round(time.monotonic() - started, 1),
-            "session_id": vendor_session, "error": error, "ok": ok}
+            "session_id": vendor_session, "error": error, "ok": ok,
+            "usage": usage, "progress_signature": progress.signature(),
+            "goal_report": goal_report if ok else None}, redact_secrets)

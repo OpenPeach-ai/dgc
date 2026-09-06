@@ -203,7 +203,11 @@ TOOL_SCHEMAS = [
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
     _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked. Use only when the whole goal, not merely this turn, reached that state.",
-        {"status": {"type": "string", "enum": ["completed", "blocked"]}}, ["status"]),
+        {"status": {"type": "string", "enum": ["completed", "blocked"]},
+         "summary": {"type": "string", "description": "Outcome or observed external blocker for the entire goal"},
+         "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                      "description": "Concrete checks, artifacts, or observations supporting this status"}},
+        ["status", "summary", "evidence"]),
     _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
         "(two valid approaches, an ambiguous request). Presents the choices and waits for their pick. "
         "Don't use it for things you can decide yourself.",
