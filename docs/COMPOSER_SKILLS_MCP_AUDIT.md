@@ -236,3 +236,14 @@ unimplemented capability. Document any provider-owned execution boundary explici
   timeout, which requires a separate correction before release. Its generated package overgeneralized
   temporary authoring restrictions; skill-author now explicitly distinguishes one-off constraints
   from reusable policy. A repeat with the revised instructions is in progress.
+- Native skill repeat completed: the actual local-model CLI created a 211-word project package and
+  ran its local validation. Independent DGC parsing/discovery confirmed the project source, exact
+  invocation and exclusion from a generic API-edit request. The generated package did not repeat the
+  earlier blanket network/dependency restriction. Both live CLI routes used isolated DGC profiles;
+  this is source-run evidence, not yet installed-release or actual Cursor verification.
+- Timeout/cancellation success bug fixed: native interrupted paths now return failure. The one-shot
+  CLI exits nonzero, the editor emits an error/cancelled terminal event and active goals pause before
+  any premature completion report is applied. Focused tests cover deadlines before and during model
+  generation, subsequent successful turns, goal reports, CLI status, editor status and user/provider
+  cancellation. Full regression: 1,387/1,387 Python checks and 102 discovered cases passed (four
+  optional real-bridge skips). No editor JavaScript change was needed for this outcome correction.

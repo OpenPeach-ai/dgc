@@ -4,6 +4,11 @@
 through work cycles until it completes the goal, pauses, or reports a blocker. The editor also
 accepts `objective /goal`; choosing `/goal` from the inline picker starts the prepared draft.
 
+A native work cycle that reaches its configured time limit pauses the goal without accepting a
+completion report. Cancellation and time limits return a nonzero one-shot CLI exit status; the editor
+reports cancellation or error rather than completed work. Saved partial work remains available for
+review and an explicit resume.
+
 ## Attach instructions and references
 
 In the editor, select skills, prompt templates, files, images or MCP snapshots before starting the
