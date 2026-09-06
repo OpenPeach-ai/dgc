@@ -39,11 +39,19 @@ The promotion refuses stale candidates, count regressions, conflicting observati
 rewinds. Review and commit the snapshot plus its generated site projection together. If the selected
 artifact is already older than 48 hours, dispatch the workflow again instead of weakening the gate.
 
+When a release refreshes the required editor capture, first build and stage the extension at a clean
+reviewed precursor commit, then record the installed verified VSIX. Commit the capture manifest and
+media before choosing core source commit A. The extension bundle may retain its precursor source
+commit: `verify_bundle` requires that commit to be an ancestor and every editor/backend protocol source
+to remain unchanged. Reuse those exact captured bytes at A; rebuilding would invalidate the capture's
+checksum binding. Record the current CLI capture before A as well. This preserves independent CLI
+and extension provenance without permitting non-site changes after the core source tag.
+
 1. Make version and release-note changes in a pull request. Never reuse a published CLI or extension
    version. Ensure required CI and CodeQL checks are green and the source branch is clean. Commit the
    reviewed release sources as commit A and create annotated tag `vX.Y.Z` at A.
 2. At A, run `scripts/preflight.sh`, `scripts/build-release.sh`, and (when applicable)
-   `scripts/release-extension.sh --build`. Stage the extension first with
+   `scripts/release-extension.sh --build` (or reuse the verified captured precursor bundle). Stage the extension first with
    `scripts/release-extension.sh --stage-site` (that phase requires the still-clean A tree), then
    run `scripts/promote-release.sh`. Update the site manifests, rerun the strict site gate, and
    commit only paths below `site/` as commit B. The committed projection includes `dgc.tar.gz`, the

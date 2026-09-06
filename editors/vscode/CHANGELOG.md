@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 — 2026-09-06
+
+- Render complete CommonMark with syntax-highlighted code, exact-source copy and safe file/source links. Group tool activity and separate successful final responses from commentary, failures and cancellation.
+- Run durable goals across native and subscription routes with pause, resume, edit, delete, evidence review and optional token budgets. Preserve work time and restore saved active goals as paused.
+- Refine the model menu and reasoning slider with DGC purple accents and host theme colors.
+- Review initial staged files and workspace diffs safely; disclose large or failed change scans.
+- Preserve rejected prompts and attachments, page saved history, restore tool details and batch streaming renders.
+- Require CLI 0.28.0 / editor protocol v6. Harden file navigation, worker acknowledgements, subscription output and legacy effort settings.
+
 ## 0.14.1 — 2026-09-06
 
 - Added the Codex-style `objective /goal` composer action: selecting or submitting the suffix now preserves the full objective, tags it as a goal, persists it, and starts the turn with one Enter.

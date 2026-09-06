@@ -1,13 +1,24 @@
 {
   "refreshed_at": "2026-09-06T00:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 17,
+  "cli_releases_last_14_days": 18,
   "cli": [
+    {
+      "version": "0.28.0",
+      "date": "2026-09-06",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.28.0",
+      "status": "current",
+      "notes": [
+        "Durable goals continue on native and subscription routes, with pause, resume, review, token budgets and saved completion evidence.",
+        "Shared response guidance, safer delegated streaming and protocol v6 keep CLI and editor behavior aligned.",
+        "Safer loop/refactor skills preserve existing user work; the new UI review skill supports real interface audits."
+      ]
+    },
     {
       "version": "0.27.0",
       "date": "2026-09-06",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.27.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "DGC Ultra coordinates deeper reasoning and bounded parallel agents through one explicit profile.",
         "Long native turns keep useful progress visible while bounded finalization guarantees a user-facing answer or an explicit saved-progress error.",
@@ -127,10 +138,21 @@
   ],
   "extension": [
     {
+      "version": "0.15.0",
+      "date": "2026-09-06",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "current",
+      "notes": [
+        "Structured Markdown, highlighted code and expandable tool activity with a clear final response",
+        "Goal pause, resume, edit, delete and evidence review above the composer; requires CLI 0.28.0 and protocol v6",
+        "Compact model and reasoning controls, native workspace diff review, safe draft recovery and paged history"
+      ]
+    },
+    {
       "version": "0.14.1",
       "date": "2026-09-06",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.1",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Protocol v5 with a one-Enter objective + /goal composer action that preserves and runs the exact tagged objective",
         "Leading goal commands and ordinary inline /goal prose remain unambiguous",
@@ -190,21 +212,33 @@
       "date": "2026-09-02",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.11.0",
       "status": "shipped",
-      "notes": ["Standing goals and plan feedback", "Structured tool cards and diffs", "Protocol v4 lifecycle controls"]
+      "notes": [
+        "Standing goals and plan feedback",
+        "Structured tool cards and diffs",
+        "Protocol v4 lifecycle controls"
+      ]
     },
     {
       "version": "0.10.0",
       "date": "2026-08-31",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.10.0",
       "status": "shipped",
-      "notes": ["Subscription-backed engines", "Multi-root workspace context", "Correlated permission decisions"]
+      "notes": [
+        "Subscription-backed engines",
+        "Multi-root workspace context",
+        "Correlated permission decisions"
+      ]
     },
     {
       "version": "0.8.1",
       "date": "2026-08-20",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.8.1",
       "status": "shipped",
-      "notes": ["Self-hosted VSIX channel", "Cursor installation flow", "Editor reliability fixes"]
+      "notes": [
+        "Self-hosted VSIX channel",
+        "Cursor installation flow",
+        "Editor reliability fixes"
+      ]
     }
   ]
 }
