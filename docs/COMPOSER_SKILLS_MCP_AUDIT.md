@@ -57,7 +57,7 @@ unimplemented capability. Document any provider-owned execution boundary explici
   useful connection/auth/error state; credentials never enter prompts, logs, or public artifacts.
 - [x] MCP context: tools, resources, templates, and prompts are discoverable and usable with
   bounded pagination/results, cancellation, per-server authority, and normal permission checks.
-- [ ] MCP authentication: verify remote HTTP/bearer/OAuth behavior and recovery rather than
+- [x] MCP authentication: verify remote HTTP/bearer/OAuth behavior and recovery rather than
   relying on an untested bridge; expose only controls supported by the actual implementation.
 - [ ] Runtime verification: native local model and subscription runs, real CLI interaction,
   browser-rendered extension flows, actual editor host activation, regression/security checks.
@@ -247,3 +247,15 @@ unimplemented capability. Document any provider-owned execution boundary explici
   generation, subsequent successful turns, goal reports, CLI status, editor status and user/provider
   cancellation. Full regression: 1,387/1,387 Python checks and 102 discovered cases passed (four
   optional real-bridge skips). No editor JavaScript change was needed for this outcome correction.
+- MCP callback forwarding implemented: only a validated callback from the pinned local bridge can
+  request editor port forwarding before the browser opens. The registered redirect stays unchanged;
+  incompatible mappings explain same-port desktop forwarding and reconnect. Duplicate acceptance,
+  cancellation, expired requests and backend replacement cannot launch or acknowledge stale sign-in.
+  Generic MCP URL requests do not acquire forwarding authority. See [MCP context](MCP_CONTEXT.md)
+  for remote-editor and provider-owned device-code limits.
+- Authentication checkpoint: the actual bridge passed all four HTTP/bearer/OAuth/PKCE/cache/refresh/
+  cancellation tests again. Full regression passed 1,387/1,387 checks and 104 discovered Python cases
+  (four optional bridge skips), 95/95 extension tests, TypeScript/build and the VS Code 1.107.1 host.
+  A public DeepWiki HTTPS smoke attempt failed with a network connection timeout from this machine;
+  no public-endpoint success is claimed. Forwarding behavior is covered through the editor API test
+  boundary; an actual SSH identity-provider exchange and browser-only remote editors are not claimed.

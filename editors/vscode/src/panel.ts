@@ -5,6 +5,7 @@ import { basename, isAbsolute, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable } from "./configuration";
 import { workspaceFile } from "./navigation";
+import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
 const MODES = [
   { id: "default", label: "$(shield) default", detail: "ask before writes and shell commands" },
@@ -203,7 +204,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         subscriptionEngine: "", subscriptionModel: "", subscriptionEffort: "",
         subscriptionEngines: [] };
   private behaviorState = { showReasoning: true, preserveThinking: false, codeAction: false };
-  private mcpUrls = new Map<string, string>();
+  private mcpUrls = new Map<string, McpBrowserRequest>();
   private slashAliases = new Map<string, string>();
   private composerSelections = false;
   private skillManagement = false;
@@ -1036,7 +1037,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "mcp_input_request":
         if (ev.kind === "elicitation" && ev.payload?.mode === "url") {
-          this.mcpUrls.set(String(ev.id), String(ev.payload.url || ""));
+          this.mcpUrls.set(String(ev.id), { url: String(ev.payload.url || ""),
+            ...(typeof ev.payload._dgc_bridge_callback === "string"
+              ? { callbackUrl: ev.payload._dgc_bridge_callback } : {}) });
         }
         break;
       case "workspace_roots": {
@@ -1345,22 +1348,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         break;
       case "mcp_input_response": {
         let action = msg.action;
-        const url = this.mcpUrls.get(String(msg.id));
-        this.mcpUrls.delete(String(msg.id));
-        if (action === "accept" && url) {
+        const id = String(msg.id), request = this.mcpUrls.get(id);
+        if (request?.opening && action === "accept") break;
+        if (action === "accept" && request) {
+          request.opening = true;
+          const current = () => this.backend === be && this.mcpUrls.get(id) === request;
           try {
-            const parsed = new URL(url);
-            const target = vscode.Uri.parse(url, true);
-            const loopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
-            if (target.scheme !== "https" && !(target.scheme === "http" && loopback)) {
-              action = "cancel";
-            } else if (!await vscode.env.openExternal(target)) {
-              action = "cancel";
-            }
-          } catch {
+            if (!await openMcpBrowser(request, current)) action = "cancel";
+          } catch (error) {
             action = "cancel";
+            if (current()) void vscode.window.showInformationMessage(
+              error instanceof Error ? error.message : "MCP sign-in could not open. Reconnect the server to retry.");
           }
+          if (!current()) break;
         }
+        this.mcpUrls.delete(id);
         be.send({ type: "mcp_input_response", id: msg.id, action,
                   content: msg.content });
         break;

@@ -17,6 +17,7 @@ let configurationInspections = {};
 const statusBar = { text: "", tooltip: "", command: "", show() {}, dispose() {} };
 globalThis.__DGC_TEST_VSCODE = {
   Uri: {},
+  env: {},
   commands: {},
   StatusBarAlignment: { Left: 1 },
   ConfigurationTarget: { WorkspaceFolder: 1, Workspace: 2, Global: 3 },
@@ -491,6 +492,46 @@ test("change previews use distinct identities for same-named workspace folders",
     api.Uri = original.Uri;
     api.commands = original.commands;
   }
+});
+
+test("MCP sign-in ignores duplicate acceptance and cannot open after cancellation during forwarding", async () => {
+  const api = globalThis.__DGC_TEST_VSCODE;
+  const original = { Uri: api.Uri, env: api.env };
+  const sent = [], opened = [];
+  let release;
+  api.Uri = { parse: value => new URL(value) };
+  api.env = { remoteName: "ssh-remote",
+    asExternalUri: () => new Promise(resolve => { release = resolve; }),
+    openExternal: async uri => { opened.push(uri.toString()); return true; } };
+  const { provider } = catalogHarness([]);
+  provider.backend = { ready: true, send: command => { sent.push(command); return true; } };
+  const callback = "http://localhost:43123/oauth/callback";
+  const url = "https://auth.example.invalid/authorize?redirect_uri=" + encodeURIComponent(callback);
+  const event = id => ({ type: "mcp_input_request", id, server: "fixture", kind: "elicitation",
+    payload: { mode: "url", url, _dgc_bridge_callback: callback } });
+  try {
+    provider.onEvent(event("cancelled"));
+    const pending = provider.onMessage({ type: "mcp_input_response", id: "cancelled", action: "accept" });
+    await provider.onMessage({ type: "mcp_input_response", id: "cancelled", action: "accept" });
+    assert.equal(sent.length, 0, "duplicate acceptance must not acknowledge before the browser opens");
+    await provider.onMessage({ type: "mcp_input_response", id: "cancelled", action: "cancel" });
+    release(new URL(callback));
+    await pending;
+    assert.deepEqual(sent.map(command => command.action), ["cancel"]);
+    assert.deepEqual(opened, []);
+    provider.onEvent(event("expired"));
+    const expired = provider.onMessage({ type: "mcp_input_response", id: "expired", action: "accept" });
+    provider.onEvent({ type: "request_expired", id: "expired" });
+    release(new URL(callback));
+    await expired;
+    assert.equal(sent.length, 1);
+    assert.deepEqual(opened, []);
+    api.env.asExternalUri = async uri => uri;
+    provider.onEvent(event("current"));
+    await provider.onMessage({ type: "mcp_input_response", id: "current", action: "accept" });
+    assert.deepEqual(opened, [url]);
+    assert.deepEqual(sent.map(command => command.action), ["cancel", "accept"]);
+  } finally { api.Uri = original.Uri; api.env = original.env; }
 });
 
 function mcpTransactionHarness(initialCatalog = []) {
