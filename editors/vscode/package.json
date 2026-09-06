@@ -403,7 +403,7 @@
     "jsdom": "^30.0.1",
     "markdown-it": "15.0.1",
     "ovsx": "1.1.1",
-    "typescript": "^5.4.0"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "qs": "^6.16.0"
