@@ -259,6 +259,9 @@
     { name: "think", description: "how hard the model reasons", action: "pickThink" },
     { name: "ultra", description: "deep reasoning + bounded parallel agents", action: "toggleUltra" },
     { name: "goal", description: "inspect, set, pause, resume, or clear the standing objective", action: "goal", accepts_args: true },
+    { name: "plan", description: "enter read-only mode and plan a task", action: "workflow:plan", accepts_args: true },
+    { name: "review", description: "review changes for bugs and regressions", action: "workflow:review", accepts_args: true },
+    { name: "init", description: "inspect the project and prepare DGC.md", action: "workflow:init", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
@@ -1615,7 +1618,9 @@
     }
     const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
     if (trailingGoal) { submitGoal(trailingGoal); return; }
-    if (text.startsWith("/") && !attachments.length) {
+    const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
+      || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
+    if (text.startsWith("/") && !attachments.length && !workflowPrompt) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
       if (custom) {
@@ -1685,6 +1690,11 @@
       renderAtts();
       replacePopToken();
     } else if (popMode === "/") {
+      if (it.action?.startsWith("workflow:")) {
+        replacePopToken();
+        prepareWorkflowDraft(it.action.slice("workflow:".length));
+        hidePop(); input.focus(); return;
+      }
       if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
         replacePopToken(); hidePop(); input.focus();
         if (it.action === "goal" && input.value.trim()) {
@@ -1705,6 +1715,17 @@
       vscode.postMessage({ type: "slash", action: it.action });
     }
     hidePop(); input.focus();
+  }
+  function prepareWorkflowDraft(name) {
+    if (!["plan", "review", "init"].includes(name)) return;
+    const prefix = `/${name} `;
+    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(input.value);
+    const removed = current ? current[0].length : 0;
+    const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
+    input.value = prefix + input.value.slice(removed);
+    input.selectionStart = input.selectionEnd = caret;
+    input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    persistDraft(); input.focus();
   }
   function onInput() {
     scheduleDraftSave();
@@ -2132,6 +2153,7 @@
       if (popMode === "@") onInput();
     }
     else if (msg.type === "open_goal_review") openGoalReview();
+    else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
     else if (msg.type === "backend_exit") { sessionReady = !draftScope; endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false); renderUnconfirmedDrafts(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
   loadDraftState();

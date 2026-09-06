@@ -743,17 +743,18 @@ class CLI:
             else:
                 self.agent.set_mode(rest)
                 self.ui.info(f"mode → {rest} ({MODE_DESCRIPTIONS[rest]})")
-        elif cmd == "plan":
-            target = "default" if self.agent.mode == "plan" else "plan"
-            from . import subscriptions as subs
-            active_engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+        elif cmd in ("plan", "review", "init"):
+            from .workflows import activate_workflow, expand_workflow_prompt, prepare_workflow
             try:
-                subs.validate_engine_mode(active_engine, target)
-            except subs.EngineModeUnsupported as exc:
+                workflow = prepare_workflow(cmd, rest, self.agent)
+                text = expand_workflow_prompt(workflow.prompt, self.expand_mentions) if workflow.prompt else ""
+                activate_workflow(workflow, self.agent)
+            except ValueError as exc:
                 self.ui.error(str(exc))
                 return True
-            self.agent.set_mode(target)
-            self.ui.info(f"mode → {target} ({MODE_DESCRIPTIONS[target]})")
+            self.ui.info(f"mode → {self.agent.mode} ({MODE_DESCRIPTIONS[self.agent.mode]})")
+            if text:
+                self._run_turn_live(text, getattr(self, "_followup_queue", []))
         elif cmd in ("view-plan", "plan-view", "viewplan"):
             plan = (sessions_mod.load_plan(self.agent.session_file, cfg.project_root)
                     if self.agent.session_file else None)
@@ -930,13 +931,6 @@ class CLI:
                 self.ui.error(f"Skill ${sk.name} is disabled. Use /skills enable {sk.name} first.")
             else:
                 self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
-        elif cmd == "init":
-            memory_mod.init_project_memory(cfg.project_root)
-            self.agent.run_turn(
-                "Analyze this project (read key files, manifests, existing docs) and rewrite "
-                "DGC.md at the project root as a concise, accurate guide for a coding agent: "
-                "what the project is, stack, layout, build/test/lint commands, conventions. "
-                "Use write_file to save it.")
         elif cmd == "status":
             self.banner()
         elif cmd == "context":
@@ -1329,8 +1323,8 @@ class CLI:
                     name, prefix = token[1], line[:token[2]].rstrip()
                     from .commands import resolve_command, discover_commands
                     if resolve_command(name, "classic"):
-                        if name == "goal":
-                            self.handle_slash("/goal " + prefix)
+                        if name in ("goal", "plan", "review", "init"):
+                            self.handle_slash("/" + name + " " + prefix)
                         else:
                             draft = prefix
                             self.handle_slash("/" + name)

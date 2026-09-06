@@ -59,13 +59,22 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
-  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true }, session_id: currentSession,
+  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true,
+    workflows: true, composer_selections: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  if (cmd.type === "prompt" && cmd.workflow) {
+    send({ type: "mode_changed", mode: "plan", workspace_trusted: true });
+    send({ type: "prompt_accepted", request_id: cmd.request_id, state: "started" });
+    send({ type: "turn_start", turn_id: "workflow-turn", prompt: cmd.text });
+    setTimeout(() => send({ type: "turn_end", turn_id: "workflow-turn", reason: "completed",
+      token_estimate: 1 }), 30);
+    return;
+  }
   if (cmd.type === "resume_session") {
     currentSession = cmd.path.replace(/\\.json$/, "");
     send({ type: "session", kind: "resumed", message_count: 0, session_id: currentSession, request_id: cmd.request_id });

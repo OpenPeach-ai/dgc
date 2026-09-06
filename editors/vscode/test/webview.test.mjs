@@ -345,6 +345,44 @@ test("inline slash picker exposes management and skills without consuming the dr
   assert.deepEqual(errors, []);
 });
 
+test("workflow pickers preserve the complete draft and wait for an explicit send", () => {
+  for (const name of ["plan", "review", "init"]) {
+    const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+    send({ type: "composer_skill", name: "verify" });
+    input.value = `Check /${name} retries`;
+    input.selectionStart = input.selectionEnd = input.value.indexOf(" retries");
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    assert.equal(input.value, `/${name} Check  retries`);
+    assert.match(doc.getElementById("attachments").textContent, /verify/);
+    assert.equal(posted.some(message => message.type === "prompt"), false);
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const request = posted.findLast(message => message.type === "prompt");
+    assert.equal(request.text, `/${name} Check  retries`);
+    assert.deepEqual(JSON.parse(JSON.stringify(request.skills)), ["verify"]);
+    send({ type: "prompt_rejected", requestId: request.requestId });
+    assert.equal(input.value, `/${name} Check  retries`);
+    assert.match(doc.getElementById("attachments").textContent, /verify/);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("typed review/init use acknowledged prompts and command-menu actions retain existing text", () => {
+  for (const original of ["/review", "/init", "/plan inspect retries", "Inspect retries /review"]) {
+    const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+    input.value = original;
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const request = posted.findLast(message => message.type === "prompt");
+    assert.equal(request.text, original);
+    assert.equal(posted.some(message => message.type === "slashText"), false);
+    send({ type: "prompt_rejected", requestId: request.requestId });
+    assert.equal(input.value, original);
+    send({ type: "workflow_draft", name: "init" });
+    assert.match(input.value, /^\/init /);
+    assert.deepEqual(errors, []);
+  }
+});
+
 test("skill and template chips preserve text, travel as selections, and restore on rejection", () => {
   const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
   send({ type: "event", event: { type: "ready", skills: ["fixture"], custom_commands: ["check-api"] } });

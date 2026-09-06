@@ -413,7 +413,7 @@ class Backend:
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
-                          "goal_inputs": True},
+                          "goal_inputs": True, "workflows": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -587,12 +587,14 @@ class Backend:
                     self, "config", getattr(getattr(self, "agent", None), "config", None))
                 safe_context = redact_value(context, secret_values(active_config))
                 model_text = _format_editor_context(safe_context) + text
+                from .workflows import display_prompt
+                shown_prompt = display_prompt(text)
                 name_session = getattr(self.agent, "name_session", None)
                 if not getattr(self.agent, "session_name", None) and callable(name_session):
-                    title = _prompt_thread_title(text)
+                    title = _prompt_thread_title(shown_prompt)
                     if title and name_session(title):
                         self.em.emit("session_named", name=title)
-                self.em.emit("turn_start", turn_id=tid, prompt=text)
+                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt)
                 failed = False
                 try:
                     config_get = getattr(active_config, "get", None)
@@ -1088,11 +1090,12 @@ class Backend:
             if role == "system":
                 continue
             if role == "user":
+                from .workflows import display_prompt
                 if isinstance(content, list):
-                    text = _strip_editor_context(" ".join(p.get("text", "") for p in content
-                                    if isinstance(p, dict) and p.get("type") == "text")) + " 📷"
+                    text = display_prompt(_strip_editor_context(" ".join(p.get("text", "") for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text"))) + " 📷"
                 else:
-                    text = _strip_editor_context(str(content))
+                    text = display_prompt(_strip_editor_context(str(content)))
                 if text.startswith("<tool_results>"):
                     continue
                 items.append({"role": "user", "text": text})
@@ -1191,12 +1194,35 @@ class Backend:
                              message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
                              **_request_fields(request_id))
                 return
+            workflow = None
+            if "workflow" in cmd:
+                from .workflows import prepare_workflow
+                try:
+                    workflow = prepare_workflow(cmd["workflow"], text, self.agent)
+                    if not workflow.prompt:
+                        raise ValueError("Enter a task to plan, or use /plan to enter plan mode without sending a prompt.")
+                    text = workflow.prompt
+                    if len(text) > _MAX_PROMPT_CHARS:
+                        raise ValueError("The prepared workflow exceeds the prompt size limit; shorten the request.")
+                except ValueError as exc:
+                    self.em.emit("command_rejected", command=t, reason="invalid_workflow",
+                                 message=str(exc), **_request_fields(request_id))
+                    return
             if "skills" in cmd or "templates" in cmd:
                 from .composer import compose_prompt
+                from .skills import discover_skills, explicit_skill_instructions, format_skill_instructions
                 try:
+                    # Discovery is a separate snapshot: do not mutate the active turn's catalog
+                    # while preflighting a queued prompt. A deleted/disabled selection must be
+                    # rejected before acknowledging the draft or changing workflow permissions.
+                    catalog = discover_skills(self.config.project_root,
+                                              disabled_names=self.config.get("disabled_skills", []))
                     text = compose_prompt(text, skills=cmd.get("skills"),
-                                          templates=cmd.get("templates"), catalog=self.agent.skills,
+                                          templates=cmd.get("templates"), catalog=catalog,
                                           project_root=self.config.project_root)
+                    context_size = getattr(self.agent, "context_size", None)
+                    allowance = min(96_000, max(4_000, context_size() * 2)) if callable(context_size) else 96_000
+                    format_skill_instructions(explicit_skill_instructions(catalog, text), allowance)
                 except ValueError as exc:
                     self.em.emit("command_rejected", command=t, reason="invalid_selection",
                                  message=str(exc), **_request_fields(request_id))
@@ -1233,7 +1259,20 @@ class Backend:
                 if parts and parts[0] in custom:
                     text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "",
                                           self.config.project_root) or text
-            state, count = self._start_turn(text, images, context)
+            if workflow:
+                from .workflows import activate_workflow
+                with self._turn_state_lock():
+                    if getattr(self, "_worker", None) or getattr(self, "_foreground_worker", None):
+                        self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                     message="Wait for the current turn to finish before starting a plan, review, or project guide.",
+                                     **_request_fields(request_id))
+                        return
+                    activate_workflow(workflow, self.agent)
+                    self.em.emit("mode_changed", mode=self.agent.mode,
+                                 workspace_trusted=self.workspace_trusted)
+                    state, count = self._start_turn(text, images, context)
+            else:
+                state, count = self._start_turn(text, images, context)
             if request_id and state in ("started", "queued"):
                 self.em.emit("prompt_accepted", request_id=request_id, state=state)
             if state == "queued":

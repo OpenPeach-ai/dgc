@@ -1260,8 +1260,7 @@ def unit_tests(tmp: Path):
           and _attachment_secret not in _submitted_attachment.get("text", "")
           and len(_submitted_attachment.get("images", [])) == 1
           and _submitted_attachment.get("reset_cancel") is False
-          and "review @source.py and @image-0.png" in _tui_shell._prompt_history
-          and "model_text = self._expand_mentions(text)" in _inspect_shell.getsource(_ShellTUI._submit),
+          and "review @source.py and @image-0.png" in _tui_shell._prompt_history,
           repr(_submitted_attachment))
 
     class _ToolSecretCfg:
@@ -12001,7 +12000,7 @@ def test_slash_palette():
         check("classic slash completion uses the canonical built-in registry",
               classic_comps("/mo") == ["/model", "/models", "/mode"])
         check("classic slash completion includes safe custom commands only",
-              classic_comps("/rev") == ["/review-api"]
+              classic_comps("/rev") == ["/review", "/review-api"]
               and classic_comps("/model q") == [])
 
         _capture = io.StringIO()

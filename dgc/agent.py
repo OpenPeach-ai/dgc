@@ -1123,7 +1123,7 @@ class Agent(GoalLifecycle):
         before = set(self._active_skill_names)
         instructions = {} if replace else dict(getattr(self, "_explicit_skill_instructions", {}))
         instructions.update(explicit_skill_instructions(self.skills, text))
-        if replace and self.goal:
+        if replace and self.goal and self.goal_status == "active":
             for name, row in explicit_skill_instructions(self.skills, self.goal).items():
                 instructions.setdefault(name, row)
         # Validate the aggregate before changing the active catalog or starting a model request.

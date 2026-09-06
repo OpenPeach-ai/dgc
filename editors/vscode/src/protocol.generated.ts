@@ -1985,6 +1985,17 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": false
+    },
+    "workflow": {
+      "types": [
+        "string"
+      ],
+      "required": false,
+      "enum": [
+        "plan",
+        "review",
+        "init"
+      ]
     }
   },
   "slash_command": {

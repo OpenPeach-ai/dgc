@@ -2422,6 +2422,14 @@
             },
             "templates": {
               "type": "array"
+            },
+            "workflow": {
+              "type": "string",
+              "enum": [
+                "plan",
+                "review",
+                "init"
+              ]
             }
           },
           "required": [
