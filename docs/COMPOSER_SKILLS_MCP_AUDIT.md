@@ -41,7 +41,7 @@ unimplemented capability. Document any provider-owned execution boundary explici
 
 - [x] Commands: a searchable, keyboard-accessible picker at any whitespace-delimited `/` token;
   preserve text before and after the caret, attachments, selection, IME input, and canceled menus.
-- [ ] Meaningful inline actions: open management/settings without consuming the draft; attach
+- [x] Meaningful inline actions: open management/settings without consuming the draft; attach
   skills and prompt templates; support plan/review/init flows on CLI and extension; retain goals.
 - [x] Skills: `$` and slash discovery, source/description/instructions, multiple explicit skills,
   removal, reload, enabled/disabled state, and draft/session handling.
@@ -181,3 +181,29 @@ unimplemented capability. Document any provider-owned execution boundary explici
   still uses ordinary `git diff --numstat`. Disabling external diff and textconv does not disable
   clean filters. Its Git executable/environment boundary also needs the same review as native tools.
   Fix and verify this before release; the native tool alone does not resolve this host-side gap.
+- Shared workflows implemented: `/plan`, `/review`, and `/init` now have real CLI/TUI/editor routes.
+  Inline choices prepare the draft for an explicit send; typed prefix/suffix forms keep selected
+  inputs and correlated rejection recovery. Review uses plan mode and concrete comparison targets;
+  init uses ordinary file edits after inspection instead of precreating DGC.md. Bare plan enters
+  read-only mode rather than toggling back to execution. Native and delegated execution use the same
+  workflow instructions. User-facing live/restored history shows the original command.
+- Workflow hardening: skill preflight uses fresh discovery without mutating a running turn's
+  catalog; missing/disabled or over-budget selections reject before mode changes. A paused goal no
+  longer injects stale explicit skill instructions into an unrelated turn. Terminal file mentions
+  expand only in the execution body, preserving the original display metadata and avoiding duplicate
+  file reads. Active goals must be paused before starting a separate workflow.
+- Workflow development evidence: Chromium rendered the actual product assets at 460×900 with a
+  protocol fixture. Mid-sentence review selection preserved both surrounding text and a selected
+  skill; explicit send carried the selection; rejection restored it. The composer remained visible
+  with no horizontal overflow. Captures are ignored development evidence. Actual VS Code 1.107.1
+  host checks passed with typed workflow/skill/context routing in addition to session, permission,
+  goal and workspace lifecycle checks. These do not establish live model or Cursor verification.
+- Workflow regression verification: 1,387/1,387 Python checks, including 87 discovered unittest
+  cases (four optional real-bridge cases skipped), 89/89 extension tests, TypeScript/build and
+  actual editor-host checks passed. Initial failures caught an outdated completion expectation and
+  a source-spelling assertion whose runtime attachment checks already passed; the latter was removed.
+  The first new host fixture emitted an invalid terminal event; correcting it to the generated v6
+  schema made the complete host run pass. This remains a development checkpoint, not publication.
+- Remaining release work now includes the host file-change inspection hardening, bundled-skill
+  audit/additions, remote-host OAuth behavior, live local/subscription runs, actual Cursor checks,
+  final docs/site/version updates, full source/history/artifact review, CI and publication.

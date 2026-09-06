@@ -338,7 +338,10 @@ class TUI:
                                                          len(row["value"]) + 2 + len(draft)))
                     return
                 self.input_buf.set_document(Document(draft, len(before)))
-                if row["value"] == "goal" and draft.strip():
+                if row["value"] in ("plan", "review", "init"):
+                    prefix = "/" + row["value"] + " "
+                    self.input_buf.set_document(Document(prefix + draft, len(prefix) + len(before)))
+                elif row["value"] == "goal" and draft.strip():
                     self.input_buf.reset()
                     self._run_command("/goal " + draft.strip())
                 else:
@@ -983,6 +986,10 @@ class TUI:
                 return "local-command"
             self._route_followup(text)
             return "follow-up"
+        from .composer import composer_token
+        token = composer_token(text, len(text))
+        if token and token[0] == "/" and token[2] > 0 and token[1] in ("plan", "review", "init"):
+            text = "/" + token[1] + " " + text[:token[2]].rstrip()
         if text.startswith("/") and self._handle_slash(text):
             return "command"
         if text.startswith("#"):
@@ -1599,7 +1606,8 @@ class TUI:
         open_files = set()
         for s in sorted(self._sessions, key=lambda s: (not s.pinned, -s.last_activity)):
             st = "active" if s is self.active else s.state
-            preview = next((str(m.get("content", "")) for m in s.agent.messages if m.get("role") == "user"), "")
+            from .workflows import display_prompt
+            preview = next((display_prompt(str(m.get("content", ""))) for m in s.agent.messages if m.get("role") == "user"), "")
             title = (s.name or (preview[:40] if preview else "(new agent)"))[:40]
             pin = "⟐ " if s.pinned else ""
             tools = f" · {s._tool_count} tools" if s._tool_count else ""
@@ -3309,6 +3317,17 @@ class TUI:
                 self._request_mode(rest)
             else:
                 self._cycle_mode()
+        elif cmd in ("plan", "review", "init"):
+            from .workflows import activate_workflow, prepare_workflow
+            try:
+                workflow = prepare_workflow(cmd, rest, self.agent)
+                activate_workflow(workflow, self.agent)
+            except ValueError as exc:
+                self._flash(str(exc))
+                return True
+            self._flash(f"mode → {self.agent.mode}")
+            if workflow.prompt:
+                self._submit(workflow.prompt)
         elif cmd == "think":
             _se = str(cfg.get("subscription_engine", "")).strip().lower()
             if _se:                                    # /think steers the subscription's reasoning effort
@@ -3526,7 +3545,7 @@ class TUI:
                     self.app.exit()
             else:
                 self._flash(f"you're on the latest — DGC v{__version__}")
-        elif cmd in ("init", "search"):
+        elif cmd == "search":
             self._flash(f"/{cmd} is available in the classic REPL — run: dgc --classic")
         elif cmd in ("quit", "exit"):
             if self.app:
@@ -3666,6 +3685,9 @@ class TUI:
             role = m.get("role")
             body = _text(m.get("content")).strip()
             if role == "user":
+                from .editor_context import _strip_editor_context
+                from .workflows import display_prompt
+                body = display_prompt(_strip_editor_context(body))
                 if body.startswith("<system-reminder>"):
                     continue                    # internal nudges aren't part of the chat
                 if body.startswith("<user-interjection>"):
@@ -4884,23 +4906,25 @@ class TUI:
         return bool(res.get("ok"))
 
     def _submit(self, text: str, *, echo: bool = True, expand_mentions: bool = True) -> None:
+        from .workflows import display_prompt
+        shown_text = display_prompt(text)
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
         self._cancel_auxiliary()                       # foreground work always preempts title/suggest
         self._cancel.clear()
         self._tool_count = 0
         self._suggestion = None                       # a new prompt supersedes the ghost text
-        if text.strip():
-            self._prompt_history.append(text)         # for /history (Ctrl+R) recall
+        if shown_text.strip():
+            self._prompt_history.append(shown_text)   # recall the command, not harness instructions
         if echo:
-            self.blocks.append({"kind": "user", "text": text})  # reflows at current width
+            self.blocks.append({"kind": "user", "text": shown_text})  # reflows at current width
             mark = len(self.blocks) - 1
         else:
             mark = next((index for index in range(len(self.blocks) - 1, -1, -1)
                          if self.blocks[index].get("kind") == "user"
-                         and self.blocks[index].get("text") == text), len(self.blocks) - 1)
+                         and self.blocks[index].get("text") == shown_text), len(self.blocks) - 1)
         if mark >= 0:
-            self._turn_marks.append((mark, text.replace("\n", " ")[:70]))  # for /jump
+            self._turn_marks.append((mark, shown_text.replace("\n", " ")[:70]))  # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
@@ -4914,7 +4938,8 @@ class TUI:
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
                 if expand_mentions:
-                    model_text = self._expand_mentions(text)
+                    from .workflows import expand_workflow_prompt
+                    model_text = expand_workflow_prompt(text, self._expand_mentions)
                 else:
                     self.agent._pending_images = None
                     model_text = text

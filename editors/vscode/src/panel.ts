@@ -1328,6 +1328,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "prompt": {
         let text = String(msg.text ?? "");
+        const prefixWorkflow = /^\/(plan|review|init)(?:\s+([\s\S]*))?$/i.exec(text.trim());
+        const suffixWorkflow = /^([\s\S]*\S)\s+\/(plan|review|init)$/i.exec(text.trim());
+        const workflow = (prefixWorkflow?.[1] || suffixWorkflow?.[2] || "").toLowerCase();
+        if (workflow) {
+          if (!this.lastReadyEvent?.capabilities?.workflows) {
+            this.post({ type: "event", event: { type: "error",
+              message: "Update the DGC CLI to use plan, review, and project-guide workflows." } });
+            this.post({ type: "prompt_rejected", requestId: msg.requestId }); return;
+          }
+          text = (prefixWorkflow ? prefixWorkflow[2] || "" : suffixWorkflow?.[1] || "").trim();
+        }
         if (msg.context !== undefined && (!Array.isArray(msg.context) || msg.context.length > 64
             || msg.context.some((item: any) => !item || typeof item !== "object" || Array.isArray(item)))) {
           this.post({ type: "event", event: { type: "error", message: "Select at most 64 valid context attachments." } });
@@ -1338,7 +1349,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const attached = Array.isArray(msg.context)
           ? msg.context.filter((item: any) => item && typeof item === "object").slice(0, 64)
           : [];
-        const live = text && !text.startsWith("/") ? this.editorContext() : [];
+        const live = workflow || (text && !text.startsWith("/")) ? this.editorContext() : [];
         const requestId = String(msg.requestId || this.nextRequestId("prompt")).slice(0, 128);
         const selections: { skills?: string[]; templates?: string[] } = {};
         for (const key of ["skills", "templates"] as const) {
@@ -1352,7 +1363,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           }
         }
         const accepted = be.send({ type: "prompt", text, images: msg.images, request_id: requestId,
-                                   context: [...attached, ...live].slice(0, 64), ...selections });
+                                   context: [...attached, ...live].slice(0, 64), ...selections,
+                                   ...(workflow ? { workflow: workflow as "plan" | "review" | "init" } : {}) });
         if (!accepted) {
           this.post({ type: "prompt_rejected", requestId });
         } else {
@@ -2026,6 +2038,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   private slash(action: string): void {
     switch (action) {
+      case "workflow:plan":
+      case "workflow:review":
+      case "workflow:init":
+        this.post({ type: "workflow_draft", name: action.slice("workflow:".length) }); break;
       case "pickModel": this.selectModel(); break;
       case "connect": this.connect(); break;
       case "pickMode": this.setMode(); break;
@@ -2088,6 +2104,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const typedName = match[1].toLowerCase(), rest = (match[2] || "").trim();
     const name = this.slashAliases.get(typedName) || typedName;
     const be = this.ensureBackend();
+    if (name === "plan" && !rest) {
+      await this.requestMode("plan"); return;
+    }
+    if (["plan", "review", "init"].includes(name)) {
+      await this.onMessage({ type: "prompt", text, requestId: this.nextRequestId("workflow") });
+      return;
+    }
     if (name === "mcp" && rest) {
       if (!this.mcpManagement) {
         this.post({ type: "event", event: { type: "error", message: "Update the DGC CLI to use MCP commands in the editor." } });

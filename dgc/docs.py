@@ -263,6 +263,28 @@ DGC keeps the plan inline in the transcript, saves a `plan.md` beside the sessio
 and (by default) renders a self-contained preview on loopback. `/view-plan` reopens
 the saved copy. The preview never inherits LAN sharing; arbitrary project previews
 remain disabled in plan mode unless `artifact_in_plan` is explicitly enabled.
+
+## Workflow commands
+
+`/plan` enters read-only mode without starting a turn. `/plan TASK` inspects the
+project and prepares a plan. It does not toggle back into execution; use `/mode`
+or the mode selector when you want to change permissions.
+
+`/review` enters read-only mode and reviews staged, working, and untracked changes
+for concrete bugs. Use `/review --staged`, `/review --working`, `/review --base main`,
+or `/review --commit HEAD~1` to choose the comparison, followed by optional focus
+text. Native review uses the bounded `git_diff` tool without executing repository
+filters or network transports. Partial coverage is explicit. Findings should name
+the file/line, trigger, and impact; a source review must not claim tests were run.
+
+`/init` inspects existing guidance and prepares or updates DGC.md using ordinary
+edit permissions. In plan mode it proposes the guide before any write. It never
+precreates a placeholder or bypasses approval to overwrite existing instructions.
+
+These commands work in the interactive CLI, TUI, and editor. Selecting them after
+other text prepares the draft until Send; skills and context stay attached. Pause
+an active goal before starting a separate workflow. Unsupported subscription modes
+and invalid selections are rejected before starting a model request.
 """.strip()),
 
     ("Artifacts", "preview what the agent builds on a localhost URL", """

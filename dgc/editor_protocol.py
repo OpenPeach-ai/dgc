@@ -238,7 +238,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
-               "skills": _A(False), "templates": _A(False)},
+               "skills": _A(False), "templates": _A(False),
+               "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False)},
     "permission_response": {

@@ -212,6 +212,17 @@ async function run() {
     command.type === "plan_response" && command.id === "host-plan").length, 1,
   "one installed-host plan request must reach the backend at most once");
 
+  const beforeWorkflow = posted().filter(item => item.eventType === "turn_end").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "/review --staged host workflow",
+    requestId: "host-workflow", skills: ["verify"],
+    context: [{ type: "mcp_context", server: "docs", uri: "docs://workflow", text: "Workflow snapshot" }] });
+  await waitFor(() => posted().filter(item => item.eventType === "turn_end").length > beforeWorkflow);
+  const workflowCommand = backendCommands(backendLogPath).find(command => command.request_id === "host-workflow");
+  assert.equal(workflowCommand?.workflow, "review");
+  assert.equal(workflowCommand?.text, "--staged host workflow");
+  assert.deepEqual(workflowCommand?.skills, ["verify"]);
+  assert.ok(workflowCommand?.context.some(item => item.text === "Workflow snapshot"));
+
   // Exercise both awaited and fire-and-forget editor state routes. The installed backend advertises
   // correlation, so every optional query/mutation must carry a unique bounded request ID.
   const turnsBeforeGoal = posted().filter((item) => item.type === "event"

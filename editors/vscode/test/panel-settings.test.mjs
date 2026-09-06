@@ -281,6 +281,30 @@ test("goal startup sends one validated-payload command and older backends reject
   assert.ok(posted.some(message => message.type === "prompt_rejected" && message.requestId === "too-many"));
 });
 
+test("workflow host routing carries selections and context without an independent permission mutation", async () => {
+  const h = harness(), posted = [], commands = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.editorContext = () => [{ type: "active_file", path: "app.ts" }];
+  h.provider.lastReadyEvent = { capabilities: { workflows: true } };
+  h.provider.composerSelections = true;
+  h.provider.backend.send = command => { commands.push(command); return true; };
+  const context = [{ type: "mcp_context", server: "docs", uri: "docs://retry", text: "Snapshot" }];
+  for (const text of ["/review --base main Retry handling", "Retry handling /review"]) {
+    await h.provider.onMessage({ type: "prompt", text, requestId: text, skills: ["verify"], context });
+    const command = commands.at(-1);
+    assert.equal(command.workflow, "review");
+    assert.equal(command.type, "prompt");
+    assert.deepEqual(command.skills, ["verify"]);
+    assert.deepEqual(command.context, [...context, { type: "active_file", path: "app.ts" }]);
+    assert.equal(command.request_id, text);
+  }
+  assert.equal(commands.length, 2);
+  h.provider.lastReadyEvent = { capabilities: {} };
+  await h.provider.onMessage({ type: "prompt", text: "/init", requestId: "old-cli" });
+  assert.equal(commands.length, 2);
+  assert.ok(posted.some(message => message.type === "prompt_rejected" && message.requestId === "old-cli"));
+});
+
 function secretMutations(timeline) {
   return timeline.filter((item) => item.startsWith("secret:store:")
     || item.startsWith("secret:delete:"));
