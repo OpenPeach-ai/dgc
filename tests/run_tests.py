@@ -16747,9 +16747,9 @@ def main():
         unit_dir.mkdir()
         unit_tests(unit_dir)
         import unittest
-        goal_suite = unittest.defaultTestLoader.discover(str(PROJECT / "tests"), pattern="test_goals.py")
+        goal_suite = unittest.defaultTestLoader.discover(str(PROJECT / "tests"), pattern="test_*.py")
         goal_result = unittest.TextTestRunner(stream=sys.stdout, verbosity=1).run(goal_suite)
-        check(f"goal lifecycle and delegated stream regressions ({goal_result.testsRun} tests)",
+        check(f"goal lifecycle, editor state and delegated stream regressions ({goal_result.testsRun} tests)",
               goal_result.wasSuccessful())
         test_mono_markdown()
         test_logo_stays_in_family()

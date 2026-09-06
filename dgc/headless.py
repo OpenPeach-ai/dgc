@@ -55,6 +55,7 @@ _BUSY_MUTATIONS = {
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
+    "prompt",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
@@ -1193,6 +1194,7 @@ class Backend:
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
         items = []
+        calls = {}
         for m in self.agent.messages:
             role = m.get("role")
             content = m.get("content")
@@ -1200,17 +1202,52 @@ class Backend:
                 continue
             if role == "user":
                 if isinstance(content, list):
-                    text = " ".join(p.get("text", "") for p in content
-                                    if isinstance(p, dict) and p.get("type") == "text") + " 📷"
+                    text = _strip_editor_context(" ".join(p.get("text", "") for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text")) + " 📷"
                 else:
                     text = _strip_editor_context(str(content))
                 if text.startswith("<tool_results>"):
                     continue
                 items.append({"role": "user", "text": text})
             elif role == "assistant":
-                tools = [(tc.get("function") or {}).get("name", "") for tc in (m.get("tool_calls") or [])]
-                items.append({"role": "assistant", "text": str(content or ""), "tools": tools})
-        return items
+                tools = [str((tc.get("function") or {}).get("name", ""))[:128] for tc in (m.get("tool_calls") or [])[:16]]
+                details = []
+                for tc in (m.get("tool_calls") or [])[:16]:
+                    function = tc.get("function") or {}
+                    arguments = function.get("arguments") or ""
+                    detail = {"name": str(function.get("name") or "tool")[:128],
+                              "arguments": (arguments if isinstance(arguments, str) else
+                                            json.dumps(arguments, ensure_ascii=False))[:1000],
+                              "output": "", "status": "unknown"}
+                    if tc.get("id"):
+                        calls[str(tc["id"])] = detail
+                    details.append(detail)
+                items.append({"role": "assistant", "text": str(content or ""), "tools": tools,
+                              "tool_details": details, "commentary": bool(tools)})
+            elif role == "tool":
+                detail = calls.pop(str(m.get("tool_call_id") or ""), None)
+                if detail is not None:
+                    output = str(content or "")
+                    detail["output"] = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
+                    # The saved protocol lacks a reliable success flag. Preserve the result without
+                    # inventing a green success state for failed commands or denials.
+                    detail["status"] = "returned"
+        # A display projection must not break the editor's bounded NDJSON transport. Session/model
+        # history remains intact; this limit applies only to the restored webview payload.
+        retained, size = [], 0
+        for item in reversed(items):
+            text = str(item.get("text") or "")
+            if len(text) > 50000:
+                item["text"] = text[:50000] + "\n[Long saved message truncated for display]"
+            cost = len(json.dumps(item, ensure_ascii=True))
+            if retained and size + cost > 1_000_000:
+                break
+            retained.append(item)
+            size += cost
+        retained.reverse()
+        if len(retained) < len(items):
+            retained.insert(0, {"role": "notice", "text": "Showing the most recent saved context. Earlier messages remain in the session file."})
+        return retained
 
     def dispatch(self, cmd: dict) -> None:
         problem = command_error(cmd)
@@ -1239,7 +1276,8 @@ class Backend:
             text = str(cmd.get("text", ""))
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
-                             message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit")
+                             message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
+                             **_request_fields(request_id))
                 return
             try:
                 images = validate_image_data_uris(
@@ -1247,7 +1285,7 @@ class Backend:
                     maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_images",
-                             message=f"prompt images rejected: {exc}")
+                             message=f"prompt images rejected: {exc}", **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
             if text.startswith("/"):               # render a custom slash-command template
@@ -1257,15 +1295,19 @@ class Backend:
                     text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "",
                                           self.config.project_root) or text
             state, count = self._start_turn(text, images, context)
+            if request_id and state in ("started", "queued"):
+                self.em.emit("prompt_accepted", request_id=request_id, state=state)
             if state == "queued":
                 self.em.emit("queued", count=count, text=text)
             elif state == "full":
                 self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
                              message=("follow-up queue reached its count or aggregate byte limit "
-                                      f"({count} queued); cancel it or wait for a turn to finish"))
+                                      f"({count} queued); cancel it or wait for a turn to finish"),
+                             **_request_fields(request_id))
             elif state == "busy":
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                             message="a foreground operation is running; cancel or wait for it to finish")
+                             message="a foreground operation is running; cancel or wait for it to finish",
+                             **_request_fields(request_id))
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()

@@ -1,4 +1,20 @@
 import MarkdownIt from "markdown-it";
+import hljs from "highlight.js/lib/core";
+import javascript from "highlight.js/lib/languages/javascript";
+import typescript from "highlight.js/lib/languages/typescript";
+import python from "highlight.js/lib/languages/python";
+import json from "highlight.js/lib/languages/json";
+import xml from "highlight.js/lib/languages/xml";
+import css from "highlight.js/lib/languages/css";
+import bash from "highlight.js/lib/languages/bash";
+import yaml from "highlight.js/lib/languages/yaml";
+import sql from "highlight.js/lib/languages/sql";
+import rust from "highlight.js/lib/languages/rust";
+import go from "highlight.js/lib/languages/go";
+import diff from "highlight.js/lib/languages/diff";
+
+for (const [name, grammar] of Object.entries({ javascript, typescript, python, json, xml, css, bash,
+  yaml, sql, rust, go, diff })) hljs.registerLanguage(name, grammar);
 
 /** Render model output without executable HTML, automatic network requests, or webview navigation.
  * Links are inert buttons; the extension host validates them again on an explicit user click. */
@@ -50,8 +66,14 @@ parser.renderer.rules.code_block = (tokens, index) => codeBlock(tokens[index].co
 
 function codeBlock(content: string, info: string): string {
   const language = /^[A-Za-z0-9_+.-]+/.exec(info.trim())?.[0] || "text";
+  let highlighted = escape(content);
+  // Explicit, bundled grammars only. Large blocks stay cheap and preserve exact source copying.
+  if (content.length <= 20000 && hljs.getLanguage(language.toLowerCase())) {
+    try { highlighted = hljs.highlight(content, { language: language.toLowerCase(), ignoreIllegals: true }).value; }
+    catch { /* Preserve readable escaped source if a grammar cannot parse this block. */ }
+  }
   // Keep the source in a data attribute for exact copy, separate from syntax/presentation markup.
-  return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code">Copy</button><code>${escape(content)}</code></pre>`;
+  return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code">Copy</button><code>${highlighted}</code></pre>`;
 }
 
 parser.renderer.rules.table_open = () => '<div class="md-table-wrap"><table class="md-table">';

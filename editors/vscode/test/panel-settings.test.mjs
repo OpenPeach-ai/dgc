@@ -203,14 +203,14 @@ test("workspace changes include initial staged files and literal subfolder scope
   workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: nested } }];
   try {
     const { provider } = catalogHarness([]);
-    const initial = await provider.collectWorkspaceChanges();
+    const { files: initial } = await provider.collectWorkspaceChanges();
     assert.equal(initial.length, 1, "a staged file in an unborn repository is a real change");
     assert.equal(initial[0].displayPath, "new.ts");
     assert.equal(initial[0].additions, 1);
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "initial");
     writeFileSync(join(nested, "new.ts"), "export const first = 2;\nexport const second = 3;\n");
     writeFileSync(join(root, "outside.ts"), "outside scoped folder\n");
-    const changed = await provider.collectWorkspaceChanges();
+    const { files: changed } = await provider.collectWorkspaceChanges();
     assert.equal(changed.length, 1);
     assert.equal(changed[0].displayPath, "new.ts");
     assert.equal(changed[0].additions, 2);
@@ -233,7 +233,7 @@ test("change review shows new staged content and never follows an external symli
   api.commands = { executeCommand: async (...args) => opened.push(args) };
   try {
     const { provider } = catalogHarness([]);
-    provider.workspaceChanges = await provider.collectWorkspaceChanges();
+    provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
     await provider.reviewWorkspaceChange("[new].ts");
     assert.equal(opened[0]?.[0], "vscode.diff");
     assert.equal(provider.reviewDocuments.get(opened[0][1].toString()), "");
@@ -241,7 +241,7 @@ test("change review shows new staged content and never follows an external symli
     const external = join(scratch, "private-fixture.txt");
     writeFileSync(external, "external content must never appear in a diff");
     symlinkSync(external, join(root, "link.txt"));
-    provider.workspaceChanges = await provider.collectWorkspaceChanges();
+    provider.workspaceChanges = (await provider.collectWorkspaceChanges()).files;
     await provider.reviewWorkspaceChange("link.txt");
     assert.equal(opened[1]?.[0], "vscode.diff");
     assert.equal(provider.reviewDocuments.get(opened[1][2].toString()), `${external}\n`);
@@ -254,6 +254,23 @@ test("change review shows new staged content and never follows an external symli
     api.Uri = original.Uri;
     api.commands = original.commands;
   }
+});
+
+test("large change scans expose true totals, bounded line reads, and unavailable folders", async () => {
+  const root = mkdtempSync(join(scratch, "large-changes-"));
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  for (let i = 0; i < 505; i++) writeFileSync(join(root, `file-${i}.txt`), "new line\n");
+  const workspace = globalThis.__DGC_TEST_VSCODE.workspace, original = workspace.workspaceFolders;
+  workspace.workspaceFolders = [{ name: "fixture", uri: { fsPath: root } }];
+  try {
+    const { provider } = catalogHarness([]), result = await provider.collectWorkspaceChanges();
+    assert.equal(result.total, 505); assert.equal(result.files.length, 500);
+    assert.ok(result.files.every(file => file.additions === 1));
+    assert.match(result.notices.join(" "), /500 of 505/);
+    workspace.workspaceFolders = [{ name: "missing", uri: { fsPath: join(root, "absent") } }];
+    const missing = await provider.collectWorkspaceChanges();
+    assert.equal(missing.total, 0); assert.match(missing.notices.join(" "), /unavailable/);
+  } finally { workspace.workspaceFolders = original; }
 });
 
 function mcpTransactionHarness(initialCatalog = []) {

@@ -207,6 +207,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "markdown": _S(), "path": _NS(False), "error": _NS(False),
     },
     "queued": {"count": _I(), "text": _S()},
+    "prompt_accepted": {"request_id": _S(), "state": _f("string", enum=("started", "queued"))},
     "command_rejected": {
         "message": _S(), "command": _S(False), "reason": _S(False), "count": _I(False),
         "request_id": _S(False),
@@ -230,7 +231,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
-    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False)},
+    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False)},
     "slash_command": {"text": _S()},
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False)},
     "permission_response": {

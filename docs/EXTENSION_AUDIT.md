@@ -1,6 +1,6 @@
 # Extension audit and parity work
 
-This audit is in progress. The target is Codex extension **26.5901.22334**, with DGC branding,
+Implementation and source review are complete; release validation and publication are in progress. The target is Codex extension **26.5901.22334**, with DGC branding,
 purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.27.0** and extension
 **0.14.1**. Downloaded reference binaries and private screenshots are excluded from release sources.
 
@@ -22,6 +22,10 @@ purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.2
 | High | Bundled loop/refactor instructions could stage unrelated files or discard existing user edits. | Require exact ownership of changes, deliberate staging, and narrowly scoped correction; add a dedicated UI review skill. |
 | Medium | Pause was represented as a blocker, editing reset elapsed time, and reopened goals counted offline time. | Distinct pause state, preserved identity and work clock, and paused session restoration. |
 | Medium | Subscription output bypassed terminal filtering, dropped terminal-only answers after commentary, and retained unbounded text/tool arguments. | Shared streaming redaction, terminal-control filtering, final-answer recovery, resource cleanup, and bounded output retention. |
+| Medium | Reopened chats dropped tool arguments/results, large histories could exceed the wire limit, and every token reparsed the full response. | Bounded history projection, 50-message pages, lazy tool disclosure, batched streaming renders and bundled syntax highlighting. |
+| Medium | Rejected prompts discarded their drafts and attachments and could leave the editor marked busy. | Correlated acceptance/rejection events, explicit draft restoration and confirmed worker-state tracking. |
+| Medium | Large or failed Git scans presented incomplete totals without disclosure. | Full file counts with a 500-row display bound, partial-scan notices and unavailable-repository state. |
+| Low | Legacy Codex subscription settings could pass unsupported `max` effort. | Map the legacy strongest-effort choice to `xhigh` at the vendor invocation boundary. |
 | Low | Missing host font tokens invalidated the whole font declaration. | Put fallback font families inside each CSS variable's fallback. |
 | Low | Failed webview assertions left timers alive and hung the test process. | Close every JSDOM instance in test cleanup. |
 
@@ -34,28 +38,35 @@ The exact reference's compact model menu and reasoning slider are now implemente
 purple accent. Ultra remains an explicit DGC option. Codex subscription selections omit `max`, which
 is not that route's supported wire value; its highest normal effort is `xhigh`.
 
-## Remaining requirements and open findings
+## Release work remaining
 
-- Exercise the shared goal runner with actual local and subscription models, including completion,
-  pause/resume, budget limits, and reviewing the evidence after reopening a session.
-- Changed-file totals are capped at 500 without a completeness indicator. Large or failed scans need
-  truthful partial-state reporting; non-Git projects and staged/working-tree differences need review.
-- Finish the exact reference comparison of model/reasoning controls, animation, keyboard behavior,
-  collapsed history, attachments, and the goal review workflow at wide and narrow sidebar sizes.
-- Audit provider tool/result lifecycles and exercise actual local and subscription model routes.
-  Add any missing skills only where they support a verified workflow.
-- Long transcripts still need a performance and restored-history audit. Confirm syntax highlighting,
-  tool grouping after resume, rejected-prompt recovery, and attachment behavior against the reference.
-- Complete source/history and artifact privacy review, package validation, clean-install tests,
-  release notes and versioning, then publish reviewed bytes to GitHub, the website and Marketplace.
-  No release from this branch has been published.
+- Build and validate the versioned runtime archive and VSIX, review the final artifact contents,
+  refresh public captures and documentation, run release CI and clean-install checks, then publish
+  the reviewed bytes to GitHub, the website and Marketplace. Nothing from this branch is published yet.
+
+## Scope and known limits
+
+- The change rail represents workspace Git changes against HEAD, including pre-existing user edits.
+  It does not claim that every displayed change belongs to this conversation. Non-Git folders report
+  unavailable review; scans above 500 files report their display limit.
+- Restored history reflects saved model context, including prior compaction. Tool details are loaded
+  on expansion; very large saved context and messages have explicit display limits. Historical native
+  tool results do not carry a reliable success field, so they are labelled saved results rather than
+  assigned an invented success status.
+- Subscription budgets are checked between vendor turns and can overshoot in one turn. Unknown usage
+  pauses a budgeted goal. Vendor CLIs own authentication, tool permissions and their internal execution;
+  DGC's optional native shell sandbox does not confine them.
+- DGC image attachments work on native vision routes. Vendor CLI delegation currently rejects DGC
+  image attachments explicitly, preserving the existing documented limitation.
+- Editor validation ran on Linux ARM64 in VS Code 1.107.1, including the matching webview surface used
+  by Cursor. Windows CLI use is through WSL; native Windows execution is not a supported promise.
 
 ## Evidence so far
 
 - Baseline: 1,383 Python checks and 51 extension tests passed.
-- Goal checkpoint: 1,387 Python checks passed, including 19 goal lifecycle and delegated-stream
+- Goal checkpoint: 1,387 Python checks passed, including 23 goal lifecycle, editor-state and delegated-stream
   regressions. The offline prompt estimate remains 2,283 tokens with no automatically loaded skill.
-- Extension: 61 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
+- Extension: 66 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
   menu races, and initial staged files have automated regression coverage.
 - Installed VS Code 1.107.1: activation, 28 commands, handshake, multi-root state, SecretStorage,
   and permission/plan lifecycles passed. Browser-driven editor checks exercised the goal card,
@@ -64,8 +75,17 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
   checks. Browser captures at 560px and 300px sidebar widths show no overflow or webview errors.
 - The host reported exhausted system file watchers during editor checks. Turn-driven refresh and
   manual review were exercised; watcher-driven refresh needs another check with watcher capacity.
-- The initial tracked-file scan found no configured machine-path markers or credential patterns
-  outside deliberate test fixtures. This is preliminary evidence, not a complete privacy signoff.
+- Actual local Qwen validation completed in two work cycles (65 seconds), and the Codex subscription
+  completed in one (25 seconds). Both wrote the requested code, passed two independently rerun tests,
+  and restored the completed goal identity and evidence from disk.
+- Source/history privacy review scanned 300 current text files and 1,970 text objects/archive members
+  across 59 reachable commits, including 16 historical runtime/extension archives. No credential,
+  configured release-secret or machine-path matches were found outside deliberate test fixtures.
+- `npm audit` and `pip-audit` found no reported vulnerabilities in the extension dependency graph and
+  11-package locked Python closure. Bandit reported no high-severity findings. Reviewed medium findings
+  concern explicit opt-in LAN preview binding, private sandbox temporary paths, and the permission-gated
+  persistent Python interpreter's intentional code execution. These are not exposed unauthenticated
+  code-evaluation endpoints.
 
 ## References
 
@@ -73,4 +93,6 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 - [Codex Marketplace listing](https://marketplace.visualstudio.com/items?itemName=OpenAI.chatgpt)
 - [markdown-it documentation](https://markdown-it.github.io/markdown-it/)
 
-Release acceptance requires completion of every remaining requirement, not only passing unit tests.
+Release acceptance still requires verified artifacts, CI and production-channel checks.
+
+- [Highlight.js source and usage](https://github.com/highlightjs/highlight.js)
