@@ -127,10 +127,22 @@
   ],
   "extension": [
     {
+      "version": "0.14.0",
+      "date": "2026-09-06",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.0",
+      "status": "current",
+      "notes": [
+        "Live changed-file totals with one-click native VS Code side-by-side review",
+        "Composer-attached timed goals with direct pause, resume, edit, and clear controls",
+        "Codex-like tools, diffs, transcript cadence, and composer hierarchy with restrained DGC accents",
+        "Cancellation-safe active goal controls plus wide and narrow editor-host verification"
+      ]
+    },
+    {
       "version": "0.13.0",
       "date": "2026-09-06",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.13.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Protocol v5 with DGC Ultra and a combined model/reasoning selector",
         "Goal objectives that persist, start immediately, and remain timed above the composer",

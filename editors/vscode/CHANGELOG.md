@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 — 2026-09-06
+
+- Added a composer-attached changed-files rail backed by live Git state, with addition/deletion totals and one-click native VS Code side-by-side review.
+- Rebuilt the standing-goal surface as a timed composer rail with direct pause/resume, edit, and clear controls; `/goal <objective>` remains a tagged action that starts that exact objective.
+- Matched the current Codex editor hierarchy for compact tools, readable diffs, transcript cadence, and the model/reasoning composer while keeping DGC purple to restrained identity and focus accents.
+- Made active-turn goal pause/clear cancellation-safe, bounded change review for binary, oversized, and symlinked files, and verified the complete UI at wide and narrow Cursor/VS Code panel widths.
+
 ## 0.13.0 — 2026-09-06
 
 - Added DGC Ultra, the combined model/reasoning control, and a Codex-inspired live activity row that follows the newest response instead of floating above a scrolled transcript.

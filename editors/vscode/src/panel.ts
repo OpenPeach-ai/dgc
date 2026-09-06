@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
+import { execFile } from "child_process";
+import { lstat, readFile, readlink } from "fs/promises";
+import { basename, relative as relativePath, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable } from "./configuration";
 
@@ -33,6 +36,8 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
 
+const MAX_REVIEW_TEXT_BYTES = 4 * 1024 * 1024;
+
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
 type ManagedMcpServer = {
@@ -54,6 +59,30 @@ type ProviderSecretMutation = {
   remove: boolean;
 };
 type ApprovedModeChange = { mode: string; acknowledgeWorkspaceTrust: boolean };
+
+type WorkspaceChange = {
+  root: string;
+  folder: string;
+  path: string;
+  displayPath: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  untracked: boolean;
+  deleted: boolean;
+};
+
+function runGit(cwd: string, args: string[], timeout = 5000): Promise<string> {
+  return new Promise((resolveRun, rejectRun) => {
+    execFile("git", args, {
+      cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
+    }, (error, stdout) => {
+      if (error) { rejectRun(error); return; }
+      resolveRun(String(stdout || ""));
+    });
+  });
+}
 
 const MCP_SECRET_FLAGS = new Set([
   "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
@@ -195,15 +224,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private nativeSettingsReady = false;
   private webviewReady = false;
   private pendingWebviewActions: Array<() => void> = [];
-  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string }> = [];
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
+  private changesRefreshTimer?: NodeJS.Timeout;
+  private changesRefreshRevision = 0;
+  private workspaceChanges: WorkspaceChange[] = [];
+  private reviewDocuments = new Map<string, string>();
   private sb: vscode.StatusBarItem;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     // one status-bar item: `model · mode` (click to change model)
     this.sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     this.sb.command = "dgc.selectModel";
+    if (typeof vscode.workspace.registerTextDocumentContentProvider === "function") {
+      this.context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("dgc-review", {
+        provideTextDocumentContent: (uri) => this.reviewDocuments.get(uri.toString()) || "",
+      }));
+    }
+    if (typeof vscode.workspace.createFileSystemWatcher === "function") {
+      const watcher = vscode.workspace.createFileSystemWatcher("**/*");
+      watcher.onDidCreate(() => this.scheduleWorkspaceChanges());
+      watcher.onDidChange(() => this.scheduleWorkspaceChanges());
+      watcher.onDidDelete(() => this.scheduleWorkspaceChanges());
+      this.context.subscriptions.push(watcher);
+    }
   }
 
   // ---- backend lifecycle ---------------------------------------------------
@@ -292,6 +337,102 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // Close the same command/turn_start race as an ordinary composer prompt.
     this.turnActive = true;
     this.post({ type: "goal_start_state", state: "started" });
+  }
+
+  private async updateGoal(text: string): Promise<void> {
+    const objective = String(text || "").trim();
+    if (!objective) { return; }
+    try {
+      await this.requestState(this.ensureBackend(), "goal", {
+        type: "set_goal", text: objective, status: this.state.goal.status || "active",
+      }, "goal_changed", 10000);
+      this.post({ type: "goal_edit_state", state: "saved" });
+    } catch (err: any) {
+      this.post({ type: "goal_edit_state", state: "error",
+                  error: err?.message || "DGC could not update the goal." });
+    }
+  }
+
+  private async pauseGoal(): Promise<void> {
+    const be = this.ensureBackend();
+    try {
+      await this.stopActiveTurn(be);
+      await this.requestState(be, "goal", {
+        type: "set_goal", status: "blocked",
+      }, "goal_changed", 10000);
+    } catch (err: any) {
+      this.post({ type: "goal_control_state", state: "error",
+                  error: err?.message || "DGC could not pause the goal." });
+    }
+  }
+
+  private async resumeGoal(): Promise<void> {
+    const objective = String(this.state.goal.text || "").trim();
+    if (!objective) { return; }
+    if (this.turnActive) {
+      this.post({ type: "goal_control_state", state: "error",
+                  error: "Finish or stop the current turn before resuming the goal." });
+      return;
+    }
+    const be = this.ensureBackend();
+    try {
+      await this.requestState(be, "goal", {
+        type: "set_goal", status: "active",
+      }, "goal_changed", 10000);
+      const accepted = be.send({
+        type: "prompt", text: objective, context: this.editorContext(),
+      });
+      if (!accepted) { throw new Error("The backend did not accept the resumed goal turn."); }
+      this.turnActive = true;
+      this.post({ type: "goal_start_state", state: "started" });
+    } catch (err: any) {
+      this.post({ type: "goal_control_state", state: "error",
+                  error: err?.message || "DGC could not resume the goal." });
+    }
+  }
+
+  private async clearGoal(): Promise<void> {
+    const be = this.ensureBackend();
+    try {
+      await this.stopActiveTurn(be);
+      await this.requestState(be, "goal", {
+        type: "set_goal", text: "", status: "none",
+      }, "goal_changed", 10000);
+    } catch (err: any) {
+      this.post({ type: "goal_control_state", state: "error",
+                  error: err?.message || "DGC could not clear the goal." });
+    }
+  }
+
+  /** Goal mutations are deliberately unavailable while the agent worker owns the session.
+   * Observe the terminal turn event before persisting pause/clear so the control cannot race the
+   * backend's busy gate and leave a still-active goal behind. */
+  private async stopActiveTurn(be: DgcBackend): Promise<void> {
+    if (!this.turnActive) { return; }
+    await new Promise<void>((resolveStop, rejectStop) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        be.off("event", onEvent);
+        be.off("exit", onExit);
+        if (error) { rejectStop(error); } else { resolveStop(); }
+      };
+      const onEvent = (event: DgcEvent) => {
+        if (event.type === "turn_end") { finish(); }
+        else if (event.type === "error" && event.fatal) {
+          finish(new Error(String(event.message || "The active DGC turn failed while stopping.")));
+        }
+      };
+      const onExit = () => finish(new Error("The DGC backend exited while stopping the active turn."));
+      const timer = setTimeout(() => finish(new Error("DGC did not finish stopping the active turn.")), 15000);
+      be.on("event", onEvent);
+      be.once("exit", onExit);
+      if (!be.send({ type: "cancel" })) {
+        finish(new Error("The DGC backend did not accept the stop request."));
+      }
+    });
   }
 
   private activeSubscription(): any | undefined {
@@ -384,6 +525,164 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.workspaceRootsRevision++;
     this.workspaceRootsDirty = true;
     this.syncWorkspaceRoots();
+    this.scheduleWorkspaceChanges(0);
+  }
+
+  /** Mirror Codex's composer-adjacent changed-files rail from real workspace state. The host asks
+   * git directly with an argv array (never a shell string), scopes results to trusted workspace
+   * folders, and sends only relative paths plus numstat totals to the webview. */
+  private scheduleWorkspaceChanges(delay = 260): void {
+    if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
+    this.changesRefreshTimer = setTimeout(() => {
+      this.changesRefreshTimer = undefined;
+      void this.refreshWorkspaceChanges();
+    }, Math.max(0, delay));
+  }
+
+  private async untrackedAdditions(root: string, repoPath: string): Promise<{ additions: number; binary: boolean }> {
+    const absolute = resolve(root, repoPath);
+    if (absolute !== root && !absolute.startsWith(root + sep)) { return { additions: 0, binary: true }; }
+    try {
+      const info = await lstat(absolute);
+      if (!info.isFile() || info.size > 2 * 1024 * 1024) { return { additions: 0, binary: true }; }
+      const bytes = await readFile(absolute);
+      if (bytes.includes(0)) { return { additions: 0, binary: true }; }
+      if (!bytes.length) { return { additions: 0, binary: false }; }
+      let lines = 0;
+      for (const byte of bytes) { if (byte === 10) { lines += 1; } }
+      if (bytes[bytes.length - 1] !== 10) { lines += 1; }
+      return { additions: lines, binary: false };
+    } catch {
+      return { additions: 0, binary: true };
+    }
+  }
+
+  private async collectWorkspaceChanges(): Promise<WorkspaceChange[]> {
+    const folders = (vscode.workspace.workspaceFolders || []).slice(0, 16);
+    const changes = new Map<string, WorkspaceChange>();
+    for (const folder of folders) {
+      const folderPath = resolve(folder.uri.fsPath);
+      let root: string;
+      try { root = resolve((await runGit(folderPath, ["rev-parse", "--show-toplevel"])).trim()); }
+      catch { continue; }
+      const scope = relativePath(root, folderPath).replace(/\\/g, "/");
+      if (scope === ".." || scope.startsWith("../")) { continue; }
+      const pathspec = scope || ".";
+      let numstat = "";
+      try {
+        numstat = await runGit(root, ["diff", "--numstat", "-z", "--no-renames", "HEAD", "--", pathspec]);
+      } catch {
+        // A repository with no first commit has no HEAD. Its files are handled as untracked below.
+      }
+      for (const record of numstat.split("\0")) {
+        if (!record) { continue; }
+        const match = /^([^\t]+)\t([^\t]+)\t([\s\S]+)$/.exec(record);
+        if (!match) { continue; }
+        const repoPath = match[3];
+        const visiblePath = scope && repoPath.startsWith(scope + "/")
+          ? repoPath.slice(scope.length + 1) : repoPath;
+        const displayPath = folders.length > 1 ? `${folder.name}/${visiblePath}` : visiblePath;
+        const absolute = resolve(root, repoPath);
+        let deleted = false;
+        try { await lstat(absolute); } catch { deleted = true; }
+        changes.set(`${root}\0${repoPath}`, {
+          root, folder: folder.name, path: repoPath, displayPath,
+          additions: match[1] === "-" ? 0 : Math.max(0, Number(match[1]) || 0),
+          deletions: match[2] === "-" ? 0 : Math.max(0, Number(match[2]) || 0),
+          binary: match[1] === "-" || match[2] === "-", untracked: false, deleted,
+        });
+      }
+      let untracked = "";
+      try {
+        untracked = await runGit(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", pathspec]);
+      } catch { /* not a usable git worktree */ }
+      for (const repoPath of untracked.split("\0")) {
+        if (!repoPath || changes.has(`${root}\0${repoPath}`)) { continue; }
+        const visiblePath = scope && repoPath.startsWith(scope + "/")
+          ? repoPath.slice(scope.length + 1) : repoPath;
+        const displayPath = folders.length > 1 ? `${folder.name}/${visiblePath}` : visiblePath;
+        const counted = await this.untrackedAdditions(root, repoPath);
+        changes.set(`${root}\0${repoPath}`, {
+          root, folder: folder.name, path: repoPath, displayPath,
+          additions: counted.additions, deletions: 0, binary: counted.binary,
+          untracked: true, deleted: false,
+        });
+      }
+    }
+    return [...changes.values()].sort((a, b) => a.displayPath.localeCompare(b.displayPath)).slice(0, 500);
+  }
+
+  private async refreshWorkspaceChanges(): Promise<void> {
+    const revision = ++this.changesRefreshRevision;
+    const files = await this.collectWorkspaceChanges();
+    if (revision !== this.changesRefreshRevision) { return; }
+    this.workspaceChanges = files;
+    this.post({
+      type: "workspace_changes",
+      total: files.length,
+      additions: files.reduce((sum, item) => sum + item.additions, 0),
+      deletions: files.reduce((sum, item) => sum + item.deletions, 0),
+      files: files.map((item) => ({
+        path: item.displayPath, additions: item.additions, deletions: item.deletions,
+        binary: item.binary, untracked: item.untracked, deleted: item.deleted,
+      })),
+    });
+  }
+
+  private async reviewWorkspaceChange(displayPath: string): Promise<void> {
+    const change = this.workspaceChanges.find((item) => item.displayPath === displayPath);
+    if (!change) {
+      this.scheduleWorkspaceChanges(0);
+      void vscode.window.showInformationMessage("That file is no longer in the workspace change set.");
+      return;
+    }
+    if (change.binary) {
+      if (!change.deleted) {
+        const absolute = resolve(change.root, change.path);
+        if (absolute !== change.root && absolute.startsWith(change.root + sep)) {
+          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(absolute), { preview: true });
+          return;
+        }
+      }
+      void vscode.window.showInformationMessage("Binary changes do not have a text diff to review.");
+      return;
+    }
+    let before = "", after = "";
+    if (!change.untracked) {
+      try { before = await runGit(change.root, ["show", `HEAD:./${change.path}`], 8000); }
+      catch { before = ""; }
+    }
+    if (!change.deleted) {
+      const absolute = resolve(change.root, change.path);
+      if (absolute === change.root || absolute.startsWith(change.root + sep)) {
+        try {
+          const info = await lstat(absolute);
+          if (info.isSymbolicLink()) {
+            after = `${await readlink(absolute)}\n`;
+          } else if (info.isFile() && info.size <= MAX_REVIEW_TEXT_BYTES) {
+            const bytes = await readFile(absolute);
+            if (bytes.includes(0)) {
+              void vscode.window.showInformationMessage("Binary changes do not have a text diff to review.");
+              return;
+            }
+            after = bytes.toString("utf8");
+          } else {
+            void vscode.window.showInformationMessage("This change is too large or is not a text file.");
+            return;
+          }
+        } catch { after = ""; }
+      }
+    }
+    this.reviewDocuments.clear();
+    const id = createHash("sha256").update(`${change.root}\0${change.path}\0${Date.now()}`).digest("hex").slice(0, 16);
+    const leaf = basename(change.path) || "change";
+    const left = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/before/${leaf}` });
+    const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
+    this.reviewDocuments.set(left.toString(), before);
+    this.reviewDocuments.set(right.toString(), after);
+    await vscode.commands.executeCommand("vscode.diff", left, right, `${change.displayPath} (DGC review)`, {
+      preview: true,
+    });
   }
 
   /** Structured resources describing what the user is looking at. The backend
@@ -651,6 +950,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "error" && (ev as any).notInstalled) {
       this.promptInstallCli();
     }
+    if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
+      this.scheduleWorkspaceChanges(ev.type === "tool_result" ? 120 : 0);
+    }
     this.post({ type: "event", event: ev });
   }
 
@@ -682,7 +984,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.testPostedMessages.push({
         type: String(msg?.type || ""),
         ...(event ? { eventType: String(event.type || ""),
-          ...(event.id === undefined ? {} : { id: String(event.id) }) } : {}),
+          ...(event.id === undefined ? {} : { id: String(event.id) }),
+          ...(event.command === undefined ? {} : { command: String(event.command) }) } : {}),
       });
       if (this.testPostedMessages.length > 256) {
         this.testPostedMessages.splice(0, this.testPostedMessages.length - 256);
@@ -700,7 +1003,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.onMessage(msg);
   }
 
-  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string }> {
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string }> {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }
@@ -809,6 +1112,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
         if (this.state.model) { this.postState(); }
+        this.scheduleWorkspaceChanges(0);
         break;
       }
       case "prompt": {
@@ -875,6 +1179,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "cancel":
         this.mcpUrls.clear();
         be.send({ type: "cancel" });
+        break;
+      case "pauseGoal":
+        await this.pauseGoal();
+        break;
+      case "resumeGoal":
+        await this.resumeGoal();
+        break;
+      case "clearGoal":
+        await this.clearGoal();
+        break;
+      case "updateGoal":
+        await this.updateGoal(String(msg.text || ""));
+        break;
+      case "reviewChange":
+        await this.reviewWorkspaceChange(String(msg.path || ""));
         break;
       case "pickModel":
         this.selectModel();
@@ -2491,6 +2810,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
+    this.changesRefreshRevision++;
+    this.reviewDocuments.clear();
     this.backend?.dispose();
     this.sb.dispose();
   }
@@ -2524,6 +2846,24 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <button type="button" id="surface-secondary" class="act" aria-label="Secondary panel action" hidden></button>
   </div>
   <div id="surface-body" class="surface-body" tabindex="-1"></div>
+</div>
+<div id="changes-review" class="panel-overlay" role="dialog" aria-modal="true" aria-labelledby="changes-review-title" hidden>
+  <div class="set-head">
+    <span id="changes-review-title" class="set-title"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span> Review changes</span>
+    <button type="button" id="changes-review-close" class="fbtn" title="Close" aria-label="Close changed files"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+  </div>
+  <div id="changes-review-summary" class="changes-review-summary"></div>
+  <div id="changes-review-list" class="changes-review-list" tabindex="-1"></div>
+</div>
+<div id="goal-editor" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="goal-editor-title" hidden>
+  <div class="goal-dialog">
+    <div class="goal-dialog-mark"><span class="codicon codicon-target" aria-hidden="true"></span></div>
+    <button type="button" id="goal-editor-close" class="fbtn goal-dialog-close" title="Close" aria-label="Close goal editor"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    <h2 id="goal-editor-title">Edit goal</h2>
+    <label class="sr-only" for="goal-editor-text">Goal</label>
+    <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="12000"></textarea>
+    <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act">Cancel</button><button type="button" id="goal-editor-save" class="act primary">Save</button></div>
+  </div>
 </div>
 <div id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
   <div class="set-head">
@@ -2647,18 +2987,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
-  <section id="goalbar" aria-label="Standing goal" hidden>
-    <span class="goal-icon codicon codicon-target" aria-hidden="true"></span>
-    <div class="goal-copy">
-      <div class="goal-label"><span id="goal-status">Active goal</span><span aria-hidden="true">·</span><time id="goal-time">0:00</time></div>
-      <div id="goal-text"></div>
-    </div>
-    <div class="goal-actions">
-      <button type="button" id="goal-edit" class="fbtn" title="Edit goal" aria-label="Edit standing goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
-      <button type="button" id="goal-toggle" class="fbtn" title="Pause goal" aria-label="Pause standing goal"><span class="codicon codicon-debug-pause" aria-hidden="true"></span></button>
-      <button type="button" id="goal-clear" class="fbtn" title="Clear goal" aria-label="Clear standing goal"><span class="codicon codicon-close" aria-hidden="true"></span></button>
-    </div>
-  </section>
+  <div id="composer-rail" aria-label="Current work" hidden>
+    <section id="changesbar" class="rail-item" aria-label="Workspace changes" hidden>
+      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
+      <button type="button" id="changes-review-button" class="rail-text-action">Review</button>
+    </section>
+    <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>
+      <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>
+      <div class="goal-actions">
+        <button type="button" id="goal-clear" class="rail-icon-button" title="Clear goal" aria-label="Clear goal"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
+        <button type="button" id="goal-toggle" class="rail-icon-button" title="Pause goal" aria-label="Pause goal"><span class="codicon codicon-debug-pause" aria-hidden="true"></span></button>
+        <button type="button" id="goal-edit" class="rail-icon-button" title="Edit goal" aria-label="Edit goal"><span class="codicon codicon-edit" aria-hidden="true"></span></button>
+      </div>
+    </section>
+  </div>
   <div id="attachments" aria-label="Attached context"></div>
   <div id="cbox" data-mode="default">
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>

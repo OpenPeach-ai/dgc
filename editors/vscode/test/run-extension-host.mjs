@@ -45,6 +45,10 @@ let seq = 0;
 let rootsAcknowledged = false;
 let subscriptionModel = "";
 let subscriptionEffort = "";
+let standingGoal = "";
+let standingGoalStatus = "none";
+let activeGoalTurn = false;
+let goalPromptCount = 0;
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
 const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
@@ -85,12 +89,31 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     sendConfig(cmd.request_id);
   }
-  if (cmd.type === "set_goal") send({ type: "goal_changed", request_id: cmd.request_id,
-    goal: cmd.text || "installed-host goal", status: cmd.status || "active" });
+  if (cmd.type === "set_goal") {
+    if (activeGoalTurn) {
+      send({ type: "command_rejected", request_id: cmd.request_id, command: "set_goal",
+        reason: "turn_in_progress", message: "'set_goal' is unavailable while a turn is running; cancel or wait" });
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(cmd, "text")) standingGoal = String(cmd.text || "");
+    standingGoalStatus = standingGoal ? (cmd.status || standingGoalStatus || "active") : "none";
+    send({ type: "goal_changed", request_id: cmd.request_id,
+      goal: standingGoal, status: standingGoalStatus });
+  }
   if (cmd.type === "prompt" && cmd.text === "host matrix") {
+    goalPromptCount += 1;
+    activeGoalTurn = true;
     send({ type: "turn_start", turn_id: "goal-turn", prompt: cmd.text });
-    send({ type: "text", turn_id: "goal-turn", text: "Goal started." });
-    send({ type: "turn_end", turn_id: "goal-turn", reason: "completed", token_estimate: 2 });
+    send({ type: "text_delta", text: "Goal started." });
+    send({ type: "stream_end" });
+    if (goalPromptCount > 1) setTimeout(() => {
+      activeGoalTurn = false;
+      send({ type: "turn_end", turn_id: "goal-turn", reason: "completed", token_estimate: 2 });
+    }, 100);
+  }
+  if (cmd.type === "cancel" && activeGoalTurn) {
+    activeGoalTurn = false;
+    send({ type: "turn_end", turn_id: "goal-turn", reason: "cancelled", token_estimate: 2 });
   }
   if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
     plan: "1. Inspect\\n2. Verify", exists: true });

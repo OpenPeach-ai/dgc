@@ -2,7 +2,7 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
-  const goalBar = $("goalbar");
+  const goalBar = $("goalbar"), changesBar = $("changesbar"), composerRail = $("composer-rail");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -531,7 +531,50 @@
   }
   function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
-  // ---- standing goal — durable state above the composer, with an active-work clock ----
+  // ---- Codex-style composer rail: durable workspace changes and standing goal ----
+  let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
+  function syncComposerRail() {
+    composerRail.hidden = goalBar.hidden && changesBar.hidden;
+    composerRail.classList.toggle("has-changes", !changesBar.hidden);
+    composerRail.classList.toggle("has-goal", !goalBar.hidden);
+  }
+  function setWorkspaceChanges(next) {
+    const files = Array.isArray(next?.files) ? next.files.filter((item) => item
+      && typeof item.path === "string").slice(0, 500) : [];
+    changeState = {
+      total: Math.max(0, Number(next?.total) || files.length),
+      additions: Math.max(0, Number(next?.additions) || 0),
+      deletions: Math.max(0, Number(next?.deletions) || 0), files,
+    };
+    changesBar.hidden = changeState.total === 0;
+    $("changes-count").textContent = `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`;
+    $("changes-add").textContent = `+${changeState.additions}`;
+    $("changes-del").textContent = `−${changeState.deletions}`;
+    syncComposerRail();
+    if (!$("changes-review").hidden) renderChangesReview();
+  }
+  function renderChangesReview() {
+    const summary = $("changes-review-summary"), list = $("changes-review-list");
+    summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
+    list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
+      `<button type="button" class="change-row" data-change="${index}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">+${Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">−${Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
+      : '<div class="surface-empty">No workspace changes remain.</div>';
+    list.querySelectorAll("[data-change]").forEach((button) => button.onclick = () => {
+      const item = changeState.files[Number(button.dataset.change)];
+      if (item) vscode.postMessage({ type: "reviewChange", path: item.path });
+    });
+  }
+  function openChangesReview() {
+    renderChangesReview();
+    $("changes-review").hidden = false;
+    $("changes-review-close").focus();
+  }
+  function closeChangesReview() {
+    $("changes-review").hidden = true;
+    $("changes-main").focus();
+  }
+
+  // Standing goal — the objective and clock stay attached immediately above the composer.
   let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
   function currentGoalElapsed() {
     return goalState.elapsed + (goalState.status === "active"
@@ -554,18 +597,39 @@
         : (text === goalState.text ? priorElapsed : 0) };
     goalObservedAt = Date.now();
     goalBar.hidden = !text;
-    if (!text) return;
+    syncComposerRail();
+    if (!text) { closeGoalEditor(false); return; }
     $("goal-text").textContent = text;
     const paused = status === "blocked", completed = status === "completed";
-    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Active goal";
+    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Pursuing goal";
     goalBar.dataset.status = status;
     const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
     toggle.hidden = false;
     const resume = paused || completed;
     icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
     toggle.title = resume ? "Resume goal" : "Pause goal";
-    toggle.setAttribute("aria-label", resume ? "Resume standing goal" : "Pause standing goal");
+    toggle.setAttribute("aria-label", resume ? "Resume goal" : "Pause goal");
+    $("goal-main").title = text;
+    $("goal-main").setAttribute("aria-label", `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
+  }
+  function openGoalEditor() {
+    if (!goalState.text) return;
+    const editor = $("goal-editor-text");
+    editor.value = goalState.text;
+    $("goal-editor-save").disabled = false;
+    $("goal-editor").hidden = false;
+    editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
+  }
+  function closeGoalEditor(restoreFocus = true) {
+    $("goal-editor").hidden = true;
+    if (restoreFocus && !goalBar.hidden) $("goal-main").focus();
+  }
+  function saveGoalEditor() {
+    const text = $("goal-editor-text").value.trim();
+    if (!text) return;
+    $("goal-editor-save").disabled = true;
+    vscode.postMessage({ type: "updateGoal", text });
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
@@ -1046,7 +1110,6 @@
       case "goal_changed": {
         const text = String(ev.goal || "");
         setGoalState({ text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
-        sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");
         break;
       }
       case "status":
@@ -1085,13 +1148,32 @@
   function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
-    type: "slashText", text: goalState.status === "active" ? "/goal pause" : "/goal resume",
+    type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
-  $("goal-clear").onclick = () => vscode.postMessage({ type: "slashText", text: "/goal clear" });
-  $("goal-edit").onclick = () => {
-    input.value = `/goal ${goalState.text}`; input.selectionStart = input.selectionEnd = input.value.length;
-    input.focus(); onInput();
-  };
+  $("goal-clear").onclick = () => vscode.postMessage({ type: "clearGoal" });
+  $("goal-main").onclick = openGoalEditor;
+  $("goal-edit").onclick = openGoalEditor;
+  $("goal-editor-close").onclick = () => closeGoalEditor();
+  $("goal-editor-cancel").onclick = () => closeGoalEditor();
+  $("goal-editor-save").onclick = saveGoalEditor;
+  $("goal-editor-text").addEventListener("input", () => {
+    $("goal-editor-save").disabled = !$("goal-editor-text").value.trim();
+  });
+  $("goal-editor").addEventListener("click", (event) => {
+    if (event.target === $("goal-editor")) closeGoalEditor();
+  });
+  $("changes-main").onclick = openChangesReview;
+  $("changes-review-button").onclick = openChangesReview;
+  $("changes-review-close").onclick = closeChangesReview;
+  $("goal-editor").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeGoalEditor(); }
+    else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault(); saveGoalEditor();
+    }
+  });
+  $("changes-review").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
+  });
   function submit() {
     const text = input.value.trim();
     if (!text && !attachments.length) return;
@@ -1443,6 +1525,7 @@
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
     else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "surface_open") { openSurface(msg.surface); }
     else if (msg.type === "command_menu") {
@@ -1459,6 +1542,16 @@
         setSending(false);
         sysLine(String(msg.error || "DGC could not start the goal."), true);
       }
+    }
+    else if (msg.type === "goal_edit_state") {
+      if (msg.state === "saved") closeGoalEditor();
+      else if (msg.state === "error") {
+        $("goal-editor-save").disabled = false;
+        sysLine(String(msg.error || "DGC could not update the goal."), true);
+      }
+    }
+    else if (msg.type === "goal_control_state" && msg.state === "error") {
+      sysLine(String(msg.error || "DGC could not change the goal state."), true);
     }
     else if (msg.type === "compact_state") {
       compacting = msg.state === "working";
