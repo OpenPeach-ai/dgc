@@ -2,7 +2,7 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Requires DGC CLI 0.28.0 or newer with editor protocol v6 on your PATH. Run `dgc setup`, then use
+> Use DGC CLI 0.29.0 or newer for all features; the connection requires editor protocol v6. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does
@@ -12,8 +12,10 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **Changed files** — the composer rail reviews workspace changes against the last commit, including files that predate this conversation. Native diffs, staged-only previews, new files and explicit partial-scan notices use the CLI's bounded file/object reader without executing repository diff filters. Requires the CLI's `workspace_inspection` capability.
 - **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics, explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
 - **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: a compact model picker with a reasoning slider, a permission-mode picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. Model/thinking controls follow the active native or subscription route; subscription pickers use vendor hints or a free-form vendor model id without querying the native endpoint. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
+- **Composer commands and skills** — type `/` or `$` after a word boundary anywhere in the draft. Pick commands, skills and templates without losing surrounding text. `/plan`, `/review` and `/init` prepare shared CLI/editor workflows. Select up to eight skills/templates, including 22 bundled skills, and attach the same inputs to a goal.
+- **Draft recovery** — per-chat drafts and attachments survive panel reloads and backend restarts. Rejected or uncertain deliveries stay available for review; recovered prompts are never sent automatically.
 - **Feature browsers instead of transcript dumps** — `/skills`, `/docs`, `/mcp`, `/permissions`, `/memory`, and `/hooks` open searchable, keyboard-accessible surfaces. Skills show their winning project/user/bundled source and instructions; documentation renders in place; none of these catalogs pollutes chat history.
-- **MCP manager** — add, edit, remove, inspect, and reload local STDIO or remote servers from the panel. Safe server metadata is persisted in DGC configuration while environment values and remote bearer tokens stay in VS Code SecretStorage and never enter the webview again.
+- **MCP manager** — add, edit, remove, enable, disable and reconnect local STDIO or remote servers. Browse resources, templates and prompts, preview text, and attach bounded snapshots to a draft or goal. Safe server metadata is persisted in DGC configuration while environment values and remote bearer tokens stay in VS Code SecretStorage and never enter the webview again.
 - **Categorized Settings page** (gear icon) — General, Models, Agents, Security, and Extensions cover provider routes, reasoning display, suggestions, permission/sandbox/network scope, plan/artifact behavior, tool profile, parallelism, and feature-manager shortcuts. Model credentials stay in endpoint-scoped VS Code SecretStorage; non-secret provider defaults can also be set in Settings UI → **DGC**.
 - **Keyboard and assistive access** — semantic buttons, menus, live status, non-color tool outcomes, dialog focus trapping, reduced-motion and forced-colors behavior, WCAG text-palette checks, and keyboard navigation cover the composer, tool/reasoning disclosures, approvals, attachments, and settings.
 - **Permission prompts** inline — allow once / always-allow (saves a rule) / deny. Permission, plan, option, and MCP cards are request-correlated and single-use; Stop/expiry/backend exit disables them immediately, and decision traffic stays ahead of queued prompts under transport pressure.
@@ -39,13 +41,26 @@ Open **DGC: MCP Servers** or run `/mcp`:
 - Local STDIO: executable, one argument per line, optional environment variable names and secret
   values. Existing ambient variables may be referenced by name without copying their values.
 - Remote: HTTPS URL (or loopback HTTP for local development) and an optional bearer token. The
-  current bridge uses `npx -y mcp-remote`; Node/npm must therefore be available for remote entries.
+  current bridge uses `npx -y mcp-remote@0.8.3`; Node/npm must therefore be available for remote entries.
   The token is expanded from a process-local environment variable rather than placed in argv.
 
-Removing a server removes its extension-managed secrets. Reload reconnects every configured server
-and refreshes the tool catalog. A server with SecretStorage-only credentials waits for editor setup
+Removing a server removes its extension-managed secrets. Disable preserves its definition;
+Reconnect refreshes one server or all enabled servers. A server with SecretStorage-only credentials waits for editor setup
 instead of starting once without its secrets; use a `KEY` ambient reference when the same server
 must also start in the standalone CLI. Tool execution still passes through DGC's permission boundary.
+
+Use **Resources**, **Resource templates**, or **Prompts** to preview and attach server text. Browser
+sign-in is cancellable. Remote desktop editors request callback forwarding before opening the browser;
+if the mapping changes its port or origin, DGC explains same-port forwarding and reconnect. See the
+[MCP guide](https://github.com/OpenPeach-ai/dgc/blob/main/docs/MCP_CONTEXT.md) for provider and remote-editor limits.
+
+## Updating
+
+Keep the CLI and extension current. `dgc update` updates the CLI; the editor gallery updates the
+extension. Check DGC's own **Auto Update** setting in its extension menu, especially after installing
+a VSIX manually. Cursor's catalog can lag a public registry. After an update, reload the editor if
+it still runs the old extension, and use **DGC: Restart Backend** after updating the CLI. See the
+[upgrade guide](https://github.com/OpenPeach-ai/dgc/blob/main/docs/UPGRADING.md) for protocol mismatches.
 
 ## Settings
 

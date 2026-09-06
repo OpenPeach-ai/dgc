@@ -1,6 +1,7 @@
 # Extension audit and parity work
 
-Implementation and source review are complete; release validation and publication are in progress. The target is Codex extension **26.5901.22334**, with DGC branding,
+This records the completed CLI 0.28.0 / extension 0.15.0 release. The next composer, skills and MCP
+pass is tracked in [its current audit](COMPOSER_SKILLS_MCP_AUDIT.md). The target is Codex extension **26.5901.22334**, with DGC branding,
 purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.27.0** and extension
 **0.14.1**. Downloaded reference binaries and private screenshots are excluded from release sources.
 
@@ -42,9 +43,8 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 
 ## Release acceptance
 
-- CLI **0.28.0** and extension **0.15.0** are the release targets. Publication requires the source-bound
-  runtime archive, verified VSIX, green CI, a clean install, and production-channel checksum checks.
-  The release scripts enforce these gates; this source audit is recorded before publication.
+- CLI **0.28.0** and extension **0.15.0** were published from reviewed, source-bound artifacts.
+  These historical checks do not establish validation of a later release; its audit records that work.
 
 ## Scope and known limits
 

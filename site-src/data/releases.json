@@ -1,13 +1,24 @@
 {
-  "refreshed_at": "2026-09-06T00:00:00Z",
+  "refreshed_at": "2026-09-06T18:00:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 18,
+  "cli_releases_last_14_days": 19,
   "cli": [
+    {
+      "version": "0.29.0",
+      "date": "2026-09-06",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.29.0",
+      "status": "current",
+      "notes": [
+        "Inline commands and exact skill selection, 22 bundled skills, portable packages, and shared plan, review and project-guide workflows.",
+        "MCP server management and bounded resource/prompt snapshots work across terminal, editor and durable goals.",
+        "Correct native completion and cancellation, reliable subscription startup, safer Git inspection and closed command output pipes."
+      ]
+    },
     {
       "version": "0.28.0",
       "date": "2026-09-06",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.28.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Durable goals continue on native and subscription routes, with pause, resume, review, token budgets and saved completion evidence.",
         "Shared response guidance, safer delegated streaming and protocol v6 keep CLI and editor behavior aligned.",
@@ -138,10 +149,21 @@
   ],
   "extension": [
     {
-      "version": "0.15.0",
+      "version": "0.16.0",
       "date": "2026-09-06",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
+      "notes": [
+        "Choose commands, skills and templates anywhere in the draft; retain per-chat text and attachments across reloads.",
+        "Attach skill instructions and MCP context to native, subscription and goal requests, with server management and cancellable browser sign-in.",
+        "Shared plan and review workflows, safer native diff previews and subscription startup fixes; CLI 0.29.0 recommended with protocol v6."
+      ]
+    },
+    {
+      "version": "0.15.0",
+      "date": "2026-09-06",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "shipped",
       "notes": [
         "Structured Markdown, highlighted code and expandable tool activity with a clear final response",
         "Goal pause, resume, edit, delete and evidence review above the composer; requires CLI 0.28.0 and protocol v6",

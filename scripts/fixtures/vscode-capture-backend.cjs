@@ -15,10 +15,12 @@ const { spawnSync } = require("node:child_process");
 const workspace = process.cwd();
 const statusPath = process.env.DGC_CAPTURE_STATUS || "";
 const target = path.join(workspace, "clamp.py");
+const initialText = fs.readFileSync(target, "utf8");
 let seq = 0;
 let turnActive = false;
 let planOpen = false;
 let currentMode = "plan";
+let goalStatus = "active";
 let timers = [];
 
 const send = (event) => process.stdout.write(JSON.stringify({ seq: seq++, ...event }) + "\n");
@@ -35,7 +37,7 @@ const writeStatus = (value) => {
   fs.writeFileSync(temporary, JSON.stringify(value) + "\n");
   fs.renameSync(temporary, statusPath);
 };
-const goal = (status = "active") => ({
+const goal = (status = goalStatus) => ({
   text: "Ship a verified bounds fix",
   status,
   elapsed_seconds: status === "active" ? 97 : 109,
@@ -44,7 +46,7 @@ const sendConfig = (requestId) => send({
   type: "config",
   ...(requestId ? { request_id: requestId } : {}),
   model: "deterministic protocol fixture",
-  mode: "plan",
+  mode: currentMode,
   think: "off",
   base_url: "fixture://deterministic",
   project_root: workspace,
@@ -64,7 +66,7 @@ send({
   type: "ready",
   version: "capture-fixture",
   protocol_version: 6,
-  capabilities: { correlated_state_requests: true },
+  capabilities: { correlated_state_requests: true, workspace_inspection: true },
   model: "deterministic protocol fixture",
   mode: "plan",
   think: "off",
@@ -175,7 +177,8 @@ function applyApprovedTrace() {
     }));
     later(1150, () => {
       send({ type: "stream_end" });
-      send({ type: "goal_changed", goal: goal("completed").text, status: "completed", elapsed_seconds: 109 });
+      goalStatus = "completed";
+      send({ type: "goal_changed", goal: goal().text, status: goalStatus, elapsed_seconds: 109 });
       send({ type: "turn_end", turn_id: "capture-turn", reason: "completed", token_estimate: 84 });
       writeStatus({ state: "passed", tests: 3, changed_file: "clamp.py" });
       turnActive = false;
@@ -187,7 +190,23 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   let command;
   try { command = JSON.parse(line); }
   catch { return; }
-  if (command.type === "set_workspace_roots") {
+  if (command.type === "get_workspace_changes") {
+    // The controlled fixture edits exactly this one known expression. Read its real state so
+    // the installed extension exercises the current backend-owned change-inspection protocol.
+    const changed = fs.readFileSync(target, "utf8") !== initialText;
+    send({ type: "workspace_changes", request_id: command.request_id, roots: [{
+      root: workspace, total: changed ? 1 : 0, complete: true, notices: [],
+      files: changed ? [{ path: "clamp.py", additions: 1, deletions: 1, counted: true,
+        binary: false, untracked: false, deleted: false, staged: false, error: "" }] : [],
+    }] });
+  } else if (command.type === "get_workspace_change") {
+    if (command.root !== workspace || command.path !== "clamp.py") {
+      send({ type: "command_rejected", command: command.type, request_id: command.request_id,
+        reason: "outside_capture_fixture", message: "Only the capture fixture file is available." });
+    } else send({ type: "workspace_change", request_id: command.request_id,
+      root: workspace, path: "clamp.py", kind: "file", before: initialText,
+      after: fs.readFileSync(target, "utf8") });
+  } else if (command.type === "set_workspace_roots") {
     send({
       type: "workspace_roots", roots: command.roots,
       ...(command.request_id ? { request_id: command.request_id } : {}),
@@ -203,7 +222,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   } else if (command.type === "get_goal") {
     send({ type: "goal_changed", request_id: command.request_id, goal: goal().text,
-      status: "active", elapsed_seconds: 97 });
+      status: goalStatus, elapsed_seconds: goal().elapsed_seconds });
   } else if (command.type === "prompt") {
     if (command.request_id) send({ type: "prompt_accepted", request_id: command.request_id, state: "started" });
     beginTrace(command);

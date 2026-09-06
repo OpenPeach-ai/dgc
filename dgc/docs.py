@@ -322,11 +322,62 @@ explicitly confirm LAN sharing; plan previews always stay private.
 DGC speaks the **Model Context Protocol**: connect a stdio MCP server and its
 tools become callable by the agent as `mcp__<server>__<tool>`.
 
-- **/mcp** — list connected servers and their tools.
-- **/mcp add** — connect one: give it a name, a command or remote URL, and the names of any
-  environment variables to pass. Set credential values in those variables before launching DGC;
-  the TUI never accepts or persists their literal values.
-- **/mcp remove <name>** — disconnect it.
+- **/mcp** — browse connected servers and their tools, resources, templates and prompts.
+- **/mcp add docs --url https://mcp.example.com/mcp** — connect a remote server. Add
+  `--auth-env DOCS_TOKEN` to reference a bearer token by its environment variable name.
+- **/mcp add local-docs --env DOCS_TOKEN -- python /path/to/server.py** — configure a local process.
+  Set credential values in those variables before launching DGC; terminal commands accept names,
+  never literal credential arguments. The editor stores the credentials it manages in SecretStorage.
+- **/mcp edit NAME ...** — change an existing definition; add never overwrites a server.
+- **/mcp disable NAME**, **/mcp enable NAME** — change availability without losing the definition.
+- **/mcp reconnect NAME** — reconnect one server; omit the name to reconnect all enabled servers.
+- **/mcp remove NAME** — disconnect and forget its DGC configuration.
+
+The same commands work outside a chat as `dgc mcp ...`. CLI, TUI and editor share configuration;
+SecretStorage-only values remain editor-owned, so use an ambient variable reference when a server
+also needs to start from the terminal.
+
+## Attach resources and prompts
+
+Choose **Resources**, **Resource templates** or **Prompts** on a connected server, preview its text,
+and choose **Attach to draft**. The snapshot stays in a removable chip; reopening management keeps
+existing text and selections. Templates take a concrete server URI, and prompts accept only their
+declared arguments.
+
+Terminal examples:
+
+```text
+/mcp resources docs
+/mcp templates docs
+/mcp prompts docs
+/mcp read docs docs://api/reference
+/mcp prompt docs inspect topic="request validation"
+/mcp context
+/mcp clear-context
+```
+
+Interactive `read` and `prompt` stage a snapshot for the next prompt or goal. `dgc mcp read ...`
+prints the result instead. Loading another chat clears terminal staging. Resource URIs belong to
+the selected server: even a `file://` URI is fetched from that server, not opened as a local file.
+Catalogs and text have explicit bounds; binary/media omissions are reported. Reference text cannot
+activate skills or grant tool access. Native reads use normal permissions, hooks and redaction;
+plan mode permits attached snapshots but does not execute live MCP tools.
+
+## Remote browser sign-in
+
+Remote entries use the pinned `mcp-remote@0.8.3` bridge and require Node/npm. Explicit reconnects
+allow a cancellable browser sign-in window. Decline stops the connection; use Reconnect to retry
+an expired login or cold-start failure. OAuth tokens live in the bridge's private user cache,
+separate from bearer tokens managed by the editor.
+
+For desktop SSH/remote editors, DGC requests callback forwarding before opening sign-in. If the
+editor changes the callback port or address, forward the remote callback port to the same local
+port in the Ports panel and reconnect. This bridge cannot use browser-only remote editors that
+require another callback origin. Terminal SSH needs equivalent forwarding. Device-code support
+belongs to the provider. See [MCP authentication details](https://github.com/OpenPeach-ai/dgc/blob/main/docs/MCP_CONTEXT.md)
+for verified flows and current bridge limits.
+
+## Protocol and execution boundaries
 
 DGC probes the stateless MCP 2026 protocol (`server/discover` plus self-describing
 requests). If a handshake-era server rejects that probe, DGC discards the probe
@@ -1006,7 +1057,12 @@ when you want to override it.
 - `autonomous_gate` — a check command that must exit `0` before a native local/API agent may stop a turn.
 - `autonomous_max_turns` (default `30`) — bound on failed gate retries.
 - `verify_before_done` (default `false`) and `verify_command` — run a command and feed a failure
-  back before allowing a native local/API turn to end.
+  back before allowing a native local/API turn to end. Passing a check normally returns its
+  result to the model so it can finish other requested work and selected skill steps.
+- `finish_on_verified` (default `false`) — opt in only when the configured verifier defines the
+  entire task. In timed native `auto` runs with `verify_before_done` and `verify_command`, a green
+  check can end the turn without another model request. Active goals, explicit skills and unfinished
+  todos always retain normal completion. Leave this off for ordinary multi-step work.
 
 Subscription turns are delegated to the selected vendor CLI and bypass these two native-loop gates.
 
