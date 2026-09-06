@@ -127,10 +127,22 @@
   ],
   "extension": [
     {
+      "version": "0.14.1",
+      "date": "2026-09-06",
+      "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.1",
+      "status": "current",
+      "notes": [
+        "Protocol v5 with a one-Enter `objective /goal` composer action that preserves and runs the exact tagged objective",
+        "Leading goal commands and ordinary inline `/goal` prose remain unambiguous",
+        "Cursor and VS Code theme-native backgrounds, surfaces, controls, and text instead of a fixed black shell",
+        "Real editor-host verification across dark/light themes and wide/narrow panels"
+      ]
+    },
+    {
       "version": "0.14.0",
       "date": "2026-09-06",
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Protocol v5 with live changed-file totals and one-click native VS Code side-by-side review",
         "Composer-attached timed goals with direct pause, resume, edit, and clear controls",

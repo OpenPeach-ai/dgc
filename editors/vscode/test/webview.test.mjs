@@ -531,6 +531,31 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.equal(doc.getElementById("send").title, "Stop",
     "a goal objective must immediately look like a running turn while its state is persisted");
 
+  input.value = "ship the release safely /g";
+  input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.match(doc.getElementById("pop").textContent, /\/goal/,
+    "the goal action must remain discoverable after an in-progress prompt");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(input.value, "",
+    "choosing the suffix action must activate the preserved prompt without a second Enter");
+  const suffixedGoal = posted.filter((m) => m.type === "startGoal").at(-1);
+  assert.equal(suffixedGoal.text, "ship the release safely");
+  assert.equal(posted.some((m) => m.type === "prompt" && /\/goal$/.test(m.text)), false,
+    "a trailing goal tag must not leak into ordinary model prompt text");
+  assert.equal([...doc.querySelectorAll(".goal-prompt .bubble")].at(-1).textContent,
+    "ship the release safely");
+
+  input.value = "Pause /goal";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.filter((m) => m.type === "startGoal").at(-1).text, "Pause",
+    "suffix goals must preserve objectives that coincide with a goal-state command");
+
+  input.value = "Explain /goal syntax";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.filter((m) => m.type === "prompt").at(-1).text, "Explain /goal syntax",
+    "a slash token inside prose must remain an ordinary prompt");
+
   input.value = "/viewp";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   assert.match(doc.getElementById("pop").textContent, /saved plan/,
@@ -879,8 +904,9 @@ test("feature browsers manage MCP, docs, permissions, memory, and settings witho
 });
 
 test("webview palette meets text contrast and forced-colors keeps state non-color-only", () => {
-  const backgrounds = ["--bg", "--surface", "--surface2", "--code", "--term"];
-  for (const foreground of ["--text", "--text-strong", "--muted", "--faint", "--accent-text", "--err"]) {
+  const backgrounds = ["--fallback-bg", "--fallback-surface", "--fallback-surface2", "--fallback-code"];
+  for (const foreground of ["--fallback-text", "--fallback-text-strong", "--fallback-muted",
+    "--fallback-faint", "--accent-text", "--err"]) {
     for (const background of backgrounds) {
       const ratio = contrastRatio(rootHex(foreground), rootHex(background));
       assert.ok(ratio >= 4.5,
@@ -889,6 +915,14 @@ test("webview palette meets text contrast and forced-colors keeps state non-colo
   }
   assert.ok(contrastRatio("#FFFFFF", rootHex("--accent-fill")) >= 4.5,
     "white text on the primary accent fill must meet normal-text contrast");
+  assert.match(mainCss, /--bg:\s*var\(--vscode-sideBar-background/,
+    "the extension shell must inherit Cursor/VS Code's sidebar background");
+  assert.match(mainCss, /--surface:\s*var\(--vscode-editor-background/,
+    "content surfaces must inherit the active editor theme");
+  assert.match(mainCss, /--surface2:\s*var\(--vscode-input-background/,
+    "composer controls must inherit the active input theme");
+  assert.match(mainCss, /--text:\s*var\(--vscode-foreground/,
+    "extension text must inherit the active host foreground");
 
   const forcedAt = mainCss.indexOf("@media (forced-colors: active)");
   assert.notEqual(forcedAt, -1, "webview needs an explicit forced-colors contract");

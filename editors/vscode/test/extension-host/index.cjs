@@ -212,7 +212,7 @@ async function run() {
     && item.eventType === "turn_end").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "setMode", mode: "plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
-  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/goal host matrix" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "startGoal", text: "host matrix" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/view-plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" });
   const correlatedTypes = new Set(["set_mode", "set_think", "set_goal", "get_plan", "status"]);
@@ -229,7 +229,7 @@ async function run() {
   const goalPromptIndex = goalStartCommands.findIndex((command) => command.type === "prompt"
     && command.text === "host matrix");
   assert.ok(goalSetIndex !== -1 && goalPromptIndex > goalSetIndex,
-    "/goal <objective> must persist its tagged goal before starting that exact agent turn");
+    "composer goal actions must persist their tagged goal before starting that exact agent turn");
   await waitFor(() => posted().some((item) => item.type === "event"
     && item.eventType === "turn_start"));
   const initialGoalPrompts = goalStartCommands.filter((command) => command.type === "prompt"

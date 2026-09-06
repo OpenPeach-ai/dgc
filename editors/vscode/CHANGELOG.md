@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1 — 2026-09-06
+
+- Added the Codex-style `objective /goal` composer action: selecting or submitting the suffix now preserves the full objective, tags it as a goal, persists it, and starts the turn with one Enter.
+- Kept `/goal <objective>` and goal-state commands intact while ensuring an inline `/goal` mentioned inside ordinary prose is never misclassified.
+- Replaced the extension's fixed black shell with Cursor/VS Code theme tokens for the sidebar, transcript, composer, controls, text, and overlays, with DGC color retained for focused product accents.
+- Verified the goal and pinned-composer flow in a real VS Code host at wide and narrow widths across both dark and light host themes.
+
 ## 0.14.0 — 2026-09-06
 
 - Added a composer-attached changed-files rail backed by live Git state, with addition/deletion totals and one-click native VS Code side-by-side review.
