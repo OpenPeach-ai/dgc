@@ -362,6 +362,9 @@ def explicit_skill_names(skills: dict[str, Skill], text: str) -> list[str]:
                 raise ValueError(f"Selected skill {name} is no longer installed. Reload Skills before retrying.")
     source = re.sub(r"```[\s\S]*?```|`[^`\n]*`", " ", source)
     names = re.findall(r"(?<!\S)\$([a-z0-9][a-z0-9._-]{0,63})(?![\w.-])", source)
+    # Preserve an exact dotted package name when installed; otherwise a sentence-ending period
+    # or ellipsis is prose punctuation, not part of the invocation.
+    names = [name if name in skills else name.rstrip(".") for name in names]
     selected = list(dict.fromkeys(name for name in names if name in skills))
     if len(selected) > MAX_EXPLICIT_SKILLS:
         raise ValueError(f"Select at most {MAX_EXPLICIT_SKILLS} explicit skills per turn.")

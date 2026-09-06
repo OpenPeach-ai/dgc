@@ -2529,7 +2529,7 @@ class Agent(GoalLifecycle):
         edit_grind_nudged = False   # so the "just write the whole file" nudge fires at most once
         verified = False            # a test/build passed AND no edit since — finish-when-verified nudge
         verify_nudged = False
-        summary_only = False        # budgeted green run → deterministic closeout, no provider request
+        summary_only = False        # explicit verifier-only task → deterministic closeout
         continues = 0               # length-truncation auto-continues used this turn
         finalization_retries = 0    # bounded recovery when a generation has no visible text/calls
         provider_pauses = 0         # exact provider-owned pause_turn continuations used this turn
@@ -2607,6 +2607,16 @@ class Agent(GoalLifecycle):
             clear_held_final()
             self.ui.end_stream()
 
+        def can_finish_on_verified() -> bool:
+            # A passing test is evidence about that check, not proof that the user's entire
+            # request (including selected skill steps or a goal report) has been completed.
+            return bool(self.config.get("finish_on_verified") is True
+                        and self.mode == "auto" and deadline is not None
+                        and self.config.get("verify_before_done") and self.config.get("verify_command")
+                        and not (self.goal and self.goal_status == "active")
+                        and not self._explicit_skill_instructions
+                        and not any(todo.get("status") != "done" for todo in self.ctx.todos))
+
         def run_configured_verifier() -> tuple[str, str]:
             """Run the explicit verifier within this turn's cancellation/deadline boundary."""
             cmd = str(self.config.get("verify_command"))
@@ -2679,7 +2689,7 @@ class Agent(GoalLifecycle):
                 withhold_final(
                     "[Completion withheld by DGC: a newer user instruction continued the turn.]",
                     "completion withheld — applying the newer user instruction")
-            if summary_only and steered:
+            if summary_only and (steered or not can_finish_on_verified()):
                 # The deterministic closeout was armed for the previously verified request.
                 # A queued interjection is newer user intent, so let the model process it and
                 # require any resulting mutation to establish a fresh green state.
@@ -3136,7 +3146,7 @@ class Agent(GoalLifecycle):
                 if self.cancelled.is_set() and not (parallel_tasks or parallel_outputs):
                     flush_text_results()
                     self.ui.info("turn cancelled")
-                    return True
+                    return False
                 sig = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
                 seen = 1
                 if call.name not in _LOOP_EXEMPT_CALLS:
@@ -3256,8 +3266,8 @@ class Agent(GoalLifecycle):
             # edit-only batch without using bash, run that known command immediately. This collapses
             # the common local-model trajectory `edit -> ask to test -> test -> ask to summarize` to
             # `edit -> test result`: red evidence reaches the next request directly, while green
-            # evidence arms the existing provider-free closeout. Untimed interactive turns retain
-            # model-authored cadence, and a batch containing any shell call is never double-tested.
+            # evidence reaches the model unless finish_on_verified explicitly defines completion.
+            # A batch containing any shell call is never double-tested.
             auto_verify = bool(
                 self.mode == "auto" and deadline is not None and batch_landed_edits > 0
                 and self.config.get("verify_before_done")
@@ -3289,6 +3299,9 @@ class Agent(GoalLifecycle):
                     f"batch; `{safe_cmd}` {verdict}:\n{verify_out[-3000:]}\n"
                     + ("The checkout is verified. Do not make another change or rerun the same "
                        "command; DGC will close this timed turn now.\n"
+                       if passed and can_finish_on_verified() else
+                       "The configured check passed. Complete any remaining requested work and "
+                       "selected skill steps, then give the final response.\n"
                        if passed else
                        "Use this evidence to make the next focused correction; do not spend a "
                        "generation asking to run the same verifier.\n")
@@ -3384,10 +3397,9 @@ class Agent(GoalLifecycle):
                 reminders.append("A test/build command passed and you haven't changed the code since. If "
                                  "the task is complete, give a brief final summary and stop — don't re-run "
                                  "or refactor code that already works.")
-            if batch_verified and edited_total > 0 and deadline is not None:
-                # The authoritative verifier is already green. A separate no-tools model request adds
-                # no evidence, costs a full generation, and can overrun the deadline. The next loop emits
-                # a bounded outcome-first closeout; unbudgeted interactive turns remain model-authored.
+            if batch_verified and edited_total > 0 and can_finish_on_verified():
+                # Only an explicitly selected verifier-only policy can replace model-authored
+                # completion. Normal timed tasks retain tools for remaining work after a green test.
                 summary_only = True
             if (edited_total >= 3 and len(edited_targets) >= 2
                     and not self.ctx.todos and not todo_nudged):

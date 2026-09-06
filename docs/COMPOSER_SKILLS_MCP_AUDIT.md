@@ -259,3 +259,20 @@ unimplemented capability. Document any provider-owned execution boundary explici
   A public DeepWiki HTTPS smoke attempt failed with a network connection timeout from this machine;
   no public-endpoint success is claimed. Forwarding behavior is covered through the editor API test
   boundary; an actual SSH identity-provider exchange and browser-only remote editors are not claimed.
+- Live editor completion audit found that an ordinary timed native turn could stop immediately after
+  a passing test, before selected-skill obligations or a goal report. Normal turns now return that
+  evidence to the model and retain tools for remaining work. Immediate verifier-only completion is
+  an explicit advanced opt-in and cannot skip active goals, explicit skills or unfinished todos.
+  Cancellation between sequential tools now returns failure while preserving completed results and
+  repairing unexecuted calls. Sentence-ending periods no longer hide a known prose skill invocation;
+  installed exact dotted names retain precedence.
+- Completion regression passed 1,387/1,387 checks and 110 discovered Python cases (four optional
+  bridge skips). The first broad run found two old cancellation assertions that required success;
+  they now require failure while preserving all transcript-integrity checks. The selected-skill
+  regression exposed the punctuation issue above before the final green run.
+- Live VS Code 1.107.1 + actual source CLI + local Qwen completed a goal using a resource fetched
+  from an actual MCP subprocess and two selected skills. Independent assertions verified the unique
+  resource contract and selected skill's saved verification note; both generated unit tests passed
+  again. The corrected run completed in one cycle (109 seconds, 42,992 reported tokens). An earlier
+  run paused truthfully at its 25,000-token boundary and is not counted as a completed run. This uses
+  an isolated synthetic workspace/profile and a fixture MCP server with a real model and editor host.

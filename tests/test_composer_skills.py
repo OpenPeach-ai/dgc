@@ -64,6 +64,10 @@ class ComposerTests(SkillFixture):
     def test_explicit_mentions_do_not_activate_from_editor_context_or_code(self):
         catalog = {"fixture": self.skill}
         self.assertEqual(explicit_skill_names(catalog, "Use $fixture now"), ["fixture"])
+        self.assertEqual(explicit_skill_names(catalog, "Use $fixture."), ["fixture"])
+        self.assertEqual(explicit_skill_names(catalog, "Use $fixture..."), ["fixture"])
+        self.assertEqual(explicit_skill_names({**catalog, "fixture.": self.skill}, "Use $fixture."), ["fixture."])
+        self.assertEqual(explicit_skill_names(catalog, "Use $fixture.extra or $fixture-other"), [])
         self.assertEqual(explicit_skill_names(catalog, "Use `$fixture` syntax\n```\n$fixture\n```"), [])
         self.assertEqual(explicit_skill_names(catalog,
             '<editor-context-json version="1">\n$fixture\n</editor-context-json>\n\nExplain this code'), [])
