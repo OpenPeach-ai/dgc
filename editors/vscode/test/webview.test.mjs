@@ -84,23 +84,98 @@ const html = htmlMatch[0].replace(/\$\{[^}]*\}/g, "");
 const activeDoms = new Set();
 afterEach(() => { for (const dom of activeDoms) dom.window.close(); activeDoms.clear(); });
 
-function makeDom() {
+function makeDom(options = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on("jsdomError", (e) => errors.push(e));
-  const dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
+  const markup = options.scope ? html.replace('data-draft-scope=""', `data-draft-scope="${options.scope}"`) : html;
+  const dom = new JSDOM(markup, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
   activeDoms.add(dom);
   const posted = [];
+  let savedState = options.state;
+  dom.window.TextEncoder = TextEncoder;
   dom.window.acquireVsCodeApi = () => ({
     postMessage: (m) => posted.push(m),
-    getState: () => undefined,
-    setState: () => undefined,
+    getState: () => savedState,
+    setState: (value) => { savedState = JSON.parse(JSON.stringify(value)); },
   });
   dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
-  return { dom, errors, posted, send, doc: dom.window.document };
+  return { dom, errors, posted, send, doc: dom.window.document, savedState: () => savedState };
 }
+
+test("draft reload retains text, cursor, skills and MCP context only in its workspace", () => {
+  const first = makeDom({ scope: "workspace-a" });
+  first.send({ type: "session_ready", sessionId: "chat-alpha" });
+  first.doc.getElementById("input").value = "Inspect the request with selected context";
+  first.send({ type: "composer_skill", name: "verify" });
+  first.send({ type: "attach", label: "Reference", resource: { type: "mcp_context", server: "docs", uri: "docs://one", text: "Reference text" } });
+  first.doc.getElementById("input").setSelectionRange(8, 11);
+  first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
+  const saved = first.savedState();
+  const reopened = makeDom({ scope: "workspace-a", state: saved });
+  const input = reopened.doc.getElementById("input");
+  assert.equal(input.value, "Inspect the request with selected context");
+  assert.deepEqual([input.selectionStart, input.selectionEnd], [8, 11]);
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify.*Reference/);
+  input.dispatchEvent(new reopened.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(reopened.posted.some(message => message.type === "prompt"), false, "restore must complete before a prompt can enter a different chat");
+  reopened.send({ type: "event", event: { type: "ready", session_id: "new-backend-session" } });
+  assert.equal(input.value, "Inspect the request with selected context");
+  reopened.send({ type: "session_ready", sessionId: "chat-alpha" });
+  assert.deepEqual([input.selectionStart, input.selectionEnd], [8, 11]);
+  const elsewhere = makeDom({ scope: "workspace-b", state: saved });
+  assert.equal(elsewhere.doc.getElementById("input").value, "");
+  assert.equal(elsewhere.doc.getElementById("attachments").textContent, "");
+  assert.deepEqual([...first.errors, ...reopened.errors, ...elsewhere.errors], []);
+});
+
+test("switching chats restores their own drafts and clears the previous live transcript", () => {
+  const { dom, doc, send, errors } = makeDom({ scope: "workspace" });
+  const input = doc.getElementById("input");
+  send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Alpha draft";
+  send({ type: "composer_skill", name: "verify" });
+  send({ type: "event", event: { type: "info", message: "Alpha transcript" } });
+  send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  assert.equal(input.value, "");
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.doesNotMatch(doc.getElementById("log").textContent, /Alpha transcript/);
+  input.value = "Beta draft";
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  assert.equal(input.value, "Alpha draft");
+  assert.match(doc.getElementById("attachments").textContent, /verify/);
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "beta" } });
+  assert.equal(input.value, "Beta draft");
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.deepEqual(errors, []);
+});
+
+test("reload never automatically resends a message whose delivery was unconfirmed", () => {
+  const first = makeDom({ scope: "workspace" });
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  const input = first.doc.getElementById("input"); input.value = "Check the migration";
+  first.send({ type: "composer_skill", name: "verify" });
+  input.dispatchEvent(new first.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const sent = first.posted.findLast(message => message.type === "prompt");
+  assert.equal(first.savedState().pending.length, 1);
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.querySelectorAll(".draft-delivery-notice").length, 1);
+  assert.equal(reopened.posted.some(message => message.type === "prompt"), false);
+  reopened.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(reopened.doc.getElementById("input").value, "Check the migration");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify/);
+  first.send({ type: "event", event: { type: "prompt_accepted", request_id: sent.requestId } });
+  assert.equal(first.savedState().pending.length, 0);
+  const accepted = makeDom({ scope: "workspace", state: first.savedState() });
+  accepted.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(accepted.doc.querySelectorAll(".draft-delivery-notice").length, 0);
+  assert.equal(accepted.doc.getElementById("input").value, "");
+  assert.deepEqual([...first.errors, ...reopened.errors, ...accepted.errors], []);
+});
 
 test("prompt rejection restores matching text and attachments while preserving a newer draft", () => {
   const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
@@ -116,6 +191,68 @@ test("prompt rejection restores matching text and attachments while preserving a
   assert.equal(input.value, "Review this file");
   assert.match(doc.getElementById("attachments").textContent, /app.ts/);
   assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
+test("rejected messages survive a newer draft and chat changes without claiming uncertain delivery", () => {
+  const first = makeDom({ scope: "workspace" }), input = first.doc.getElementById("input");
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Rejected request";
+  first.send({ type: "composer_skill", name: "verify" });
+  input.dispatchEvent(new first.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const request = first.posted.findLast(message => message.type === "prompt");
+  input.value = "Newer draft";
+  first.send({ type: "event", event: { type: "command_rejected", command: "prompt", request_id: request.requestId } });
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.getElementById("input").value, "Newer draft");
+  assert.match(reopened.doc.querySelector(".draft-delivery-notice").textContent, /rejected message/);
+  reopened.send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  assert.equal(reopened.doc.querySelector(".draft-delivery-notice"), null);
+  reopened.send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  reopened.doc.getElementById("input").value = "";
+  reopened.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(reopened.doc.getElementById("input").value, "Rejected request");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify/);
+  assert.equal(reopened.savedState().pending.length, 0);
+  assert.deepEqual([...first.errors, ...reopened.errors], []);
+});
+
+test("disconnect preserves an uncertain delivery for review and never preloads a duplicate send", () => {
+  const { dom, doc, posted, send, savedState, errors } = makeDom({ scope: "workspace" });
+  send({ type: "session_ready", sessionId: "alpha" });
+  doc.getElementById("input").value = "Run migration";
+  doc.getElementById("input").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  send({ type: "backend_exit", code: 7 });
+  assert.equal(doc.getElementById("input").value, "");
+  assert.equal(savedState().pending[0].rejected, false);
+  assert.match(doc.querySelector(".draft-delivery-notice").textContent, /not confirmed/);
+  send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(posted.filter(message => message.type === "prompt").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("an image finishing after a chat switch remains with its original draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom({ scope: "workspace" });
+  const input = doc.getElementById("input");
+  let reader;
+  dom.window.FileReader = class HoldingReader { constructor() { reader = this; } readAsDataURL() {} };
+  send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Inspect image";
+  const event = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { items: [{ type: "image/png",
+    getAsFile: () => new dom.window.File([new Uint8Array(32)], "image.png", { type: "image/png" }) }] } });
+  input.dispatchEvent(event);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.some(message => message.type === "prompt"), false);
+  send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  reader.result = "data:image/png;base64,iVBORw0KGgo="; reader.onload();
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  assert.equal(input.value, "Inspect image");
+  assert.match(doc.getElementById("attachments").textContent, /image/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.findLast(message => message.type === "prompt").images[0], reader.result);
   assert.deepEqual(errors, []);
 });
 

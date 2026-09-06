@@ -128,3 +128,19 @@ unimplemented capability. Document any provider-owned execution boundary explici
   context; meaningful plan/review/init flows; the bundled-skill audit/additions; real local and
   subscription model runs; actual editor/Cursor host verification; remote-host authentication;
   final documentation/site/version updates; source/artifact review, CI and multi-channel publication.
+- Draft/session restoration implemented: bounded workspace-scoped webview state retains each chat's
+  text, selected skills/templates, MCP snapshots, images and cursor. Confirmed rejections remain
+  recoverable alongside a newer draft; uncertain delivery is offered for review without automatic
+  resubmission. Pending image reads stay with their original chat and block premature submission.
+  A backend restart restores the remembered session after settings and workspace grants, before
+  releasing queued prompts. Missing sessions preserve the draft in a new chat; restoration timeouts
+  retain the draft and close the connection. Loaded goals remain paused. Terminal MCP staging is
+  cleared when loading a different saved conversation.
+- Restoration verification: 1,387/1,387 Python checks, 63 discovered unittest cases (four optional
+  bridge cases skipped), 82/82 extension tests, TypeScript and whitespace checks passed. Tests cover
+  crossed acknowledgements, changing workspace grants, backend generation changes, missing/external
+  sessions, bounded display history, rejected/uncertain deliveries and delayed image loading. The
+  actual VS Code 1.107.1 host test passed with backend-restart session restoration, settings/roots,
+  SecretStorage and permission/plan lifecycle checks. The host emitted environment file-watcher
+  limit warnings (ENOSPC); this does not constitute a current Cursor UI or live-model verification.
+  Setup descriptions that still advertised protocol v5 now correctly describe protocol v6.

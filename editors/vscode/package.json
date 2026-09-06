@@ -269,7 +269,7 @@
           "type": "string",
           "default": "dgc",
           "scope": "machine",
-          "description": "Path to the DGC CLI executable (v0.26.2+ with editor protocol v5)."
+          "description": "Path to the DGC CLI executable (v0.28.0+ with editor protocol v6)."
         },
         "dgc.checkForUpdates": {
           "type": "boolean",
@@ -358,7 +358,7 @@
           {
             "id": "cli",
             "title": "Install the DGC CLI",
-            "description": "DGC drives the `dgc` CLI (v0.26.2+ with editor protocol v5). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
+            "description": "DGC drives the `dgc` CLI (v0.28.0+ with editor protocol v6). Install it with `curl -fsSL https://vibedgc.com/install.sh | bash`, then run `dgc setup`.",
             "media": {
               "markdown": "media/walkthrough.md"
             }

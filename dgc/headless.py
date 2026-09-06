@@ -59,7 +59,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
-    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
+    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory",
 })
@@ -473,7 +473,7 @@ class Backend:
                           "headless_handoff": True, "headless_hook_catalog": True,
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
-                          "mcp_context": True, "mcp_management": True},
+                          "mcp_context": True, "mcp_management": True, "history_snapshot": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1806,7 +1806,13 @@ class Backend:
                 p = sessions_mod.latest(self.config.project_root)
                 path = str(p) if p else None
             if path:
-                n = self.agent.load_session(path)
+                try:
+                    n = self.agent.load_session(path)
+                except (OSError, ValueError) as exc:
+                    self.em.emit("command_rejected", command=t, reason="session_unavailable",
+                                 message=redact_value(str(exc), secret_values(self.config)),
+                                 **_request_fields(request_id))
+                    return
                 self.em.emit("session", kind="resumed", message_count=n, path=str(path),
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
@@ -1817,6 +1823,9 @@ class Backend:
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
+        elif t == "get_history":
+            self.em.emit("history", items=self._history(), request_id=cmd["request_id"])
+
         elif t == "list_sessions":
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}

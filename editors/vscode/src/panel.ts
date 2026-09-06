@@ -232,6 +232,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private initializingBackend?: DgcBackend;
   private nativeSettingsReady = false;
   private webviewReady = false;
+  private lastReadyEvent?: DgcEvent;
+  private currentSessionId = "";
+  private currentSessionName = "";
+  private sessionRestoreCandidate = "";
+  private sessionRestoreStarted = false;
+  private sessionRestoreFinished = false;
+  private sessionRestoreRequestId?: string;
+  private sessionDraftSource = "";
+  private sessionHandshakeGeneration = 0;
+  private sessionReady = false;
+  private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
   private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string }> = [];
   private settingsSaveInFlight = false;
@@ -263,6 +274,33 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   // ---- backend lifecycle ---------------------------------------------------
   private cwd(): string {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  }
+
+  private draftScope(): string {
+    if (!this.composerScope) {
+      const workspace = vscode.workspace.workspaceFile?.toString()
+        || vscode.workspace.workspaceFolders?.[0]?.uri.toString() || this.cwd();
+      this.composerScope = createHash("sha256").update(workspace).digest("hex");
+    }
+    return this.composerScope;
+  }
+
+  private rememberSession(): void {
+    if (!this.currentSessionId) { return; }
+    void this.context.workspaceState.update("dgc.activeSession.v1", {
+      scope: this.draftScope(), id: this.currentSessionId,
+    }).then(undefined, () => this.post({ type: "event", event: { type: "error",
+      message: "DGC could not remember this chat for window reload. The saved conversation remains available under Resume." } }));
+  }
+
+  private finishSessionHandshake(be: DgcBackend, adoptDraftFrom = ""): void {
+    if (this.backend !== be) { return; }
+    this.sessionReady = true;
+    this.rememberSession();
+    this.post({ type: "session_ready", sessionId: this.currentSessionId, adoptDraftFrom });
+    this.initializingBackend = undefined;
+    this.nativeSettingsReady = false;
+    be.completeHandshake();
   }
 
   private nextRequestId(prefix: string): string {
@@ -540,9 +578,39 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       this.syncWorkspaceRoots(be, true);
       return;
     }
-    this.initializingBackend = undefined;
-    this.nativeSettingsReady = false;
-    be.completeHandshake();
+    if (this.sessionRestoreStarted) {
+      if (this.sessionRestoreFinished) { this.finishSessionHandshake(be, this.sessionDraftSource); }
+      return;
+    }
+    this.sessionRestoreStarted = true;
+    const generation = this.sessionHandshakeGeneration;
+    const previous = this.sessionRestoreCandidate;
+    if (!previous || previous === this.currentSessionId) {
+      this.finishSessionHandshake(be);
+      return;
+    }
+    const command = this.stateCommand("restore-session", { type: "resume_session", path: `${previous}.json` });
+    this.sessionRestoreRequestId = command.request_id;
+    void be.request(command, "session", 10000, true)
+      .then(() => {
+        if (this.backend !== be || generation !== this.sessionHandshakeGeneration) { return; }
+        this.sessionRestoreFinished = true;
+        this.maybeCompleteHandshake(be);
+      })
+      .catch((error: any) => {
+        if (this.backend !== be || generation !== this.sessionHandshakeGeneration) { return; }
+        if (!be.ready || String(error?.message || "").includes("timed out")) {
+          be.dispose();
+          this.post({ type: "event", event: { type: "error",
+            message: "Chat restoration did not complete. Your draft is retained; restart DGC to reconnect." } });
+          return;
+        }
+        this.post({ type: "event", event: { type: "info",
+          message: "The previous chat is unavailable. DGC opened a new chat and retained its unsent draft." } });
+        this.sessionRestoreFinished = true;
+        this.sessionDraftSource = previous;
+        this.maybeCompleteHandshake(be);
+      });
   }
 
   /** Called by the extension host when folders are added, removed, or reordered. */
@@ -819,12 +887,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         "DGC ignored a workspace-level dgc.command override. Configure the executable in User Settings.");
     }
     const cmd = executable.command;
+    const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+    this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
+      ? saved.id! : "";
+    this.sessionRestoreStarted = false;
+    this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
     be.on("exit", (code: number | null) => {
       this.mcpUrls.clear();
       if (this.backend === be) {
+        this.sessionReady = false;
         this.turnActive = this.confirmedTurnActive = false;
         this.correlatedStateRequests = false;
         this.workspaceRootsInFlight = undefined;
@@ -860,6 +934,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onEvent(ev: DgcEvent): void {
     switch (ev.type) {
       case "ready":
+        this.sessionReady = false;
+        this.sessionRestoreStarted = false;
+        this.sessionRestoreFinished = false;
+        this.sessionRestoreRequestId = undefined;
+        this.sessionDraftSource = "";
+        this.sessionHandshakeGeneration++;
+        {
+          const saved = this.context.workspaceState.get<{ scope?: string; id?: string }>("dgc.activeSession.v1");
+          this.sessionRestoreCandidate = saved?.scope === this.draftScope() && /^[A-Za-z0-9_-]{1,128}$/.test(saved.id || "")
+            ? saved.id! : "";
+        }
+        this.lastReadyEvent = ev;
+        this.currentSessionId = String(ev.session_id || "");
+        this.currentSessionName = String(ev.session_name || "");
         this.turnActive = this.confirmedTurnActive = false;
         this.workspaceRootsInFlight = undefined;
         this.workspaceRootsDirty = true;
@@ -910,6 +998,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
               }
             });
         }
+        break;
+      case "session":
+        if (this.initializingBackend && this.sessionRestoreStarted && !this.sessionRestoreFinished
+            && this.sessionRestoreRequestId && ev.request_id !== this.sessionRestoreRequestId) { return; }
+        if (typeof ev.session_id === "string") {
+          this.currentSessionId = ev.session_id;
+          this.currentSessionName = String(ev.name || "");
+          this.rememberSession();
+        }
+        break;
+      case "session_named":
+        this.currentSessionName = String(ev.name || "");
         break;
       case "model_changed":
         if (this.routeState.subscriptionEngine) {
@@ -1183,6 +1283,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case "webviewReady": {
         this.webviewReady = true;
+        if (this.lastReadyEvent) {
+          this.post({ type: "event", event: { ...this.lastReadyEvent, session_id: this.currentSessionId,
+            session_name: this.currentSessionName } });
+        }
+        if (this.sessionReady) {
+          this.post({ type: "session_ready", sessionId: this.currentSessionId });
+          if (this.lastReadyEvent?.capabilities?.history_snapshot) {
+            be.send({ type: "get_history", request_id: this.nextRequestId("restore-history") });
+          }
+        }
         const actions = this.pendingWebviewActions.splice(0);
         for (const action of actions) { action(); }
         if (this.state.model) { this.postState(); }
@@ -3060,7 +3170,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};`;
-    return `<!doctype html><html lang="en"><head>
+    const draftScope = this.draftScope();
+    return `<!doctype html><html lang="en" data-draft-scope="${draftScope}"><head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
