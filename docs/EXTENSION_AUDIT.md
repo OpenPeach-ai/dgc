@@ -15,6 +15,7 @@ purple accents, and equivalent CLI behavior. The inspected baseline is CLI **0.2
 | Medium | Tool identifiers such as `__proto__` collided with JavaScript object properties. Denial details were lost. | Prototype-free correlation maps; visible denial evidence and regressions. |
 | Medium | Initial staged files disappeared from the changed-file rail before the first commit. | Include the unborn repository's index and scope Git queries literally; real-repository regression. |
 | Medium | Diff read errors were shown as empty files, and stale folder grants remained usable. | Recheck current roots and distinguish missing blobs from failed reads. |
+| Medium | Git 2.55 could return commit metadata when `git show` received an absent bracketed path, corrupting the review baseline. | Read explicit blobs with `git cat-file blob`; CI's new-staged-file regression and first-commit/literal-blob coverage. |
 | Medium | Model discovery could reopen a dismissed menu; Escape did not close a loading menu. | Ignore late results while closed and handle Escape before enumerating options. |
 | Medium | Enter could submit a prompt while an input method was still composing text. | Respect composition state; regression for IME confirmation. |
 | High | Standing goals stopped after one turn and were omitted from subscription requests. | Shared durable continuation for native and delegated turns, bounded no-progress handling, explicit evidence reports, and cycle/accounting review. |
@@ -68,7 +69,7 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 - Baseline: 1,383 Python checks and 51 extension tests passed.
 - Goal checkpoint: 1,387 Python checks passed, including 24 goal lifecycle, editor-state and delegated-stream
   regressions. The offline prompt estimate remains 2,283 tokens with no automatically loaded skill.
-- Extension: 66 tests passed, covering semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
+- Extension: 67 tests cover semantic rendering, unsafe links, file boundaries, tool IDs, cancellation, IME,
   menu races, and initial staged files have automated regression coverage.
 - Installed VS Code 1.107.1: activation, 28 commands, handshake, multi-root state, SecretStorage,
   and permission/plan lifecycles passed. Browser-driven editor checks exercised the goal card,

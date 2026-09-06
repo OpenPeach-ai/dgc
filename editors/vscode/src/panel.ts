@@ -693,7 +693,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     let before = "", after = "";
     if (!change.untracked) {
-      try { before = await runGit(change.root, ["show", `HEAD:./${change.path}`], 8000); }
+      // Request a blob explicitly. `git show` can interpret an absent bracketed path as
+      // a revision/path filter on newer Git and return commit metadata with exit status 0.
+      try { before = await runGit(change.root, ["cat-file", "blob", `HEAD:./${change.path}`], 8000); }
       catch {
         // A new staged file has no HEAD blob. A read failure for an existing file is not an
         // empty baseline: doing that would misrepresent the entire file as an addition.
