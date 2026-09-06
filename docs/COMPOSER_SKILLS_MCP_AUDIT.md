@@ -1,7 +1,7 @@
 # Composer, skills, and MCP parity audit
 
-Status: implementation in progress. This document tracks the full requested pass; an unchecked
-item is not a release claim. Baseline: CLI 0.28.0 / extension 0.15.0 (`de17fac`).
+Status: implementation and source validation complete; release validation and publication in progress.
+This document tracks the requested pass; an unchecked item is not a release claim. Baseline: CLI 0.28.0 / extension 0.15.0 (`de17fac`).
 
 ## Reference and scope
 
@@ -59,9 +59,9 @@ unimplemented capability. Document any provider-owned execution boundary explici
   bounded pagination/results, cancellation, per-server authority, and normal permission checks.
 - [x] MCP authentication: verify remote HTTP/bearer/OAuth behavior and recovery rather than
   relying on an untested bridge; expose only controls supported by the actual implementation.
-- [ ] Runtime verification: native local model and subscription runs, real CLI interaction,
+- [x] Runtime verification: native local model and subscription runs, real CLI interaction,
   browser-rendered extension flows, actual editor host activation, regression/security checks.
-- [ ] Documentation: command/skill/MCP guides, bundled-skill inventory, migration notes, website
+- [x] Documentation: command/skill/MCP guides, bundled-skill inventory, migration notes, website
   examples, changelog, and this evidence matrix reflect the final implementation.
 - [ ] Release: clean reviewed commit; CI and release gates; scan source/history/artifacts for
   secrets and private data; publish identical reviewed bytes to GitHub, website, Marketplace,
@@ -307,3 +307,10 @@ unimplemented capability. Document any provider-owned execution boundary explici
   secret values and private machine references. Only deliberate credential-shape test fixtures matched.
   Other local refs were inspected separately and are not part of the publishable ancestry. Final
   source-bound runtime/VSIX artifacts still require their own scan before publication.
+- Release preparation targets CLI 0.29.0 / extension 0.16.0, both using protocol v6. In-app and
+  website documentation now share command/skill/MCP guidance, the 22-skill inventory, goal inputs,
+  verifier-only policy and remote sign-in limits. Upgrade guidance explains separate CLI/editor
+  installations, executable/remote-host checks, VSIX pinning and stale active extension code.
+  Changelog/site release metadata and the current capture fixture are updated before packaging.
+  Browser acceptance, refreshed source-bound captures, artifact scans, CI, public distribution and
+  actual Cursor installation checks remain release gates; neither target is claimed published here.

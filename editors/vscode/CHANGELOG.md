@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.0 — 2026-09-06
+
+- Use `/` and `$` anywhere at a word boundary to choose commands, skills and prompt templates while preserving the draft. Add shared plan, review and project-guide workflows.
+- Attach exact skill instructions and MCP resource/prompt snapshots to native, subscription and goal requests. Include 22 bundled skills, portable package discovery, create/install, and enable/disable controls.
+- Preserve per-chat drafts, attachments and selected context across panel reloads and backend restarts, with recovery for rejected or uncertain delivery.
+- Add per-server MCP reconnect/enablement, bounded context browsing and cancellable OAuth sign-in with desktop remote callback forwarding.
+- Inspect workspace changes through the CLI without running repository filters; handle sparse checkouts, staged-only changes, duplicate folder labels and partial results.
+- Fix subscription startup hanging on the editor input pipe, early native success after tests, interrupted-turn success and completed command pipe retention.
+- Recommend CLI 0.29.0 for every feature; keep protocol v6 with additive capability checks. See the upgrade guide for editor auto-update and VSIX pinning.
+
 ## 0.15.0 — 2026-09-06
 
 - Render complete CommonMark with syntax-highlighted code, exact-source copy and safe file/source links. Group tool activity and separate successful final responses from commentary, failures and cancellation.
