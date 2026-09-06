@@ -1,8 +1,7 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
-import { execFile } from "child_process";
-import { lstat, readFile, readlink, realpath } from "fs/promises";
-import { basename, relative as relativePath, resolve, sep } from "path";
+import { realpath } from "fs/promises";
+import { basename, isAbsolute, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable } from "./configuration";
 import { workspaceFile } from "./navigation";
@@ -37,8 +36,6 @@ const PROVIDERS: Record<string, { url: string; needsKey: boolean; label: string;
   mistral: { url: "https://api.mistral.ai/v1", needsKey: true, label: "Mistral" },
 };
 
-const MAX_REVIEW_TEXT_BYTES = 4 * 1024 * 1024;
-
 const endpointId = (value: unknown): string => String(value || "").trim().replace(/\/$/, "").toLowerCase();
 
 type ManagedMcpServer = {
@@ -62,6 +59,10 @@ type ProviderSecretMutation = {
 type ApprovedModeChange = { mode: string; acknowledgeWorkspaceTrust: boolean };
 
 type WorkspaceChange = {
+  id: string;
+  counted: boolean;
+  staged: boolean;
+  error: string;
   root: string;
   folder: string;
   path: string;
@@ -72,21 +73,6 @@ type WorkspaceChange = {
   untracked: boolean;
   deleted: boolean;
 };
-
-function runGit(cwd: string, args: string[], timeout = 5000): Promise<string> {
-  // Automatic review queries must not execute a repository fsmonitor or inherited Git overrides.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
-  env.GIT_TERMINAL_PROMPT = "0";
-  return new Promise((resolveRun, rejectRun) => {
-    execFile("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", ...args], {
-      cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024,
-      windowsHide: true, env,
-    }, (error, stdout) => {
-      if (error) { rejectRun(error); return; }
-      resolveRun(String(stdout || ""));
-    });
-  });
-}
 
 const MCP_SECRET_FLAGS = new Set([
   "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
@@ -245,11 +231,13 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private sessionReady = false;
   private composerScope = "";
   private pendingWebviewActions: Array<() => void> = [];
-  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string }> = [];
+  private testPostedMessages: Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number }> = [];
   private settingsSaveInFlight = false;
   private commandOverrideWarningShown = false;
   private changesRefreshTimer?: NodeJS.Timeout;
   private changesRefreshRevision = 0;
+  private changesRefreshInFlight = false;
+  private changesRefreshDirty = false;
   private workspaceChanges: WorkspaceChange[] = [];
   private reviewDocuments = new Map<string, string>();
   private sb: vscode.StatusBarItem;
@@ -302,6 +290,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.initializingBackend = undefined;
     this.nativeSettingsReady = false;
     be.completeHandshake();
+    this.scheduleWorkspaceChanges(0);
   }
 
   private nextRequestId(prefix: string): string {
@@ -650,9 +639,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.scheduleWorkspaceChanges(0);
   }
 
-  /** Mirror Codex's composer-adjacent changed-files rail from real workspace state. The host asks
-   * git directly with an argv array (never a shell string), scopes results to trusted workspace
-   * folders, and sends only relative paths plus numstat totals to the webview. */
+  /** Owner-facing inspection runs in the backend's bounded object/file reader. The host never
+   * executes repository diff filters, and the webview receives only opaque IDs and display data. */
   private scheduleWorkspaceChanges(delay = 260): void {
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
     this.changesRefreshTimer = setTimeout(() => {
@@ -661,186 +649,132 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }, Math.max(0, delay));
   }
 
-  private async untrackedAdditions(root: string, repoPath: string): Promise<{ additions: number; binary: boolean }> {
-    const absolute = resolve(root, repoPath);
-    if (absolute !== root && !absolute.startsWith(root + sep)) { return { additions: 0, binary: true }; }
-    try {
-      const info = await lstat(absolute);
-      if (!info.isFile() || info.size > 2 * 1024 * 1024) { return { additions: 0, binary: true }; }
-      const bytes = await readFile(absolute);
-      if (bytes.includes(0)) { return { additions: 0, binary: true }; }
-      if (!bytes.length) { return { additions: 0, binary: false }; }
-      let lines = 0;
-      for (const byte of bytes) { if (byte === 10) { lines += 1; } }
-      if (bytes[bytes.length - 1] !== 10) { lines += 1; }
-      return { additions: lines, binary: false };
-    } catch {
-      return { additions: 0, binary: true };
-    }
-  }
-
   private async collectWorkspaceChanges(): Promise<{ files: WorkspaceChange[]; total: number; notices: string[] }> {
-    const allFolders = vscode.workspace.workspaceFolders || [];
-    const folders = allFolders.slice(0, 16);
-    const notices: string[] = allFolders.length > 16 ? ["Only the first 16 workspace folders were scanned."] : [];
-    const changes = new Map<string, WorkspaceChange>();
-    for (const folder of folders) {
-      const folderPath = await realpath(folder.uri.fsPath).catch(() => "");
-      if (!folderPath) { notices.push(`${folder.name}: workspace folder is unavailable.`); continue; }
-      let root: string;
-      try { root = resolve((await runGit(folderPath, ["rev-parse", "--show-toplevel"])).trim()); }
-      catch { notices.push(`${folder.name}: Git changes are unavailable. Open Source Control to check the repository.`); continue; }
-      const scope = relativePath(root, folderPath).replace(/\\/g, "/");
-      if (scope === ".." || scope.startsWith("../")) { continue; }
-      const pathspec = `:(literal)${scope || "."}`;
-      let numstat = "";
-      let hasHead = true;
-      try { await runGit(root, ["rev-parse", "--verify", "HEAD"]); }
-      catch { hasHead = false; }
-      try {
-        if (hasHead) numstat = await runGit(root, ["diff", "--numstat", "-z", "--no-renames",
-          "--no-ext-diff", "--no-textconv", "HEAD", "--", pathspec]);
-      } catch { notices.push(`${folder.name}: tracked changes could not be read.`); }
-      for (const record of numstat.split("\0")) {
-        if (!record) { continue; }
-        const match = /^([^\t]+)\t([^\t]+)\t([\s\S]+)$/.exec(record);
-        if (!match) { continue; }
-        const repoPath = match[3];
-        const visiblePath = scope && repoPath.startsWith(scope + "/")
-          ? repoPath.slice(scope.length + 1) : repoPath;
-        const displayPath = folders.length > 1 ? `${folder.name}/${visiblePath}` : visiblePath;
-        const absolute = resolve(root, repoPath);
-        let deleted = false;
-        try { await lstat(absolute); } catch { deleted = true; }
-        changes.set(`${root}\0${repoPath}`, {
-          root, folder: folder.name, path: repoPath, displayPath,
-          additions: match[1] === "-" ? 0 : Math.max(0, Number(match[1]) || 0),
-          deletions: match[2] === "-" ? 0 : Math.max(0, Number(match[2]) || 0),
-          binary: match[1] === "-" || match[2] === "-", untracked: false, deleted,
-        });
-      }
-      let untracked = "";
-      try {
-        untracked = await runGit(root, ["ls-files", ...(hasHead ? [] : ["--cached"]),
-          "--others", "--exclude-standard", "-z", "--", pathspec]);
-      } catch { notices.push(`${folder.name}: new files could not be scanned.`); }
-      for (const repoPath of untracked.split("\0")) {
-        if (!repoPath || changes.has(`${root}\0${repoPath}`)) { continue; }
-        const visiblePath = scope && repoPath.startsWith(scope + "/")
-          ? repoPath.slice(scope.length + 1) : repoPath;
-        const displayPath = folders.length > 1 ? `${folder.name}/${visiblePath}` : visiblePath;
-        const counted = changes.size < 500 ? await this.untrackedAdditions(root, repoPath)
-          : { additions: 0, binary: true };
-        changes.set(`${root}\0${repoPath}`, {
-          root, folder: folder.name, path: repoPath, displayPath,
-          additions: counted.additions, deletions: 0, binary: counted.binary,
-          untracked: true, deleted: false,
-        });
-      }
+    const be = this.backend;
+    if (this.workspaceRootsInFlight || this.workspaceRootsDirty) {
+      return { files: [], total: 0, notices: ["Workspace changes are waiting for the current folder access to be confirmed."] };
     }
-    if (changes.size > 500) notices.push(`Showing 500 of ${changes.size} changed files. Line totals cover the displayed files only.`);
-    // Keep scanned entries before unscanned ones when capped; all displayed line counts are real.
-    const files = [...changes.values()].slice(0, 500).sort((a, b) => a.displayPath.localeCompare(b.displayPath));
-    return { files, total: changes.size, notices };
+    if (!be?.ready || !this.lastReadyEvent?.capabilities?.workspace_inspection) {
+      return { files: [], total: 0, notices: [be?.ready
+        ? "Update the DGC CLI to inspect workspace changes."
+        : "Workspace changes will be available when DGC reconnects."] };
+    }
+    const allFolders = vscode.workspace.workspaceFolders || [];
+    const notices = allFolders.length > 16 ? ["Only the first 16 workspace folders were scanned."] : [];
+    const folders = (await Promise.all(allFolders.slice(0, 16).map(async folder => ({
+      name: folder.name, path: await realpath(folder.uri.fsPath).catch(() => ""),
+    })))).filter(folder => {
+      if (!folder.path) notices.push(`${folder.name}: workspace folder is unavailable.`);
+      return !!folder.path;
+    });
+    // An overlapping folder already belongs to its parent report; counting both would duplicate
+    // files and make the total inaccurate. Preserve the first label for duplicate folder roots.
+    const scopes = folders.filter((folder, index) => !folders.some((other, otherIndex) =>
+      otherIndex !== index && ((other.path === folder.path && otherIndex < index)
+        || folder.path.startsWith(other.path + sep))));
+    const changes = new Map<string, WorkspaceChange>();
+    const reported = new Set<string>();
+    let total = 0;
+    try {
+      const result = await be.request({ type: "get_workspace_changes", request_id: this.nextRequestId("changes") },
+        "workspace_changes", 30000);
+      if (be !== this.backend || result.type !== "workspace_changes") return { files: [], total: 0, notices };
+      for (const report of result.roots.slice(0, 16)) {
+        const folder = scopes.find(item => typeof report?.root === "string" && item.path === report.root);
+        if (!folder || !Array.isArray(report.files) || reported.has(folder.path)) continue;
+        reported.add(folder.path);
+        if (report.complete !== true && !report.notices?.length) {
+          notices.push(`${folder.name}: changes could not be inspected completely.`);
+        }
+        notices.push(...(Array.isArray(report.notices) ? report.notices.slice(0, 8).map((value: unknown) =>
+          `${folder.name}: ${String(value).slice(0, 500)}`) : []));
+        total += Number.isSafeInteger(report.total) ? Math.max(0, Math.min(4096, report.total)) : report.files.length;
+        for (const row of report.files.slice(0, 500)) {
+          if (typeof row?.path !== "string" || !row.path || row.path.length > 4096 || isAbsolute(row.path)) continue;
+          const absolute = resolve(folder.path, row.path);
+          if (!absolute.startsWith(folder.path + sep)) continue;
+          const id = createHash("sha256").update(absolute).digest("hex").slice(0, 24);
+          changes.set(absolute, {
+            id, root: folder.path, folder: folder.name, path: row.path,
+            displayPath: scopes.length > 1 ? `${folder.name}/${row.path}` : row.path,
+            additions: Number.isSafeInteger(row.additions) ? Math.max(0, row.additions) : 0,
+            deletions: Number.isSafeInteger(row.deletions) ? Math.max(0, row.deletions) : 0,
+            binary: row.binary === true, counted: row.counted === true, staged: row.staged === true,
+            untracked: row.untracked === true, deleted: row.deleted === true,
+            error: typeof row.error === "string" ? row.error.slice(0, 500) : "",
+          });
+        }
+      }
+      for (const folder of scopes) {
+        if (!reported.has(folder.path)) notices.push(`${folder.name}: no change report was returned.`);
+      }
+    } catch (error) {
+      notices.push(error instanceof Error ? error.message : "Workspace changes could not be inspected.");
+    }
+    if (changes.size > 500) notices.push(`Showing 500 of ${total} changed files. Line totals cover the displayed files only.`);
+    return { files: [...changes.values()].slice(0, 500).sort((a, b) => a.displayPath.localeCompare(b.displayPath)), total, notices };
   }
 
   private async refreshWorkspaceChanges(): Promise<void> {
+    if (this.changesRefreshInFlight) { this.changesRefreshDirty = true; return; }
+    this.changesRefreshInFlight = true;
     const revision = ++this.changesRefreshRevision;
-    const { files, total, notices } = await this.collectWorkspaceChanges();
-    if (revision !== this.changesRefreshRevision) { return; }
-    this.workspaceChanges = files;
-    this.post({
-      type: "workspace_changes",
-      total, notices,
-      additions: files.reduce((sum, item) => sum + item.additions, 0),
-      deletions: files.reduce((sum, item) => sum + item.deletions, 0),
-      files: files.map((item) => ({
-        path: item.displayPath, additions: item.additions, deletions: item.deletions,
-        binary: item.binary, untracked: item.untracked, deleted: item.deleted,
-      })),
-    });
+    try {
+      const { files, total, notices } = await this.collectWorkspaceChanges();
+      if (revision !== this.changesRefreshRevision) return;
+      this.workspaceChanges = files;
+      this.post({ type: "workspace_changes", total, notices,
+        additions: files.reduce((sum, item) => sum + item.additions, 0),
+        deletions: files.reduce((sum, item) => sum + item.deletions, 0),
+        files: files.map(item => ({ id: item.id, path: item.displayPath,
+          additions: item.additions, deletions: item.deletions, counted: item.counted,
+          binary: item.binary, untracked: item.untracked, deleted: item.deleted, staged: item.staged,
+          error: item.error })),
+      });
+    } finally {
+      this.changesRefreshInFlight = false;
+      if (this.changesRefreshDirty) {
+        this.changesRefreshDirty = false;
+        this.scheduleWorkspaceChanges();
+      }
+    }
   }
 
-  private async reviewWorkspaceChange(displayPath: string): Promise<void> {
-    const change = this.workspaceChanges.find((item) => item.displayPath === displayPath);
+  private async reviewWorkspaceChange(identity: string): Promise<void> {
+    const matches = this.workspaceChanges.filter(item => item.id === identity || item.displayPath === identity);
+    const change = matches.length === 1 ? matches[0] : undefined;
     if (!change) {
       this.scheduleWorkspaceChanges(0);
       void vscode.window.showInformationMessage("That file is no longer in the workspace change set.");
       return;
     }
-    const absolute = resolve(change.root, change.path);
-    const liveRoots = await Promise.all(this.workspaceRoots().map(root => realpath(root).catch(() => "")));
-    // Resolve the parent rather than the final component: a changed symlink is reviewed as link
-    // text, never followed into an external directory. Recheck grants on every click.
-    const parent = await realpath(resolve(absolute, "..")).catch(() => "");
-    if (!parent || !liveRoots.some(root => root && (parent === root || parent.startsWith(root + sep)))) {
-      void vscode.window.showInformationMessage("That change is outside the current workspace.");
-      return;
+    const be = this.backend;
+    if (!be?.ready || !this.lastReadyEvent?.capabilities?.workspace_inspection) {
+      void vscode.window.showInformationMessage("Update or reconnect the DGC CLI to inspect this change."); return;
     }
-    const link = (await lstat(absolute).catch(() => undefined))?.isSymbolicLink();
-    if (change.binary && !link) {
-      if (!change.deleted) {
-        const target = await workspaceFile(absolute, this.workspaceRoots());
-        if (target) {
-          await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(target), { preview: true });
-          return;
-        }
-      }
-      void vscode.window.showInformationMessage("Binary changes do not have a text diff to review.");
-      return;
+    const revision = this.workspaceRootsRevision;
+    const roots = await Promise.all(this.workspaceRoots().map(root => realpath(root).catch(() => "")));
+    if (!roots.includes(change.root)) {
+      void vscode.window.showInformationMessage("That change is outside the current workspace."); return;
     }
-    let before = "", after = "";
-    if (!change.untracked) {
-      // Request a blob explicitly. `git show` can interpret an absent bracketed path as
-      // a revision/path filter on newer Git and return commit metadata with exit status 0.
-      try { before = await runGit(change.root, ["cat-file", "blob", `HEAD:./${change.path}`], 8000); }
-      catch {
-        // A new staged file has no HEAD blob. A read failure for an existing file is not an
-        // empty baseline: doing that would misrepresent the entire file as an addition.
-        // Verify absence using ls-tree, whose successful empty output is distinguishable from
-        // a missing repository or an oversized/failed blob read.
-        const entry = await runGit(change.root, ["ls-tree", "-z", "HEAD", "--", `:(literal)${change.path}`]).catch(() => undefined);
-        if (entry === undefined || entry.length > 0) {
-          void vscode.window.showInformationMessage("The original file could not be read for review.");
-          return;
-        }
-      }
+    try {
+      const result = await be.request({ type: "get_workspace_change", root: change.root, path: change.path,
+        request_id: this.nextRequestId("change-preview") }, "workspace_change", 30000);
+      if (be !== this.backend || revision !== this.workspaceRootsRevision || result.type !== "workspace_change") return;
+      if (result.root !== change.root || result.path !== change.path) throw new Error("The change preview no longer matches this file.");
+      this.reviewDocuments.clear();
+      const id = createHash("sha256").update(`${change.id}:${Date.now()}`).digest("hex").slice(0, 16);
+      const leaf = basename(change.path) || "change";
+      const left = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/before/${leaf}` });
+      const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
+      this.reviewDocuments.set(left.toString(), result.before);
+      this.reviewDocuments.set(right.toString(), result.after);
+      const label = result.kind === "staged" ? "DGC staged review" : "DGC review";
+      await vscode.commands.executeCommand("vscode.diff", left, right, `${change.displayPath} (${label})`, { preview: true });
+    } catch (error) {
+      void vscode.window.showInformationMessage(error instanceof Error ? error.message : "The change preview could not be read.");
+      this.scheduleWorkspaceChanges(0);
     }
-    if (!change.deleted) {
-      const absolute = resolve(change.root, change.path);
-      if (absolute === change.root || absolute.startsWith(change.root + sep)) {
-        try {
-          const info = await lstat(absolute);
-          if (info.isSymbolicLink()) {
-            after = `${await readlink(absolute)}\n`;
-          } else if (info.isFile() && info.size <= MAX_REVIEW_TEXT_BYTES) {
-            const bytes = await readFile(absolute);
-            if (bytes.includes(0)) {
-              void vscode.window.showInformationMessage("Binary changes do not have a text diff to review.");
-              return;
-            }
-            after = bytes.toString("utf8");
-          } else {
-            void vscode.window.showInformationMessage("This change is too large or is not a text file.");
-            return;
-          }
-        } catch {
-          void vscode.window.showInformationMessage("The file changed or became unavailable. Refresh changes and try again.");
-          this.scheduleWorkspaceChanges(0);
-          return;
-        }
-      }
-    }
-    this.reviewDocuments.clear();
-    const id = createHash("sha256").update(`${change.root}\0${change.path}\0${Date.now()}`).digest("hex").slice(0, 16);
-    const leaf = basename(change.path) || "change";
-    const left = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/before/${leaf}` });
-    const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
-    this.reviewDocuments.set(left.toString(), before);
-    this.reviewDocuments.set(right.toString(), after);
-    await vscode.commands.executeCommand("vscode.diff", left, right, `${change.displayPath} (DGC review)`, {
-      preview: true,
-    });
   }
 
   /** Structured resources describing what the user is looking at. The backend
@@ -924,6 +858,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("exit", (code: number | null) => {
       this.mcpUrls.clear();
       if (this.backend === be) {
+        this.changesRefreshRevision++;
+        this.workspaceChanges = [];
         this.sessionReady = false;
         this.turnActive = this.confirmedTurnActive = false;
         this.correlatedStateRequests = false;
@@ -940,6 +876,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   restart(): void {
+    this.changesRefreshRevision++;
+    this.workspaceChanges = [];
     this.backend?.dispose();
     this.backend = undefined;
     this.mcpUrls.clear();
@@ -958,6 +896,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   private onEvent(ev: DgcEvent): void {
+    // The request handlers project summaries and open text documents. Raw roots and file bodies
+    // are owner-facing host data, not chat events or model inputs for the webview.
+    if (ev.type === "workspace_changes" || ev.type === "workspace_change"
+        || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change"].includes(ev.command))) return;
     switch (ev.type) {
       case "ready":
         this.sessionReady = false;
@@ -1109,6 +1051,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.backend) {
           this.maybeCompleteHandshake(this.backend);
         }
+        this.scheduleWorkspaceChanges(0);
         break;
       }
       case "turn_start":
@@ -1183,6 +1126,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ? msg.event : undefined;
       this.testPostedMessages.push({
         type: String(msg?.type || ""),
+        ...(msg?.type === "workspace_changes" ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }) } : {}),
@@ -1203,7 +1147,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     await this.onMessage(msg);
   }
 
-  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string }> {
+  testOnlyPostedMessages(token: string): Array<{ type: string; eventType?: string; id?: string; command?: string; fileCount?: number }> {
     if (!token || token !== process.env.DGC_EXTENSION_TEST_TOKEN) {
       throw new Error("DGC extension test bridge is unavailable");
     }
@@ -3211,6 +3155,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
+    this.changesRefreshDirty = false;
     this.changesRefreshRevision++;
     this.reviewDocuments.clear();
     this.backend?.dispose();

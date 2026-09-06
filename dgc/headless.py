@@ -54,6 +54,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "prompt", "start_goal",
+    "get_workspace_changes", "get_workspace_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
@@ -413,7 +414,7 @@ class Backend:
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
-                          "goal_inputs": True, "workflows": True},
+                          "goal_inputs": True, "workflows": True, "workspace_inspection": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -971,6 +972,9 @@ class Backend:
 
     def close(self) -> None:
         """Cancel foreground work and release pending controller decisions on backend exit."""
+        inspection = getattr(self, "_editor_inspection", None)
+        if inspection is not None:
+            inspection.close()
         with self._turn_state_lock():
             self.agent.cancelled.set()
             self._queue.clear()
@@ -1186,6 +1190,14 @@ class Backend:
                                  **_request_fields(request_id))
                     return
                 self.em.emit("prompt_accepted", request_id=request_id, state=state)
+
+        elif t in ("get_workspace_changes", "get_workspace_change"):
+            from .editor_changes import EditorChanges
+            if getattr(self, "_editor_inspection", None) is None:
+                self._editor_inspection = EditorChanges(self.config.project_root, self.em.emit)
+                if hasattr(self, "_editor_inspection_roots"):
+                    self._editor_inspection.set_roots(self._editor_inspection_roots)
+            self._editor_inspection.request(dict(cmd))
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))
@@ -1545,16 +1557,22 @@ class Backend:
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
-            roots = []
+            roots, visible = [], []
             for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
                 try:
                     path = Path(str(raw)).resolve(strict=True)
                 except (OSError, RuntimeError):
                     continue
-                if path.is_dir() and not is_within(path, self.config.project_root) and path not in roots:
-                    roots.append(path)
+                if path.is_dir():
+                    if path not in visible:
+                        visible.append(path)
+                    if not is_within(path, self.config.project_root) and path not in roots:
+                        roots.append(path)
             self.config.session_permissions = {
                 "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
+            self._editor_inspection_roots = visible[:16]
+            if getattr(self, "_editor_inspection", None) is not None:
+                self._editor_inspection.set_roots(self._editor_inspection_roots)
             self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
                          **_request_fields(request_id))
 

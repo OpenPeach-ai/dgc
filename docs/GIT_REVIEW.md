@@ -34,3 +34,27 @@ The implementation follows the documented [Git object-reading interface](https:/
 [transport/optional-lock controls](https://git-scm.com/docs/git). Git's diff filters are documented in
 [git-diff](https://git-scm.com/docs/git-diff). Subscription CLIs use their own tools and permission boundaries;
 they do not receive DGC's native tool registry.
+
+## Editor change rail and previews
+
+The editor uses the same bounded object/file reader for its automatic changed-file summary and
+native diff previews. It does not run a separate Git executable or read file bodies in the webview.
+The protocol-v6 `workspace_inspection` capability gates the correlated `get_workspace_changes` and
+`get_workspace_change` requests. An older CLI shows an update notice instead of falling back to
+ordinary Git diffs. Inspection is independent of the model turn and does not add file bodies to the
+conversation or model input. Normal event credential redaction also applies to preview text.
+
+The rail covers the currently acknowledged editor folders, including changes made before the chat.
+It compares HEAD with working files and also retains staged-only changes. Line totals represent
+the displayed working-file differences; a staged-only entry can therefore show zero net lines.
+Opening that entry previews its index content in a diff titled **DGC staged review**. Other entries
+preview HEAD against current working content. New repositories and untracked files use an empty
+before side. Symlinks show link text, never target contents. Sparse-checkout omissions do not appear
+as deletions. Binary, conflict, submodule and oversized previews direct the user to Source Control.
+
+Inspection covers at most 16 folders, with one 20-second deadline and 500 displayed files across
+them. Overlapping folders are counted once. Reports share a 2 MiB transport budget; each text-preview
+side is limited to 256 KiB. Unknown line counts display a dash, with partial-coverage notices rather
+than a clean-workspace claim. Folder changes revoke pending inspections; backend restarts reject
+pending requests immediately. Opaque row identities distinguish identical filenames and folder
+labels, and stale responses cannot open a preview after its workspace access changes.

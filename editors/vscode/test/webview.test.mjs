@@ -1180,8 +1180,8 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   doc.getElementById("goal-clear").click();
   assert.equal(posted.filter((m) => m.type === "clearGoal").length, 1);
   send({ type: "workspace_changes", total: 2, additions: 7, deletions: 3, files: [
-    { path: "src/a.ts", additions: 5, deletions: 3 },
-    { path: "src/new.ts", additions: 2, deletions: 0, untracked: true },
+    { id: "opaque-change", path: "src/a.ts", additions: 5, deletions: 3 },
+    { path: "src/new.ts", additions: 0, deletions: 0, counted: false, error: "Preview limit", untracked: true },
   ] });
   assert.equal(doc.getElementById("changesbar").hidden, false);
   assert.equal(doc.getElementById("changes-count").textContent, "2 files changed");
@@ -1189,7 +1189,11 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.equal(doc.getElementById("changes-review").hidden, false);
   assert.equal(doc.querySelectorAll(".change-row").length, 2);
   doc.querySelector(".change-row").click();
-  assert.equal(posted.filter((m) => m.type === "reviewChange").at(-1).path, "src/a.ts");
+  assert.equal(posted.filter((m) => m.type === "reviewChange").at(-1).path, "opaque-change");
+  const limitedChange = doc.querySelectorAll(".change-row")[1];
+  assert.match(limitedChange.textContent, /—/);
+  assert.doesNotMatch(limitedChange.textContent, /\+0/);
+  assert.match(limitedChange.title, /Preview limit/);
   send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },

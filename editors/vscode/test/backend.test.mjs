@@ -273,7 +273,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     backend.request({ type: "status", request_id: "unbounded-timeout" }, "status", 180_001),
     /between 1 and 180000ms/,
   );
+  const disposedListeners = backend.listenerCount("disposed");
+  const duringRestart = backend.request(
+    { type: "get_workspace_changes", request_id: "restart-inspection" }, "workspace_changes", 30000);
+  const rejected = assert.rejects(duringRestart, /restarted or closed/);
   backend.dispose();
+  await rejected;
+  assert.equal(backend.listenerCount("event"), eventListeners);
+  assert.equal(backend.listenerCount("exit"), exitListeners);
+  assert.equal(backend.listenerCount("disposed"), disposedListeners);
 });
 
 test("backend prioritizes correlated decisions over queued prompts under stdin backpressure", async () => {

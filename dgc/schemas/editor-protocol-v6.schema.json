@@ -18,6 +18,74 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "workspace_changes"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "roots": {
+              "type": "array"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "roots",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "workspace_change"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "root": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "before": {
+              "type": "string"
+            },
+            "after": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "root",
+            "path",
+            "before",
+            "after",
+            "kind",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "ready"
             },
             "seq": {
@@ -2385,6 +2453,46 @@
     },
     "command": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_workspace_changes"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_workspace_change"
+            },
+            "root": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "root",
+            "path",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {

@@ -207,3 +207,16 @@ unimplemented capability. Document any provider-owned execution boundary explici
 - Remaining release work now includes the host file-change inspection hardening, bundled-skill
   audit/additions, remote-host OAuth behavior, live local/subscription runs, actual Cursor checks,
   final docs/site/version updates, full source/history/artifact review, CI and publication.
+- Host inspection gap resolved: automatic change summaries and previews now use the CLI's bounded
+  object/no-follow file reader through correlated, capability-gated requests. No host-side Git diff
+  command or racy file-content read remains. Sparse omissions, staged-only changes, overlapping
+  roots, missing reports, partial counts, duplicate folder labels and backend restart cancellation
+  have explicit handling. Two bounded inspection workers leave model and approval handling usable.
+  Owner preview bodies are not forwarded to the webview conversation or model input.
+- Inspection verification: 1,387/1,387 Python checks, 96 discovered unittest cases (four optional
+  bridge cases skipped), 90/90 extension tests, TypeScript/build and actual VS Code 1.107.1 host
+  checks passed. Real Git fixtures exercise hostile filters, symlinks, initial commits, sparse
+  checkouts, staged-only previews, multiroot bounds and cancellation. The host opens an actual
+  native diff. Its initial test incorrectly treated a waiting-for-roots notice as a completed
+  report; it now waits for the populated summary. A separate regression proves pending requests
+  reject immediately on backend disposal and release their listeners. See [Git review](GIT_REVIEW.md).

@@ -39,6 +39,9 @@ _NA = lambda required=True: _f("null", "array", required=required)
 # still declared and type-checked; undeclared fields fail closed so a mismatched or compromised
 # backend cannot smuggle arbitrary data into the editor webview.
 EVENT_FIELDS: dict[str, dict[str, dict]] = {
+    "workspace_changes": {"roots": _A(), "request_id": _S()},
+    "workspace_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
+                         "request_id": _S()},
     "ready": {
         "version": _S(), "protocol_version": _I(), "capabilities": _O(),
         "model": _S(),
@@ -237,6 +240,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
+    "get_workspace_changes": {"request_id": _S()},
+    "get_workspace_change": {"root": _S(), "path": _S(), "request_id": _S()},
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
