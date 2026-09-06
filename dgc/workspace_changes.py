@@ -51,6 +51,9 @@ def collect_changes(root: Path, cancel=None, *, deadline=None) -> dict:
     result = {"root": str(root), "files": [], "total": 0, "complete": True, "notices": []}
     review = None
     try:
+        # Canonicalize only the approved root (for example macOS /var → /private/var).
+        # Child names stay lexical so capture_file_state can reject parent symlinks.
+        root = root.resolve()
         review = Review(root, root, cancel, deadline=deadline)
         old, index = _head(review), review.entries()
         untracked = review.git(["ls-files", "--others", "--exclude-standard", "-z", "--", review.scope])
@@ -115,6 +118,7 @@ def read_change(root: Path, path: str, cancel=None) -> dict:
     if (not path or len(path) > 4096 or relative.is_absolute()
             or any(part in ("..", ".git") for part in relative.parts) or "\0" in path):
         raise ValueError("Choose a literal file inside the current workspace.")
+    root = root.resolve()
     target = root / relative
     # Use the workspace as the Git process cwd even when a selected file's parent was deleted.
     review = Review(root, root, cancel)

@@ -314,3 +314,14 @@ unimplemented capability. Document any provider-owned execution boundary explici
   Changelog/site release metadata and the current capture fixture are updated before packaging.
   Browser acceptance, refreshed source-bound captures, artifact scans, CI, public distribution and
   actual Cursor installation checks remain release gates; neither target is claimed published here.
+- First release CI caught a Python 3.11-only unittest helper in the session fixtures and a macOS
+  root-alias mismatch in change inspection. The fixture now supports Python 3.10; approved workspace
+  roots and Git's reported repository root use canonical identities. Selected child paths remain
+  lexical and no-follow. Targeted alias, symlink, sparse, staged-only, scoped-review and session
+  regressions pass locally; the corrected cross-platform CI run remains required.
+- Viewing the real CLI capture exposed OSC 8 hyperlink payloads in the full-screen answer renderer.
+  Rich generates those controls, but prompt_toolkit's ANSI parser does not understand them. The TUI
+  now removes only generated hyperlink wrappers, retaining labels and text styles; classic output
+  keeps clickable links. Real Rich-to-prompt_toolkit regressions cover final and partial Markdown,
+  local and web links, and both OSC terminators. The capture poster now selects the final half-second
+  rather than a frame that can precede the last answer. The capture is being regenerated.
