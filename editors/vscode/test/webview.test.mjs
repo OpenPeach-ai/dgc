@@ -256,6 +256,68 @@ test("an image finishing after a chat switch remains with its original draft", (
   assert.deepEqual(errors, []);
 });
 
+test("goal actions carry selected skills, templates, images and MCP snapshots with correlated draft recovery", () => {
+  for (const inline of [false, true]) {
+    const original = inline ? "Verify the release /goal" : "/goal Verify the release";
+    const context = { type: "mcp_context", server: "docs", uri: "docs://release", text: "Snapshot reference" };
+    const { dom, doc, posted, send, savedState, errors } = makeDom({ scope: "workspace", state: {
+      version: 1, scope: "workspace", active: "alpha", entries: [["alpha", { text: original,
+        attachments: [{ label: "$verify", skill: "verify" }, { label: "/check", template: "check" },
+          { label: "Reference", resource: context }, { label: "Image", img: true, bytes: 8,
+            data: "data:image/png;base64,iVBORw0KGgo=" }], start: original.length, end: original.length }]], pending: [],
+    } });
+    send({ type: "session_ready", sessionId: "alpha" });
+    const input = doc.getElementById("input");
+    if (inline) input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const command = posted.findLast(message => message.type === "startGoal");
+    assert.equal(command.text, "Verify the release");
+    assert.deepEqual(JSON.parse(JSON.stringify(command.skills)), ["verify"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(command.templates)), ["check"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(command.context)), [context]);
+    assert.equal(command.images.length, 1);
+    assert.equal(posted.some(message => message.type === "prompt"), false);
+    assert.equal(input.value, "");
+    assert.equal(doc.getElementById("attachments").textContent, "");
+    assert.equal(savedState().pending.length, 1);
+    send({ type: "event", event: { type: "command_rejected", command: "start_goal", request_id: command.requestId,
+      message: "Goal selection rejected" } });
+    assert.equal(input.value, original);
+    assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*Image/);
+    assert.equal(savedState().pending.length, 0);
+    send({ type: "state", state: { goal: { text: "Verify", status: "paused", attachments: {
+      skills: ["verify"], templates: ["check"], images: 1, context: 1 } } } });
+    doc.getElementById("goal-review-button").click();
+    assert.match(doc.querySelector(".goal-attachments").textContent, /\$verify.*\/check.*1 context attachment.*1 image/);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("goal control commands preserve selected attachments and do not become model instructions", () => {
+  const { dom, doc, posted, send, errors } = makeDom();
+  send({ type: "composer_skill", name: "verify" });
+  doc.getElementById("input").value = "/goal pause";
+  doc.getElementById("input").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.findLast(message => message.type === "slashText").text, "/goal pause");
+  assert.equal(posted.some(message => message.type === "prompt" || message.type === "startGoal"), false);
+  assert.match(doc.getElementById("attachments").textContent, /verify/);
+  assert.deepEqual(errors, []);
+});
+
+test("composer rejects excess selections before they can escape saved-draft limits", () => {
+  const { dom, doc, send, savedState, errors } = makeDom({ scope: "workspace" });
+  send({ type: "session_ready", sessionId: "alpha" });
+  doc.getElementById("input").value = "Keep this request";
+  for (let i = 0; i < 9; i++) send({ type: "composer_skill", name: `skill-${i}` });
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 8);
+  for (let i = 0; i < 57; i++) send({ type: "attach", label: `file-${i}`, resource: { type: "file_mention", path: `file-${i}` } });
+  assert.equal(doc.querySelectorAll("#attachments .chip").length, 64);
+  dom.window.dispatchEvent(new dom.window.Event("pagehide"));
+  assert.equal(savedState().entries[0][1].attachments.length, 64);
+  assert.equal(savedState().entries[0][1].text, "Keep this request");
+  assert.deepEqual(errors, []);
+});
+
 test("inline slash picker exposes management and skills without consuming the draft", () => {
   const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
   send({ type: "event", event: { type: "ready", capabilities: { headless_skill_catalog: true },
@@ -993,8 +1055,8 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   const input = doc.getElementById("input");
   input.value = "/goal ship the release";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  const goal = posted.find((m) => m.type === "slashText");
-  assert.equal(goal.text, "/goal ship the release");
+  const goal = posted.find((m) => m.type === "startGoal");
+  assert.equal(goal.text, "ship the release");
   assert.equal(posted.some((m) => m.type === "prompt" && m.text === goal.text), false,
     "built-in slash commands must not be sent as model prompts");
   assert.equal(doc.querySelector(".goal-prompt .role").textContent, "goal");

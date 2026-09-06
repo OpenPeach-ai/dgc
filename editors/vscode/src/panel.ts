@@ -223,6 +223,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private skillManagement = false;
   private mcpContext = false;
   private mcpManagement = false;
+  private goalInputs = false;
   private plaintextSecretWarnings = new Set<string>();
   private turnActive = false;
   private confirmedTurnActive = false;
@@ -360,35 +361,60 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   /** `/goal <objective>` is an action, not only a state mutation: persist the standing goal
    * first, then run that exact objective as the next agent turn. Awaiting the correlated goal
    * acknowledgement prevents a failed/busy goal update from launching an untagged prompt. */
-  private async startGoal(text: string): Promise<void> {
+  private async startGoal(text: string, payload: any = {}): Promise<void> {
     let objective = String(text || "").trim();
+    const requestId = String(payload.requestId || this.nextRequestId("goal-prompt")).slice(0, 128);
+    const reject = (error: string) => {
+      this.post({ type: "prompt_rejected", requestId });
+      this.post({ type: "goal_start_state", state: "error", error });
+    };
+    for (const key of ["context", "images", "skills", "templates"]) {
+      if (payload[key] !== undefined && !Array.isArray(payload[key])) {
+        reject(`Invalid goal ${key}; select the attachments again.`); return;
+      }
+    }
+    if (payload.context?.length > 64 || payload.context?.some((item: any) => !item || typeof item !== "object" || Array.isArray(item))) {
+      reject("Select at most 64 valid goal context attachments."); return;
+    }
     let tokenBudget: number | undefined;
     if (objective.startsWith("--tokens")) {
       const match = /^--tokens\s+(\d{1,13})\s+([\s\S]+)$/.exec(objective);
       if (!match || Number(match[1]) <= 0 || Number(match[1]) > 1e12) {
-        this.post({ type: "goal_start_state", state: "error", error: "Use /goal --tokens POSITIVE_NUMBER objective" });
+        reject("Use /goal --tokens POSITIVE_NUMBER objective");
         return;
       }
       tokenBudget = Number(match[1]); objective = match[2].trim();
     }
-    if (!objective) { return; }
+    if (!objective) { reject("Enter a goal objective."); return; }
     const be = this.ensureBackend();
+    const attached = Array.isArray(payload.context) ? payload.context.filter((item: any) => item && typeof item === "object") : [];
+    if (this.goalInputs) {
+      const accepted = be.send({ type: "start_goal", text: objective, request_id: requestId,
+        skills: payload.skills, templates: payload.templates, images: payload.images,
+        context: [...attached, ...this.editorContext()].slice(0, 64),
+        ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}) });
+      if (!accepted) { reject("DGC could not submit the goal. Your draft has been retained."); return; }
+      this.turnActive = true;
+      this.post({ type: "goal_start_state", state: "submitted" });
+      return;
+    }
+    if (attached.length || payload.images?.length || payload.skills?.length || payload.templates?.length) {
+      reject("Update the DGC CLI to start goals with attachments."); return;
+    }
     try {
       await this.requestState(be, "goal", {
         type: "set_goal", text: objective, status: "active", replace: true,
         ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}),
       }, "goal_changed", 10000);
     } catch (err: any) {
-      this.post({ type: "goal_start_state", state: "error",
-                  error: err?.message || "DGC could not start the goal." });
+      reject(err?.message || "DGC could not start the goal.");
       return;
     }
     const accepted = be.send({
-      type: "prompt", text: objective, context: this.editorContext(),
+      type: "prompt", text: objective, context: this.editorContext(), request_id: requestId,
     });
     if (!accepted) {
-      this.post({ type: "goal_start_state", state: "error",
-                  error: "The goal was saved, but its first turn could not start. Send it again to continue." });
+      reject("The goal was saved, but its first turn could not start. Resume the goal to continue.");
       return;
     }
     // Close the same command/turn_start race as an ordinary composer prompt.
@@ -956,6 +982,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.skillManagement = ev.capabilities?.skill_management === true;
         this.mcpContext = ev.capabilities?.mcp_context === true;
         this.mcpManagement = ev.capabilities?.mcp_management === true;
+        this.goalInputs = ev.capabilities?.goal_inputs === true;
         this.routeState.nativeModel = String(ev.model || "");
         this.routeState.nativeThink = String(ev.think || "off");
         this.routeState.subscriptionEngine = "";
@@ -1095,7 +1122,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.syncWorkspaceRoots();
         break;
       case "command_rejected":
-        if (ev.command === "prompt") {
+        if (ev.command === "prompt" || ev.command === "start_goal") {
           this.turnActive = this.confirmedTurnActive;
           this.syncWorkspaceRoots();
         }
@@ -1301,6 +1328,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "prompt": {
         let text = String(msg.text ?? "");
+        if (msg.context !== undefined && (!Array.isArray(msg.context) || msg.context.length > 64
+            || msg.context.some((item: any) => !item || typeof item !== "object" || Array.isArray(item)))) {
+          this.post({ type: "event", event: { type: "error", message: "Select at most 64 valid context attachments." } });
+          this.post({ type: "prompt_rejected", requestId: msg.requestId }); return;
+        }
         // Slash commands remain pure command text. Normal prompts carry typed resources
         // separately so display/history and model input cannot be confused.
         const attached = Array.isArray(msg.context)
@@ -1333,7 +1365,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "startGoal":
         // The webview uses this typed route for `objective /goal`, preserving the objective
         // exactly even when it happens to equal a /goal state verb such as "pause".
-        void this.startGoal(String(msg.text || ""));
+        void this.startGoal(String(msg.text || ""), msg);
         break;
       case "permission_response":
         be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule });

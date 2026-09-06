@@ -269,9 +269,10 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-icon-button:hover { border-color: var(--border); background: var(--surface2); color: var(--text); }
 .rail-icon-button .codicon { font-size: 12px; }
 #queued { padding: 0 4px; font: 400 11px/1.4 var(--mono); color: var(--faint); }
-#attachments { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 4px; }
-#attachments .chip { font: 400 11px/1 var(--mono); background: var(--surface2); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; display: inline-flex; gap: 5px; align-items: center; }
-#attachments .chip .x { cursor: pointer; border: 0; padding: 0 1px; background: transparent; color: var(--faint); line-height: 1; }
+#attachments { display: flex; gap: 5px; flex-wrap: wrap; padding: 0 4px; max-height: min(104px, 20vh); overflow-y: auto; overscroll-behavior: contain; }
+#attachments .chip { font: 400 11px/1 var(--mono); background: var(--surface2); color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; display: inline-flex; gap: 5px; align-items: center; min-width: 0; max-width: 100%; box-sizing: border-box; }
+#attachments .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#attachments .chip .x { cursor: pointer; border: 0; padding: 0 1px; background: transparent; color: var(--faint); line-height: 1; flex: 0 0 auto; }
 #attachments .chip .x:hover { color: var(--err); }
 
 #cbox { position: relative; z-index: 2; background: var(--surface2); border: 1px solid var(--border-strong); border-radius: 18px; display: flex; flex-direction: column; box-shadow: 0 7px 24px rgba(0,0,0,.18); }

@@ -181,7 +181,7 @@ _TOOL_INTENT_PATTERNS = {
 def _trusted_intent_text(text: str) -> str:
     source = str(text or "")
     editor_end = "</editor-context-json>\n\n"
-    if source.startswith("<editor-context-json ") and editor_end in source:
+    while source.startswith("<editor-context-json ") and editor_end in source:
         source = source.split(editor_end, 1)[1]
     if len(source) > 40_000:
         source = source[:20_000] + "\n" + source[-20_000:]
@@ -1896,6 +1896,19 @@ class Agent(GoalLifecycle):
             completed = None
             try:
                 self.reload_skills()
+                try:
+                    safe_user_text, goal_context, goal_images = self.prepare_goal_inputs(safe_user_text)
+                    if goal_images:
+                        from .attachments import validate_image_data_uris, MAX_EDITOR_IMAGE_TOTAL_BYTES
+                        self._pending_images = validate_image_data_uris(
+                            list(dict.fromkeys([*(self._pending_images or []), *goal_images])),
+                            maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
+                            maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
+                except ValueError as exc:
+                    self._last_turn_error = str(exc)
+                    self.update_goal("paused", reason=self._last_turn_error)
+                    self.ui.error(self._last_turn_error)
+                    return False
                 self._mcp_query_text = _trusted_intent_text(safe_user_text)
                 self._active_mcp_tools.clear()
                 self._activate_tool_intents(safe_user_text, replace=True)
@@ -1904,7 +1917,7 @@ class Agent(GoalLifecycle):
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 from .mcp_context import apply_staged_context
-                completed = self._run_goal_steps(apply_staged_context(self, safe_user_text), self._run_turn)
+                completed = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text), self._run_turn)
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -1990,11 +2003,18 @@ class Agent(GoalLifecycle):
                         self.messages.append({"role": "assistant", "content": self._safe_text(str(turn_result["text"]))})
             try:
                 self.reload_skills()
+                try:
+                    safe_user_text, goal_context, _ = self.prepare_goal_inputs(safe_user_text, external=True)
+                except ValueError as exc:
+                    self._last_turn_error = str(exc)
+                    self.update_goal("paused", reason=self._last_turn_error)
+                    self.ui.error(self._last_turn_error)
+                    return {"ok": False, "rc": None, "text": "", "error": str(exc)}
                 self._activate_skill_intents(safe_user_text, replace=True)
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 from .mcp_context import apply_staged_context
-                result = self._run_goal_steps(apply_staged_context(self, safe_user_text), step, external=True)
+                result = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text), step, external=True)
                 if not isinstance(result, dict):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result

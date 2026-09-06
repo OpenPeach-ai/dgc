@@ -3179,19 +3179,18 @@ class TUI:
                                   or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
                 if self.agent.update_goal("active"):
-                    self._submit(self.agent.goal)
+                    self._submit(self.agent.goal, expand_mentions=False)
                 else:
                     self._flash(self.agent._last_persist_error or "no standing goal to resume")
             elif rest and rest.lower() not in ("review", "status"):
-                from .goals import parse_start
+                from .goal_inputs import start_terminal_goal
                 try:
-                    objective, budget = parse_start(rest)
+                    notices = start_terminal_goal(rest, self.agent)
                 except ValueError as exc:
                     self._flash(str(exc)); return True
-                if self.agent.set_goal(objective, token_budget=budget, replace=True):
-                    self._submit(self.agent.goal)
-                else:
-                    self._flash(self.agent._last_persist_error or "goal update was not saved")
+                for notice in notices:
+                    self.info(notice)
+                self._submit(self.agent.goal, expand_mentions=False)
             else:
                 g = getattr(self.agent, "goal", "")
                 if g:
@@ -4884,7 +4883,7 @@ class TUI:
             self.error(f"{engine.short_label} exited with status {res['rc']}")
         return bool(res.get("ok"))
 
-    def _submit(self, text: str, *, echo: bool = True) -> None:
+    def _submit(self, text: str, *, echo: bool = True, expand_mentions: bool = True) -> None:
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
         self._cancel_auxiliary()                       # foreground work always preempts title/suggest
@@ -4914,7 +4913,11 @@ class TUI:
                 self._foreground_aux_barrier()
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
-                model_text = self._expand_mentions(text)
+                if expand_mentions:
+                    model_text = self._expand_mentions(text)
+                else:
+                    self.agent._pending_images = None
+                    model_text = text
                 _se = str(self.config.get("subscription_engine", "")).strip().lower()
                 if _se:
                     succeeded = self._run_delegated_turn(_se, model_text)

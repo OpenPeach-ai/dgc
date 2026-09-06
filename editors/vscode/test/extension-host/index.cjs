@@ -218,24 +218,25 @@ async function run() {
     && item.eventType === "turn_end").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "setMode", mode: "plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
-  await testApi.testOnlyWebviewMessage(testToken, { type: "startGoal", text: "host matrix" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "startGoal", text: "host matrix", requestId: "host-goal-input",
+    skills: ["verify"], context: [{ type: "mcp_context", server: "docs", uri: "docs://fixture", text: "Selected fixture context" }] });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/view-plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" });
-  const correlatedTypes = new Set(["set_mode", "set_think", "set_goal", "get_plan", "status"]);
+  const correlatedTypes = new Set(["set_mode", "set_think", "start_goal", "get_plan", "status"]);
   await waitFor(() => {
     const commands = backendCommands(backendLogPath);
     const seen = new Set(commands
       .filter((command) => correlatedTypes.has(command.type)).map((command) => command.type));
     return [...correlatedTypes].every((type) => seen.has(type))
-      && commands.some((command) => command.type === "prompt" && command.text === "host matrix");
+      && commands.some((command) => command.type === "start_goal" && command.text === "host matrix");
   });
   const goalStartCommands = backendCommands(backendLogPath);
-  const goalSetIndex = goalStartCommands.findIndex((command) => command.type === "set_goal"
-    && command.text === "host matrix");
-  const goalPromptIndex = goalStartCommands.findIndex((command) => command.type === "prompt"
-    && command.text === "host matrix");
-  assert.ok(goalSetIndex !== -1 && goalPromptIndex > goalSetIndex,
-    "composer goal actions must persist their tagged goal before starting that exact agent turn");
+  const startGoal = goalStartCommands.find(command => command.type === "start_goal" && command.text === "host matrix");
+  assert.ok(startGoal, "the host must submit the complete goal as one backend command");
+  assert.equal(startGoal.request_id, "host-goal-input");
+  assert.deepEqual(startGoal.skills, ["verify"]);
+  assert.ok(startGoal.context.some(item => item.type === "mcp_context" && item.text === "Selected fixture context"));
+  assert.equal(goalStartCommands.some(command => command.type === "set_goal" && command.text === "host matrix"), false);
   await waitFor(() => posted().some((item) => item.type === "event"
     && item.eventType === "turn_start"));
   const initialGoalPrompts = goalStartCommands.filter((command) => command.type === "prompt"

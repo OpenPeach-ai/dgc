@@ -60,6 +60,14 @@ def clean_details(value) -> dict:
     result = new_details()
     if not isinstance(value, dict):
         return result
+    if value.get("inputs_error"):
+        result["inputs_error"] = True
+    if "inputs" in value:
+        from .goal_inputs import normalize_inputs
+        try:
+            result["inputs"] = normalize_inputs(value["inputs"])
+        except (ValueError, TypeError, OverflowError):
+            result["inputs_error"] = True
     if isinstance(value.get("id"), str) and len(value["id"]) == 32:
         try:
             result["id"] = uuid.UUID(hex=value["id"]).hex
@@ -188,6 +196,17 @@ def review_markdown(snapshot: dict) -> str:
     text += f"**Reported tokens:** {usage}\n\n"
     if snapshot.get("token_budget"):
         text += f"**Token budget:** {snapshot['token_budget']}\n\n"
+    attached = snapshot.get("attachments") or {}
+    selections = [*("$" + name for name in attached.get("skills", [])),
+                  *("/" + name for name in attached.get("templates", []))]
+    if attached.get("context"):
+        selections.append(f"{attached['context']} context attachment" + ("" if attached['context'] == 1 else "s"))
+    if attached.get("images"):
+        selections.append(f"{attached['images']} image" + ("" if attached['images'] == 1 else "s"))
+    if selections:
+        text += "**Attachments:** " + ", ".join(selections) + "\n\n"
+    if attached.get("invalid"):
+        text += "Saved attachments could not be restored; replace this goal before resuming.\n\n"
     text += "`/goal pause` · `/goal resume` · `/goal clear`"
     return text
 
@@ -196,11 +215,26 @@ class GoalLifecycle:
     """Shared Agent lifecycle; frontends control it through the same persisted transitions."""
 
     def goal_snapshot(self) -> dict:
+        from .goal_inputs import input_summary
         return {"text": self.goal, "status": self.goal_status,
                 "elapsed_seconds": self.goal_elapsed_seconds(),
                 "running": bool(self._goal_active_since and self.goal_status == "active"),
                 **{key: copy.deepcopy(value) for key, value in self._goal_details.items()
-                   if key not in ("last_progress", "stalled_cycles")}}
+                   if key not in ("last_progress", "stalled_cycles", "inputs", "inputs_error")},
+                "attachments": {**input_summary(self._goal_details.get("inputs", {})),
+                                "invalid": bool(self._goal_details.get("inputs_error"))}}
+
+    def prepare_goal_inputs(self, text: str, *, external: bool = False, force: bool = False) -> tuple[str, str, list]:
+        if not self.goal or (not force and self.goal_status != "active") or self.depth:
+            return text, "", []
+        if self._goal_details.get("inputs_error"):
+            raise ValueError("Saved goal attachments could not be restored. Review and replace the goal before resuming.")
+        from .goal_inputs import prepare_inputs
+        prepared, context, images = prepare_inputs(
+            text, self._safe_value(self._goal_details.get("inputs", {})), self, external=external)
+        # Templates are loaded after the public turn boundary sanitized the original request.
+        # Sanitize their newly introduced text before either native or delegated execution.
+        return self._safe_text(prepared), context, images
 
     def request_goal_control(self, action: str) -> bool:
         """A UI thread can stop/delete an active goal; its owner commits after tool cleanup."""
@@ -228,7 +262,7 @@ class GoalLifecycle:
             notify(self.goal, self.goal_status)
 
     def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
-                 replace: bool = False) -> bool:
+                 replace: bool = False, inputs: dict | None = None) -> bool:
         clean = self._safe_text(text).strip()
         if len(clean) > 4000:
             self._last_persist_error = "Goal objectives must be at most 4,000 characters; no text was discarded"
@@ -248,12 +282,34 @@ class GoalLifecycle:
             previous = (self.goal, self.goal_status, self._goal_elapsed_seconds,
                         self._goal_active_since, copy.deepcopy(self._goal_details))
             fresh = replace or not self.goal
+            staged = getattr(self, "_draft_mcp_context", []) if fresh else []
+            supplied = inputs is not None or bool(staged)
+            if clean:
+                from .goal_inputs import normalize_inputs, prepare_inputs
+                from .skills import explicit_skill_names
+                try:
+                    selected = normalize_inputs(self._safe_value(inputs if inputs is not None else
+                        {"context": staged} if staged else self._goal_details.get("inputs", {}) if not fresh else {}))
+                    self.reload_skills()
+                    selected = normalize_inputs({**selected, "skills": list(dict.fromkeys([
+                        *selected.get("skills", []), *explicit_skill_names(self.skills, clean)]))})
+                    prepare_inputs(clean, selected, self, external=status == "active"
+                                   and bool(self.config.get("subscription_engine", "")))
+                except (TypeError, ValueError) as exc:
+                    self._last_persist_error = str(exc)
+                    return False
+            else:
+                selected = {}
             if fresh or not clean:
                 self._goal_details = new_details()
                 self._goal_elapsed_seconds = self._goal_active_since = 0.0
             else:
                 self._stop_goal_clock()
             self.goal, self.goal_status = clean, status if clean else "none"
+            if clean:
+                self._goal_details["inputs"] = selected
+                if supplied or fresh:
+                    self._goal_details.pop("inputs_error", None)
             self._pending_goal_report = None
             if token_budget is not None:
                 self._goal_details["token_budget"] = token_budget
@@ -265,6 +321,8 @@ class GoalLifecycle:
                     self._goal_active_since = time.time()
             self._refresh_system()
             if self._persist():
+                if staged and inputs is None:
+                    self._draft_mcp_context = []
                 self._notify_goal()
                 return True
             (self.goal, self.goal_status, self._goal_elapsed_seconds,
@@ -282,6 +340,13 @@ class GoalLifecycle:
             if not reserved:
                 self._last_persist_error = "Stop the active turn before changing its goal."
                 return False
+            if status == "active":
+                try:
+                    self.reload_skills()
+                    self.prepare_goal_inputs(self.goal, external=bool(self.config.get("subscription_engine", "")), force=True)
+                except (TypeError, ValueError) as exc:
+                    self._last_persist_error = str(exc)
+                    return False
             previous = (self.goal_status, self._goal_elapsed_seconds, self._goal_active_since,
                         copy.deepcopy(self._goal_details))
             self._stop_goal_clock()

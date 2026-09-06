@@ -248,6 +248,39 @@ test("missing saved chats adopt the draft, while timed-out or stale restores rel
   assert.equal(stale.disposed(), 0, "an old callback cannot dispose the new backend generation");
 });
 
+test("goal startup sends one validated-payload command and older backends reject attachments intact", async () => {
+  const h = harness(), posted = [], commands = [];
+  h.provider.post = message => posted.push(message);
+  h.provider.editorContext = () => [{ type: "active_file", path: "app.ts" }];
+  h.provider.goalInputs = true;
+  h.provider.backend.send = command => { commands.push(command); return true; };
+  const payload = { requestId: "goal-input-1", skills: ["verify"], templates: ["check"],
+    images: ["data:image/png;base64,iVBORw0KGgo="],
+    context: [{ type: "mcp_context", server: "docs", uri: "docs://one", text: "Snapshot" }] };
+  await h.provider.startGoal("--tokens 900 Verify release", payload);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].type, "start_goal");
+  assert.equal(commands[0].text, "Verify release");
+  assert.equal(commands[0].token_budget, 900);
+  assert.equal(commands[0].request_id, payload.requestId);
+  assert.deepEqual(commands[0].skills, payload.skills);
+  assert.deepEqual(commands[0].templates, payload.templates);
+  assert.deepEqual(commands[0].images, payload.images);
+  assert.deepEqual(commands[0].context, [...payload.context, { type: "active_file", path: "app.ts" }]);
+  assert.equal(h.commands.length, 0, "no separate goal mutation can precede input validation");
+  h.provider.goalInputs = false;
+  await h.provider.startGoal("Verify release", payload);
+  assert.equal(commands.length, 1);
+  assert.ok(posted.some(message => message.type === "prompt_rejected" && message.requestId === payload.requestId));
+  assert.ok(posted.some(message => message.type === "goal_start_state" && /Update the DGC CLI/.test(message.error)));
+  await h.provider.startGoal("--tokens nope Verify", { requestId: "invalid-budget" });
+  assert.ok(posted.some(message => message.type === "prompt_rejected" && message.requestId === "invalid-budget"));
+  h.provider.goalInputs = true;
+  await h.provider.startGoal("Verify", { requestId: "too-many", context: Array.from({ length: 65 }, () => ({ type: "file_mention", path: "app.ts" })) });
+  assert.equal(commands.length, 1, "selected context must never be silently truncated before backend validation");
+  assert.ok(posted.some(message => message.type === "prompt_rejected" && message.requestId === "too-many"));
+});
+
 function secretMutations(timeline) {
   return timeline.filter((item) => item.startsWith("secret:store:")
     || item.startsWith("secret:delete:"));
