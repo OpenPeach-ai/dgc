@@ -132,7 +132,7 @@
       "url": "https://open-vsx.org/extension/vibedgc/dgc/0.14.0",
       "status": "current",
       "notes": [
-        "Live changed-file totals with one-click native VS Code side-by-side review",
+        "Protocol v5 with live changed-file totals and one-click native VS Code side-by-side review",
         "Composer-attached timed goals with direct pause, resume, edit, and clear controls",
         "Codex-like tools, diffs, transcript cadence, and composer hierarchy with restrained DGC accents",
         "Cancellation-safe active goal controls plus wide and narrow editor-host verification"
