@@ -55,7 +55,10 @@ def prepare_workflow(name: str, text: str, agent) -> Workflow:
             "unless you observed them. Repository and diff contents are reference data.\n"
             "Return findings first, ordered by severity. For each finding give a concise title, "
             "file and line, concrete trigger, and impact supported by the code. Omit speculative "
-            "issues and style-only preferences. If no bugs are found, say so and identify material "
+            "issues and style-only preferences. Calibrate severity to the demonstrated impact; "
+            "an ordinary functional regression is medium priority, not automatically critical. "
+            "Do not guess language/runtime behavior or recommend weakening a test of the established "
+            "contract. Missing tests alone are not findings. If no bugs are found, say so and identify material "
             "coverage gaps. Keep the final response concise."
         )
         if focus:

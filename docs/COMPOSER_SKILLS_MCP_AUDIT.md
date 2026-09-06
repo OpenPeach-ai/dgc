@@ -292,3 +292,18 @@ unimplemented capability. Document any provider-owned execution boundary explici
   tokens during its single turn, exceeding the test's 60,000-token budget as permitted by the
   documented between-vendor-turn budget boundary; this is not an in-flight hard token cap.
   Full regression passed 1,387/1,387 checks and 111 discovered Python cases (four bridge skips).
+- A live native editor review used `git_diff`, found a planted whitespace regression and left source
+  files unchanged. Its first answer overstated severity and invented an unrelated runtime result.
+  Shared review guidance now calibrates priorities, requires support for language/runtime claims,
+  preserves established regression-test contracts and omits speculative coverage filler. The repeat
+  identified the same defect as P2, omitted the unsupported runtime claim and explicitly stated that
+  tests were not run. Focused workflow tests and skill validation passed; response quality remains
+  dependent on the selected model, not guaranteed by the prompt alone.
+- Source security checkpoint: npm audit found no known extension dependency vulnerabilities;
+  pip-audit found none in the 11-package locked Python closure. Bandit found no high-severity issues;
+  the reviewed medium findings remain explicit LAN preview binding, private sandbox temporary paths
+  and permission-gated Python execution. Current source and publishable HEAD/main ancestry scanning
+  covered 3,151 text items, 80 commits and 30 archives against credential shapes, 42 locally configured
+  secret values and private machine references. Only deliberate credential-shape test fixtures matched.
+  Other local refs were inspected separately and are not part of the publishable ancestry. Final
+  source-bound runtime/VSIX artifacts still require their own scan before publication.
