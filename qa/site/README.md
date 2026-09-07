@@ -65,3 +65,5 @@ npm run qa:site:release
 The same mode is available from the CI workflow's `workflow_dispatch` input. The local results are
 useful acceptance evidence, but production CDN and field data remain the authority for real-user
 performance.
+
+If port 4173 belongs to another local app, run with `DGC_SITE_QA_PORT=45173` (or another free port). The browser runner still starts its own server and checks responses against that exact origin; it never reuses the other app.
