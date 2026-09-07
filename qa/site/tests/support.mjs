@@ -27,7 +27,7 @@ export function observeRuntime(page) {
   page.on("pageerror", error => pageErrors.push(error.message));
   page.on("response", response => {
     const url = new URL(response.url());
-    if (url.origin !== "http://127.0.0.1:4173") return;
+    if (url.origin !== QA_ORIGIN) return;
     if (response.status() >= 400) httpErrors.push(`${response.status()} ${url.pathname}`);
   });
   return {
@@ -67,3 +67,4 @@ export async function settle(page) {
   await page.evaluate(() => document.fonts?.ready);
   await page.waitForTimeout(350);
 }
+import {QA_ORIGIN} from "../origin.mjs";

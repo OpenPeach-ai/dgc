@@ -1,6 +1,7 @@
 import {defineConfig} from "@playwright/test";
 import {fileURLToPath} from "node:url";
 import {resolve} from "node:path";
+import {QA_ORIGIN, QA_PORT} from "./origin.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 
@@ -30,7 +31,7 @@ export default defineConfig({
     ["html", {open: "never", outputFolder: resolve(ROOT, "output/site-qa/playwright-report")}],
   ],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: QA_ORIGIN,
     browserName: "chromium",
     colorScheme: "dark",
     deviceScaleFactor: 1,
@@ -41,11 +42,11 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "node qa/site/server.mjs --port 4173",
+    command: `node qa/site/server.mjs --port ${QA_PORT}`,
     cwd: ROOT,
     reuseExistingServer: false,
     timeout: 15_000,
-    url: "http://127.0.0.1:4173/__qa/ready",
+    url: `${QA_ORIGIN}/__qa/ready`,
   },
   projects: [
     {
