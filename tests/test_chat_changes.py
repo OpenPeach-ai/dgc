@@ -115,11 +115,12 @@ class ChatChangesTests(unittest.TestCase):
         self.write("safe.py", "safe\n")
         self.journal.finish(before)
         self.assertNotIn("PRIVATE_OUTSIDE_SENTINEL", json.dumps(self.journal.state()))
-        state = self.journal.state()
-        state["files"]["../private"] = state["files"].pop("safe.py")
-        restored = ChatChanges.from_state(self.root, state)
-        self.assertEqual(restored.report()["total"], 0)
-        self.assertFalse(restored.report()["complete"])
+        for invalid in ("../private", "C:private", "C:/private", "//server/share", "safe/../private"):
+            state = self.journal.state()
+            state["files"][invalid] = state["files"].pop("safe.py")
+            restored = ChatChanges.from_state(self.root, state)
+            self.assertEqual(restored.report()["total"], 0)
+            self.assertFalse(restored.report()["complete"])
         with patch.object(chat_changes, "MAX_JOURNAL_BYTES", 1):
             before = self.journal.begin()
             self.write("another.py", "no room\n")
