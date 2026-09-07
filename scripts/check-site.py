@@ -556,10 +556,10 @@ CAPTURE_MEDIA_FILES = {
             "real_time": True,
             "tool_sequence": ["read_file", "read_file", "edit_file", "bash"],
             "sandbox_backend": "bwrap",
-            "model_route": "local Ollama · qwen3.8:27b-q4km",
+            "model_route": "local Ollama · qwen2.5:14b",
         },
         "provenance_terms": (
-            "Actual current DGC ", "real local Ollama run", "qwen3.8:27b-q4km",
+            "Actual current DGC ", "real local Ollama run", "qwen2.5:14b",
             "disposable controlled fixture", "python3 -m unittest -v passed 3/3",
             "real time, no speed adjustment", "no user config or session persisted",
         ),
