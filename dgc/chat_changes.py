@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import stat
 import threading
 import time
@@ -28,7 +28,7 @@ _LIMIT = "Some changes could not be recorded within the safe inspection limits. 
 
 def _path(value):
     return (isinstance(value, str) and 0 < len(value) <= 4096 and "\0" not in value
-            and "\\" not in value and not Path(value).is_absolute()
+            and "\\" not in value and not Path(value).is_absolute() and not PureWindowsPath(value).drive
             and all(part not in ("", ".", "..", ".git") for part in value.split("/")))
 
 
