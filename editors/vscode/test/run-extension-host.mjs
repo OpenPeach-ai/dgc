@@ -62,13 +62,18 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
   capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true,
-    workflows: true, composer_selections: true, workspace_inspection: true }, session_id: currentSession,
+    workflows: true, composer_selections: true, workspace_inspection: true, chat_inspection: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  if (cmd.type === "get_chat_changes") {
+    send({ type: "chat_changes", request_id: cmd.request_id, session_id: currentSession,
+      roots: workspaceFolders.map(root => ({ root, total: 0, complete: true, notices: [], files: [] })) });
+    return;
+  }
   if (cmd.type === "get_workspace_changes") {
     send({ type: "workspace_changes", request_id: cmd.request_id, roots: workspaceFolders.map(root => ({
       root, total: root === process.cwd() ? 1 : 0, complete: true, notices: [],

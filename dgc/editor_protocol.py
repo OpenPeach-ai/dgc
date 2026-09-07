@@ -39,6 +39,9 @@ _NA = lambda required=True: _f("null", "array", required=required)
 # still declared and type-checked; undeclared fields fail closed so a mismatched or compromised
 # backend cannot smuggle arbitrary data into the editor webview.
 EVENT_FIELDS: dict[str, dict[str, dict]] = {
+    "chat_changes": {"roots": _A(), "session_id": _S(), "request_id": _S()},
+    "chat_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
+                    "session_id": _S(), "request_id": _S()},
     "workspace_changes": {"roots": _A(), "request_id": _S()},
     "workspace_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
                          "request_id": _S()},
@@ -240,6 +243,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
+    "get_chat_changes": {"request_id": _S()},
+    "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
     "get_workspace_changes": {"request_id": _S()},
     "get_workspace_change": {"root": _S(), "path": _S(), "request_id": _S()},
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),

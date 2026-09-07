@@ -51,6 +51,54 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(calls, ["ordinary request"])
         self.assertEqual(self.agent.goal_status, "none")
 
+    def test_chat_changes_persist_across_native_subscription_resume_and_reset(self):
+        state_dir = tempfile.TemporaryDirectory(prefix="dgc-chat-state-")
+        self.addCleanup(state_dir.cleanup)
+        with patch.object(sessions, "project_dir", return_value=Path(state_dir.name)):
+            self.agent.session_file = sessions.new_path(self.root)
+            saved_path = self.agent.session_file
+            target = self.root / "existing.py"
+            target.write_text("already changed before this chat\n")
+            def native(prompt):
+                self.agent.messages.append({"role": "user", "content": prompt})
+                target.write_text("already changed before this chat\nnative addition\n")
+                return True
+            self.agent._run_turn = native
+            self.assertTrue(self.agent.run_turn("native edit"))
+            self.assertEqual(self.agent.chat_changes.report()["files"][0]["additions"], 1)
+            def delegated(_prompt):
+                target.write_text(target.read_text() + "subscription addition fixture-placeholder\n")
+                return {"ok": True, "text": "Updated", "rc": 0}
+            self.assertTrue(self.agent.run_external_turn("subscription edit", delegated)["ok"])
+            self.assertEqual(self.agent.chat_changes.report()["files"][0]["additions"], 2)
+            self.assertNotIn("fixture-placeholder", saved_path.read_text())
+            self.agent.reset()
+            self.assertEqual(self.agent.chat_changes.report()["total"], 0)
+            target.write_text("later manual edit\n")
+            self.agent.load_session(saved_path)
+            self.assertEqual(self.agent.chat_changes.report()["files"][0]["additions"], 2)
+            self.assertIn("subscription addition", self.agent.chat_changes.read("existing.py")["after"])
+            self.assertNotIn("later manual edit", self.agent.chat_changes.read("existing.py")["after"])
+
+    def test_rewind_updates_chat_changes_and_failed_save_restores_evidence(self):
+        target = self.root / "rewind.py"
+        target.write_text("before\n")
+        with patch.object(self.agent.client, "chat", side_effect=[
+            ChatResult(tool_calls=[ToolCall("edit", "edit_file", {
+                "path": "rewind.py", "old_string": "before", "new_string": "after"})]),
+            ChatResult(content="Updated."),
+        ]):
+            self.assertTrue(self.agent.run_turn("Update rewind.py"))
+        self.assertEqual(self.agent.chat_changes.report()["total"], 1)
+        saved = self.agent.chat_changes.state()
+        with patch.object(self.agent, "_persist", return_value=False):
+            self.assertEqual(self.agent.rewind(0), (-1, 0))
+        self.assertEqual(self.agent.chat_changes.state(), saved)
+        self.assertEqual(target.read_text(), "after\n")
+        self.assertGreaterEqual(self.agent.rewind(0)[0], 0)
+        self.assertEqual(target.read_text(), "before\n")
+        self.assertEqual(self.agent.chat_changes.report()["total"], 0)
+
     def test_native_continues_and_commits_evidence_only_after_success(self):
         self.agent.set_goal("finish both steps")
         observed = []

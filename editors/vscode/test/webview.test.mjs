@@ -540,7 +540,7 @@ test("stream batching flushes final text and partial changes stay explicit", () 
   for (const text of ["Complete ", "answer ", "with **formatting**."]) send({ type: "event", event: { type: "text_delta", text } });
   send({ type: "event", event: { type: "turn_end", reason: "completed" } });
   assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
-  send({ type: "workspace_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
+  send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
   assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
   doc.getElementById("changes-review-button").click();
   assert.match(doc.getElementById("changes-review-list").textContent, /Showing 500 of 900/);
@@ -1179,12 +1179,12 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   assert.equal(doc.getElementById("goal-editor").hidden, true);
   doc.getElementById("goal-clear").click();
   assert.equal(posted.filter((m) => m.type === "clearGoal").length, 1);
-  send({ type: "workspace_changes", total: 2, additions: 7, deletions: 3, files: [
+  send({ type: "chat_changes", total: 2, additions: 7, deletions: 3, files: [
     { id: "opaque-change", path: "src/a.ts", additions: 5, deletions: 3 },
     { path: "src/new.ts", additions: 0, deletions: 0, counted: false, error: "Preview limit", untracked: true },
   ] });
   assert.equal(doc.getElementById("changesbar").hidden, false);
-  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed");
+  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed in this chat");
   doc.getElementById("changes-review-button").click();
   assert.equal(doc.getElementById("changes-review").hidden, false);
   assert.equal(doc.querySelectorAll(".change-row").length, 2);
@@ -1617,4 +1617,32 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
 
   assert.deepEqual(errors, [], "accessible interaction flow raised JS errors");
   dom.window.close();
+});
+
+
+test("a new chat excludes pre-existing workspace changes and rejects stale chat reports", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "session_ready", sessionId: "chat-one" });
+  send({ type: "workspace_changes", total: 6, additions: 778, deletions: 2,
+    files: [{ id: "existing", path: "existing.py", additions: 778, deletions: 2 }] });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  doc.getElementById("workspace-changes").click();
+  assert.equal(doc.getElementById("changes-review-title").textContent, "Workspace changes");
+  assert.match(doc.getElementById("changes-review-summary").textContent, /6 files changed/);
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.at(-1).scope, "workspace");
+  send({ type: "chat_changes", sessionId: "chat-one", total: 1, additions: 1, deletions: 0,
+    files: [{ id: "chat-edit", path: "existing.py", additions: 1, deletions: 0 }] });
+  assert.equal(doc.getElementById("changesbar").hidden, false);
+  assert.equal(doc.getElementById("changes-add").textContent, "+1");
+  doc.getElementById("changes-main").click();
+  assert.equal(doc.getElementById("changes-review-title").textContent, "Changes in this chat");
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.at(-1).scope, "chat");
+  send({ type: "event", event: { type: "session", session_id: "chat-two" } });
+  send({ type: "session_ready", sessionId: "chat-two" });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  send({ type: "chat_changes", sessionId: "chat-one", total: 10, files: [] });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  assert.deepEqual(errors, []);
 });

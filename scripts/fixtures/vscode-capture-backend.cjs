@@ -66,7 +66,8 @@ send({
   type: "ready",
   version: "capture-fixture",
   protocol_version: 6,
-  capabilities: { correlated_state_requests: true, workspace_inspection: true },
+  capabilities: { correlated_state_requests: true, workspace_inspection: true, chat_inspection: true },
+  session_id: "capture-chat",
   model: "deterministic protocol fixture",
   mode: "plan",
   think: "off",
@@ -190,20 +191,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   let command;
   try { command = JSON.parse(line); }
   catch { return; }
-  if (command.type === "get_workspace_changes") {
+  if (["get_workspace_changes", "get_chat_changes"].includes(command.type)) {
     // The controlled fixture edits exactly this one known expression. Read its real state so
     // the installed extension exercises the current backend-owned change-inspection protocol.
     const changed = fs.readFileSync(target, "utf8") !== initialText;
-    send({ type: "workspace_changes", request_id: command.request_id, roots: [{
+    send({ type: command.type === "get_chat_changes" ? "chat_changes" : "workspace_changes",
+      ...(command.type === "get_chat_changes" ? { session_id: "capture-chat" } : {}), request_id: command.request_id, roots: [{
       root: workspace, total: changed ? 1 : 0, complete: true, notices: [],
       files: changed ? [{ path: "clamp.py", additions: 1, deletions: 1, counted: true,
         binary: false, untracked: false, deleted: false, staged: false, error: "" }] : [],
     }] });
-  } else if (command.type === "get_workspace_change") {
+  } else if (["get_workspace_change", "get_chat_change"].includes(command.type)) {
     if (command.root !== workspace || command.path !== "clamp.py") {
       send({ type: "command_rejected", command: command.type, request_id: command.request_id,
         reason: "outside_capture_fixture", message: "Only the capture fixture file is available." });
-    } else send({ type: "workspace_change", request_id: command.request_id,
+    } else send({ type: command.type === "get_chat_change" ? "chat_change" : "workspace_change",
+      ...(command.type === "get_chat_change" ? { session_id: "capture-chat" } : {}), request_id: command.request_id,
       root: workspace, path: "clamp.py", kind: "file", before: initialText,
       after: fs.readFileSync(target, "utf8") });
   } else if (command.type === "set_workspace_roots") {

@@ -704,12 +704,13 @@
 
   // ---- Codex-style composer rail: durable workspace changes and standing goal ----
   let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
+  let workspaceChangeState = { ...changeState }, reviewScope = "chat";
   function syncComposerRail() {
     composerRail.hidden = goalBar.hidden && changesBar.hidden;
     composerRail.classList.toggle("has-changes", !changesBar.hidden);
     composerRail.classList.toggle("has-goal", !goalBar.hidden);
   }
-  function setWorkspaceChanges(next) {
+  function setChatChanges(next) {
     const files = Array.isArray(next?.files) ? next.files.filter((item) => item
       && typeof item.path === "string").slice(0, 500) : [];
     changeState = {
@@ -720,15 +721,21 @@
     };
     changesBar.hidden = changeState.total === 0 && !changeState.notices.length;
     $("changes-count").textContent = changeState.notices.length
-      ? (changeState.total ? `${changeState.total} changed · partial scan` : "Changes unavailable")
-      : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed`;
-    changesBar.title = ["Workspace changes since the last commit", ...changeState.notices].join("\n");
+      ? (changeState.total ? `${changeState.total} changed in this chat · partial scan` : "Changes unavailable")
+      : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
+    changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded", ...changeState.notices].join("\n");
+    $("changes-add").hidden = $("changes-del").hidden = changeState.total === 0;
     $("changes-add").textContent = `+${changeState.additions}`;
     $("changes-del").textContent = `−${changeState.deletions}`;
     syncComposerRail();
     if (!$("changes-review").hidden) renderChangesReview();
   }
   function renderChangesReview() {
+    const changeState = reviewScope === "chat" ? currentChatChanges() : workspaceChangeState;
+    $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this chat" : "Workspace changes";
+    $("changes-review-description").textContent = reviewScope === "chat"
+      ? "Saved before/after snapshots from this chat’s runs in the primary project folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
+      : "All pending changes since the last Git commit, including edits made before this chat or by other tools.";
     const summary = $("changes-review-summary"), list = $("changes-review-list");
     summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
     list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
@@ -741,17 +748,23 @@
     }
     list.querySelectorAll("[data-change]").forEach((button) => button.onclick = () => {
       const item = changeState.files[Number(button.dataset.change)];
-      if (item) vscode.postMessage({ type: "reviewChange", path: item.id || item.path });
+      if (item) vscode.postMessage({ type: "reviewChange", path: item.id || item.path, scope: reviewScope });
     });
   }
-  function openChangesReview() {
+  function currentChatChanges() { return changeState; }
+  function setWorkspaceChanges(next) {
+    workspaceChangeState = { total: 0, additions: 0, deletions: 0, files: [], ...next };
+    if (!$("changes-review").hidden && reviewScope === "workspace") renderChangesReview();
+  }
+  function openChangesReview(scope = "chat") {
+    reviewScope = scope === "workspace" ? "workspace" : "chat";
     renderChangesReview();
     $("changes-review").hidden = false;
     $("changes-review-close").focus();
   }
   function closeChangesReview() {
     $("changes-review").hidden = true;
-    $("changes-main").focus();
+    (reviewScope === "workspace" || changesBar.hidden ? $("workspace-changes") : $("changes-main")).focus();
   }
 
   // Standing goal — the objective and clock stay attached immediately above the composer.
@@ -1139,6 +1152,10 @@
   });
 
   function onEvent(ev) {
+    if (ev.type === "session" || ev.type === "ready") {
+      setChatChanges({ files: [], total: 0 });
+      $("changes-review").hidden = true;
+    }
     const stick = atBottom();
     switch (ev.type) {
       case "ready": {
@@ -1562,8 +1579,9 @@
   $("goal-editor").addEventListener("click", (event) => {
     if (event.target === $("goal-editor")) closeGoalEditor();
   });
-  $("changes-main").onclick = openChangesReview;
-  $("changes-review-button").onclick = openChangesReview;
+  $("workspace-changes").onclick = () => openChangesReview("workspace");
+  $("changes-main").onclick = () => openChangesReview("chat");
+  $("changes-review-button").onclick = () => openChangesReview("chat");
   $("changes-review-close").onclick = closeChangesReview;
   $("goal-editor").addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeGoalEditor(); }
@@ -2092,6 +2110,9 @@
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
     else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "chat_changes") {
+      if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
+    }
     else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
     else if (msg.type === "mcp_command_started") {

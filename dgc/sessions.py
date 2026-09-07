@@ -377,6 +377,7 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
          goal_details: dict | None = None,
          subscription_sessions: dict | None = None,
+         chat_changes: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -428,6 +429,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["timing"] = _timing_values(timing)
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
+        if chat_changes is not None:
+            from .redaction import redact_value
+            data["chat_changes"] = redact_value(chat_changes, redact_secrets or ())
         clean_subscription_sessions = _clean_subscription_sessions(subscription_sessions)
         if clean_subscription_sessions:
             data["subscription_sessions"] = clean_subscription_sessions

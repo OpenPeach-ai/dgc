@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.1 — 2026-09-07
+
+- Fix new chats showing pre-existing Git changes as chat work. The composer card now shows changes recorded during this chat's runs; **Workspace changes** opens the separate repository review.
+- Compare edits against actual pre-run file contents, including already modified files. Preserve saved previews across reloads, exclude edits made between runs, and clear the card on a new chat.
+- Support live inspection, native and subscription runs, cancelled/error turns, and rewind. Chat snapshots remain private and are never supplied to the model.
+- Recommend CLI 0.29.1; retain protocol v6 and gate chat inspection by capability. Older sessions have no retroactive chat baseline. Concurrent external edits during a run may be included; tracking covers the primary project folder.
+
 ## 0.16.0 — 2026-09-06
 
 - Use `/` and `$` anywhere at a word boundary to choose commands, skills and prompt templates while preserving the draft. Add shared plan, review and project-guide workflows.
