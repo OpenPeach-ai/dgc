@@ -12,35 +12,35 @@
         "edit_file",
         "bash"
       ],
-      "duration_seconds": 47.566,
-      "duration_label": "0:48",
-      "provenance": "Actual current DGC 0.29.0 full-screen TUI · real local Ollama run · qwen3.8:27b-q4km · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
-      "model_route": "local Ollama · qwen3.8:27b-q4km",
+      "duration_seconds": 47.466,
+      "duration_label": "0:47",
+      "provenance": "Actual current DGC 0.29.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "model_route": "local Ollama · qwen2.5:14b",
       "time_compression": 1.0,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "2737f64427824bc1d4c11839b2fb499d815e712ba268ff47ad390760b671e0d9",
-          "bytes": 2177302,
+          "sha256": "37aa1e18e28f23ae1081dbee484dcf4161d2a4cd6bde6b5fd861cef6bcd0f1fb",
+          "bytes": 2024953,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.566
+          "duration_seconds": 47.466
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "db7f2278a220840ddace664ad54de2c6d89b7aad0ad3047718c631e509dd92da",
-          "bytes": 583352,
+          "sha256": "eaee9736dfff2883d225b708413ab1c85cefc69c7c5fd05513f7f5aaa89988ca",
+          "bytes": 539247,
           "codec": "h264",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.566667
+          "duration_seconds": 47.466667
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
-          "sha256": "cf7032cba3c5b0050a5eb0d57f162ab9db911ef5cf259f3c11789f6c1aafdc76",
-          "bytes": 112028,
+          "sha256": "5ca4bd4b428ff0e69fc3da342fb86e553c35ae19ab38bbbb7c66cca93055b0c5",
+          "bytes": 109451,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720
@@ -61,45 +61,45 @@
       "real_plan_button_click": true,
       "visible_editor_matches_diff": true,
       "source_unchanged_through_current_head": true,
-      "duration_seconds": 30.8,
+      "duration_seconds": 30.666,
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.16.0",
-      "packaged_extension_source_commit": "64271cb4d404a9ad2b5577f92f7ce68756ea3d6b",
-      "extension_vsix_sha256": "b14df712b48f88cad056ab281337d365df68fb842f44d0761f6cf4ea2fb7113d",
+      "extension_version": "0.16.1",
+      "packaged_extension_source_commit": "9c37d850227382bc43a106caa8c2cfbe629e9ff1",
+      "extension_vsix_sha256": "32bae05656248d735c43eb110c97287261e5b2192d649bbebe15f897f78edcf8",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "50657bc4fe1726979ba461d1113efbcf986aff6809fe3fa213593c19dc3e644d",
-          "bytes": 1398005,
+          "sha256": "ea26c5edda06d7fd9ae525c55b616b914ba94004112244d01e15c11d01866b78",
+          "bytes": 1366895,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.8
+          "duration_seconds": 30.666
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "c97721b35477042547a486d51e736bb45058a702461ba4f1d0fe078dc7a84e28",
-          "bytes": 338565,
+          "sha256": "390048ae82acb63717c323fb73952042c2e496b0059d903ab643a2b33fba19a3",
+          "bytes": 355544,
           "codec": "h264",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.8
+          "duration_seconds": 30.666667
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "7607bfffa3f5b0ef4f741fc70896559568d62a7622d2aec4eef72f804641d2c7",
-          "bytes": 155274,
+          "sha256": "4459509a7762ac456458b31e8441ff5f9f1ad7a353e35636f6b3c5d0fafdcafc",
+          "bytes": 148942,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "c489641eda2fdaf1b658a9c0cb5ea8eee87bcca85e94927d3ffffac7fb568678",
-          "bytes": 39196,
+          "sha256": "1d917f3b533e10bb0e122638f54ac2b442cf848dd4027d65db8dc1d498d95504",
+          "bytes": 38083,
           "codec": "mjpeg",
           "width": 720,
           "height": 450

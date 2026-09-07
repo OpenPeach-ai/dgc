@@ -48,7 +48,7 @@ is not that route's supported wire value; its highest normal effort is `xhigh`.
 
 ## Scope and known limits
 
-- The change rail represents workspace Git changes against HEAD, including pre-existing user edits.
+- At this baseline, the change rail represented workspace Git changes against HEAD, including pre-existing user edits. This misleading attribution is corrected in [CLI 0.29.1 / extension 0.16.1](CHAT_CHANGES_FIX.md).
   It does not claim that every displayed change belongs to this conversation. Non-Git folders report
   unavailable review; scans above 500 files report their display limit.
 - Restored history reflects saved model context, including prior compaction. Tool details are loaded

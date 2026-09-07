@@ -2,14 +2,14 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Use DGC CLI 0.29.0 or newer for all features; the connection requires editor protocol v6. Run `dgc setup`, then use
+> Use DGC CLI 0.29.1 or newer for all features; the connection requires editor protocol v6. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does
 
 - **Chat panel** — CommonMark responses with headings, lists, quotes, tables, safe file/source links, syntax-highlighted code and exact-source copy. Reasoning and tool batches collapse into compact rows, with visible failures and a separate final response. Surfaces follow your Cursor/VS Code theme with DGC purple accents.
 - **Goals** — start an objective with `/goal <objective>` or `<objective> /goal`. The card supports pause, resume, edit, delete and review of evidence, work time, cycles and reported tokens. Native and subscription routes continue until completion, pause or a blocker. Optional token budgets are checked between requests or vendor turns.
-- **Changed files** — the composer rail reviews workspace changes against the last commit, including files that predate this conversation. Native diffs, staged-only previews, new files and explicit partial-scan notices use the CLI's bounded file/object reader without executing repository diff filters. Requires the CLI's `workspace_inspection` capability.
+- **Changed files** — the composer card shows changes recorded during the current chat, using actual pre-run file contents. **Workspace changes** opens the separate Git review. Saved chat previews exclude pre-existing edits and later manual changes; native diffs run through bounded inspection workers without executing repository filters.
 - **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics, explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
 - **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: a compact model picker with a reasoning slider, a permission-mode picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. Model/thinking controls follow the active native or subscription route; subscription pickers use vendor hints or a free-form vendor model id without querying the native endpoint. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
 - **Composer commands and skills** — type `/` or `$` after a word boundary anywhere in the draft. Pick commands, skills and templates without losing surrounding text. `/plan`, `/review` and `/init` prepare shared CLI/editor workflows. Select up to eight skills/templates, including 22 bundled skills, and attach the same inputs to a goal.
@@ -82,3 +82,12 @@ npm run test:host        # installed VS Code: activation, commands, handshake, r
 `/usr/share/code/code`.
 
 Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · PolyForm Noncommercial.
+
+### File changes in a chat
+
+A fresh chat starts without a changed-file card. **Changes in this chat** records the deltas observed
+while that chat runs, using actual pre-run contents even when files were already modified. Saved
+reviews survive reloads; later manual edits do not change the saved preview. **Workspace changes**
+opens the separate Git review, including work that predates the chat. Tracking covers the primary
+project folder; concurrent external edits during a run may be included. Older chats have no
+retroactive baseline.

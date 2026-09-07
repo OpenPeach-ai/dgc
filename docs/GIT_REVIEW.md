@@ -37,14 +37,21 @@ they do not receive DGC's native tool registry.
 
 ## Editor change rail and previews
 
-The editor uses the same bounded object/file reader for its automatic changed-file summary and
-native diff previews. It does not run a separate Git executable or read file bodies in the webview.
+Since CLI 0.29.1 / extension 0.16.1, the composer rail shows **Changes in this chat**. It compares
+actual pre-run and post-run file snapshots, so an empty chat does not inherit pending Git changes.
+The `chat_inspection` capability gates `get_chat_changes` and `get_chat_change`; replies are bound
+to the current session. Saved previews survive resume, remain stable after later manual edits,
+and never enter model context. See [chat change attribution](CHAT_CHANGES_FIX.md) for limits and
+concurrency behavior.
+
+The separate **Workspace changes** button uses the bounded Git object/file reader for its summary
+and native diff previews. The extension does not run a separate Git executable or read file bodies in the webview.
 The protocol-v6 `workspace_inspection` capability gates the correlated `get_workspace_changes` and
 `get_workspace_change` requests. An older CLI shows an update notice instead of falling back to
 ordinary Git diffs. Inspection is independent of the model turn and does not add file bodies to the
 conversation or model input. Normal event credential redaction also applies to preview text.
 
-The rail covers the currently acknowledged editor folders, including changes made before the chat.
+Workspace review covers the currently acknowledged editor folders, including changes made before the chat.
 It compares HEAD with working files and also retains staged-only changes. Line totals represent
 the displayed working-file differences; a staged-only entry can therefore show zero net lines.
 Opening that entry previews its index content in a diff titled **DGC staged review**. Other entries
