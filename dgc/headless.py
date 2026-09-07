@@ -54,7 +54,7 @@ _BUSY_MUTATIONS = {
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "prompt", "start_goal",
-    "get_workspace_changes", "get_workspace_change",
+    "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
@@ -414,7 +414,7 @@ class Backend:
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
-                          "goal_inputs": True, "workflows": True, "workspace_inspection": True},
+                          "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -1191,13 +1191,17 @@ class Backend:
                     return
                 self.em.emit("prompt_accepted", request_id=request_id, state=state)
 
-        elif t in ("get_workspace_changes", "get_workspace_change"):
+        elif t in ("get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"):
             from .editor_changes import EditorChanges
             if getattr(self, "_editor_inspection", None) is None:
                 self._editor_inspection = EditorChanges(self.config.project_root, self.em.emit)
                 if hasattr(self, "_editor_inspection_roots"):
                     self._editor_inspection.set_roots(self._editor_inspection_roots)
-            self._editor_inspection.request(dict(cmd))
+            if t in ("get_chat_changes", "get_chat_change"):
+                self._editor_inspection.request(dict(cmd), journal=self.agent.chat_changes,
+                    session_id=self.agent.session_file.stem if self.agent.session_file else "")
+            else:
+                self._editor_inspection.request(dict(cmd))
 
         elif t == "prompt":
             text = str(cmd.get("text", ""))

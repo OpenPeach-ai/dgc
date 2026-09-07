@@ -240,6 +240,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private changesRefreshInFlight = false;
   private changesRefreshDirty = false;
   private workspaceChanges: WorkspaceChange[] = [];
+  private chatChanges: WorkspaceChange[] = [];
   private reviewDocuments = new Map<string, string>();
   private sb: vscode.StatusBarItem;
 
@@ -650,8 +651,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }, Math.max(0, delay));
   }
 
-  private async collectWorkspaceChanges(): Promise<{ files: WorkspaceChange[]; total: number; notices: string[] }> {
+  private async collectWorkspaceChanges(chat = false): Promise<{ files: WorkspaceChange[]; total: number; notices: string[] }> {
     const be = this.backend;
+    const sessionId = this.currentSessionId;
+    if (chat && !this.lastReadyEvent?.capabilities?.chat_inspection) {
+      return { files: [], total: 0, notices: ["Update DGC CLI to review changes recorded during this chat."] };
+    }
     if (this.workspaceRootsInFlight || this.workspaceRootsDirty) {
       return { files: [], total: 0, notices: ["Workspace changes are waiting for the current folder access to be confirmed."] };
     }
@@ -677,9 +682,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const reported = new Set<string>();
     let total = 0;
     try {
-      const result = await be.request({ type: "get_workspace_changes", request_id: this.nextRequestId("changes") },
-        "workspace_changes", 30000);
-      if (be !== this.backend || result.type !== "workspace_changes") return { files: [], total: 0, notices };
+      const result = await be.request({ type: chat ? "get_chat_changes" : "get_workspace_changes", request_id: this.nextRequestId("changes") },
+        chat ? "chat_changes" : "workspace_changes", 30000);
+      if (be !== this.backend || (result.type !== "workspace_changes" && result.type !== "chat_changes")
+          || (chat && (result.type !== "chat_changes" || result.session_id !== sessionId || sessionId !== this.currentSessionId))) return { files: [], total: 0, notices };
       for (const report of result.roots.slice(0, 16)) {
         const folder = scopes.find(item => typeof report?.root === "string" && item.path === report.root);
         if (!folder || !Array.isArray(report.files) || reported.has(folder.path)) continue;
@@ -707,7 +713,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
       }
       for (const folder of scopes) {
-        if (!reported.has(folder.path)) notices.push(`${folder.name}: no change report was returned.`);
+        if (!chat && !reported.has(folder.path)) notices.push(`${folder.name}: no change report was returned.`);
       }
     } catch (error) {
       notices.push(error instanceof Error ? error.message : "Workspace changes could not be inspected.");
@@ -721,8 +727,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.changesRefreshInFlight = true;
     const revision = ++this.changesRefreshRevision;
     try {
-      const { files, total, notices } = await this.collectWorkspaceChanges();
-      if (revision !== this.changesRefreshRevision) return;
+      const sessionId = this.currentSessionId;
+      const [{ files, total, notices }, chat] = await Promise.all([
+        this.collectWorkspaceChanges(), this.collectWorkspaceChanges(true),
+      ]);
+      if (revision !== this.changesRefreshRevision || sessionId !== this.currentSessionId) return;
+      this.chatChanges = chat.files;
+      this.post({ type: "chat_changes", sessionId, ...chat,
+        additions: chat.files.reduce((sum, item) => sum + item.additions, 0),
+        deletions: chat.files.reduce((sum, item) => sum + item.deletions, 0),
+        files: chat.files.map(item => ({ id: item.id, path: item.displayPath,
+          additions: item.additions, deletions: item.deletions, counted: item.counted,
+          binary: item.binary, untracked: item.untracked, deleted: item.deleted, error: item.error })),
+      });
       this.workspaceChanges = files;
       this.post({ type: "workspace_changes", total, notices,
         additions: files.reduce((sum, item) => sum + item.additions, 0),
@@ -741,8 +758,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async reviewWorkspaceChange(identity: string): Promise<void> {
-    const matches = this.workspaceChanges.filter(item => item.id === identity || item.displayPath === identity);
+  private async reviewWorkspaceChange(identity: string, chat = false): Promise<void> {
+    const matches = (chat ? this.chatChanges : this.workspaceChanges).filter(item => item.id === identity || item.displayPath === identity);
     const change = matches.length === 1 ? matches[0] : undefined;
     if (!change) {
       this.scheduleWorkspaceChanges(0);
@@ -754,14 +771,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showInformationMessage("Update or reconnect the DGC CLI to inspect this change."); return;
     }
     const revision = this.workspaceRootsRevision;
+    const sessionId = this.currentSessionId;
     const roots = await Promise.all(this.workspaceRoots().map(root => realpath(root).catch(() => "")));
     if (!roots.includes(change.root)) {
       void vscode.window.showInformationMessage("That change is outside the current workspace."); return;
     }
     try {
-      const result = await be.request({ type: "get_workspace_change", root: change.root, path: change.path,
-        request_id: this.nextRequestId("change-preview") }, "workspace_change", 30000);
-      if (be !== this.backend || revision !== this.workspaceRootsRevision || result.type !== "workspace_change") return;
+      const command = chat
+        ? { type: "get_chat_change" as const, root: change.root, path: change.path, session_id: sessionId, request_id: this.nextRequestId("change-preview") }
+        : { type: "get_workspace_change" as const, root: change.root, path: change.path, request_id: this.nextRequestId("change-preview") };
+      const result = await be.request(command, chat ? "chat_change" : "workspace_change", 30000);
+      if (be !== this.backend || revision !== this.workspaceRootsRevision
+          || (result.type !== "workspace_change" && result.type !== "chat_change")
+          || (chat && (result.type !== "chat_change" || result.session_id !== sessionId || sessionId !== this.currentSessionId))) return;
       if (result.root !== change.root || result.path !== change.path) throw new Error("The change preview no longer matches this file.");
       this.reviewDocuments.clear();
       const id = createHash("sha256").update(`${change.id}:${Date.now()}`).digest("hex").slice(0, 16);
@@ -770,7 +792,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       const right = vscode.Uri.from({ scheme: "dgc-review", authority: id, path: `/after/${leaf}` });
       this.reviewDocuments.set(left.toString(), result.before);
       this.reviewDocuments.set(right.toString(), result.after);
-      const label = result.kind === "staged" ? "DGC staged review" : "DGC review";
+      const label = chat ? "DGC chat changes" : result.kind === "staged" ? "DGC staged review" : "DGC workspace review";
       await vscode.commands.executeCommand("vscode.diff", left, right, `${change.displayPath} (${label})`, { preview: true });
     } catch (error) {
       void vscode.window.showInformationMessage(error instanceof Error ? error.message : "The change preview could not be read.");
@@ -899,8 +921,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private onEvent(ev: DgcEvent): void {
     // The request handlers project summaries and open text documents. Raw roots and file bodies
     // are owner-facing host data, not chat events or model inputs for the webview.
-    if (ev.type === "workspace_changes" || ev.type === "workspace_change"
-        || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change"].includes(ev.command))) return;
+    if (ev.type === "chat_changes" || ev.type === "chat_change" || ev.type === "workspace_changes" || ev.type === "workspace_change"
+        || (ev.type === "command_rejected" && ["get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"].includes(ev.command))) return;
     switch (ev.type) {
       case "ready":
         this.sessionReady = false;
@@ -973,7 +995,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         if (this.initializingBackend && this.sessionRestoreStarted && !this.sessionRestoreFinished
             && this.sessionRestoreRequestId && ev.request_id !== this.sessionRestoreRequestId) { return; }
         if (typeof ev.session_id === "string") {
+          this.changesRefreshRevision++;
+          this.chatChanges = [];
+          this.reviewDocuments.clear();
           this.currentSessionId = ev.session_id;
+          this.post({ type: "chat_changes", sessionId: this.currentSessionId, files: [], total: 0 });
           this.currentSessionName = String(ev.name || "");
           this.rememberSession();
         }
@@ -1129,7 +1155,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ? msg.event : undefined;
       this.testPostedMessages.push({
         type: String(msg?.type || ""),
-        ...(msg?.type === "workspace_changes" ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
+        ...(["workspace_changes", "chat_changes"].includes(msg?.type) ? { fileCount: Array.isArray(msg.files) ? msg.files.length : 0 } : {}),
         ...(event ? { eventType: String(event.type || ""),
           ...(event.id === undefined ? {} : { id: String(event.id) }),
           ...(event.command === undefined ? {} : { command: String(event.command) }) } : {}),
@@ -1387,7 +1413,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         be.send(this.stateCommand("goal", { type: "get_goal" }));
         break;
       case "reviewChange":
-        await this.reviewWorkspaceChange(String(msg.path || ""));
+        await this.reviewWorkspaceChange(String(msg.path || ""), msg.scope === "chat");
         break;
       case "pickModel":
         this.selectModel();
@@ -3201,6 +3227,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <span id="changes-review-title" class="set-title"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span> Workspace changes</span>
     <button type="button" id="changes-review-close" class="fbtn" title="Close" aria-label="Close changed files"><span class="codicon codicon-close" aria-hidden="true"></span></button>
   </div>
+  <div id="changes-review-description" class="surface-notice"></div>
   <div id="changes-review-summary" class="changes-review-summary"></div>
   <div id="changes-review-list" class="changes-review-list" tabindex="-1"></div>
 </div>
@@ -3344,9 +3371,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
+  <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
   <div id="composer-rail" aria-label="Current work" hidden>
-    <section id="changesbar" class="rail-item" aria-label="Workspace changes" hidden>
-      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
+    <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
+      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
       <button type="button" id="changes-review-button" class="rail-text-action">Review</button>
     </section>
     <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>

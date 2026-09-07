@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .checkpoints import CheckpointManager, WorkspaceSnapshot
+from .chat_changes import ChatChanges
 from .config import Config
 from .hooks import run_hooks
 from .llm import (ContextOverflowError, LLMClient, LLMError, ToolsUnsupportedError, ToolCall,
@@ -868,6 +869,7 @@ class Agent(GoalLifecycle):
         self._accepting_steer = False        # false once a final response owns the completion boundary
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
+        self.chat_changes = ChatChanges(self.config.project_root)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
         self.agent_defs = discover_agents(config.project_root)  # named sub-agent personas/hosts
         self._effort_override: str | None = None  # a sub-agent may pin its own thinking level
@@ -1500,6 +1502,7 @@ class Agent(GoalLifecycle):
         self.subscription_sessions: dict[str, dict[str, str]] = {}
         self.todos.clear()
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
+        self.chat_changes = ChatChanges(self.config.project_root)
         self.session_name = None
         self._session_revision = 0
         self._session_exists = False
@@ -1856,6 +1859,15 @@ class Agent(GoalLifecycle):
                 if release is not None:
                     release.release()
 
+    def _record_chat_step(self, runner, prompt):
+        if self.depth != 0:
+            return runner(prompt)
+        before = self.chat_changes.begin()
+        try:
+            return runner(prompt)
+        finally:
+            self.chat_changes.finish(before)
+
     def run_turn(self, user_text: str, *, reset_cancel: bool = True) -> bool:
         """Run one foreground turn and report truthful terminal + persistence success.
 
@@ -1921,7 +1933,8 @@ class Agent(GoalLifecycle):
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 from .mcp_context import apply_staged_context
-                completed = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text), self._run_turn)
+                completed = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text),
+                                                 lambda prompt: self._record_chat_step(self._run_turn, prompt))
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
@@ -2018,7 +2031,8 @@ class Agent(GoalLifecycle):
                 if self._explicit_skill_instructions:
                     self.ui.info("Using skills: " + ", ".join("$" + name for name in self._explicit_skill_instructions))
                 from .mcp_context import apply_staged_context
-                result = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text), step, external=True)
+                result = self._run_goal_steps(goal_context + apply_staged_context(self, safe_user_text),
+                                              lambda prompt: self._record_chat_step(step, prompt), external=True)
                 if not isinstance(result, dict):
                     raise TypeError("external turn runner returned an invalid result")
                 return_result = result
@@ -2067,7 +2081,7 @@ class Agent(GoalLifecycle):
                     goal_elapsed_seconds=self.goal_elapsed_seconds(),
                     goal_details=self._goal_details,
                     usage=usage, activity=activity, timing=timing,
-                    checkpoints=checkpoint_state,
+                    checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
                     subscription_sessions=self.subscription_sessions,
                     expected_revision=self._session_revision,
                     expected_exists=self._session_exists,
@@ -2355,6 +2369,7 @@ class Agent(GoalLifecycle):
                 checkpoint_state if isinstance(checkpoint_state, dict) else {},
                 self.config.project_root, on_change=self._persist,
                 max_message_count=len(self.messages))
+            self.chat_changes = ChatChanges.from_state(self.config.project_root, record.get("chat_changes"))
             return len(loaded)
 
     def subscription_session_id(self, engine: str, mode: str, model: str, effort: str) -> str:
@@ -3753,6 +3768,8 @@ class Agent(GoalLifecycle):
             if not acquire_cancellable(lease, self.cancelled):
                 return (-1, 0)
             old_messages = self.messages
+            old_changes = self.chat_changes.state()
+            before_changes = self.chat_changes.begin()
             rewind_pending = False
             try:
                 msg_count, n_files, conversation = self.checkpoints.rewind_state(
@@ -3767,7 +3784,9 @@ class Agent(GoalLifecycle):
                     msg_count = len(self.messages)
                 else:
                     self.messages = self.messages[:msg_count]
+                self.chat_changes.finish(before_changes)
                 if not self._persist():
+                    self.chat_changes = ChatChanges.from_state(self.config.project_root, old_changes)
                     self.messages = old_messages
                     self.checkpoints.rollback_rewind()
                     rewind_pending = False
@@ -3777,6 +3796,7 @@ class Agent(GoalLifecycle):
                 return msg_count, n_files
             finally:
                 if rewind_pending:
+                    self.chat_changes = ChatChanges.from_state(self.config.project_root, old_changes)
                     self.messages = old_messages
                     self.checkpoints.rollback_rewind()
                 lease.release()

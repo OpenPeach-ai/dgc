@@ -18,6 +18,82 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "chat_changes"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "roots": {
+              "type": "array"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "roots",
+            "session_id",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "chat_change"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "root": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "before": {
+              "type": "string"
+            },
+            "after": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "root",
+            "path",
+            "before",
+            "after",
+            "kind",
+            "session_id",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "workspace_changes"
             },
             "seq": {
@@ -2453,6 +2529,50 @@
     },
     "command": {
       "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_chat_changes"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "get_chat_change"
+            },
+            "root": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "root",
+            "path",
+            "session_id",
+            "request_id"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {

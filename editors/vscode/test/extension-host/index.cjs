@@ -179,6 +179,8 @@ async function run() {
       changes: posted().filter(item => item.type === "workspace_changes").length,
       posted: posted().slice(-25), commands: backendCommands(backendLogPath).slice(-25).map(command => command.type) }));
   }
+  await waitFor(() => posted().some(item => item.type === "chat_changes" && item.fileCount === 0));
+  assert.ok(backendCommands(backendLogPath).some(command => command.type === "get_chat_changes"));
   await testApi.testOnlyWebviewMessage(testToken, { type: "reviewChange", path: `${basename(primaryRoot)}/host-change.ts` });
   await waitFor(() => backendCommands(backendLogPath).some(command =>
     command.type === "get_workspace_change" && command.root === primaryRoot && command.path === "host-change.ts"));

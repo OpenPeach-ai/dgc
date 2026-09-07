@@ -255,6 +255,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-text-action { flex: none; min-height: 26px; padding: 0 4px; border: 0; background: transparent;
   color: var(--muted); cursor: pointer; font: 400 12px/1 var(--sans); }
 .rail-text-action:hover { color: var(--text-strong); }
+#workspace-changes { align-self: flex-end; min-height: 20px; font-size: 11px; }
 .change-add { color: var(--good); font-variant-numeric: tabular-nums; }
 .change-del { color: var(--err); font-variant-numeric: tabular-nums; }
 #goalbar[data-status="active"] .goal-icon { color: var(--accent-text); }

@@ -1,4 +1,4 @@
-"""Two bounded editor inspection workers, independent of the model/approval stdin loop."""
+"""Bounded chat/workspace inspection workers, independent of the model/approval stdin loop."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,13 +35,14 @@ class EditorChanges:
             self.roots = tuple(dict.fromkeys(root.resolve() for root in roots))[:16]
             self._cancel()
 
-    def request(self, command: dict):
-        kind = "list" if command["type"] == "get_workspace_changes" else "read"
+    def request(self, command: dict, *, journal=None, session_id=""):
+        kind = "list" if command["type"] in ("get_workspace_changes", "get_chat_changes") else "read"
+        worker_key = ("chat-" if journal is not None else "") + kind
         with self.lock:
             if self.closed:
                 self._reject(command, "inspection_cancelled", "DGC is closing.")
                 return
-            if kind in self.workers:
+            if worker_key in self.workers:
                 self._reject(command, "inspection_in_progress", "A workspace inspection is already running. Try again when it finishes.")
                 return
             roots = self.roots
@@ -51,7 +52,7 @@ class EditorChanges:
                     root = Path(command["root"]).resolve(strict=True)
                 except (OSError, ValueError, RuntimeError):
                     pass
-                if root not in roots:
+                if root not in roots or (journal is not None and (root != journal.root or command.get("session_id") != session_id)):
                     self._reject(command, "workspace_unavailable", "That change is outside the current editor workspace.")
                     return
             job = {"command": command, "cancel": threading.Event(), "generation": self.generation,
@@ -60,7 +61,14 @@ class EditorChanges:
             def work():
                 value, error = None, ""
                 try:
-                    if kind == "read":
+                    if journal is not None:
+                        view = journal.view()
+                        if kind == "read":
+                            value = view.read(command["path"])
+                        else:
+                            value = {"roots": [view.report()] if journal.root in roots else []}
+                        value["session_id"] = session_id
+                    elif kind == "read":
                         value = read_change(root, command["path"], job["cancel"])
                     else:
                         deadline = time.monotonic() + 20
@@ -95,8 +103,8 @@ class EditorChanges:
                 except Exception as exc:
                     error = f"Workspace inspection failed ({type(exc).__name__})."
                 with self.lock:
-                    if self.workers.get(kind) is job:
-                        del self.workers[kind]  # release before the acknowledgement permits a next query
+                    if self.workers.get(worker_key) is job:
+                        del self.workers[worker_key]  # release before the acknowledgement permits a next query
                     if job["replied"]:
                         return
                     job["replied"] = True
@@ -105,12 +113,13 @@ class EditorChanges:
                     elif error:
                         self._reject(command, "inspection_failed", error)
                     else:
-                        self.emit("workspace_changes" if kind == "list" else "workspace_change",
+                        self.emit(("chat_changes" if kind == "list" else "chat_change") if journal is not None
+                                  else ("workspace_changes" if kind == "list" else "workspace_change"),
                                   request_id=command["request_id"], **value)
 
             thread = threading.Thread(target=work, name="dgc-editor-changes-" + kind, daemon=True)
             job["thread"] = thread
-            self.workers[kind] = job
+            self.workers[worker_key] = job
             thread.start()
 
     def close(self):

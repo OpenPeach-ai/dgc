@@ -1,13 +1,23 @@
 {
-  "refreshed_at": "2026-09-06T18:00:00Z",
+  "refreshed_at": "2026-09-07T17:25:00Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 19,
+  "cli_releases_last_14_days": 20,
   "cli": [
+    {
+      "version": "0.29.1",
+      "date": "2026-09-07",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.29.1",
+      "status": "current",
+      "notes": [
+        "Record private, bounded before/after snapshots for native and subscription chat runs, separate from Git status.",
+        "Persist chat reviews across resume, handle partial or cancelled runs and rewind, and exclude pre-existing edits and changes made between runs."
+      ]
+    },
     {
       "version": "0.29.0",
       "date": "2026-09-06",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.29.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Inline commands and exact skill selection, 22 bundled skills, portable packages, and shared plan, review and project-guide workflows.",
         "MCP server management and bounded resource/prompt snapshots work across terminal, editor and durable goals.",
@@ -149,10 +159,21 @@
   ],
   "extension": [
     {
+      "version": "0.16.1",
+      "date": "2026-09-07",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "current",
+      "notes": [
+        "Fix changed-file counts appearing in a fresh chat before any prompt.",
+        "Separate Changes in this chat from Workspace changes; review exact saved deltas and reject stale responses from another chat.",
+        "Use CLI 0.29.1 for chat tracking while keeping protocol v6 compatibility."
+      ]
+    },
+    {
       "version": "0.16.0",
       "date": "2026-09-06",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Choose commands, skills and templates anywhere in the draft; retain per-chat text and attachments across reloads.",
         "Attach skill instructions and MCP context to native, subscription and goal requests, with server management and cancellable browser sign-in.",

@@ -21,11 +21,15 @@
       {
         "install_count": 2,
         "observed_at": "2026-09-06T07:11:27Z"
+      },
+      {
+        "install_count": 2,
+        "observed_at": "2026-09-07T07:24:02Z"
       }
     ],
     "install_count": 2,
-    "listing_updated_at": "2026-09-06T07:02:33.59Z",
-    "observed_at": "2026-09-06T07:11:27Z",
+    "listing_updated_at": "2026-09-06T19:19:32.9Z",
+    "observed_at": "2026-09-07T07:24:02Z",
     "publisher": "vibedgc",
     "source": "visual-studio-marketplace-gallery-api",
     "source_url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
