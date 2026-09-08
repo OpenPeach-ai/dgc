@@ -56,6 +56,7 @@ STATIC_PUBLIC_FILES = {
     "icon-512.png", "og-card.png", "og-benchmark.png", "og-docs.png", "og-editor.png",
     "dgc-mark.svg", "dgc-mark-mono.svg",
     "assets/cli-capture-poster.jpg", "assets/cli-capture.mp4", "assets/cli-capture.webm",
+    "assets/files-capture-poster.jpg", "assets/files-capture.mp4", "assets/files-capture.webm",
     "assets/editor-capture-poster.jpg", "assets/editor-capture-poster-720.jpg",
     "assets/editor-capture.mp4", "assets/editor-capture.webm",
     "assets/hero-graded-poster.jpg", "assets/hero-mobile-poster.webp", "assets/hero-graded.mp4", "assets/hero-graded.webm",
@@ -510,7 +511,8 @@ def check_media(parsed: dict[Path, PageParser], errors: list[str]) -> None:
             or not all(key in hero[0] for key in ("muted", "loop", "playsinline"))):
         errors.append("index.html: hero must be muted, looping, inline autoplay with preload=auto")
     ambient = [video for video in home.videos
-               if "data-lazy-video" in video and "data-editor-preview" not in video]
+               if "data-lazy-video" in video and "data-editor-preview" not in video
+               and "data-capture-preview" not in video]
     if len(ambient) != 2 or any(video.get("preload") != "none" for video in ambient):
         errors.append("index.html: both ambient section videos must lazy-load with preload=none")
     for label in ("index.html", "vscode/index.html"):
@@ -564,6 +566,25 @@ CAPTURE_MEDIA_FILES = {
             "real time, no speed adjustment", "no user config or session persisted",
         ),
     },
+    "files": {
+        "prefix": "files-capture",
+        "width": 1280,
+        "height": 720,
+        "min_duration": 46.0,
+        "kind": "real_cli_local_model_focus_pane",
+        "required": {
+            "live_model": True,
+            "controlled_fixture": True,
+            "real_time": True,
+            "model_route": "local Ollama · qwen3.8:27b-q4km",
+        },
+        "provenance_terms": (
+            "Actual DGC ", "real local Ollama run", "qwen3.8:27b-q4km",
+            "disposable controlled fixture", "/files opened and driven by real keystrokes",
+            "python3 -m unittest -v passed 3/3", "real time, no speed adjustment",
+            "no user config or session persisted",
+        ),
+    },
     "editor": {
         "prefix": "editor-capture",
         "width": 1440,
@@ -594,6 +615,11 @@ CAPTURE_KEYS = {
         "kind", "live_model", "controlled_fixture", "real_time", "tool_sequence",
         "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
         "sandbox_backend", "files",
+    },
+    "files": {
+        "kind", "live_model", "controlled_fixture", "real_time", "keystrokes",
+        "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
+        "dgc_version", "files",
     },
     "editor": {
         "kind", "live_model", "controlled_fixture", "deterministic_fixture", "real_time",
@@ -627,7 +653,7 @@ def check_capture_manifest(errors: list[str]) -> None:
         return
     captures = manifest.get("captures")
     if not isinstance(captures, dict) or set(captures) != set(CAPTURE_MEDIA_FILES):
-        errors.append("capture-media.json: CLI and editor capture sets must both be declared")
+        errors.append("capture-media.json: CLI, focus-pane and editor capture sets must all be declared")
         return
 
     declared: dict[str, str] = {}
@@ -649,6 +675,9 @@ def check_capture_manifest(errors: list[str]) -> None:
         if slug == "cli" and isinstance(provenance, str) \
                 and f"Actual current DGC {VERSION}" not in provenance:
             errors.append("capture-media.json: CLI provenance is not for the current release")
+        if slug == "files" and (capture.get("dgc_version") != VERSION or not isinstance(provenance, str)
+                                or f"Actual DGC {VERSION} " not in provenance):
+            errors.append("capture-media.json: focus-pane capture is not for the current release")
         if not isinstance(provenance, str) or re.search(r"permission denied|denied|loop|retry", provenance, re.I):
             errors.append(f"capture-media.json: {slug}.provenance contains denied/retry evidence")
         factor = capture.get("time_compression")
