@@ -4996,10 +4996,10 @@ class TUI:
                     # These bands were rendered when accepted as steering. The old turn ended before
                     # consuming them, so preserve their order as one subsequent prompt without echoing.
                     self._queue_followup(sess, "\n".join(deferred), shown=True, front=True)
-                    for text in reversed(deferred):
+                    for deferred_text in reversed(deferred):
                         for block in reversed(sess.blocks):
                             if (isinstance(block, dict) and block.get("kind") == "user"
-                                    and block.get("text") == text
+                                    and block.get("text") == deferred_text
                                     and block.get("tag") == "follow-up · steering this turn"):
                                 block["tag"] = "follow-up · queued"
                                 break

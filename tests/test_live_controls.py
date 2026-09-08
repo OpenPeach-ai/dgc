@@ -205,6 +205,29 @@ class LiveControlTests(unittest.TestCase):
         self.assertIsNotNone(command_error({"type": "prompt", "text": "hello", "delivery": "discard"}))
         self.assertIsNotNone(command_error({"type": "set_mode", "mode": "auto", "live": "true"}))
 
+    def test_fullscreen_submit_runs_and_retains_cancelled_followups(self):
+        from dgc.tui import TUI
+        tui = TUI(self.agent.config, agent=self.agent)
+        self.agent.session_name = "Fixture"
+        requests = []
+        def run(text, **kwargs):
+            requests.append(text)
+            self.agent._accepting_steer = True
+            self.assertEqual(tui._route_followup("Retained follow-up"), "steered")
+            self.agent.cancelled.set()
+            return False
+        with patch.object(self.agent, "run_turn", side_effect=run):
+            tui._submit("Original request", expand_mentions=False)
+            worker = tui.active._worker_thread
+            if worker:
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
+        self.assertEqual(requests, ["Original request"])
+        self.assertEqual(tui.active._queue, [("Retained follow-up", True)])
+        self.assertFalse(tui._turn.is_set())
+        self.assertTrue(any(isinstance(block, dict) and block.get("tag") == "follow-up · queued"
+                            for block in tui.blocks))
+
     @unittest.skipUnless(os.name == "posix", "requires a real POSIX terminal")
     def test_classic_terminal_live_skills_mode_unicode_steering_and_tab_queue(self):
         import pty
