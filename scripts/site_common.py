@@ -21,6 +21,15 @@ def site_context() -> dict[str, str]:
     version = load_json(SITE / "version.json")
     commit = str(version.get("commit", "unknown"))
     asset_revision = site_asset_revision()
+    # The announcement names what the current release shipped, from the same row the changelog
+    # renders; an empty headline falls back to the bare version.
+    headline = ""
+    try:
+        current = next(row for row in load_json(SRC / "data" / "releases.json")["cli"]
+                       if row.get("status") == "current")
+        headline = str(current.get("headline") or "").strip()[:60]
+    except (StopIteration, KeyError, TypeError, ValueError, OSError):
+        headline = ""
     return {
         "PRODUCT": str(brand["product"]),
         "LONG_NAME": str(brand["long_name"]),
@@ -36,6 +45,7 @@ def site_context() -> dict[str, str]:
         "COMMIT": commit,
         "COMMIT_SHORT": commit[:8],
         "ASSET_REVISION": asset_revision,
+        "RELEASE_HEADLINE": (" · " + html.escape(headline)) if headline else "",
     }
 
 

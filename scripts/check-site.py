@@ -57,6 +57,7 @@ STATIC_PUBLIC_FILES = {
     "dgc-mark.svg", "dgc-mark-mono.svg",
     "assets/cli-capture-poster.jpg", "assets/cli-capture.mp4", "assets/cli-capture.webm",
     "assets/files-capture-poster.jpg", "assets/files-capture.mp4", "assets/files-capture.webm",
+    "assets/files-replay.json",
     "assets/editor-capture-poster.jpg", "assets/editor-capture-poster-720.jpg",
     "assets/editor-capture.mp4", "assets/editor-capture.webm",
     "assets/hero-graded-poster.jpg", "assets/hero-mobile-poster.webp", "assets/hero-graded.mp4", "assets/hero-graded.webm",
@@ -714,6 +715,8 @@ def check_capture_manifest(errors: list[str]) -> None:
         expected_kinds = {"webm", "mp4", "poster"}
         if slug == "editor":
             expected_kinds.add("preview")
+        if slug == "files":
+            expected_kinds.add("replay")
         if not isinstance(files, dict) or set(files) != expected_kinds:
             errors.append(
                 f"capture-media.json: {slug} must declare exactly "
@@ -730,6 +733,29 @@ def check_capture_manifest(errors: list[str]) -> None:
             file_specs.append(
                 ("preview", "assets/editor-capture-poster-720.jpg", "mjpeg", 720, 450, False)
             )
+        if slug == "files":
+            replay = files.get("replay")
+            replay_path = SITE / "assets" / "files-replay.json"
+            try:
+                raw_replay = replay_path.read_bytes()
+                payload = json.loads(raw_replay.decode("utf-8"))
+                frames = payload.get("frames") if isinstance(payload, dict) else None
+                if (not isinstance(replay, dict)
+                        or set(replay) != {"path", "sha256", "bytes", "frames", "cols", "rows", "duration_seconds"}
+                        or replay.get("path") != "assets/files-replay.json"
+                        or replay.get("sha256") != hashlib.sha256(raw_replay).hexdigest()
+                        or replay.get("bytes") != len(raw_replay)
+                        or not isinstance(frames, list) or len(frames) < 40
+                        or replay.get("frames") != len(frames)
+                        or payload.get("cols") != replay.get("cols") or payload.get("rows") != replay.get("rows")
+                        or not (isinstance(frames[0], dict) and isinstance(frames[0].get("full"), list)
+                                and len(frames[0]["full"]) == payload.get("rows"))
+                        or len(raw_replay) > 1_500_000):
+                    errors.append("capture-media.json: files.replay disagrees with assets/files-replay.json")
+                elif any(not isinstance(f, dict) or ("full" not in f and not isinstance(f.get("d"), dict)) for f in frames):
+                    errors.append("capture-media.json: files.replay frames are malformed")
+            except (OSError, UnicodeError, ValueError) as exc:
+                errors.append(f"capture-media.json: files.replay could not be validated ({exc})")
         for kind, expected_path, codec, width, height, is_video in file_specs:
             record = files.get(kind)
             if not isinstance(record, dict):
