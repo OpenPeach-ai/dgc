@@ -6,26 +6,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-
-@dataclass(frozen=True)
-class Segment:
-    """One styled run in a game frame; roles are mapped to the active DGC theme by the TUI."""
-
-    text: str
-    role: str = "text"
-
-
-@dataclass(frozen=True)
-class GameFrame:
-    """Renderer-neutral snapshot produced by a game."""
-
-    title: str
-    score: str
-    lines: tuple[tuple[Segment, ...], ...]
-    footer: str
-    status: str = ""
-    paused: bool = False
-    best: str = ""
+from ..pane import GameFrame, PaneFrame, Segment  # shared focus-pane frame contract
 
 
 class ArcadeGame(Protocol):
@@ -183,9 +164,26 @@ class BoredController:
             # High scores are deliberately subordinate to both the game and agent execution.
             return
 
+    kind = "game"
+    raw_text_input = False          # letters may be content (Word Grid) but never need their case
+
     @property
     def key(self) -> str:
         return self.game.key
+
+    @property
+    def text_input(self) -> bool:
+        return bool(getattr(self.game, "text_input", False))
+
+    @property
+    def redraw_interval(self) -> float:
+        return float(getattr(self.game, "redraw_interval", 0.08))
+
+    def handle_text(self, text: str) -> bool:
+        return False
+
+    def hint_chips(self) -> list[tuple[str, str]]:
+        return [("Arrows/WASD", "move"), ("P", "pause"), ("Q/Esc", "return")]
 
     @property
     def revision(self) -> int:

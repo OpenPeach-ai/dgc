@@ -459,12 +459,17 @@
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
-    const t0 = Date.now(), meta = act.querySelector(".meta");
-    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "" };
-    turn.timer = setInterval(() => {
-      meta.textContent = `(${Math.floor((Date.now() - t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok)`;
-    }, 200);
+    const t0 = Date.now();
+    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "" };
+    turn.timer = setInterval(renderTurnMeta, 200);
+    renderTurnMeta();
     scroll();
+  }
+  function renderTurnMeta() {
+    const meta = turn?.act?.querySelector(".meta");
+    if (!turn || !meta) return;
+    const eta = turn.eta ? ` · ${turn.eta}` : "";
+    meta.textContent = `(${Math.floor((Date.now() - turn.t0) / 1000)}s${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
   }
   function endTurn(reason = "completed") {
     if (!turn) return;
@@ -1284,6 +1289,7 @@
         if (!$("settings").hidden) fillSettings(ev);
         break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";

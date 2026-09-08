@@ -1,13 +1,23 @@
 {
   "refreshed_at": "2026-09-08T15:52:58Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 13,
+  "cli_releases_last_14_days": 14,
   "cli": [
+    {
+      "version": "0.30.0",
+      "date": "2026-09-09",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.0",
+      "status": "current",
+      "notes": [
+        "Add /files: a file explorer in the focus pane under the transcript — Miller columns, previews, copy/cut/paste, rename, trash with undo, Enter inserts @path — while the agent keeps working. Writes follow the permission mode and stay inside the project.",
+        "Show a calibrated turn ETA range in the status line, per-project and measured (/eta stats); /notify pings the terminal when a turn finishes. Promote the hidden arcade's pane into a shared focus-pane host."
+      ]
+    },
     {
       "version": "0.29.2",
       "date": "2026-09-08",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.29.2",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Browse skills and change permission mode during active turns; recheck pending approvals while preserving explicit ask/deny rules and workspace trust.",
         "Steer native editor turns with text, images and selected context; keep queued and unapplied follow-ups recoverable. Classic CLI Enter steers and Tab queues.",
@@ -170,10 +180,19 @@
   ],
   "extension": [
     {
+      "version": "0.17.0",
+      "date": "2026-09-09",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "current",
+      "notes": [
+        "Show the turn ETA beside the elapsed timer (additive protocol-v6 turn_eta event from CLI 0.30.0) and add a Notify On Turn End setting for a walk-away notification."
+      ]
+    },
+    {
       "version": "0.16.2",
       "date": "2026-09-08",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Browse skills and change modes during active turns, preserving explicit ask/deny rules and workspace trust.",
         "Steer native turns with Enter, queue with Alt+Enter or Queue, and restore unapplied inputs after interruption. Subscription CLI follow-ups queue.",

@@ -134,7 +134,7 @@ def capture_context(data: dict[str, Any]) -> dict[str, str]:
     if data.get("schema_version") != 1 or not isinstance(data.get("captures"), dict):
         raise ValueError("capture-media.json has an unsupported schema")
     context: dict[str, str] = {}
-    for name in ("cli", "editor"):
+    for name in ("cli", "editor", "files"):
         capture = data["captures"].get(name)
         if not isinstance(capture, dict):
             raise ValueError(f"capture-media.json is missing {name}")
@@ -352,7 +352,7 @@ def build_outputs() -> dict[str, str | bytes]:
     if not protocol_match:
         raise ValueError("could not read the editor protocol version")
     ctx.update({
-        "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "TERMINAL": partial("terminal.html", ctx),
+        "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "FIG6": partial("fig6.html", ctx), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
         "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"]),
         "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": releases["extension"][0]["notes"][0], "EXT_NOTE_2": releases["extension"][0]["notes"][1], "EXT_NOTE_3": releases["extension"][0]["notes"][2],

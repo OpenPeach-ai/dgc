@@ -835,12 +835,15 @@ class Agent(GoalLifecycle):
         self.todos: list = []
         self.plan_return_mode: str | None = None
         self.cancelled = threading.Event()  # a front-end sets this to interrupt the turn/tool wait
+        self.eta = None                     # TurnEstimator for the running foreground turn
+        self._eta_stats_cache = None
         todo_callback = getattr(ui, "on_todo", None)
-        if callable(todo_callback):
-            def safe_todo_callback(todos):
+        agent_self = self
+
+        def safe_todo_callback(todos):
+            agent_self._eta_todos(todos)
+            if callable(todo_callback):
                 todo_callback(redact_value(todos, secret_values(config)))
-        else:
-            safe_todo_callback = None
         self.ctx = AgentContext(project_root=config.project_root, config=config,
                                 skills=self.skills, todos=self.todos,
                                 on_todo=safe_todo_callback, cancelled=self.cancelled,
@@ -1031,6 +1034,7 @@ class Agent(GoalLifecycle):
 
     def _record_usage(self, raw_usage: dict | None, request_reason: object = "other") -> None:
         usage = normalize_usage(raw_usage)
+        self._eta_request(usage)
         if (getattr(self, "_goal_running", False)
                 and not (usage["input_tokens"] or usage["output_tokens"])):
             # A successful coding request cannot be accounted for from an empty/all-zero usage
@@ -1063,8 +1067,81 @@ class Agent(GoalLifecycle):
         if parent is not None and parent is not self:
             parent._record_activity(name, edit_failed)
 
+    # ------------------------------------------------------------------ turn ETA ---
+    # The estimator only ever observes counters the agent already keeps; it never blocks a turn
+    # and every failure inside it is swallowed, so a broken stats file cannot stop the work.
+    def _eta_stats(self):
+        if self._eta_stats_cache is None:
+            try:
+                from .eta import EtaStats
+                self._eta_stats_cache = EtaStats(project=str(self.session_root))
+            except Exception:
+                self._eta_stats_cache = False
+        return self._eta_stats_cache or None
+
+    def _eta_begin(self, user_text: str) -> None:
+        if self.depth or not self.config.get("eta", True):
+            self.eta = None
+            return
+        try:
+            from .eta import TurnEstimator, classify_prompt
+            features = classify_prompt(user_text, mode=self.mode,
+                                       goal=bool(getattr(self, "goal", "")),
+                                       model=str(self.config.get("model", "") or ""))
+            self.eta = TurnEstimator(self._eta_stats(), features)
+        except Exception:
+            self.eta = None
+
+    def _eta_end(self, completed) -> None:
+        estimator, self.eta = self.eta, None
+        if estimator is None:
+            return
+        try:
+            estimator.finish(completed=(completed is not False and not self.cancelled.is_set()))
+        except Exception:
+            pass
+
+    def _eta_request(self, usage: dict) -> None:
+        estimator = self.eta
+        if estimator is not None:
+            try:
+                estimator.on_request(int(usage.get("output_tokens", 0) or 0))
+            except Exception:
+                pass
+
+    def _eta_tool(self, name: str, elapsed_us: int) -> None:
+        estimator = self.eta
+        if estimator is not None:
+            try:
+                estimator.on_tool(name, max(0, int(elapsed_us)) / 1_000_000)
+            except Exception:
+                pass
+
+    def _eta_todos(self, todos) -> None:
+        estimator = self.eta
+        if estimator is not None:
+            try:
+                estimator.on_todos(todos)
+            except Exception:
+                pass
+
+    def eta_snapshot(self):
+        """The current turn's estimate (an :class:`dgc.eta.Eta`) or ``None`` when there is none."""
+        estimator = self.eta
+        if estimator is None or getattr(estimator, "finished", False):
+            return None
+        try:
+            return estimator.estimate()
+        except Exception:
+            return None
+
+    def eta_stats_summary(self) -> dict:
+        stats = self._eta_stats()
+        return stats.summary() if stats is not None else {"turns": 0, "scored": 0, "buckets": {}}
+
     def _record_tool_timing(self, name: str, elapsed_us: int) -> None:
         """Accumulate argument-free built-in timing; the next activity/request save journals it."""
+        self._eta_tool(name, elapsed_us)
         label = str(name)
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", label):
             label = "unknown"
@@ -1956,6 +2033,7 @@ class Agent(GoalLifecycle):
                 self._accepting_steer = True
             safe_user_text = self._safe_text(user_text)
             completed = None
+            self._eta_begin(safe_user_text)
             try:
                 self.reload_skills()
                 try:
@@ -1984,6 +2062,7 @@ class Agent(GoalLifecycle):
             finally:
                 with self._steer_lock:
                     self._accepting_steer = False
+                self._eta_end(completed)
                 self._active_tool_intents.clear()
                 self._active_skill_names.clear()
                 self._explicit_skill_instructions = {}

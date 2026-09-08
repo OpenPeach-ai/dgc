@@ -1,0 +1,17 @@
+<figure class="instrument capture-figure reveal" aria-labelledby="fig6-title">
+  <figcaption class="figure-title" id="fig6-title"><span class="figure-id">FIG.6 · Focus pane</span><span>Actual CLI · {{CAPTURE_FILES_DURATION_LABEL}} · real time</span><span class="figure-state">/files while a turn runs</span></figcaption>
+  <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
+  <button class="capture-card" type="button" data-open-capture="files-capture" aria-controls="files-capture" aria-haspopup="dialog" aria-expanded="false" aria-label="Open the {{CAPTURE_FILES_DURATION_LABEL}} DGC focus-pane capture with controls">
+    <video autoplay muted loop playsinline preload="none" data-poster="/assets/files-capture-poster.jpg" data-lazy-video aria-hidden="true"><source data-src="/assets/files-capture.webm" type="video/webm"><source data-src="/assets/files-capture.mp4" type="video/mp4"></video>
+    <span class="capture-shade" aria-hidden="true"></span>
+    <span class="capture-live" aria-hidden="true"><i></i><span data-capture-status data-playing="Auto-playing · {{CAPTURE_FILES_DURATION_LABEL}}" data-paused="Motion paused · {{CAPTURE_FILES_DURATION_LABEL}}">Auto-playing · {{CAPTURE_FILES_DURATION_LABEL}}</span></span>
+    <span class="capture-expand" aria-hidden="true">Open controls ↗</span>
+  </button>
+  <p class="capture-caption">{{CAPTURE_FILES_PROVENANCE}}</p>
+</figure>
+
+<dialog class="capture-dialog" id="files-capture" data-capture-dialog aria-labelledby="files-capture-title" aria-describedby="files-capture-note">
+  <div class="capture-head"><span class="micro" id="files-capture-title">DGC · /files in the focus pane during a real turn · {{CAPTURE_FILES_DURATION_LABEL}}</span><button type="button" data-close-capture aria-label="Close focus-pane capture">×</button></div>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/files-capture-poster.jpg" aria-describedby="files-capture-note"><source data-src="/assets/files-capture.webm" type="video/webm"><source data-src="/assets/files-capture.mp4" type="video/mp4"></video>
+  <p id="files-capture-note">{{CAPTURE_FILES_PROVENANCE}}</p>
+</dialog>

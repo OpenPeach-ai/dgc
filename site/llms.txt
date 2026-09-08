@@ -19,6 +19,8 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Plan mode: https://docs.vibedgc.com/plan-mode
 - Sessions & rewind: https://docs.vibedgc.com/sessions-rewind
 - Standing goals: https://docs.vibedgc.com/standing-goals
+- Files pane: https://docs.vibedgc.com/files-pane
+- Turn ETA & notifications: https://docs.vibedgc.com/turn-eta-notifications
 - Connect your model: https://docs.vibedgc.com/connect-your-model
 - Subscriptions: https://docs.vibedgc.com/subscriptions
 - Thinking & reasoning: https://docs.vibedgc.com/thinking-reasoning

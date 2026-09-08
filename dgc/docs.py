@@ -124,6 +124,15 @@ Unconsumed terminal follow-ups remain queued after interruption; a new prompt co
 In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
 can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
 
+## Files pane (`/files`)
+- **j / k · ↑ ↓** move · **h / l · ← →** parent / enter · **gg / G** top / bottom · **H / L** back / forward
+- **Space** select · **v** visual select · **Ctrl+A** all · **Esc** clear selection, filter, or help
+- **y / x / p** copy / cut / paste · **P** paste overwriting · **a** new (end with `/` for a folder) · **r** rename
+- **d** trash · **D** delete permanently · **u** undo the last change
+- **f** filter · **/** find, **n / N** next / previous · **.** hidden files · **s / S** sort / reverse
+- **Enter** insert `@path` into the prompt · **c** insert the plain path · **i / Tab** inspect · **J / K** scroll the preview
+- **?** all keys · **q** return to DGC · **Ctrl+C** still stops the agent
+
 ## Navigate
 - **PageUp / PageDn** — scroll the transcript · **End** — jump to the latest
 - click **◆ Thought** — expand the reasoning · click the token count — context details
@@ -745,6 +754,95 @@ and `dgc.autonomousMaxTurns` in Settings. Delegated subscription turns bypass th
 native controller gate; selecting a vendor engine does not make the configured command run.
 """.strip()),
 
+    ("Files pane", "a file explorer under the transcript while the agent works", """
+# Files pane
+
+`/files` opens a file explorer in the **focus pane** — the split under the transcript that the
+agent keeps streaming above. Browse the project, pick files for your next prompt, watch the
+model's edits land, and manage files without leaving DGC or stopping the turn.
+
+## Open it
+
+- `/files` opens at the project root · `/files src/auth` jumps to a folder or focuses a file.
+- The pane folds away whenever DGC needs your answer (a permission, a prompt, a picker) and
+  returns when you have answered. **q** or **Esc** closes it; **Ctrl+C** still stops the agent.
+- It works during a turn: the header shows what the agent is doing (`DGC: USING TOOLS`), and
+  files the model changed this turn carry a **✎** mark.
+
+## Layout
+
+Three columns like yazi and ranger: the parent folder, the current folder, and a preview of what
+is under the cursor — the first lines of a text file with line numbers, a folder's entries, a
+symlink's target, or a one-line summary for binaries. Narrow terminals drop the parent column,
+then the preview. **i** or **Tab** swaps the preview for details (size, modified time, mode, Git
+status). Git status letters (**M** modified · **A** added · **D** deleted · **?** untracked) come
+from a read-only `git status` that never runs filters or transports.
+
+## Move and select
+
+- **j / k** or **↑ ↓** move · **h / l** or **← →** go to the parent / enter a folder · **gg / G** top / bottom
+- **H / L** back / forward through folders you visited · **-** the previous folder · **~** home · **gr** the project root
+- **Space** toggles the entry under the cursor · **v** starts a visual range · **Ctrl+A** selects everything · **Esc** clears
+- **f** filters the list as you type (smart case) · **/** finds and **n / N** step through matches · **.** shows hidden files · **s** cycles name → modified → size → extension, **S** reverses
+
+## Use a file in your prompt
+
+- **Enter** (or **o**) on a file inserts `@path` into the composer — the same bounded file attachment as typing it — so you can browse, pick, and ask about exactly that file.
+- **c** inserts the plain path instead.
+
+## Change files
+
+- **a** creates a file, or a folder when the name ends with `/` (`docs/notes/` creates both levels).
+- **r** renames, with the cursor placed before the extension.
+- **y** copies and **x** cuts the selection (or the entry under the cursor); **p** pastes into the current folder, keeping both on a name collision (`name (2).ext`); **P** overwrites instead.
+- **d** sends entries to the trash — DGC's own `~/.dgc/trash` by default, kept for 30 days, or the OS trash when `trash_mode` is `os`.
+- **D** deletes permanently and always asks first.
+- **u** undoes the last change: renames move back, copies are removed unless you edited them, trashed entries return, and permanently deleted *files* (up to 8 MB) are restored from the snapshot taken before deletion. Deleted folders are not restorable.
+
+## What it will not do
+
+- It never runs a shell command and nothing it does enters the model's context unless you insert a path.
+- Writes follow the permission mode: **plan** makes the pane read-only; **default** asks before trash, move, and overwrite; **acceptEdits** and **auto** act immediately with undo. Permanent deletion asks in every mode.
+- Writes stay inside the project. Browsing above the root is read-only, except in **auto** mode, which asks first.
+- Trees over 5,000 entries or 512 MB are refused rather than half-copied; use the shell for those.
+""".strip()),
+    ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
+# Turn ETA & notifications
+
+While a native turn runs, the status line shows a calibrated range for how much longer it
+should take — `1m12s · ~2–4 min left · 3/5 tasks` — so you can decide whether to wait or walk
+away. `/eta` says the same in a sentence with its basis and confidence; `/eta stats` shows how
+often the range has held on this project.
+
+## How the estimate is made
+
+- **Your history.** Every finished turn on this project is recorded by what it asked for
+  (explain · test · fix · add · refactor) and how long the prompt was. The estimate starts from
+  the middle and 80th-percentile durations of similar turns — or DGC's built-in priors on a new
+  project — and shifts as time passes, because a turn that has already run past the typical
+  length is likelier to keep going.
+- **The turn's own plan.** Once the model keeps a task list, remaining tasks × the pace of the
+  tasks already finished takes over as the main signal. This is where the range gets sharp.
+- **Honesty rules.** The range appears only after 20 seconds, may shrink freely but only grows
+  when there is a reason, and drops to `~a few min left` instead of a number when confidence is
+  low. Predicted-vs-actual is logged for every turn; the site only ever quotes coverage that was
+  measured.
+
+The estimate is per-project and private (`~/.dgc/eta-stats.json`, bounded). Turn it off with
+`eta: false` in `config.json` or `/settings`. Subscription turns delegated to a vendor CLI have no
+estimate: DGC does not see their steps.
+
+## Walk away
+
+- `/notify` during a turn pings you once when it finishes: a terminal notification where the
+  terminal supports one (iTerm2, WezTerm, kitty, Windows Terminal, ConEmu), a bell everywhere,
+  and a flash in the status line. `/notify` before a turn arms the next one.
+- `/notify on` keeps it on for every turn over 20 seconds; `/notify off` turns it back off.
+- In the editor, enable **DGC: Notify On Turn End** to get a toast when a turn finishes while
+  the DGC panel is not visible.
+- For anything else — a phone push, a sound, a script — use the **Stop** lifecycle hook, which
+  already fires at the end of every turn (see *Lifecycle hooks*).
+""".strip()),
     ("Connect your model", "point DGC at Ollama, llama.cpp, vLLM, or a cloud host", """
 # Connect your model
 
@@ -1081,6 +1179,17 @@ configured in `config.json`.
 
 - `subscription_engine` — which vendor CLI drives the turn.
 - `subscription_model`, `subscription_effort` — model and effort passed through to that CLI.
+
+## Turns
+
+- `eta` (default `true`) — show the calibrated "~2–4 min left" range while a turn runs.
+- `notify` (default `off`) — `on` pings after every turn over 20 seconds; `/notify` arms a single one.
+
+## Files pane
+
+- `trash_mode` (default `dgc`) — where `/files` sends deleted entries: `dgc` keeps them in
+  `~/.dgc/trash` for 30 days (undo with **u**), `os` uses the system trash (freedesktop layout on
+  Linux, `~/.Trash` on macOS; other platforms fall back to `dgc`).
 
 ## Appearance
 

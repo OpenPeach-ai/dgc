@@ -27,6 +27,7 @@ from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Layout, VSplit, Window
@@ -286,8 +287,9 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
-        self._bored = None                 # process-local arcade controller; never enters a session
-        self._bored_render_cache = None    # ((controller/revision/geometry/theme/state), ANSI text)
+        self._pane = None                  # focus-pane occupant (arcade game or /files explorer); never enters a session
+        self._notify_armed = False         # /notify without arguments: ping once when this turn ends
+        self._pane_render_cache = None     # ((occupant/revision/geometry/theme/state), ANSI text)
         self._arcade_scores = None          # lazy owner-private high scores; never enters a session
         self._refresh_task = None           # adaptive 12.5/20 FPS asyncio UI pulse
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
@@ -478,6 +480,13 @@ class TUI:
             ("show_reasoning", "Show reasoning", "bool"),
             ("preserve_thinking", "Preserve thinking in context", "bool"),
             ("logo_animation", "Animate logo", "bool"),
+        ],
+        "Files pane": [
+            ("trash_mode", "/files deletes go to", "enum", ["dgc", "os"]),
+        ],
+        "Turns": [
+            ("eta", "Show the turn ETA range", "bool"),
+            ("notify", "Ping when a turn finishes", "enum", ["off", "on"]),
         ],
         "Artifacts": [
             ("artifact_bind", "Reach", "enum", ["localhost", "lan"]),
@@ -827,7 +836,7 @@ class TUI:
         return ANSI(self._rich(Padding(panel, (0, 0, 0, lpad))))
 
     def _ask_input(self, prompt: str, cb, secret: bool = False) -> None:
-        self._pause_bored("DGC NEEDS INPUT")
+        self._pause_pane("DGC NEEDS INPUT")
         self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
@@ -837,7 +846,80 @@ class TUI:
         self._flash_until = time.monotonic() + secs
         self._invalidate()
 
-    # ------------------------------------------------------- hidden arcade ---
+    # ------------------------------------------------------- turn ETA + notify ---
+    def _eta_status_text(self) -> str:
+        if not self.config.get("eta", True):
+            return ""
+        snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+        snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        if snapshot is None or not snapshot.visible:
+            return ""
+        return snapshot.label
+
+    def _show_eta(self, rest: str = "") -> None:
+        from .eta import format_stats
+        if rest.strip().lower() in ("stats", "stat", "calibration"):
+            self._open_reader(format_stats(self.agent.eta_stats_summary()), footer="turn ETA calibration · Esc close")
+            return
+        if not self.config.get("eta", True):
+            self._flash("turn ETA is off · /set eta true or /settings")
+            return
+        snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+        snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        if snapshot is None:
+            self._flash("no turn is running · /eta stats shows calibration")
+            return
+        basis = {"prior": "from this project's history", "structure": "from the task list",
+                 "blend": "history + task list"}.get(snapshot.basis, snapshot.basis)
+        self._flash(f"{snapshot.label} · {basis} · confidence {snapshot.confidence:.0%}"
+                    if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
+
+    def _set_notify(self, rest: str = "") -> None:
+        choice = rest.strip().lower()
+        if choice in ("on", "always", "true"):
+            self.config.set("notify", "on")
+            self._flash("notify → on · every turn over 20 s pings when it finishes")
+        elif choice in ("off", "never", "false"):
+            self.config.set("notify", "off")
+            self._notify_armed = False
+            self._flash("notify → off")
+        elif choice:
+            self._flash("usage: /notify · /notify on · /notify off")
+        elif self._turn.is_set():
+            self._notify_armed = not self._notify_armed
+            self._flash("will ping when this turn finishes · Esc still stops it" if self._notify_armed
+                        else "notification cancelled")
+        else:
+            self._notify_armed = not self._notify_armed
+            self._flash("will ping when the next turn finishes" if self._notify_armed
+                        else "notification cancelled")
+
+    def _maybe_notify(self, sess, verb: str, elapsed: float) -> None:
+        armed, self._notify_armed = self._notify_armed, False
+        always = str(self.config.get("notify", "off") or "off").lower() == "on"
+        if not (armed or (always and elapsed >= 20.0)):
+            return
+        name = sess.name or self.agent.session_name or "DGC"
+        title = f"DGC · {verb}"
+        body = f"{name} · {verb} after {int(elapsed)}s"
+        self._terminal_notification(title, body)
+        self._flash(f"{glyphs.DIAMOND} {body}")
+
+    @staticmethod
+    def _terminal_notification(title: str, body: str) -> None:
+        """OSC 9 (iTerm2/ConEmu/Windows Terminal), OSC 777 (rxvt/WezTerm/kitty), then BEL."""
+        import sys
+        clean = lambda s: "".join(ch for ch in str(s) if ch.isprintable())[:120]
+        try:
+            sys.stdout.write(f"\x1b]9;{clean(body)}\x07\x1b]777;notify;{clean(title)};{clean(body)}\x07\a")
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            pass
+
+    # ---------------------------------------------------------- focus pane ---
+    # One slot under the transcript with one occupant at a time: a hidden arcade game or the
+    # /files explorer. prompt_toolkit stays the only renderer/input owner, so the agent keeps
+    # streaming above. The occupant folds away whenever DGC needs the user's answer.
     def _arcade_score_store(self):
         store = getattr(self, "_arcade_scores", None)
         if store is None:
@@ -864,13 +946,73 @@ class TUI:
     def _start_bored(self, game: str) -> None:
         from .bored import BoredController
         try:
-            self._bored = BoredController(game, scores=self._arcade_score_store())
+            occupant = BoredController(game, scores=self._arcade_score_store())
         except ValueError:
             self._flash("that diversion is unavailable")
             return
-        self._bored_render_cache = None
+        self._mount_pane(occupant, "game on · Q returns to DGC; Ctrl+C still stops the agent")
+
+    def _open_files(self, arg: str = "") -> None:
+        """Open the /files explorer in the focus pane (or jump it to a path)."""
+        from .files import FilesPane, FilesPaneError
+        current = self._pane if getattr(self._pane, "kind", "") == "files" else None
+        try:
+            if current is not None:
+                if arg.strip():
+                    current.go(arg.strip())
+                self._pane_render_cache = None
+                self._invalidate()
+                return
+            occupant = FilesPane(self.config.project_root, host=self._files_host(),
+                                 start=arg.strip() or None)
+        except FilesPaneError as exc:
+            self._flash(str(exc))
+            return
+        self._mount_pane(occupant, "files · Enter inserts @path · q returns to DGC")
+
+    def _files_host(self):
+        """The narrow surface the explorer may touch: composer, mode, flash, changed paths."""
+        tui = self
+
+        class _Host:
+            @property
+            def mode(self) -> str:
+                return str(getattr(tui.agent, "mode", "default") or "default")
+
+            @property
+            def config(self):
+                return tui.config
+
+            def flash(self, message: str) -> None:
+                tui._flash(message)
+
+            def insert_reference(self, text: str) -> None:
+                buf = tui.input_buf
+                prefix = buf.document.text_before_cursor
+                if prefix and not prefix[-1].isspace():
+                    text = " " + text
+                buf.insert_text(text)
+
+            def changed_paths(self) -> set[str]:
+                paths: set[str] = set()
+                manager = getattr(tui.agent, "checkpoints", None)
+                points = getattr(manager, "points", None) or []
+                if points:
+                    try:
+                        paths.update(str(item) for item in (points[-1].get("files") or {}))
+                    except AttributeError:
+                        pass
+                return paths
+
+            def agent_busy(self) -> bool:
+                return tui._turn.is_set()
+        return _Host()
+
+    def _mount_pane(self, occupant, message: str) -> None:
+        self._pane = occupant
+        self._pane_render_cache = None
         self.input_buf.reset()
-        self._flash("game on · Q returns to DGC; Ctrl+C still stops the agent")
+        self._flash(message)
         self._invalidate()
 
     def _ensure_refresh_task(self, app) -> None:
@@ -881,44 +1023,51 @@ class TUI:
 
         async def pulse() -> None:
             while True:
-                controller = getattr(self, "_bored", None)
+                occupant = getattr(self, "_pane", None)
                 interval = 0.08
-                if controller is not None and not controller.paused:
-                    interval = min(interval, float(getattr(controller.game,
-                                                           "redraw_interval", interval)))
+                if occupant is not None and not getattr(occupant, "paused", False):
+                    interval = min(interval, float(getattr(occupant, "redraw_interval", interval)))
                 await asyncio.sleep(max(0.04, interval))
                 app.invalidate()
 
         self._refresh_task = app.create_background_task(pulse())
 
-    def _close_bored(self) -> None:
-        if self._bored is not None:
-            self._bored = None
-            self._bored_render_cache = None
-            self._flash("back to work")
+    def _close_pane(self) -> None:
+        occupant = self._pane
+        if occupant is not None:
+            self._pane = None
+            self._pane_render_cache = None
+            close = getattr(occupant, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            self._flash("back to work" if getattr(occupant, "kind", "") == "game" else "files closed")
             self._invalidate()
 
-    def _pause_bored(self, reason: str) -> None:
-        controller = getattr(self, "_bored", None)
-        if controller is not None and controller.pause(reason):
+    def _pause_pane(self, reason: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is not None and occupant.pause(reason):
             self._invalidate()
 
-    def _bored_visible(self) -> bool:
-        return (getattr(self, "_bored", None) is not None
+    def _pane_visible(self) -> bool:
+        return (getattr(self, "_pane", None) is not None
                 and self._overlay is None and self._req is None
                 and self._input is None and not self._naming)
 
-    def _bored_height(self) -> int:
-        if not self._bored_visible():
+    def _pane_height(self) -> int:
+        if not self._pane_visible():
             return 0
         self._sync_width()
-        target = min(16, max(10, (self._height * 3) // 5))
-        # The game temporarily folds the task pane, so reserve header/chrome + four real transcript
-        # rows. Tasks remain live in memory and reappear unchanged when the game closes.
+        cap = 18 if getattr(self._pane, "kind", "") == "files" else 16
+        target = min(cap, max(10, (self._height * 3) // 5))
+        # The pane temporarily folds the task pane, so reserve header/chrome + four real transcript
+        # rows. Tasks remain live in memory and reappear unchanged when the pane closes.
         available = self._height - self._chrome_below() - 1 - 4
         return max(4, min(target, available))
 
-    def _bored_agent_state(self) -> str:
+    def _pane_agent_state(self) -> str:
         if self._req is not None:
             return "NEEDS INPUT"
         if not self._turn.is_set():
@@ -933,34 +1082,41 @@ class TUI:
             return "THINKING"
         return "WORKING"
 
-    def _render_bored(self):
-        from .bored.render import render_frame
-        controller = getattr(self, "_bored", None)
-        if controller is None:
+    def _render_pane(self):
+        from .pane import render_frame
+        occupant = getattr(self, "_pane", None)
+        if occupant is None:
             return ANSI("")
         self._sync_width()
-        height = max(4, self._bored_height())
+        height = max(4, self._pane_height())
         width = max(20, self._width - 2)
-        agent_state = self._bored_agent_state()
+        agent_state = self._pane_agent_state()
         th = style_mod.theme()
-        revision = controller.advance()
-        cache_key = (id(controller), revision, width, height, agent_state, th.name)
-        cached = getattr(self, "_bored_render_cache", None)
+        revision = occupant.advance()
+        cache_key = (id(occupant), revision, width, height, agent_state, th.name)
+        cached = getattr(self, "_pane_render_cache", None)
         if cached is not None and cached[0] == cache_key:
             return ANSI(cached[1])
-        frame = controller.snapshot(width - 2, height - 2)
+        frame = occupant.snapshot(width - 2, height - 2)
         rendered = self._rich(render_frame(
             frame, width, height, agent_state=agent_state, theme=th))
-        self._bored_render_cache = (cache_key, rendered)
+        self._pane_render_cache = (cache_key, rendered)
         return ANSI(rendered)
 
-    def _bored_key(self, key: str) -> None:
-        controller = getattr(self, "_bored", None)
-        if controller is None:
+    def _pane_key(self, key: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is None:
             return
-        if controller.handle_key(key) == "exit":
-            self._close_bored()
+        if occupant.handle_key(key) == "exit":
+            self._close_pane()
         else:
+            self._invalidate()
+
+    def _pane_text(self, text: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is None or not text:
+            return
+        if occupant.handle_text(text):
             self._invalidate()
 
     def _handle_running_local_command(self, text: str) -> bool:
@@ -1266,7 +1422,7 @@ class TUI:
 
     def _tip(self):
         th = style_mod.theme()
-        if (self.blocks or self._buf or self._overlay or getattr(self, "_bored", None) is not None
+        if (self.blocks or self._buf or self._overlay or self._pane is not None
                 or self._welcome_metrics()[2] == "compact"):
             return ANSI("")
         upd = cached_update()
@@ -1290,8 +1446,8 @@ class TUI:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
             chips = [("↑↓", "move"), ("Enter", "select"), ("Esc", "close")]
-        elif self._bored_visible():
-            chips = [("Arrows/WASD", "move"), ("P", "pause"), ("Q/Esc", "return")]
+        elif self._pane_visible():
+            chips = list(self._pane.hint_chips())
             if self._turn.is_set():
                 chips.append(("Ctrl+C", "stop agent"))
         elif self._turn.is_set():
@@ -1324,7 +1480,7 @@ class TUI:
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
         if (self.blocks or self._buf or self._overlay
-                or getattr(self, "_bored", None) is not None):  # active surface → slim line
+                or self._pane is not None):  # active surface → slim line
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             branch = getattr(self.active, "workspace_branch", "")
             ws = f" · {branch}" if branch else ""
@@ -1865,8 +2021,10 @@ class TUI:
             #  turn-status structure: spinner + activity + phase-timer (left); total-time + ⇣tokens + [stop] (right).
             tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
             toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
+            eta_text = self._eta_status_text()
             left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/] [{th.faint}]{pstr}[/]"
-            right = f"[{th.faint}]{tstr}  ⇣{toks}[/]  [{th.err}][stop][/]"
+            right = (f"[{th.faint}]{tstr}[/]" + (f"  [{th.muted}]{_esc(eta_text)}[/]" if eta_text else "")
+                     + f"  [{th.faint}]⇣{toks}[/]  [{th.err}][stop][/]")
             return self._pad_lr(left, right)
         return ANSI("")                          # idle: the context bar now lives top-right in the header
 
@@ -2079,8 +2237,8 @@ class TUI:
                                       or any(t.get("status") not in ("done", "cancelled") for t in self._todos))
 
     def _todo_panel_visible(self) -> bool:
-        """The arcade borrows the task pane's rows; task state itself continues updating."""
-        return getattr(self, "_bored", None) is None and self._todos_visible()
+        """The focus pane borrows the task pane's rows; task state itself continues updating."""
+        return self._pane is None and self._todos_visible()
 
     def _todo_pane_height(self) -> int:
         return (len(self._todos) + 1) if self._todos_visible() else 0   # title row + one per task
@@ -2352,7 +2510,7 @@ class TUI:
         now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
         sess = self._cur_session()
         if sess is self.active:
-            self._pause_bored("DGC NEEDS INPUT")
+            self._pause_pane("DGC NEEDS INPUT")
         sess._req = req
         sess._req_event.clear()
 
@@ -2413,7 +2571,7 @@ class TUI:
 
     def _ask_text(self, prompt: str, cancel=None) -> str:
         """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
-        self._pause_bored("DGC NEEDS INPUT")
+        self._pause_pane("DGC NEEDS INPUT")
         result = {"v": ""}
         self._req_event.clear()
 
@@ -2641,19 +2799,20 @@ class TUI:
                    height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
-        # An in-process game shares the layout instead of taking over the terminal. The transcript
-        # remains the weighted region above it and therefore continues to show live agent output.
-        bored_panel = ConditionalContainer(
-            Window(FormattedTextControl(self._render_bored), height=self._bored_height,
+        # The focus pane (a game or the /files explorer) shares the layout instead of taking over
+        # the terminal. The transcript remains the weighted region above it and therefore
+        # continues to show live agent output.
+        pane_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._render_pane), height=self._pane_height,
                    dont_extend_height=True),
-            filter=Condition(self._bored_visible))
+            filter=Condition(self._pane_visible))
         # A live task list pinned just above the composer  — shows while a turn
         # runs or any task is still open, then folds away.
         todo_panel = ConditionalContainer(
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
             filter=Condition(self._todo_panel_visible))
-        root = HSplit([header, transcript, bored_panel, overlay_panel, todo_panel,
+        root = HSplit([header, transcript, pane_panel, overlay_panel, todo_panel,
                        status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
@@ -2670,7 +2829,7 @@ class TUI:
                                color_depth=style_mod.detect_color_depth())
 
     def _header_height(self) -> int:
-        if self.blocks or self._buf or self._overlay or getattr(self, "_bored", None) is not None:
+        if self.blocks or self._buf or self._overlay or self._pane is not None:
             return 1
         self._sync_width()
         _, _, mode, card_h, _ = self._welcome_metrics()
@@ -3029,7 +3188,7 @@ class TUI:
         if self.active.draft:
             self.input_buf.insert_text(self.active.draft)
         if self.active._req is not None:                 # this agent was waiting on you → show its card
-            self._pause_bored("DGC NEEDS INPUT")
+            self._pause_pane("DGC NEEDS INPUT")
             self._show_req_overlay(self.active)
         self._invalidate()
 
@@ -3234,6 +3393,12 @@ class TUI:
                 self._open_docs()
         elif cmd == "bored":
             self._open_bored_menu()
+        elif cmd == "files":
+            self._open_files(rest)
+        elif cmd == "eta":
+            self._show_eta(rest)
+        elif cmd == "notify":
+            self._set_notify(rest)
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
@@ -4521,23 +4686,44 @@ class TUI:
         kb = KeyBindings()
 
         ov_open = Condition(lambda: self._overlay is not None)
-        game_active = Condition(self._bored_visible)
+        pane_active = Condition(self._pane_visible)
+        pane_text = Condition(lambda: self._pane_visible()
+                              and bool(getattr(self._pane, "raw_text_input", False)))
+        pane_commands = pane_active & ~pane_text
 
-        # Game controls are eager so input never leaks into the composer or transcript. Ctrl+C and
-        # Ctrl+Q remain deliberately untouched: they still stop the active agent. Capturing the
-        # complete printable alphabet lets WORD GRID behave like a real text game.
-        _game_keys = [
+        # Pane controls are eager so input never leaks into the composer or transcript. Ctrl+C and
+        # Ctrl+Q remain deliberately untouched: they still stop the active agent. Navigation keys
+        # always reach the occupant; letters, digits and punctuation are commands unless the
+        # occupant is taking raw text (a file name, a filter), when Keys.Any delivers them
+        # verbatim so their case survives. WORD GRID keeps folding letters as before.
+        _pane_nav_keys = [
             ("up", "up"), ("down", "down"), ("left", "left"), ("right", "right"),
             ("enter", "enter"), ("backspace", "backspace"), ("delete", "delete"),
-            (" ", "space"), ("escape", "escape"),
+            ("escape", "escape"), ("tab", "tab"), ("home", "home"),
+            ("end", "end"), ("pageup", "pageup"), ("pagedown", "pagedown"),
+            ("c-a", "c-a"), ("c-d", "c-d"), ("c-u", "c-u"), ("c-f", "c-f"), ("c-b", "c-b"),
+        ]
+        for _key, _pane_key in _pane_nav_keys:
+            @kb.add(_key, filter=pane_active, eager=True)
+            def _(ev, _pane_key=_pane_key):
+                self._pane_key(_pane_key)
+        _pane_command_keys = [
+            (" ", "space"),
             *((str(number), str(number)) for number in range(10)),
             *((letter, letter) for letter in "abcdefghijklmnopqrstuvwxyz"),
-            *((letter.upper(), letter) for letter in "abcdefghijklmnopqrstuvwxyz"),
+            *((letter.upper(), letter.upper()) for letter in "abcdefghijklmnopqrstuvwxyz"),
+            *((mark, mark) for mark in "/.~?-,;:!@#$%^&*()[]{}<>=+\'\"`|_"),
         ]
-        for _key, _game_key in _game_keys:
-            @kb.add(_key, filter=game_active, eager=True)
-            def _(ev, _game_key=_game_key):
-                self._bored_key(_game_key)
+        for _key, _pane_key in _pane_command_keys:
+            @kb.add(_key, filter=pane_commands, eager=True)
+            def _(ev, _pane_key=_pane_key):
+                self._pane_key(_pane_key)
+
+        @kb.add(Keys.Any, filter=pane_text, eager=True)
+        def _(ev):
+            data = getattr(ev, "data", "") or ""
+            if data and data.isprintable():
+                self._pane_text(data)
 
         def open_composer_trigger(trigger):
             b = self.input_buf
@@ -4773,7 +4959,7 @@ class TUI:
         # Arrow Up/Down scroll the transcript while the input is empty (browsing the chat); once you
         # start typing, arrows edit the prompt as usual. Overlay/completion nav is handled above.
         scroll_idle = Condition(lambda: self._overlay is None
-                                and getattr(self, "_bored", None) is None
+                                and self._pane is None
                                 and self.input_buf.complete_state is None
                                 and not self.input_buf.text)
 
@@ -5121,7 +5307,8 @@ class TUI:
                     self._submit(queued_text, echo=not shown)
                     return
                 if sess is self.active:
-                    self._pause_bored(f"DGC {verb.upper()}")
+                    self._pause_pane(f"DGC {verb.upper()}")
+                self._maybe_notify(sess, verb, el)
                 if not succeeded:
                     sess._worker_thread = None
                     return
@@ -5230,7 +5417,7 @@ class TUI:
                     self._submit(queued_text, echo=not shown)
                     return
                 if sess is self.active:
-                    self._pause_bored(f"DGC {verb.upper()}")
+                    self._pause_pane(f"DGC {verb.upper()}")
                 sess._worker_thread = None
 
         sess._worker_thread = threading.Thread(
@@ -5239,12 +5426,12 @@ class TUI:
 
     def _shutdown_fleet(self) -> None:
         """Cancel all workers and preserve every managed checkout before the TUI process exits."""
-        self._bored = None  # no external resources, but make the process-local lifetime explicit
+        self._pane = None  # no external resources, but make the process-local lifetime explicit
         task = getattr(self, "_refresh_task", None)
         if task is not None and not task.done():
             task.cancel()
         self._refresh_task = None
-        self._bored_render_cache = None
+        self._pane_render_cache = None
         fleet = list(getattr(self, "_sessions", ()))
         for sess in fleet:
             sess._closing = True

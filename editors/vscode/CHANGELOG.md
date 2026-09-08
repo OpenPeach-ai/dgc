@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0 — 2026-09-09
+
+- Show the turn ETA beside the elapsed timer while a native turn runs: a calibrated range such as `~2–4 min left · 3/5 tasks`, sent by CLI 0.30.0 as the additive `turn_eta` protocol-v6 event and hidden on older CLIs.
+- Add **DGC: Notify On Turn End** — a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.
+- Recommend CLI 0.30.0; protocol v6 compatibility is retained.
+
 ## 0.16.2 — 2026-09-08
 
 - Keep native plan, permission and question cards pending until you respond or stop. Dismissing a question no longer silently selects its first option.

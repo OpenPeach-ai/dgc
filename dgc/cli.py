@@ -955,6 +955,17 @@ class CLI:
                 self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "status":
             self.banner()
+        elif cmd == "eta":
+            from .eta import format_stats
+            snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+            if rest.strip().lower() in ("stats", "stat", "calibration") or snapshot is None:
+                self.console.print(render.render_markdown(format_stats(self.agent.eta_stats_summary())))
+                if snapshot is None and not rest.strip():
+                    self.ui.info("no turn is running; the range appears in the status line 20 s into a turn")
+            else:
+                self.ui.info(f"{snapshot.label} · basis {snapshot.basis} · confidence {snapshot.confidence:.0%}"
+                             if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
         elif cmd == "context":
             used, size = self.agent.estimate_tokens(), self._context_window_size()
             self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)

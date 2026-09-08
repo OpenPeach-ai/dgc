@@ -64,6 +64,12 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error")),
         "token_estimate": _I(),
     },
+    # A calibrated range for the running turn; emitted only while it changes, never as a promise.
+    "turn_eta": {
+        "turn_id": _S(), "elapsed_seconds": _N(), "remaining_low_seconds": _N(),
+        "remaining_high_seconds": _N(), "confidence": _N(), "label": _S(),
+        "tasks_done": _I(False), "tasks_total": _I(False),
+    },
     "text_delta": {"text": _S()},
     "thinking_delta": {"text": _S()},
     "stream_end": {},

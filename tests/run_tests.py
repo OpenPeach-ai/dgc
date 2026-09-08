@@ -11638,7 +11638,7 @@ def test_bored_mode():
           and all(len(panel.plain.splitlines()) == 4 for panel in compact_panels))
 
     squeezed_ui = object.__new__(TUI)
-    squeezed_ui._bored = BoredController("snake", seed=1)
+    squeezed_ui._pane = BoredController("snake", seed=1)
     squeezed_ui._overlay = None; squeezed_ui._input = None; squeezed_ui._naming = False
     squeezed_ui._width = 60; squeezed_ui._height = 20
     squeezed_ui._sync_width = lambda: None; squeezed_ui._chrome_below = lambda: 5
@@ -11646,7 +11646,7 @@ def test_bored_mode():
     squeezed_ui._todos = [{"content": "still live", "status": "in_progress"}]
     squeezed_ui._turn = _threading.Event(); squeezed_ui._turn.set()
     check("the game borrows task-pane rows while preserving transcript space",
-          squeezed_ui._bored_height() == 10 and not squeezed_ui._todo_panel_visible())
+          squeezed_ui._pane_height() == 10 and not squeezed_ui._todo_panel_visible())
 
     # Exercise the real command router with an active turn. If ordering regresses, the fake agent's
     # steer method records the command and the assertion fails.
@@ -11659,7 +11659,7 @@ def test_bored_mode():
     ui._sessions = [session]; ui._active_idx = 0; ui._tls = _threading.local()
     ui.config = SimpleNamespace(project_root=_Path.cwd())
     ui.input_buf = SimpleNamespace(text="", reset=lambda: None)
-    ui._overlay = None; ui._input = None; ui._naming = False; ui._bored = None; ui.app = None
+    ui._overlay = None; ui._input = None; ui._naming = False; ui._pane = None; ui.app = None
     ui._arcade_scores = SimpleNamespace(
         best=lambda key: 123 if key == "snake" else 0,
         refresh=lambda: None,
@@ -11678,13 +11678,13 @@ def test_bored_mode():
           and "best" not in opened["rows"][3]["desc"])
     opened["on_pick"](opened["rows"][0])
     check("selecting a game installs only process-local controller state",
-          ui._bored is not None and ui._bored.key == "snake"
-          and not hasattr(session, "_bored"))
+          ui._pane is not None and ui._pane.key == "snake"
+          and not hasattr(session, "_pane"))
 
     # A foreground permission request must atomically pause the game before its card takes input.
     paused_before_card = []
     def answer_request(active):
-        paused_before_card.append((ui._bored.paused, ui._bored.pause_reason))
+        paused_before_card.append((ui._pane.paused, ui._pane.pause_reason))
         active._req_answer = 0
         active._req_event.set()
     ui._show_req_overlay = answer_request
@@ -11719,7 +11719,7 @@ def test_bored_mode():
     done_ui = object.__new__(TUI)
     done_ui._sessions = [turn_session]; done_ui._active_idx = 0
     done_ui._tls = _threading.local(); done_ui._prompt_history = []
-    done_ui._bored = BoredController("merge", seed=2)
+    done_ui._pane = BoredController("merge", seed=2)
     done_ui._cancel_auxiliary = lambda: None
     done_ui._foreground_aux_barrier = lambda: None
     done_ui._expand_mentions = lambda value: value
@@ -11735,19 +11735,19 @@ def test_bored_mode():
     worker.join(2)
     check("agent completion pauses the game and leaves no turn worker running",
           not worker.is_alive() and not turn_session._turn.is_set()
-          and done_ui._bored.paused and done_ui._bored.pause_reason == "DGC DONE")
+          and done_ui._pane.paused and done_ui._pane.pause_reason == "DGC DONE")
 
     cache_ui = object.__new__(TUI)
-    cache_ui._bored = BoredController("merge", seed=4)
-    cache_ui._bored_render_cache = None; cache_ui._width = 180
-    cache_ui._sync_width = lambda: None; cache_ui._bored_height = lambda: 12
-    cache_ui._bored_agent_state = lambda: "WORKING"
+    cache_ui._pane = BoredController("merge", seed=4)
+    cache_ui._pane_render_cache = None; cache_ui._width = 180
+    cache_ui._sync_width = lambda: None; cache_ui._pane_height = lambda: 12
+    cache_ui._pane_agent_state = lambda: "WORKING"
     rich_calls = []
     cache_ui._rich = lambda value: rich_calls.append(value) or value.plain
-    first_render = cache_ui._render_bored()
-    second_render = cache_ui._render_bored()
-    cache_ui._bored.handle_key("r")
-    third_render = cache_ui._render_bored()
+    first_render = cache_ui._render_pane()
+    second_render = cache_ui._render_pane()
+    cache_ui._pane.handle_key("r")
+    third_render = cache_ui._render_pane()
     check("unchanged frames reuse rendered ANSI while state changes invalidate the cache",
           str(first_render) == str(second_render) and len(rich_calls) == 2
           and str(third_render) != "")
@@ -11813,40 +11813,40 @@ def test_bored_mode():
             smoke["menu"] = eventually(lambda: smoke_ui._overlay is not None
                                         and len(smoke_ui._overlay_rows()) == 15)
             pipe.send_text("\r")
-            smoke["game"] = eventually(lambda: getattr(smoke_ui._bored, "key", None) == "snake")
+            smoke["game"] = eventually(lambda: getattr(smoke_ui._pane, "key", None) == "snake")
             smoke["slim_header"] = smoke_ui._header_height() == 1
-            start_head = smoke_ui._bored.game.snake[0] if smoke["game"] else None
+            start_head = smoke_ui._pane.game.snake[0] if smoke["game"] else None
             smoke["animated"] = eventually(
-                lambda: smoke_ui._bored is not None
-                and smoke_ui._bored.game.snake[0] != start_head)
+                lambda: smoke_ui._pane is not None
+                and smoke_ui._pane.game.snake[0] != start_head)
             pipe.send_text("p")
-            if eventually(lambda: smoke_ui._bored is not None and smoke_ui._bored.paused):
-                paused_head = smoke_ui._bored.game.snake[0]
+            if eventually(lambda: smoke_ui._pane is not None and smoke_ui._pane.paused):
+                paused_head = smoke_ui._pane.game.snake[0]
                 time.sleep(0.2)
-                smoke["paused"] = smoke_ui._bored.game.snake[0] == paused_head
+                smoke["paused"] = smoke_ui._pane.game.snake[0] == paused_head
             pipe.send_text("q")
-            smoke["closed"] = eventually(lambda: smoke_ui._bored is None)
+            smoke["closed"] = eventually(lambda: smoke_ui._pane is None)
             pipe.send_text("/bored\r")
             if eventually(lambda: smoke_ui._overlay is not None):
                 pipe.send_text("paddle")
                 if eventually(lambda: len(smoke_ui._overlay_rows()) == 1):
                     pipe.send_text("\r")
-                    if eventually(lambda: getattr(smoke_ui._bored, "key", None) == "paddle"):
-                        smoke_ui._bored.game._next_tick = 0
-                        start_revision = smoke_ui._bored.revision
-                        start_ball_x = smoke_ui._bored.game.ball_x
+                    if eventually(lambda: getattr(smoke_ui._pane, "key", None) == "paddle"):
+                        smoke_ui._pane.game._next_tick = 0
+                        start_revision = smoke_ui._pane.revision
+                        start_ball_x = smoke_ui._pane.game.ball_x
                         smoke_ui._invalidate()
                         paddle_started = eventually(
-                            lambda: smoke_ui._bored is not None
-                            and smoke_ui._bored.revision >= start_revision + 1,
+                            lambda: smoke_ui._pane is not None
+                            and smoke_ui._pane.revision >= start_revision + 1,
                             timeout=1.0)
                         smoke["smooth_paddle"] = paddle_started and eventually(
-                            lambda: smoke_ui._bored is not None
-                            and smoke_ui._bored.revision >= start_revision + 4
-                            and abs(smoke_ui._bored.game.ball_x - start_ball_x) >= 3,
+                            lambda: smoke_ui._pane is not None
+                            and smoke_ui._pane.revision >= start_revision + 4
+                            and abs(smoke_ui._pane.game.ball_x - start_ball_x) >= 3,
                             timeout=1.0)
                         pipe.send_text("q")
-                        eventually(lambda: smoke_ui._bored is None)
+                        eventually(lambda: smoke_ui._pane is None)
             pipe.send_text("/bored\r")
             if eventually(lambda: smoke_ui._overlay is not None):
                 pipe.send_bytes(b"\x1b[B" * 14)
@@ -11856,21 +11856,21 @@ def test_bored_mode():
                     and smoke_ui._overlay.get("scroll", 0) > 0)
                 pipe.send_text("\r")
                 smoke["last_game"] = eventually(
-                    lambda: getattr(smoke_ui._bored, "key", None) == "process")
+                    lambda: getattr(smoke_ui._pane, "key", None) == "process")
                 pipe.send_text("q")
-                eventually(lambda: smoke_ui._bored is None)
+                eventually(lambda: smoke_ui._pane is None)
             pipe.send_text("/bored\r")
             if eventually(lambda: smoke_ui._overlay is not None):
                 pipe.send_text("word grid")
                 if eventually(lambda: len(smoke_ui._overlay_rows()) == 1):
                     pipe.send_text("\r")
-                    if eventually(lambda: getattr(smoke_ui._bored, "key", None) == "wordgrid"):
+                    if eventually(lambda: getattr(smoke_ui._pane, "key", None) == "wordgrid"):
                         pipe.send_text("qpr")
                         smoke["text_game"] = eventually(
-                            lambda: smoke_ui._bored is not None
-                            and smoke_ui._bored.game.current == "QPR")
+                            lambda: smoke_ui._pane is not None
+                            and smoke_ui._pane.game.current == "QPR")
                         pipe.send_bytes(b"\x1b")
-                        eventually(lambda: smoke_ui._bored is None)
+                        eventually(lambda: smoke_ui._pane is None)
             pipe.send_bytes(b"\x03\x03")
             app_thread.join(2)
             smoke["exited"] = not app_thread.is_alive()

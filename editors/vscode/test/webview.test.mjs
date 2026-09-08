@@ -534,6 +534,19 @@ test("restored history pages and tool disclosure preserve live content and safe 
   assert.deepEqual(errors, []);
 });
 
+test("turn_eta shows the remaining range beside the turn timer and clears with the turn", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  assert.doesNotMatch(doc.querySelector(".thinking .meta").textContent, /left/);
+  send({ type: "event", event: { type: "turn_eta", turn_id: "t1", elapsed_seconds: 25, remaining_low_seconds: 60,
+    remaining_high_seconds: 200, confidence: 0.5, label: "~1–4 min left · 1/3 tasks" } });
+  assert.match(doc.querySelector(".thinking .meta").textContent, /~1–4 min left · 1\/3 tasks/);
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  send({ type: "event", event: { type: "turn_eta", turn_id: "t1", elapsed_seconds: 30, remaining_low_seconds: 1,
+    remaining_high_seconds: 2, confidence: 0.5, label: "stale" } });
+  assert.deepEqual(errors, []);
+});
+
 test("stream batching flushes final text and partial changes stay explicit", () => {
   const { doc, send, errors } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
