@@ -83,6 +83,15 @@ class FilesModelTests(unittest.TestCase):
         self.assertEqual(human_size(0), "0B")
         self.assertEqual(human_size(2000), "2.0K")
 
+    def test_natural_sort_survives_digit_leading_and_letter_leading_names_together(self):
+        for name in ("2024-report.md", "10 things.txt", "9 lives", "Zeta", "alpha1", "alpha10", "alpha2"):
+            (self.root / name).write_text("")
+        names = [e.name for e in scan(self.root).entries if not e.is_dir]
+        self.assertEqual(names[:3], ["9 lives", "10 things.txt", "2024-report.md"])
+        self.assertEqual([n for n in names if n.startswith("alpha")], ["alpha1", "alpha2", "alpha10"])
+        self.assertLess(natural_key("9 lives"), natural_key("alpha1"))
+        self.assertLess(natural_key("10 things.txt"), natural_key("2024-report.md"))
+
     def test_scan_reports_missing_directory_without_raising(self):
         listing = scan(self.root / "gone")
         self.assertEqual(listing.entries, [])

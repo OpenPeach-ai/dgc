@@ -1097,9 +1097,15 @@ class TUI:
         cached = getattr(self, "_pane_render_cache", None)
         if cached is not None and cached[0] == cache_key:
             return ANSI(cached[1])
-        frame = occupant.snapshot(width - 2, height - 2)
-        rendered = self._rich(render_frame(
-            frame, width, height, agent_state=agent_state, theme=th))
+        try:
+            frame = occupant.snapshot(width - 2, height - 2)
+            rendered = self._rich(render_frame(
+                frame, width, height, agent_state=agent_state, theme=th))
+        except Exception as exc:  # an occupant bug must never take the transcript down with it
+            self._pane = None
+            self._pane_render_cache = None
+            self._flash(f"pane closed: {type(exc).__name__}: {str(exc)[:80]}")
+            return ANSI("")
         self._pane_render_cache = (cache_key, rendered)
         return ANSI(rendered)
 
@@ -1107,7 +1113,15 @@ class TUI:
         occupant = getattr(self, "_pane", None)
         if occupant is None:
             return
-        if occupant.handle_key(key) == "exit":
+        try:
+            result = occupant.handle_key(key)
+        except Exception as exc:
+            self._pane = None
+            self._pane_render_cache = None
+            self._flash(f"pane closed: {type(exc).__name__}: {str(exc)[:80]}")
+            self._invalidate()
+            return
+        if result == "exit":
             self._close_pane()
         else:
             self._invalidate()

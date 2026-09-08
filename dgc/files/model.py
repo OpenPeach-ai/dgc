@@ -41,7 +41,9 @@ class Listing:
 
 
 def natural_key(text: str) -> tuple:
-    return tuple(int(part) if part.isdigit() else part.lower()
+    """Natural ordering with a type-stable key: every chunk is (0, int) or (1, str), so a
+    digit-leading name never compares an int against a str (which raises in Python)."""
+    return tuple((0, int(part)) if part.isdigit() else (1, part.lower())
                  for part in _NUMBER.split(text) if part != "")
 
 
