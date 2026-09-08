@@ -3,6 +3,20 @@
 CLI 0.29.2 and extension 0.16.2 add live controls without changing editor protocol v6.
 Update both components for these capabilities.
 
+Native plans, tool permissions and decision questions wait until you respond or stop the turn;
+the five-minute MCP input timeout no longer applies to human review. Closing a pending question
+never chooses its first option. A stopped plan remains unapproved.
+
+Every native question includes **Other** for a custom text answer. The extension and full-screen
+terminal show grouped questions in tabs; you can switch tabs and revise answers before **Submit**
+sends the complete form. The classic terminal provides a question list with answer review and one
+Submit action. Up to six questions and eight suggested choices per question are supported, with
+custom answers bounded to 4,096 characters. Unanswered or blank custom choices cannot be submitted.
+For models, `propose_options` accepts the original `question`/`options` shape or a `questions` array
+whose entries contain `id`, `header`, `question`, and `options`. It returns answers keyed by question ID.
+Older editor clients receive grouped questions sequentially. External subscription tools retain
+their own question interface; the native question-form protocol does not alter those processes.
+
 | Action | Extension | Terminal |
 | --- | --- | --- |
 | Steer a native turn | Enter or Send with a draft | Enter |

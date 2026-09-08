@@ -2,6 +2,8 @@
 
 ## 0.16.2 — 2026-09-08
 
+- Keep native plan, permission and question cards pending until you respond or stop. Dismissing a question no longer silently selects its first option.
+- Add an Other text answer to every question, plus separate question tabs, retained answers and one Submit action for grouped decisions.
 - Browse and select skills while a turn runs. Skill installation, enablement and reload wait until it finishes.
 - Send follow-ups into an active native-model turn with Enter or Send; use Alt+Enter or Queue for a later turn. Keep Stop available while drafting. Subscription CLI follow-ups queue for the next turn.
 - Acknowledge steering delivery and restore unapplied inputs after cancellation or failure, including images and selected context.

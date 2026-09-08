@@ -952,6 +952,65 @@ test("concurrent pasted images reserve bytes before FileReader can cross the agg
   dom.window.close();
 });
 
+test("question tabs retain custom answers and submit exactly one complete response", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "options_request", id: "form",
+    question: "Where?", options: ["Local", "Cloud"], questions: [
+      { id: "storage", header: "Storage", question: "Where?", options: ["Local", "Cloud"] },
+      { id: "accent", header: "Appearance", question: "Which accent?", options: ["Purple", "Blue"] },
+    ] } });
+  const card = doc.querySelector('.card[data-request-id="form"]');
+  assert.equal(card.querySelector(".question-submit").disabled, true);
+  card.querySelector('[data-choice="0"]').click();
+  assert.equal(posted.some((m) => m.type === "options_response"), false);
+  card.querySelector('[data-tab="1"]').click();
+  card.querySelector('[data-choice="other"]').click();
+  let input = card.querySelector(".question-other");
+  assert.equal(input.hidden, false);
+  input.value = "Lavender <script>alert(1)</script>";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  card.querySelector('[data-tab="0"]').click();
+  assert.equal(card.querySelector('[data-choice="0"]').getAttribute("aria-pressed"), "true");
+  card.querySelector('[data-tab="1"]').click();
+  input = card.querySelector(".question-other");
+  assert.equal(input.value, "Lavender <script>alert(1)</script>");
+  assert.equal(card.querySelector("script"), null);
+  const submit = card.querySelector(".question-submit");
+  assert.equal(submit.disabled, false);
+  submit.click(); submit.click();
+  const responses = posted.filter((m) => m.type === "options_response");
+  assert.equal(responses.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(responses[0])), { type: "options_response", id: "form",
+    answers: { storage: "Local", accent: "Lavender <script>alert(1)</script>" } });
+  assert.match(card.querySelector(".question-summary").textContent, /Lavender <script>/);
+  assert.equal(card.querySelector("script"), null);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("single question offers Other and cancellation never submits a default", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "options_request", id: "single",
+    question: "Which approach?", options: ["One", "Two", "Three"] } });
+  const card = doc.querySelector('.card[data-request-id="single"]');
+  assert.equal(card.querySelectorAll(".opt").length, 4);
+  card.querySelector('[data-choice="other"]').click();
+  const input = card.querySelector(".question-other");
+  input.value = " "; input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".question-submit").disabled, true);
+  input.value = "Use both approaches"; input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".question-submit").disabled, false);
+  send({ type: "event", event: { type: "request_expired", id: "single" } });
+  assert.equal(input.disabled, true);
+  card.querySelector(".question-submit").click();
+  assert.equal(posted.some((m) => m.type === "options_response"), false);
+  assert.doesNotMatch(doc.getElementById("log").textContent, /Approval request expired/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("decision cards expire by exact ID and cannot double-submit across cancel/exit races", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
@@ -976,6 +1035,10 @@ test("decision cards expire by exact ID and cannot double-submit across cancel/e
 
   const option = live.querySelector("button");
   option.click(); option.click();
+  assert.equal(posted.filter((message) => message.type === "options_response").length, 0,
+    "selecting an option must wait for Submit");
+  const submit = live.querySelector(".question-submit");
+  submit.click(); submit.click();
   assert.equal(posted.filter((message) => message.type === "options_response").length, 1,
     "one decision card must produce at most one response");
 
@@ -1118,7 +1181,7 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   send({ type: "event", event: { type: "command_rejected", message: "wait for the turn" } });
   send({ type: "event", event: { type: "request_expired" } });
   assert.match(doc.getElementById("log").textContent, /wait for the turn/);
-  assert.match(doc.getElementById("log").textContent, /expired/);
+  assert.match(doc.getElementById("log").textContent, /Input request closed/);
 
   // Clear is acknowledged only after the backend resets model state; the old implementation
   // removed DOM nodes while silently retaining every prior turn in the model context.

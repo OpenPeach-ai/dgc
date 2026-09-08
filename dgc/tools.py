@@ -216,12 +216,20 @@ TOOL_SCHEMAS = [
                       "description": "Concrete checks, artifacts, or observations supporting this status"}},
         ["status", "summary", "evidence"]),
     _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
-        "(two valid approaches, an ambiguous request). Presents the choices and waits for their pick. "
-        "Don't use it for things you can decide yourself.",
+        "(two valid approaches, an ambiguous request). Waits for an explicit answer, with Other/free text. "
+        "Use questions to group 1–6 separate decisions into tabs with one Submit. "
+        "Use question/options for a single decision. Don't use it for things you can decide yourself.",
         {"question": {"type": "string", "description": "What you're asking them to decide"},
          "options": {"type": "array", "items": {"type": "string"},
-                     "description": "The choices, most-recommended first"}},
-        ["question", "options"]),
+                     "description": "The choices, most-recommended first; Other is added by the client"},
+         "questions": {"type": "array", "minItems": 1, "maxItems": 6,
+                       "items": {"type": "object", "properties": {
+                           "id": {"type": "string", "description": "Unique answer key"},
+                           "header": {"type": "string", "maxLength": 32, "description": "Short tab label"},
+                           "question": {"type": "string"},
+                           "options": {"type": "array", "maxItems": 8, "items": {"type": "string"}}},
+                           "required": ["id", "header", "question", "options"]}}},
+        []),
     _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
         "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
         "describing the page is not. First write a self-contained .html file, then call this with its "

@@ -232,6 +232,8 @@ class HeadlessUI:
         self.em = emitter
         self.pending = pending
         self.approval_timeout_s = max(0.01, float(approval_timeout_s))
+        self.question_forms = False  # opted in by the editor handshake; strict older v6 clients remain valid
+        self.cancelled = None
         self._rule_hook = None          # set by Backend to persist an allow rule
         self._rule_override: dict = {}   # tool -> explicit rule string the IDE dictated
         self.plan_feedback = ""         # one-shot feedback consumed by Agent after rejection
@@ -307,9 +309,16 @@ class HeadlessUI:
         self.em.emit("error", message=message)
 
     # blocking decisions -------------------------------------------------------
-    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None):
-        deadline = time.monotonic() + self.approval_timeout_s
-        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
+        # Reviewing a plan or deciding between options is not an abandoned network request.
+        # Only an explicit reply, Stop, or disconnection ends a native human decision.
+        deadline = None if human else time.monotonic() + self.approval_timeout_s
+        cancel = cancel if cancel is not None else self.cancelled
+        while not ev.wait(0.1 if deadline is None else min(0.1, max(0.0, deadline - time.monotonic()))):
+            if cancel is not None and cancel.is_set():
+                self.pending.value(rid)
+                self.em.emit("request_expired", id=rid)
+                return None
             if recheck is not None:
                 decision = recheck()
                 if decision in ("once", "no") and self.pending.resolve(rid, {"decision": decision}):
@@ -317,11 +326,7 @@ class HeadlessUI:
                                  message="Approved by the current permission mode" if decision == "once"
                                  else "Blocked by the current permission mode")
                     continue
-            if cancel is not None and cancel.is_set():
-                self.pending.value(rid)
-                self.em.emit("request_expired", id=rid)
-                return None
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 self.pending.value(rid)  # discard it so a late response cannot affect another request
                 self.em.emit("request_expired", id=rid)
                 return None
@@ -336,7 +341,7 @@ class HeadlessUI:
                      command=(args.get("command") if name == "bash" else None),
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
-        payload = self._await(rid, ev, recheck=recheck) or {}
+        payload = self._await(rid, ev, recheck=recheck, human=True) or {}
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
         return {"once": "once", "always": "always",
@@ -352,7 +357,7 @@ class HeadlessUI:
         rid, ev = self.pending.register()
         self.em.emit("plan_proposal", id=rid, plan=plan,
                      choices=["auto", "acceptEdits", "default", "reject"])
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, human=True) or {}
         self.plan_feedback = str(payload.get("feedback") or "").strip()
         decision = payload.get("decision")
         if decision in _PLAN_MODES:
@@ -360,15 +365,37 @@ class HeadlessUI:
         return decision if decision in _PLAN_MODES else None
 
     def propose_options(self, question: str, options: list) -> str:
-        rid, ev = self.pending.register()
+        def valid(payload):
+            choice = payload.get("choice") if isinstance(payload, dict) else None
+            return ((type(choice) is int and 1 <= choice <= len(options))
+                    or (isinstance(choice, str) and bool(choice.strip()) and len(choice) <= 4096))
+        rid, ev = self.pending.register(validator=valid)
         self.em.emit("options_request", id=rid, question=question, options=options)
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, human=True) or {}
         choice = payload.get("choice")
-        if isinstance(choice, int) and 1 <= choice <= len(options):
+        if type(choice) is int and 1 <= choice <= len(options):
             return options[choice - 1]
-        if isinstance(choice, str) and choice:
-            return choice
-        return options[0] if options else ""
+        if isinstance(choice, str) and choice.strip() and len(choice) <= 4096:
+            return choice.strip()
+        return ""
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        from .questions import valid_answers
+        if not self.question_forms:
+            answers = {}
+            for q in questions:
+                answer = self.propose_options(q["question"], q["options"])
+                if not answer:
+                    return None
+                answers[q["id"]] = answer
+            return answers
+        rid, ev = self.pending.register(validator=lambda p: isinstance(p, dict)
+                                         and valid_answers(questions, p.get("answers")))
+        self.em.emit("options_request", id=rid, question=questions[0]["question"],
+                     options=questions[0]["options"], questions=questions)
+        payload = self._await(rid, ev, human=True) or {}
+        answers = payload.get("answers")
+        return answers if valid_answers(questions, answers) else None
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -399,6 +426,7 @@ class Backend:
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
         self.agent = Agent(config, self.ui)
+        self.ui.cancelled = self.agent.cancelled
         self.ui._goal_hook = self._emit_goal
         self.ui._rule_hook = self._add_rule
         self.ui._steering_hook = self._steering_applied
@@ -432,7 +460,7 @@ class Backend:
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
                           "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
-                          "live_steering": True, "live_modes": True,
+                          "live_steering": True, "live_modes": True, "question_forms": True,
                           "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
@@ -1631,6 +1659,8 @@ class Backend:
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
+            if "question_forms" in cmd:
+                self.ui.question_forms = cmd["question_forms"]
             roots, visible = [], []
             for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
                 try:
@@ -1655,7 +1685,7 @@ class Backend:
         elif t == "plan_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "feedback": cmd.get("feedback")})
         elif t == "options_response":
-            self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice")})
+            self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice"), "answers": cmd.get("answers")})
         elif t == "mcp_input_response":
             self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
                                                   "content": cmd.get("content")})

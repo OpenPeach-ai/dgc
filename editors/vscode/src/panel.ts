@@ -566,7 +566,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const revision = this.workspaceRootsRevision;
     const command = this.stateCommand(
-      "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots() });
+      "workspace-roots", { type: "set_workspace_roots", roots: this.workspaceRoots(),
+        ...(this.lastReadyEvent?.capabilities?.question_forms === true ? { question_forms: true } : {}) });
     const accepted = setup || this.initializingBackend === be
       ? be.sendSetup(command)
       : be.send(command);
@@ -1372,7 +1373,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                   feedback: msg.feedback });
         break;
       case "options_response":
-        be.send({ type: "options_response", id: msg.id, choice: msg.choice });
+        be.send({ type: "options_response", id: msg.id,
+          ...(msg.answers ? { answers: msg.answers } : { choice: msg.choice }) });
         break;
       case "mcp_input_response": {
         let action = msg.action;

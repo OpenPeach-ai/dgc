@@ -2276,11 +2276,75 @@ class TUI:
         req = sess._req
         if not req:
             return
+        if req.get("kind") == "questions":
+            self._show_questions_overlay(sess)
+            return
         options = req.get("options", [])
         rows = [{"label": f"{i + 1}  {o}", "value": i} for i, o in enumerate(options)]   # 1-9 shortcuts
         self._open_overlay(rows, on_pick=sess._req_pick, title=req.get("title"), header=req.get("header"),
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
+
+    def _show_questions_overlay(self, sess: "AgentSession") -> None:
+        """One persistent decision form: Tab changes questions; only Submit wakes the worker."""
+        from rich.text import Text
+        from .questions import valid_answers, MAX_ANSWER
+        req = sess._req
+        questions, answers = req["questions"], req["answers"]
+        req.setdefault("composer_draft", self.input_buf.document)
+        safe = style_mod.terminal_safe_text
+
+        def rebuild(ov):
+            req["tab"] = ov["tab"]
+            q = questions[ov["tab"]]
+            ov["header"] = [Text(safe(q["question"]), style="bold")]
+            rows = [{"label": f"{i + 1}  {'✓ ' if answers.get(q['id']) == o else ''}{safe(o)}",
+                     "value": i} for i, o in enumerate(q["options"])]
+            custom = answers.get(q["id"], "")
+            rows.append({"label": f"{len(rows) + 1}  Other — type your own answer",
+                         "desc": safe(custom) if custom not in q["options"] else "", "value": "other"})
+            rows.append({"label": f"Submit · {len(answers)}/{len(questions)} answered", "value": "submit"})
+            return rows
+
+        def pick(row):
+            if sess._req is not req:
+                return
+            q = questions[req.get("tab", 0)]
+            value = row["value"]
+            if value == "submit":
+                if valid_answers(questions, answers):
+                    sess._req_answer = dict(answers)
+                    sess._req_event.set()
+                    return
+                self._flash("Answer every question before submitting")
+            elif value == "other":
+                self.input_buf.reset()
+                custom = req.get("other_drafts", {}).get(q["id"], answers.get(q["id"], ""))
+                if custom and custom not in q["options"]:
+                    self.input_buf.insert_text(custom)
+                def entered(text):
+                    if sess._req is not req:
+                        return
+                    text = text.strip()
+                    req.setdefault("other_drafts", {})[q["id"]] = text
+                    if text and len(text) <= MAX_ANSWER:
+                        answers[q["id"]] = text
+                    elif len(text) > MAX_ANSWER:
+                        self._flash(f"Keep your answer within {MAX_ANSWER} characters")
+                    self.input_buf.set_document(req["composer_draft"])
+                    self._show_questions_overlay(sess)
+                self._input = {"cb": entered, "prompt": "Other — your answer (Esc returns to questions):",
+                               "question_owner": sess, "question_id": q["id"]}
+                self._invalidate()
+                return
+            else:
+                answers[q["id"]] = q["options"][value]
+            self._show_questions_overlay(sess)
+
+        self._open_overlay([], on_pick=pick, tabs=[q["header"] for q in questions], tab=req.get("tab", 0),
+                           rebuild=rebuild, accent=True,
+                           footer="Tab switch question · ↑↓ move · Enter select · Submit sends all · Esc cancel")
+        self._overlay["selectable"] = True
 
     def _ask(self, req: dict, cancel=None, recheck=None):
         """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
@@ -2312,6 +2376,9 @@ class TUI:
                 sess._req_answer = None
                 break
         sess._req = None
+        if req.get("kind") == "questions" and sess is self.active:
+            self._input = None
+            self.input_buf.set_document(req.get("composer_draft", self.input_buf.document))
         if sess is self.active and self._overlay is not None:
             self._overlay = None                        # close (option chosen or Esc-cancelled)
         self._invalidate()
@@ -2389,11 +2456,16 @@ class TUI:
         return None
 
     def propose_options(self, question: str, options: list[str]) -> str:
-        from rich.text import Text
+        answers = self.propose_questions([{"id": "q1", "header": "Question", "question": question,
+                                           "options": list(options)}])
+        return (answers or {}).get("q1", "")
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        from .questions import valid_answers
         self._flush_text()
-        ans = self._ask({"kind": "options", "options": list(options),
-                         "header": [Text(style_mod.terminal_safe_text(question), style="bold")]})
-        return options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else options[0]
+        ans = self._ask({"kind": "questions", "questions": questions, "answers": {}, "tab": 0},
+                        cancel=self._cur_session().agent.cancelled)
+        return ans if valid_answers(questions, ans) else None
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -2943,6 +3015,12 @@ class TUI:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
         if not self._sessions:
             return
+        if self._input is not None and self._input.get("question_owner") is self.active:
+            req = self.active._req
+            if req is not None:
+                req.setdefault("other_drafts", {})[self._input["question_id"]] = self.input_buf.text
+                self.input_buf.set_document(req["composer_draft"])
+            self._input = None
         if self._overlay is None:                        # stash a REAL draft, not an overlay's filter text
             self.active.draft = self.input_buf.text
         self._active_idx = max(0, min(idx, len(self._sessions) - 1))
@@ -4566,7 +4644,7 @@ class TUI:
                 else:
                     buf.cancel_completion()
                 # fall through and submit — one Enter runs the command
-            if self._req is not None:
+            if self._req is not None and not (self._req.get("kind") == "questions" and self._input is not None):
                 return                      # answered via number keys
             text = self.input_buf.text.strip()
             self.input_buf.reset()
@@ -4593,6 +4671,10 @@ class TUI:
 
         @kb.add("escape")
         def _(ev):
+            if self._req is not None and self._req.get("kind") == "questions" and self._input is not None:
+                cb = self._input["cb"]; self._input = None
+                cb("")
+                return
             if self._req is not None:                       # blocking prompt (permission card) → deny/cancel
                 self._req_answer = None
                 self._req_event.set()
@@ -4740,10 +4822,17 @@ class TUI:
             if self._route_followup(text, queue_only=True) != "full":
                 self.input_buf.reset()
 
-        for i in range(1, 5):               # number keys answer a blocking request
+        for i in range(1, 10):               # number keys select a blocking request's options
             @kb.add(str(i))
             def _(ev, n=i):
                 if self._req is not None:
+                    if self._req.get("kind") == "questions":
+                        if self._input is not None:
+                            self.input_buf.insert_text(str(n))
+                        elif self._overlay is not None and n <= len(self._overlay_rows()) - 1:
+                            self._overlay["sel"] = n - 1
+                            self._overlay_select()
+                        return
                     opts = self._req.get("options", [])
                     if n - 1 < len(opts):
                         self._req_answer = n - 1

@@ -290,17 +290,39 @@ class UI:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
         self._yield_stdin()
         idx = menu_select(terminal_safe_text(question or "Choose one"),
-                          [terminal_safe_text(option) for option in options] + ["something else…"],
+                          [terminal_safe_text(option) for option in options] + ["Other"],
                           [""] * len(options) + ["type your own answer"])
         if idx is None:
-            return options[0]
+            return ""
         if idx == len(options):                          # the "something else…" row
             try:
                 raw = input("  › ").strip()
             except EOFError:
-                return options[0]
-            return raw or options[0]
+                return ""
+            return raw if len(raw) <= 4096 else ""
         return options[idx]
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        """Review/edit separate decisions and explicitly submit the complete batch."""
+        from .questions import valid_answers
+        self._yield_stdin()
+        answers = {}
+        while True:
+            idx = menu_select("Questions — review each answer, then Submit",
+                              [terminal_safe_text(q["header"]) for q in questions] + ["Submit"],
+                              [terminal_safe_text(answers.get(q["id"], "Not answered")) for q in questions]
+                              + [f"{len(answers)}/{len(questions)} answered"])
+            if idx is None:
+                return None
+            if idx == len(questions):
+                if valid_answers(questions, answers):
+                    return answers
+                self.info("Answer every question before submitting.")
+                continue
+            q = questions[idx]
+            answer = self.propose_options(q["question"], q["options"])
+            if answer:
+                answers[q["id"]] = answer
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}

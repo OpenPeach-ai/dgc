@@ -10,7 +10,8 @@
       "status": "current",
       "notes": [
         "Browse skills and change permission mode during active turns; recheck pending approvals while preserving explicit ask/deny rules and workspace trust.",
-        "Steer native editor turns with text, images and selected context; keep queued and unapplied follow-ups recoverable. Classic CLI Enter steers and Tab queues."
+        "Steer native editor turns with text, images and selected context; keep queued and unapplied follow-ups recoverable. Classic CLI Enter steers and Tab queues.",
+        "Keep native human decisions pending until reply or Stop; add grouped question review and custom Other answers without defaulting unanswered choices."
       ]
     },
     {
@@ -176,7 +177,8 @@
       "notes": [
         "View and select skills while working; change modes without cancelling the turn.",
         "Steer native turns with Enter, queue with Alt+Enter or Queue, and keep a separate Stop action while drafting. Subscription CLI follow-ups queue.",
-        "Restore unapplied steering after interruption and use the standard Settings Save button style. CLI 0.29.2 enables live controls with protocol v6."
+        "Restore unapplied steering after interruption and use the standard Settings Save button style. CLI 0.29.2 enables live controls with protocol v6.",
+        "Review questions in tabs with an Other text answer and one Submit action; plan approvals no longer expire during human review."
       ]
     },
     {

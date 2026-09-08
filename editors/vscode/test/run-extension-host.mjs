@@ -61,7 +61,7 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
 send({ type: "ready", version: "fixture", protocol_version: 6,
-  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true,
+  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true, question_forms: true,
     workflows: true, composer_selections: true, workspace_inspection: true, chat_inspection: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
@@ -179,6 +179,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (cmd.type === "plan_response" && cmd.id === "host-plan") {
     send({ type: "request_expired", id: "host-plan" });
+    send({ type: "options_request", id: "host-questions", question: "Storage?", options: ["Local", "Cloud"],
+      questions: [
+        { id: "storage", header: "Storage", question: "Storage?", options: ["Local", "Cloud"] },
+        { id: "accent", header: "Accent", question: "Accent?", options: ["Purple", "Blue"] }
+      ] });
+  }
+  if (cmd.type === "options_response" && cmd.id === "host-questions") {
     send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
   }
   if (cmd.type === "shutdown") process.exit(0);
