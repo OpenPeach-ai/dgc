@@ -1805,7 +1805,7 @@ def unit_tests(tmp: Path):
     _mode_calls = []
     _ma = type("ModeAgent", (), {"mode": "default",
                                   "set_mode": lambda self, m: (_mode_calls.append(m), setattr(self, "mode", m))})()
-    _ms = type("ModeSession", (), {"agent": _ma})()
+    _ms = type("ModeSession", (), {"agent": _ma, "_req": None})()
     _mu = object.__new__(TUI); _mu._sessions = [_ms]; _mu._active_idx = 0
     _mode_config = {"subscription_engine": ""}
     _mu.config = type("ModeConfig", (), {
@@ -3651,7 +3651,7 @@ def unit_tests(tmp: Path):
             if self.recover and self.calls == 2:
                 return _ChatResult(content="Concise user-facing outcome.")
             return _ChatResult(content="", thinking="hidden analysis", finish_reason="length")
-    _empty_budget_cfg = _Cfg(tmp); _empty_budget_cfg.data["thinking"] = "high"
+    _empty_budget_cfg = _Cfg(tmp); _empty_budget_cfg.data.update(thinking="high", ultra_mode=False)
     _empty_budget_turn = _Ag(_empty_budget_cfg, _AgUI())
     _empty_budget_turn.client = _EmptyBudgetClient()
     check("an empty output-limit response gets a concise thinking-off finalization retry",
@@ -7081,6 +7081,7 @@ os._exit(0 if lock.acquire(timeout=1) else 2)
         return True
     harness = Agent.__new__(Agent)
     harness.config = LeaseConfig()
+    harness._mode_lock = threading.RLock()
     harness.ui = LeaseUI()
     harness.cancelled = threading.Event()
     harness.ctx = SimpleNamespace(
@@ -12137,9 +12138,12 @@ def test_steering():
     # navigation. Full mode is an escape hatch; plan mode separately retains navigation breadth.
     a.config.data["mode"] = "default"
     a.config.data["tool_profile"] = "adaptive"
+    a.config.data["ultra_mode"] = False
     a.config.data["artifact_autostart"] = True
     a._active_tool_intents.clear()
     a._active_skill_names.clear()
+    a._explicit_skill_instructions = {}
+    a._mcp_query_text = ""
     _adaptive = a._tool_schemas()
     _adaptive_names = {tool["function"]["name"] for tool in _adaptive}
     _optional = {"web_fetch", "web_search", "add_skill", "save_memory", "artifact", "task"}

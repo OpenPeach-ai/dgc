@@ -115,6 +115,14 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 
 ## This turn
 - **Esc** — stop the turn · **Ctrl+C** — cancel · clear draft · quit
+- **Enter** — steer native work at the next model/tool boundary; subscription follow-ups queue
+- **Tab** — queue a separate turn while working, outside menus and completion
+- **/skills** and **/skills show NAME** — browse the current catalog without stopping work
+- **/mode MODE** — change native permission decisions during work; explicit ask/deny rules remain
+
+Unconsumed terminal follow-ups remain queued after interruption; a new prompt continues the queue.
+In the editor, Enter steers and **Alt+Enter** or **Queue** submits a later turn. Unapplied steering
+can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.
 
 ## Navigate
 - **PageUp / PageDn** — scroll the transcript · **End** — jump to the latest

@@ -1337,6 +1337,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         }
         const accepted = be.send({ type: "prompt", text, images: msg.images, request_id: requestId,
                                    context: [...attached, ...live].slice(0, 64), ...selections,
+                                   ...(this.lastReadyEvent?.capabilities?.live_steering
+                                     ? { delivery: msg.delivery === "queue" ? "queue" : "steer" } : {}),
                                    ...(workflow ? { workflow: workflow as "plan" | "review" | "init" } : {}) });
         if (!accepted) {
           this.post({ type: "prompt_rejected", requestId });
@@ -3062,6 +3064,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     try {
       await this.requestState(this.ensureBackend(), "mode", {
         type: "set_mode", mode: change.mode,
+        ...(this.lastReadyEvent?.capabilities?.live_modes ? { live: true } : {}),
         acknowledge_workspace_trust: change.acknowledgeWorkspaceTrust,
       }, "mode_changed", 5000);
       return true;
@@ -3364,7 +3367,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     </section>
   </div>
   <div class="set-foot">
-    <button type="button" id="set-save" class="csend set-save">Save</button>
+    <button type="button" id="set-save" class="act primary set-save">Save</button>
     <button type="button" id="set-cancel" class="fbtn">Close</button>
   </div>
 </div>
@@ -3415,8 +3418,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
         <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
+      <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>
+      <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
     </div>
+    <div id="followup-hint" hidden></div>
   </div>
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>

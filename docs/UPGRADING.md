@@ -1,9 +1,11 @@
 # Updating DGC and resolving protocol mismatches
 
 The CLI and editor extension are separate installations with independent version numbers. Update
-both for the current feature set: CLI 0.29.1 and extension 0.16.1 use editor protocol v6. Additive
+both for the current feature set: CLI 0.29.2 and extension 0.16.2 use editor protocol v6. Additive
 capabilities let the extension explain a missing backend feature instead of sending unsupported
 commands to an older protocol-v6 CLI.
+
+See [Controls during a turn](LIVE_CONTROLS.md) for live skills, permission changes, steering and queuing.
 
 1. Run `dgc --version` and `dgc protocol describe` in the editor's terminal. Check **User Settings →
    DGC: Command** if the extension uses a different executable. For SSH, containers or WSL, check

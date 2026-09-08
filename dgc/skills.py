@@ -318,12 +318,15 @@ def skill_catalog(skills: dict[str, Skill], project_root: Path) -> list[dict]:
     return rows
 
 
-def manage_skills(config, arguments: str = "") -> str:
+def manage_skills(config, arguments: str = "", *, catalog=None, read_only=False) -> str:
     """Shared terminal management commands; returns text rather than rendering or running a model."""
     import shlex
     parts = shlex.split(arguments)
     action = parts[0].lower() if parts else "list"
-    catalog = discover_skills(config.project_root, disabled_names=config.get("disabled_skills", []))
+    if read_only and action not in ("list", "show"):
+        raise ValueError("You can browse and view skills while working. Change installed skills after the turn finishes.")
+    catalog = (dict(catalog) if catalog is not None else
+               discover_skills(config.project_root, disabled_names=config.get("disabled_skills", [])))
     if action in ("enable", "disable") and len(parts) == 2:
         set_skill_enabled(config, parts[1], action == "enable")
         return f"Skill ${parts[1]} {'enabled' if action == 'enable' else 'disabled'}."

@@ -10,6 +10,7 @@
   let pendingImageFiles = 0, pendingImageBytes = 0;
   let queuedCount = 0, customCommands = [], skillRows = [];
   let skillManagement = false;
+  let liveSteering = false, nativeSteering = false;
   let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
@@ -910,6 +911,7 @@
   }
   function surfaceButtons(primary, primaryAction, secondary, secondaryAction) {
     const p = $("surface-primary"), s = $("surface-secondary");
+    for (const button of [p, s]) { delete button.dataset.skillMutation; button.disabled = false; }
     p.hidden = !primary; p.textContent = primary || ""; p.onclick = primaryAction || null;
     s.hidden = !secondary; s.textContent = secondary || ""; s.onclick = secondaryAction || null;
   }
@@ -962,6 +964,11 @@
     });
     surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }),
       skillManagement ? "Create / install" : "", () => vscode.postMessage({ type: "skillsManage" }));
+    for (const button of [$("surface-primary"), $("surface-secondary"), ...surfaceBody.querySelectorAll("[data-skill-toggle]")]) {
+      button.dataset.skillMutation = "true";
+      button.disabled = streaming;
+      button.title = streaming ? "Available after this turn finishes" : "";
+    }
     filterSurface();
   }
   function renderSkillDetail(ev) {
@@ -1168,6 +1175,8 @@
         skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
           typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
         skillManagement = ev.capabilities?.skill_management === true;
+        liveSteering = ev.capabilities?.live_steering === true;
+        nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
         mcpContextSupported = ev.capabilities?.mcp_context === true;
         mcpManagement = ev.capabilities?.mcp_management === true;
         if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
@@ -1197,6 +1206,8 @@
       case "session_named": setThreadTitle(ev.name); break;
       case "config":
         lastConfig = ev;
+        nativeSteering = liveSteering && !ev.subscription_engine;
+        renderComposerControls();
         curUltra = ev.ultra_mode === true;
         curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
         updateModelControl();
@@ -1209,7 +1220,36 @@
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
-      case "prompt_accepted": pendingPrompts.delete(ev.request_id); persistDraft(); break;
+      case "prompt_accepted": {
+        const pending = pendingPrompts.get(ev.request_id);
+        if (ev.state === "steered") {
+          if (pending?.node) pending.node.querySelector(".role").textContent = "you · steering pending";
+        } else {
+          if (ev.state === "queued" && pending?.node) pending.node.querySelector(".role").textContent = "you · queued";
+          pendingPrompts.delete(ev.request_id);
+        }
+        if (ev.message) sysLine(ev.message);
+        persistDraft(); break;
+      }
+      case "steering_update": {
+        const pending = pendingPrompts.get(ev.request_id);
+        if (ev.state === "returned") {
+          rejectPrompt(ev.request_id);
+          if (ev.message) sysLine(ev.message);
+        } else {
+          if (pending?.node) {
+            pending.node.querySelector(".role").textContent = ev.state === "applied" ? "you · steering" : "you · queued";
+            if (ev.state === "applied" && turn) {
+              flushText(); finishReasoning();
+              if (turn.textEl) turn.textEl.classList.add("commentary");
+              turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
+              appendTurnContent(pending.node);
+            }
+          }
+          pendingPrompts.delete(ev.request_id); persistDraft();
+        }
+        break;
+      }
       case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
@@ -1520,6 +1560,12 @@
         break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
+      case "mode_changed": if (ev.message) sysLine(ev.message); break;
+      case "permission_resolved":
+        document.querySelectorAll(".card[data-request-id]").forEach((card) => {
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card);
+        });
+        sysLine(ev.message, ev.decision === "no"); break;
       case "command_rejected":
         if (ev.command === "prompt" || ev.command === "start_goal") rejectPrompt(ev.request_id);
         sysLine(ev.message || "Command unavailable while a turn is running", true); break;
@@ -1548,7 +1594,24 @@
   }
 
   // ---- composer ----
-  function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
+  function hasComposerInput() { return Boolean(input.value.trim() || attachments.length); }
+  function renderComposerControls() {
+    const hasDraft = hasComposerInput(), stop = streaming && !hasDraft;
+    const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
+    send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
+    send.title = label; send.setAttribute("aria-label", label);
+    $("queue-send").hidden = !streaming || !nativeSteering;
+    $("queue-send").disabled = !hasDraft;
+    $("stop-run").hidden = !streaming || !hasDraft;
+    $("followup-hint").hidden = !streaming;
+    $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+  }
+  function setSending(on) {
+    streaming = on; renderComposerControls();
+    document.querySelectorAll("[data-skill-mutation]").forEach(button => {
+      button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
+    });
+  }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
@@ -1614,7 +1677,7 @@
     input.value = ""; input.style.height = "auto"; attachments.length = 0;
     renderAtts(); persistDraft(); scroll();
   }
-  function submit() {
+  function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     const text = input.value.trim();
@@ -1654,8 +1717,9 @@
     const requestId = `${promptPrefix}-${++promptSequence}`;
     pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
+      delivery,
       skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
-      context: resources.length ? resources : undefined });   // backend queues it if a turn is running
+      context: resources.length ? resources : undefined });
     input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
   }
   function renderAtts() {
@@ -1667,6 +1731,7 @@
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
     });
     scheduleDraftSave();
+    renderComposerControls();
   }
 
   // ---- @file / slash popover ----
@@ -1747,6 +1812,7 @@
   }
   function onInput() {
     scheduleDraftSave();
+    renderComposerControls();
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
@@ -1792,7 +1858,7 @@
       if (e.key === "Escape") { e.preventDefault(); hidePop(); return; }
     }
     if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); cycleMode(); return; }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.altKey ? "queue" : undefined); }
     else if (e.key === "Escape" && streaming) doStop();
   });
   input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
@@ -1846,7 +1912,9 @@
       }
     }
   });
-  send.onclick = () => { if (streaming) doStop(); else submit(); };
+  send.onclick = () => { if (streaming && !hasComposerInput()) doStop(); else submit(); };
+  $("stop-run").onclick = doStop;
+  $("queue-send").onclick = () => submit("queue");
   $("btn-ctx").onclick = (e) => { e.stopPropagation(); toggleContextMenu(); };
   $("ctx-compact").onclick = () => {
     if (compacting) return;

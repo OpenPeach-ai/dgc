@@ -42,13 +42,13 @@ class EditorStateTests(unittest.TestCase):
 
     def test_prompt_acknowledgement_and_rejections_are_correlated(self):
         backend = self.backend()
-        backend._start_turn = lambda *args: ("queued", 2)
+        backend._start_turn = lambda *args, **kwargs: ("queued", 2)
         backend.dispatch({"type": "prompt", "text": "test", "request_id": "p1"})
         self.assertIn({"type": "prompt_accepted", "request_id": "p1", "state": "queued"}, self.events)
         backend.dispatch({"type": "prompt", "text": "x" * (_MAX_PROMPT_CHARS + 1), "request_id": "p2"})
         self.assertEqual(self.events[-1]["request_id"], "p2")
         self.assertEqual(self.events[-1]["type"], "command_rejected")
-        backend._start_turn = lambda *args: ("full", 16)
+        backend._start_turn = lambda *args, **kwargs: ("full", 16)
         backend.dispatch({"type": "prompt", "text": "test", "request_id": "p3"})
         self.assertEqual(self.events[-1]["request_id"], "p3")
         self.assertEqual(self.events[-1]["reason"], "queue_full")

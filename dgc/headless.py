@@ -46,9 +46,9 @@ _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
-    "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
+    "set_model", "set_think", "new_session", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal", "start_goal",
-    "resolve_retained_task", "list_skills", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
+    "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
@@ -246,6 +246,11 @@ class HeadlessUI:
     def end_stream(self) -> None:
         self.em.emit("stream_end")
 
+    def steering_applied(self, request_id: str) -> None:
+        hook = getattr(self, "_steering_hook", None)
+        if hook:
+            hook(request_id)
+
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
         self.em.emit("tool_call", call_id=call_id, name=name, args=args,
@@ -302,9 +307,16 @@ class HeadlessUI:
         self.em.emit("error", message=message)
 
     # blocking decisions -------------------------------------------------------
-    def _await(self, rid: str, ev: threading.Event, cancel=None):
+    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None):
         deadline = time.monotonic() + self.approval_timeout_s
         while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+            if recheck is not None:
+                decision = recheck()
+                if decision in ("once", "no") and self.pending.resolve(rid, {"decision": decision}):
+                    self.em.emit("permission_resolved", id=rid, decision=decision,
+                                 message="Approved by the current permission mode" if decision == "once"
+                                 else "Blocked by the current permission mode")
+                    continue
             if cancel is not None and cancel.is_set():
                 self.pending.value(rid)
                 self.em.emit("request_expired", id=rid)
@@ -316,12 +328,15 @@ class HeadlessUI:
         return self.pending.value(rid)
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
+        return self.approve_live(name, args, call_id)
+
+    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
         self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
                      command=(args.get("command") if name == "bash" else None),
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, recheck=recheck) or {}
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
         return {"once": "once", "always": "always",
@@ -386,12 +401,14 @@ class Backend:
         self.agent = Agent(config, self.ui)
         self.ui._goal_hook = self._emit_goal
         self.ui._rule_hook = self._add_rule
+        self.ui._steering_hook = self._steering_applied
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._foreground_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
+        self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
 
     def _add_rule(self, rule_text: str) -> None:
@@ -414,7 +431,9 @@ class Backend:
                           "hook_activity": True, "correlated_state_requests": True,
                           "ultra_profile": True, "composer_selections": True, "skill_management": True,
                           "mcp_context": True, "mcp_management": True, "history_snapshot": True,
-                          "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True},
+                          "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
+                          "live_steering": True, "live_modes": True,
+                          "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
             ultra_mode=bool(self.config.get("ultra_mode", False)),
@@ -466,18 +485,35 @@ class Backend:
             lock = self._turn_lock = threading.RLock()
         return lock
 
-    def _start_turn(self, text: str, images=None, context=None) -> tuple[str, int]:
+    def _start_turn(self, text: str, images=None, context=None, *, delivery="queue", request_id="") -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         lock = self._turn_state_lock()
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
             if getattr(self, "_worker", None) is not None:
-                pending_bytes = sum(_turn_payload_bytes(*item) for item in self._queue)
-                if (len(self._queue) >= _MAX_QUEUED_TURNS
+                steers = getattr(self, "_steer_payloads", {})
+                pending_bytes = sum(_turn_payload_bytes(*item) for item in [*self._queue, *steers.values()])
+                if (len(self._queue) + len(steers) >= _MAX_QUEUED_TURNS
                         or pending_bytes + _turn_payload_bytes(text, images, context)
                         > _MAX_QUEUED_TURN_BYTES):
                     return "full", len(self._queue)
+                config = getattr(self, "config", getattr(self.agent, "config", None))
+                config_get = getattr(config, "get", None)
+                engine = config_get("subscription_engine", "") if callable(config_get) else ""
+                if delivery == "steer" and not engine and not self.agent.cancelled.is_set():
+                    import uuid
+                    identity = request_id or str(uuid.uuid4())
+                    if identity in steers:
+                        return "duplicate", len(self._queue)
+                    model_text = _format_editor_context(redact_value(context, secret_values(config))) + text
+                    steers[identity] = (text, images, context)
+                    self._steer_payloads = steers
+                    if self.agent.steer(model_text, images=images, request_id=identity):
+                        # Publish acceptance before the worker can acknowledge consumption.
+                        self.em.emit("prompt_accepted", request_id=identity, state="steered")
+                        return "steered", len(self._queue)
+                    steers.pop(identity, None)
                 self._queue.append((text, images, context))
                 return "queued", len(self._queue)
             self._queue.append((text, images, context))
@@ -486,6 +522,32 @@ class Backend:
             self._worker = worker
             worker.start()
             return "started", 0
+
+    def _steering_applied(self, request_id: str) -> None:
+        with self._turn_state_lock():
+            if getattr(self, "_steer_payloads", {}).pop(request_id, None) is not None:
+                self.em.emit("steering_update", request_id=request_id, state="applied")
+
+    def _finish_steering(self, cancelled: bool, failed: bool) -> None:
+        take = getattr(self.agent, "take_deferred_inputs", None)
+        if callable(take):
+            take()
+        retained = []
+        with self._turn_state_lock():
+            # The consumption acknowledgement removes applied inputs synchronously. Everything
+            # left here is owned but unconsumed, including a failed context/skill preparation.
+            pending = getattr(self, "_steer_payloads", {})
+            for identity, payload in list(pending.items()):
+                pending.pop(identity, None)
+                if cancelled or failed:
+                    self.em.emit("steering_update", request_id=identity, state="returned",
+                                 message="This follow-up was not applied. Your message has been preserved.")
+                else:
+                    retained.append(payload)
+                    self.em.emit("steering_update", request_id=identity, state="queued")
+            self._queue[:0] = retained
+            if retained:
+                self.em.emit("queued", count=len(self._queue), text="")
 
     def _run_subscription_turn(self, engine_key: str, prompt: str) -> bool:
         """Delegate one editor turn while preserving the native headless event contract."""
@@ -624,6 +686,7 @@ class Backend:
                         {"traceback": traceback.format_exc()},
                         secret_values(active_config))["traceback"])
                 cancelled = self.agent.cancelled.is_set()
+                self._finish_steering(cancelled, failed)
                 try:
                     est = self.agent.estimate_tokens()
                 except Exception:
@@ -758,14 +821,15 @@ class Backend:
         return lambda: self.em.emit(event, **fields)
 
     def _emit_skill_catalog(self, request_id: str) -> None:
-        rows = skill_catalog(self.agent.skills, self.config.project_root)
+        rows = skill_catalog(dict(self.agent.skills), self.config.project_root)
         self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
 
     def _emit_skill_detail(self, request_id: str, name: str) -> None:
         normalized = normalize_skill_name(name)
-        skill = self.agent.skills.get(normalized)
+        skills = dict(self.agent.skills)
+        skill = skills.get(normalized)
         metadata = {row["name"]: row
-                    for row in skill_catalog(self.agent.skills, self.config.project_root)}
+                    for row in skill_catalog(skills, self.config.project_root)}
         row = metadata.get(normalized, {})
         self.em.emit(
             "skill_detail", request_id=request_id, found=skill is not None,
@@ -1288,9 +1352,12 @@ class Backend:
                                  workspace_trusted=self.workspace_trusted)
                     state, count = self._start_turn(text, images, context)
             else:
-                state, count = self._start_turn(text, images, context)
+                state, count = self._start_turn(text, images, context,
+                    **({"delivery": cmd["delivery"], "request_id": request_id} if "delivery" in cmd else {}))
             if request_id and state in ("started", "queued"):
-                self.em.emit("prompt_accepted", request_id=request_id, state=state)
+                self.em.emit("prompt_accepted", request_id=request_id, state=state,
+                             **({"message": "Queued for the next turn; this operation cannot accept live steering."}
+                                if state == "queued" and cmd.get("delivery") == "steer" else {}))
             if state == "queued":
                 self.em.emit("queued", count=count, text=text)
             elif state == "full":
@@ -1302,6 +1369,9 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                              message="a foreground operation is running; cancel or wait for it to finish",
                              **_request_fields(request_id))
+            elif state == "duplicate":
+                self.em.emit("command_rejected", command=t, reason="duplicate_request",
+                             message="This follow-up is already awaiting delivery.", **_request_fields(request_id))
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
@@ -1600,6 +1670,11 @@ class Backend:
                 self.em.emit("request_expired", id=rid)
 
         elif t == "set_mode":
+            if self._busy() and cmd.get("live") is not True:
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="Update the extension to change modes during a turn.",
+                             **_request_fields(request_id))
+                return
             mode = cmd.get("mode", "default")
             config_get = getattr(self.config, "get", None)
             active_engine = str(
@@ -1626,6 +1701,8 @@ class Backend:
             self.agent.set_mode(mode)
             self.em.emit("mode_changed", mode=self.agent.mode,
                          workspace_trusted=self.workspace_trusted,
+                         **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}
+                            if active_engine and self._busy() else {}),
                          **_request_fields(request_id))
         elif t == "set_model":
             config_get = getattr(self.config, "get", None)

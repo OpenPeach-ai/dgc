@@ -993,8 +993,7 @@ class TUI:
         if self._turn.is_set():
             if self._handle_running_local_command(text):
                 return "local-command"
-            self._route_followup(text)
-            return "follow-up"
+            return "full" if self._route_followup(text) == "full" else "follow-up"
         from .composer import composer_token
         token = composer_token(text, len(text))
         if token and token[0] == "/" and token[2] > 0 and token[1] in ("plan", "review", "init"):
@@ -1296,7 +1295,7 @@ class TUI:
             if self._turn.is_set():
                 chips.append(("Ctrl+C", "stop agent"))
         elif self._turn.is_set():
-            chips = [("Esc", "stop"), ("Enter", "follow up")]
+            chips = [("Esc", "stop"), ("Enter", "follow up"), ("Tab", "queue")]
         else:
             chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
                      ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
@@ -2283,7 +2282,7 @@ class TUI:
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
 
-    def _ask(self, req: dict, cancel=None):
+    def _ask(self, req: dict, cancel=None, recheck=None):
         """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
         thread answers via on_pick / number keys / Esc. If the session is on screen the card opens
         now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
@@ -2304,6 +2303,11 @@ class TUI:
         self._invalidate()
 
         while not sess._req_event.wait(0.1):
+            if recheck is not None:
+                answer = recheck()
+                if answer is not None:
+                    sess._req_answer = answer
+                    break
             if cancel is not None and cancel.is_set():
                 sess._req_answer = None
                 break
@@ -2314,6 +2318,9 @@ class TUI:
         return sess._req_answer
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
+        return self.approve_live(name, args, call_id)
+
+    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         from rich.text import Text
         self._flush_text()
         th = style_mod.theme()
@@ -2329,7 +2336,8 @@ class TUI:
                 header.append(Text("  " + detail, style=th.muted))
         ans = self._ask({"kind": "approve", "header": header,
                          "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
-                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"})
+                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"},
+                        recheck=(lambda: {"once": 0, "no": 2}.get(recheck())) if recheck else None)
         if ans == 3:                                     # deny + tell the model why (steers the retry)
             self.deny_reason = self._ask_text("why / what to do instead:")
             return "no"
@@ -3064,7 +3072,9 @@ class TUI:
 
         def commit() -> None:
             self.agent.set_mode(mode)
-            self._flash(f"mode → {mode}")
+            self._flash(f"mode → {mode}" + (" · next subscription turn" if active_engine and self._turn.is_set() else ""))
+            if self._req is not None and self._overlay is None:
+                self._show_req_overlay(self.active)
             self._invalidate()
             if after:
                 after()
@@ -3082,8 +3092,11 @@ class TUI:
         def picked(row) -> None:
             if row["value"] == "yes":
                 commit()
-            elif on_cancel:
-                on_cancel()
+            else:
+                if self._req is not None and self._overlay is None:
+                    self._show_req_overlay(self.active)
+                if on_cancel:
+                    on_cancel()
         self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
                            on_pick=picked)
 
@@ -3465,8 +3478,11 @@ class TUI:
             if rest:
                 from .skills import manage_skills
                 try:
-                    output = manage_skills(cfg, rest)
-                    self.agent.reload_skills()
+                    running = self._turn.is_set()
+                    output = manage_skills(cfg, rest, read_only=running,
+                                           catalog=self.agent.skills if running else None)
+                    if not running and rest.split()[0] not in ("list", "show"):
+                        self.agent.reload_skills()
                     self._append(self._rich(_esc(redact_text(output, secret_values(cfg)))))
                 except (OSError, ValueError) as exc:
                     self._flash(str(exc))
@@ -3749,7 +3765,8 @@ class TUI:
 
         def rebuild(ov):
             if ov["tab"] == 0:                          # Skills
-                sk = discover_skills(self.config.project_root, disabled_names=self.config.get("disabled_skills", []))
+                sk = (dict(self.agent.skills) if self._turn.is_set() else
+                      discover_skills(self.config.project_root, disabled_names=self.config.get("disabled_skills", [])))
                 return [{"label": name + (" · disabled" if not s.enabled else ""),
                          "desc": f"{s.source} · " + (s.short_description or s.description or "skill"),
                          "enabled": s.enabled,
@@ -3773,6 +3790,9 @@ class TUI:
         def on_action(key, row):
             ov = self._overlay
             is_mcp = ov["tab"] == 1
+            if self._turn.is_set():
+                self._flash("Browse skills now; change installed skills or servers after this turn finishes.")
+                return
             if key == "a":                              # add
                 self._close_overlay()
                 if is_mcp:
@@ -4568,7 +4588,8 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            self._dispatch_composer_text(text)
+            if self._dispatch_composer_text(text) == "full":
+                self.input_buf.insert_text(text)
 
         @kb.add("escape")
         def _(ev):
@@ -4710,6 +4731,15 @@ class TUI:
             if s:
                 self.input_buf.insert_text(s.text)
 
+        @kb.add("tab", filter=Condition(lambda: self._turn.is_set() and self._overlay is None
+                  and self._req is None and self._input is None and not self._naming
+                  and self.input_buf.complete_state is None and bool(self.input_buf.text.strip())
+                  and not self.input_buf.text.lstrip().startswith("/")))
+        def _(ev):
+            text = self.input_buf.text.strip()
+            if self._route_followup(text, queue_only=True) != "full":
+                self.input_buf.reset()
+
         for i in range(1, 5):               # number keys answer a blocking request
             @kb.add(str(i))
             def _(ev, n=i):
@@ -4807,10 +4837,10 @@ class TUI:
         with sess._queue_lock:
             return sess._queue.pop(0) if sess._queue else None
 
-    def _route_followup(self, text: str) -> str:
+    def _route_followup(self, text: str, *, queue_only: bool = False) -> str:
         """Atomically steer the active model turn or retain text as the next turn."""
         sess = self._cur_session()
-        if sess.agent.steer(text):
+        if not queue_only and sess.agent.steer(text):
             sess.blocks.append({"kind": "user", "text": text,
                                 "tag": "follow-up · steering this turn"})
             sess._scroll_off = 0
@@ -4966,6 +4996,13 @@ class TUI:
                     # These bands were rendered when accepted as steering. The old turn ended before
                     # consuming them, so preserve their order as one subsequent prompt without echoing.
                     self._queue_followup(sess, "\n".join(deferred), shown=True, front=True)
+                    for text in reversed(deferred):
+                        for block in reversed(sess.blocks):
+                            if (isinstance(block, dict) and block.get("kind") == "user"
+                                    and block.get("text") == text
+                                    and block.get("tag") == "follow-up · steering this turn"):
+                                block["tag"] = "follow-up · queued"
+                                break
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._turn.clear()
@@ -4986,7 +5023,9 @@ class TUI:
                     if result is not None and result.status != "cleaned":
                         self._flash(f"retained {result.branch} at {result.path}")
                     return
-                queued = self._pop_followup(sess)
+                queued = self._pop_followup(sess) if not self._cancel.is_set() and succeeded else None
+                if queued is None and sess._queue:
+                    self.info("Follow-ups retained. Send a new prompt to continue the queue.")
                 if queued is not None:
                     sess._worker_thread = None
                     queued_text, shown = queued
