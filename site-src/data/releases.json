@@ -177,7 +177,7 @@
       "notes": [
         "Browse skills and change modes during active turns, preserving explicit ask/deny rules and workspace trust.",
         "Steer native turns with Enter, queue with Alt+Enter or Queue, and restore unapplied inputs after interruption. Subscription CLI follow-ups queue.",
-        "Keep plan reviews pending until reply or Stop; answer questions in tabs with Other and one Submit. Match Settings Save to standard buttons. Requires CLI 0.29.2."
+        "Keep plan reviews pending until reply or Stop; answer questions in tabs with Other and one Submit. Match Settings Save to standard buttons. CLI 0.29.2, protocol v6."
       ]
     },
     {
