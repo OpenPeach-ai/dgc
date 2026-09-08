@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -31,22 +32,23 @@ _spec.loader.exec_module(base)
 
 # (seconds after the prompt is sent, keys)  — literal text is typed; names are tmux key names.
 SCENARIO = [
-    (3.0, ["/files", "Enter"]),      # open the explorer at the fixture root
-    (7.5, ["i"]),                    # inspect clamp.py (size · modified · mode · git)
-    (11.5, ["i"]),                   # back to the text preview
-    (15.5, ["j"]),                   # test_clamp.py
-    (22.0, ["k"]),                   # clamp.py again — by now the edit has landed (✎ mark)
-    (29.0, ["?"]),                   # the key reference
-    (33.0, ["?"]),                   # close it
-    (40.0, ["q"]),                   # return to DGC for the verified ending
+    (1.6, ["/files", "Enter"]),      # open the explorer before the model's first tool call
+    (16.0, ["i"]),                   # inspect clamp.py (size · modified · mode · git · ✎ changed by DGC)
+    (22.0, ["i"]),                   # back to the text preview
+    (27.0, ["j"]),                   # test_clamp.py
+    (31.0, ["k"]),                   # clamp.py again
+    (36.0, ["?"]),                   # the key reference
+    (40.0, ["?"]),                   # close it
+    (45.0, ["q"]),                   # return to DGC for the verified ending
 ]
 
 PROVENANCE = (
     "Actual DGC {version} full-screen TUI · real local Ollama run · {model} · the same disposable "
     "controlled fixture and one-line code edit as the CLI capture · /files opened and driven by real "
-    "keystrokes while the turn ran · python3 -m unittest -v passed 3/3 · real time, no speed "
-    "adjustment · no user config or session persisted."
+    "keystrokes while the turn ran · python3 -m unittest -v passed 3/3 · {timing} · no user config "
+    "or session persisted."
 )
+CAPTURE_FACTOR = {"value": 1.0}
 
 
 def _drive(socket: str) -> None:
@@ -77,6 +79,13 @@ def _type_prompt_and_drive(socket: str, text: str) -> None:
 base.type_prompt = _type_prompt_and_drive
 
 
+def _remember_factor(output_dir: Path, *, model: str, dgc_version: str, factor: float) -> None:
+    CAPTURE_FACTOR["value"] = float(factor)
+
+
+base.update_cli_manifest = _remember_factor
+
+
 def publish(staged_dir: Path, model: str) -> None:
     assets = ROOT / "site" / "assets"
     names = {"webm": ("cli-capture.webm", "files-capture.webm"),
@@ -87,21 +96,24 @@ def publish(staged_dir: Path, model: str) -> None:
     records = {kind: base.media_manifest_record(assets, target) for kind, (_s, target) in names.items()}
     duration = float(records["webm"]["duration_seconds"])
     rounded = int(duration + 0.5)
-    import dgc
+    version = re.search(r'^__version__ = "([^"]+)"', (ROOT / "dgc" / "__init__.py").read_text(), re.M).group(1)
     manifest_path = ROOT / "site-src" / "data" / "capture-media.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    factor = CAPTURE_FACTOR["value"]
+    real_time = abs(factor - 1.0) < 0.0001
+    timing = "real time, no speed adjustment" if real_time else f"{factor:.2f}× time-compressed"
     payload["captures"]["files"] = {
         "kind": "real_cli_local_model_focus_pane",
         "live_model": True,
         "controlled_fixture": True,
-        "real_time": True,
+        "real_time": real_time,
         "keystrokes": [keys for _offset, keys in SCENARIO],
         "duration_seconds": round(duration, 3),
         "duration_label": f"{rounded // 60}:{rounded % 60:02d}",
-        "provenance": PROVENANCE.format(version=dgc.__version__, model=model),
+        "provenance": PROVENANCE.format(version=version, model=model, timing=timing),
         "model_route": f"local Ollama · {model}",
-        "time_compression": 1,
-        "dgc_version": dgc.__version__,
+        "time_compression": round(factor, 4),
+        "dgc_version": version,
         "files": records,
     }
     manifest_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

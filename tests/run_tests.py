@@ -17,6 +17,16 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+# The suite must never read or write the developer's real ~/.dgc: several checks assert DGC's
+# defaults (tool profile, ultra mode, hooks…) and a populated config.json makes them fail
+# falsely, while others could persist state there. Redirect HOME before any dgc module computes
+# USER_HOME at import time. CI runners are unaffected; local runs become hermetic.
+_ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-tests-home-")
+os.environ["HOME"] = _ISOLATED_HOME.name
+os.environ["USERPROFILE"] = _ISOLATED_HOME.name
+os.environ.pop("XDG_CONFIG_HOME", None)
+os.environ.pop("XDG_DATA_HOME", None)
+
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 

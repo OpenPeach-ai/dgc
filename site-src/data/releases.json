@@ -185,7 +185,9 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
       "notes": [
-        "Show the turn ETA beside the elapsed timer (additive protocol-v6 turn_eta event from CLI 0.30.0) and add a Notify On Turn End setting for a walk-away notification."
+        "Show the turn ETA beside the elapsed timer while a native turn runs — a calibrated range such as `~2–4 min left · 3/5 tasks` from the additive protocol-v6 turn_eta event, hidden on older CLIs.",
+        "Add DGC: Notify On Turn End — a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.",
+        "Recommend CLI 0.30.0 for the turn ETA; protocol v6 compatibility is retained. The /files focus pane is a terminal feature; the editor keeps its native explorer."
       ]
     },
     {
