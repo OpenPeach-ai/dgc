@@ -545,6 +545,55 @@ test("editor capture autoplays in place and retains an explicit controls dialog"
   expect(runtime.httpErrors).toEqual([]);
 });
 
+test("focus-pane figure replays the real terminal cells as text and keeps its recording dialog", async ({page}) => {
+  const runtime = observeRuntime(page);
+  const replayRequests = [];
+  page.on("request", request => {
+    if (/files-replay\.json$|files-capture\.(?:webm|mp4)$/.test(new URL(request.url()).pathname)) {
+      replayRequests.push(new URL(request.url()).pathname);
+    }
+  });
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+
+  const opener = page.locator('[data-open-capture="files-capture"]');
+  const replay = opener.locator("pre.term-replay");
+  const poster = opener.locator("img.capture-poster");
+  await expect(replay).toBeHidden();
+  expect(replayRequests).toEqual([]);
+
+  await opener.scrollIntoViewIfNeeded();
+  await expect(replay).toHaveAttribute("data-hydrated", "true");
+  await expect(replay).toBeVisible();
+  await expect(poster).toBeHidden();
+  expect(replayRequests).toEqual(["/assets/files-replay.json"]);
+  await expect.poll(() => replay.evaluate(pre => pre.children.length)).toBe(32);
+  // The replay starts with the prompt being typed; /files opens a few seconds into the session.
+  await expect.poll(() => replay.evaluate(pre => pre.textContent.includes("FILES")), {timeout: 25_000}).toBe(true);
+  const metrics = await replay.evaluate(pre => ({
+    fontSize: parseFloat(getComputedStyle(pre).fontSize),
+    scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
+    spans: pre.querySelectorAll("span").length,
+  }));
+  expect(metrics.fontSize).toBeGreaterThan(4);
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
+  expect(metrics.spans).toBeGreaterThan(10);
+  const status = opener.locator("[data-capture-status]");
+  await expect(status).toContainText(/Auto-playing|Motion paused/);
+
+  await opener.click();
+  const capture = page.locator("#files-capture");
+  await expect(capture).toHaveAttribute("open", "");
+  await expect(capture.locator("video")).toHaveAttribute("data-hydrated", "true");
+  await expect(capture.locator("#files-capture-note")).toContainText("actual cells");
+  await capture.locator("[data-close-capture]").click();
+  await expect(capture).not.toHaveAttribute("open", "");
+
+  expect(runtime.consoleErrors).toEqual([]);
+  expect(runtime.pageErrors).toEqual([]);
+  expect(runtime.httpErrors).toEqual([]);
+});
+
 test("editor capture preview selects the viewport-sized source", async ({page}) => {
   const posterRequests = [];
   page.on("request", request => {

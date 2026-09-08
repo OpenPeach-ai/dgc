@@ -412,9 +412,9 @@ function encode(raw, outputDir, rawSeconds, manifestUpdate = null) {
   try {
     const common = ["-hide_banner", "-loglevel", "error", "-y", "-i", raw, "-an",
       "-vf", `setpts=PTS/${factor.toFixed(8)}`];
-    run("ffmpeg", [...common, "-c:v", "libvpx-vp9", "-crf", "35", "-b:v", "0",
+    run("ffmpeg", [...common, "-c:v", "libvpx-vp9", "-crf", "31", "-b:v", "0",
       "-row-mt", "1", join(staged, "editor-capture.webm")], { timeout: 300_000 });
-    run("ffmpeg", [...common, "-c:v", "libx264", "-preset", "slow", "-crf", "27",
+    run("ffmpeg", [...common, "-c:v", "libx264", "-preset", "slower", "-tune", "animation", "-crf", "23",
       "-pix_fmt", "yuv420p", "-movflags", "+faststart",
       join(staged, "editor-capture.mp4")], { timeout: 300_000 });
     const posterAt = Math.min(Math.max(8, rawSeconds * 0.72), Math.max(0, rawSeconds - 0.5));

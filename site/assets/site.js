@@ -178,6 +178,76 @@
     }), {rootMargin:'0px'}); videos.forEach(video => vio.observe(video));
   } else videos.forEach(hydrateVideo);
 
+  // Terminal-cell replays: the real session's cells (from tmux) rendered as text, so the
+  // animation is sharp at any zoom and a few kilobytes instead of a blurry upscaled video.
+  const BASIC = ['#000000','#cd3131','#0dbc79','#e5e510','#2472c8','#bc3fbc','#11a8cd','#e5e5e5',
+                 '#666666','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#ffffff'];
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ansiRow = line => {
+    const st = {fg:'', bg:'', b:false, d:false, inv:false}; let out = '';
+    const parts = line.split(/\x1b\[([0-9;]*)m/);
+    const emit = text => {
+      if (!text) return;
+      let fg = st.fg, bg = st.bg; if (st.inv) { [fg, bg] = [bg || '#f5f5f5', fg || '#08080a']; }
+      const style = (fg ? `color:${fg};` : '') + (bg ? `background:${bg};` : '') + (st.b ? 'font-weight:500;' : '') + (st.d ? 'opacity:.62;' : '');
+      const text2 = esc(text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''));
+      out += style ? `<span style="${style}">${text2}</span>` : text2;
+    };
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 0) { emit(parts[i]); continue; }
+      const c = parts[i] === '' ? [0] : parts[i].split(';').map(Number);
+      for (let k = 0; k < c.length; k++) {
+        const n = c[k];
+        if (n === 0) Object.assign(st, {fg:'', bg:'', b:false, d:false, inv:false});
+        else if (n === 1) st.b = true; else if (n === 2) st.d = true; else if (n === 22) { st.b = false; st.d = false; }
+        else if (n === 7) st.inv = true; else if (n === 27) st.inv = false;
+        else if (n === 39) st.fg = ''; else if (n === 49) st.bg = '';
+        else if (n >= 30 && n <= 37) st.fg = BASIC[n - 30]; else if (n >= 90 && n <= 97) st.fg = BASIC[n - 82];
+        else if (n >= 40 && n <= 47) st.bg = BASIC[n - 40]; else if (n >= 100 && n <= 107) st.bg = BASIC[n - 92];
+        else if ((n === 38 || n === 48) && c[k + 1] === 2) { const v = `rgb(${c[k+2]|0},${c[k+3]|0},${c[k+4]|0})`; if (n === 38) st.fg = v; else st.bg = v; k += 4; }
+        else if ((n === 38 || n === 48) && c[k + 1] === 5) { const idx = c[k+2]|0; const v = idx < 16 ? BASIC[idx] : idx >= 232 ? `rgb(${8+(idx-232)*10},${8+(idx-232)*10},${8+(idx-232)*10})` : (() => { const q = idx - 16, r = Math.floor(q/36), g = Math.floor((q%36)/6), b = q%6, m = x => x ? 55 + x*40 : 0; return `rgb(${m(r)},${m(g)},${m(b)})`; })(); if (n === 38) st.fg = v; else st.bg = v; k += 2; }
+      }
+    }
+    return out;
+  };
+  const replays = [...document.querySelectorAll('pre[data-replay]')];
+  const hydrateReplay = async pre => {
+    if (pre.dataset.hydrated) return; pre.dataset.hydrated = 'true';
+    const card = pre.closest('.capture-card'); const poster = card?.querySelector('.capture-poster');
+    const captureStatus = card?.querySelector('[data-capture-status]');
+    const setStatus = playing => { if (!captureStatus) return; captureStatus.textContent = playing ? captureStatus.dataset.playing : captureStatus.dataset.paused; captureStatus.parentElement?.classList.toggle('is-paused', !playing); };
+    let data; try { data = await (await fetch(pre.dataset.replay, {credentials:'omit'})).json(); } catch { setStatus(false); return; }
+    const cols = data.cols || 126, rows = data.rows || 32, frames = data.frames || [];
+    if (!frames.length) { setStatus(false); return; }
+    // Materialise every frame's full row set once (deltas applied), then render lazily by frame.
+    const full = []; let cur = [];
+    for (const f of frames) { if (f.full) cur = f.full.slice(); else for (const [i, row] of Object.entries(f.d || {})) cur[Number(i)] = row; full.push(cur.slice()); }
+    const lines = []; for (let r = 0; r < rows; r++) { const div = document.createElement('div'); pre.appendChild(div); lines.push(div); }
+    const html = new Map(); const rowHtml = (fi, r) => { const key = fi * 1000 + r; let v = html.get(key); if (v === undefined) { v = ansiRow(full[fi][r] || ''); html.set(key, v); } return v; };
+    let shown = -1;
+    const show = fi => { if (fi === shown) return; for (let r = 0; r < rows; r++) { if (shown < 0 || full[fi][r] !== full[shown][r]) lines[r].innerHTML = rowHtml(fi, r); } shown = fi; };
+    const fit = () => { const w = pre.clientWidth || card?.clientWidth || 960; pre.style.fontSize = `${(w / cols / 0.6).toFixed(3)}px`; };
+    fit(); if ('ResizeObserver' in window) new ResizeObserver(fit).observe(pre);
+    pre.hidden = false; if (poster) poster.hidden = true;
+    const duration = (data.duration_seconds || frames[frames.length - 1].t) + 1.8;   // hold the ending, then loop
+    if (reduce) { show(Math.max(0, Math.floor(frames.length * 0.6))); setStatus(false); return; }
+    let t0 = 0, raf = 0, running = false, pointer = 0;
+    const tick = now => { if (!running) return; if (!t0) t0 = now; const t = ((now - t0) / 1000) % duration; if (t < (frames[pointer]?.t ?? 0)) pointer = 0; while (pointer + 1 < frames.length && frames[pointer + 1].t <= t) pointer++; show(pointer); raf = requestAnimationFrame(tick); };
+    const start = () => { if (running) return; running = true; t0 = 0; pointer = 0; raf = requestAnimationFrame(tick); setStatus(true); };
+    const stop = () => { running = false; cancelAnimationFrame(raf); setStatus(false); };
+    show(0);
+    if ('IntersectionObserver' in window) new IntersectionObserver(es => es.forEach(e => e.isIntersecting ? start() : stop()), {threshold:.15}).observe(pre); else start();
+  };
+  // Observe the visible card, not the still-hidden <pre>: a display:none target never intersects.
+  if ('IntersectionObserver' in window) {
+    const rio = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const pre = entry.target.matches('pre[data-replay]') ? entry.target : entry.target.querySelector('pre[data-replay]');
+      if (pre) hydrateReplay(pre); rio.unobserve(entry.target);
+    }), {rootMargin:'200px'});
+    replays.forEach(pre => rio.observe(pre.closest('.capture-card') || pre));
+  } else replays.forEach(hydrateReplay);
+
   const images = [...document.querySelectorAll('img[data-lazy-image]')];
   const hydrateImage = image => {
     if (image.dataset.sizes) { image.sizes = image.dataset.sizes; delete image.dataset.sizes; }

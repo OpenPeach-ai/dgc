@@ -12,7 +12,8 @@
         "Add /files: a file explorer in the focus pane under the transcript — Miller columns, previews, copy/cut/paste, rename, trash with undo, Enter inserts @path — while the agent keeps working. Writes follow the permission mode and stay inside the project.",
         "Show a calibrated turn ETA range in the status line, per-project and measured (/eta stats); /notify pings the terminal when a turn finishes. Promote the hidden arcade's pane into a shared focus-pane host.",
         "Fix the /files natural sort raising when a folder mixes digit-leading and letter-leading names; the focus pane now closes itself on an occupant error instead of taking the transcript down. Test suite runs hermetically with a canonical temporary HOME."
-      ]
+      ],
+      "headline": "/files explorer · turn ETA · /notify"
     },
     {
       "version": "0.29.2",
