@@ -22,8 +22,10 @@ from pathlib import Path
 # falsely, while others could persist state there. Redirect HOME before any dgc module computes
 # USER_HOME at import time. CI runners are unaffected; local runs become hermetic.
 _ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-tests-home-")
-os.environ["HOME"] = _ISOLATED_HOME.name
-os.environ["USERPROFILE"] = _ISOLATED_HOME.name
+# realpath: macOS hands out /var/folders/… which is a symlink to /private/var/…; DGC compares
+# canonical paths, so a symlinked HOME would make private-path checks disagree with themselves.
+os.environ["HOME"] = os.path.realpath(_ISOLATED_HOME.name)
+os.environ["USERPROFILE"] = os.environ["HOME"]
 os.environ.pop("XDG_CONFIG_HOME", None)
 os.environ.pop("XDG_DATA_HOME", None)
 

@@ -12,35 +12,35 @@
         "edit_file",
         "bash"
       ],
-      "duration_seconds": 47.5,
-      "duration_label": "0:48",
-      "provenance": "Actual current DGC 0.30.0 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "duration_seconds": 47.4,
+      "duration_label": "0:47",
+      "provenance": "Actual current DGC 0.30.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
-      "time_compression": 1,
+      "time_compression": 1.0,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "a1597240942abd9c021ce370e135b7d7b60504ed26effff0fee07f3056900156",
-          "bytes": 2030057,
+          "sha256": "119338a93b7e03c7905aceb6b183030d79382f51865f9e7416cf693308bb8901",
+          "bytes": 2060497,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.4
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "bdefdd40df739859fa2d73dd491705f5530142d5c261ae914ae79eacaf9fb74e",
-          "bytes": 544703,
+          "sha256": "b4fdf000e4c93f0d5fbdc81a23bb8ffb746a1c94f57811d9b2fe4468b4b20942",
+          "bytes": 536231,
           "codec": "h264",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.4
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
-          "sha256": "d1069d05d67b2159c3be2d370e03e8ff409f0c9419e5956096e6973b47ccbaaf",
-          "bytes": 105693,
+          "sha256": "c3d10540897e4998b5c2cd4840249ec3aa2312e960feb70d523f50798639578d",
+          "bytes": 105665,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720
@@ -140,15 +140,15 @@
       ],
       "duration_seconds": 47.533,
       "duration_label": "0:48",
-      "provenance": "Actual DGC 0.30.0 full-screen TUI · real local Ollama run · qwen3.8:27b-q4km · the same disposable controlled fixture and one-line code edit as the CLI capture · /files opened and driven by real keystrokes while the turn ran · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "provenance": "Actual DGC 0.30.1 full-screen TUI · real local Ollama run · qwen3.8:27b-q4km · the same disposable controlled fixture and one-line code edit as the CLI capture · /files opened and driven by real keystrokes while the turn ran · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen3.8:27b-q4km",
-      "time_compression": 1,
-      "dgc_version": "0.30.0",
+      "time_compression": 1.0,
+      "dgc_version": "0.30.1",
       "files": {
         "webm": {
           "path": "assets/files-capture.webm",
-          "sha256": "b8887d20449bc3517471c1c6f8c9962f89cd8701e6a4488e8d6c5f78a7d8d07f",
-          "bytes": 2538520,
+          "sha256": "94056378379706b041f7da76a13acbd44a634f2cd0148d2210c47f6989d31374",
+          "bytes": 2468061,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
@@ -156,8 +156,8 @@
         },
         "mp4": {
           "path": "assets/files-capture.mp4",
-          "sha256": "4861565ac41b452f36b1709bbe5e257df3654f68e26649cc5d40f11c50472bfb",
-          "bytes": 610369,
+          "sha256": "f1059aa4acbd65d7da1d52fadd30968f1a5e59f389bd1bb65ca34c8333cef5c0",
+          "bytes": 623026,
           "codec": "h264",
           "width": 1280,
           "height": 720,
@@ -165,8 +165,8 @@
         },
         "poster": {
           "path": "assets/files-capture-poster.jpg",
-          "sha256": "17b2632bdb78d0a9b5d47ba7fe189ed764600c028317407ee04dda126c82b733",
-          "bytes": 102456,
+          "sha256": "9015ef0760627f9380ff984b588022d031b781310c12fe135734d65b53000c1a",
+          "bytes": 113962,
           "codec": "mjpeg",
           "width": 1280,
           "height": 720
