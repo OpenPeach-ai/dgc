@@ -175,10 +175,9 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
       "notes": [
-        "View and select skills while working; change modes without cancelling the turn.",
-        "Steer native turns with Enter, queue with Alt+Enter or Queue, and keep a separate Stop action while drafting. Subscription CLI follow-ups queue.",
-        "Restore unapplied steering after interruption and use the standard Settings Save button style. CLI 0.29.2 enables live controls with protocol v6.",
-        "Review questions in tabs with an Other text answer and one Submit action; plan approvals no longer expire during human review."
+        "Browse skills and change modes during active turns, preserving explicit ask/deny rules and workspace trust.",
+        "Steer native turns with Enter, queue with Alt+Enter or Queue, and restore unapplied inputs after interruption. Subscription CLI follow-ups queue.",
+        "Keep plan reviews pending until reply or Stop; answer questions in tabs with Other and one Submit. Match Settings Save to standard buttons. Requires CLI 0.29.2."
       ]
     },
     {
