@@ -2430,10 +2430,10 @@ def unit_tests(tmp: Path):
           [event.get("status") for event in _events[3:]] == ["started", "completed"]
           and _events[-1].get("event") == "PreToolUse"
           and _events[-1].get("duration_ms") == 7)
-    _verdict = _hui.approve("bash", {"command": "echo no"}, "call-8")
+    _verdict = _hui.mcp_input("fixture", "sampling_request", {})
     _expiry = [_json2.loads(line) for line in _wire.getvalue().splitlines()]
-    _rid = next(e["id"] for e in _expiry if e["type"] == "permission_request")
-    check("abandoned headless approval fails closed", _verdict == "no"
+    _rid = next(e["id"] for e in _expiry if e["type"] == "mcp_input_request")
+    check("abandoned headless MCP input fails closed", _verdict == {"action": "cancel"}
           and any(e["type"] == "request_expired" for e in _expiry)
           and not _pending.resolve(_rid, {"decision": "once"}))
 
@@ -11284,7 +11284,7 @@ def test_acp_protocol():
               and "ACP fixture endpoint failed" in (failed_reply.get("error") or {}).get("message", "")
               and failed_reply.get("result") is None and state.worker is None)
 
-        server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
+        server.request = lambda method, params, timeout=0, cancel=None: {"outcome": {"outcome": "selected",
                                                                           "optionId": "once"}}
         notices.clear()
         verdict = ui.approve("bash", {"command": "true"}, "tool-1")
@@ -11293,7 +11293,7 @@ def test_acp_protocol():
         check("ACP tool approval has one correlated pending-to-running lifecycle",
               verdict == "once" and life[0]["toolCallId"] == life[1]["toolCallId"] == "tool-1"
               and life[0]["status"] == "pending" and life[1]["status"] == "in_progress")
-        server.request = lambda method, params, timeout=0: {"outcome": {"outcome": "selected",
+        server.request = lambda method, params, timeout=0, cancel=None: {"outcome": {"outcome": "selected",
                                                                           "optionId": "reject"}}
         check("ACP never auto-approves a proposed plan", ui.present_plan("# Plan\n- change it") is None)
         text = _ACP._prompt_text([

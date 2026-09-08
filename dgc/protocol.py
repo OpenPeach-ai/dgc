@@ -60,14 +60,14 @@ class PendingRequests:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._slots: dict[str, list] = {}   # id -> [Event, value]
+        self._slots: dict[str, list] = {}   # id -> [Event, value, optional response validator]
         self._n = itertools.count(1)
 
-    def register(self) -> tuple[str, threading.Event]:
+    def register(self, validator=None) -> tuple[str, threading.Event]:
         rid = f"r{next(self._n)}"
         ev = threading.Event()
         with self._lock:
-            self._slots[rid] = [ev, None]
+            self._slots[rid] = [ev, None, validator]
         return rid, ev
 
     def value(self, rid: str):
@@ -81,6 +81,8 @@ class PendingRequests:
             # A request has one terminal result. In particular, a late approval must never
             # overwrite a deny/cancel that already released the waiting worker.
             if not slot or slot[0].is_set():
+                return False
+            if slot[2] is not None and not slot[2](value):
                 return False
             slot[1] = value
             slot[0].set()

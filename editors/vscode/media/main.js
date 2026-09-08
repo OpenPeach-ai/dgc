@@ -690,12 +690,81 @@
       sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
     }
   }
-  function requestCard(c, id) { c.dataset.requestId = String(id); return c; }
+  function updateInputActivity() {
+    if (!turn?.act) return;
+    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
+    turn.act.classList.toggle("waiting-input", waiting);
+    turn.act.querySelector(".verb").textContent = waiting ? "waiting for your input" : "working…";
+  }
+  function requestCard(c, id) { c.dataset.requestId = String(id); updateInputActivity(); return c; }
+  function showQuestionForm(ev) {
+    const grouped = Array.isArray(ev.questions);
+    const questions = grouped ? ev.questions : [{ id: "q1", header: "Question", question: ev.question, options: ev.options }];
+    if (!questions.length || questions.length > 6 || questions.some((q) => !q || typeof q.id !== "string"
+      || typeof q.question !== "string" || !Array.isArray(q.options) || q.options.length > 8
+      || q.options.some((o) => typeof o !== "string"))
+      || new Set(questions.map((q) => q.id)).size !== questions.length) {
+      sysLine("DGC received an invalid question form. Stop the turn and retry.", true); return;
+    }
+    speak(questions.length > 1 ? `${questions.length} questions need your input` : questions[0].question);
+    const c = requestCard(decisionCard('<div class="question-form"></div><div class="question-summary"></div>', "Questions for you"), ev.id);
+    const form = c.querySelector(".question-form"), states = questions.map(() => ({ selected: null, text: "" }));
+    let tab = 0;
+    const answer = (i) => states[i].selected === "other" ? states[i].text.trim()
+      : Number.isInteger(states[i].selected) ? questions[i].options[states[i].selected] : "";
+    function render() {
+      const q = questions[tab], state = states[tab];
+      form.innerHTML = (questions.length > 1 ? `<div class="question-tabs" role="tablist" aria-label="Questions">${questions.map((item, i) =>
+        `<button type="button" class="question-tab${i === tab ? " active" : ""}" role="tab" aria-selected="${i === tab}" tabindex="${i === tab ? 0 : -1}" data-tab="${i}">${esc(item.header || `Question ${i + 1}`)}${answer(i) ? ' ✓' : ''}</button>`).join("")}</div>` : "")
+        + `<div class="question-panel" role="group" aria-label="${esc(q.question)}"><div class="q">${esc(q.question)}</div><div class="opts">${q.options.map((o, i) =>
+          `<button type="button" class="opt${i === 0 ? " rec" : ""}${state.selected === i ? " selected" : ""}" aria-pressed="${state.selected === i}" data-choice="${i}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("")}
+          <button type="button" class="opt${state.selected === "other" ? " selected" : ""}" aria-pressed="${state.selected === "other"}" data-choice="other"><span class="n">${q.options.length + 1}</span><span class="ol">Other<span class="question-hint">Type your own answer</span></span></button></div>
+          <textarea class="question-other feedback" rows="3" maxlength="4096" aria-label="Your answer" placeholder="Describe what you want…"${state.selected === "other" ? "" : " hidden"}></textarea></div>
+          <div class="btns"><span class="question-progress"></span>${questions.length > 1 ? '<button type="button" class="act question-next">Next</button>' : ''}<button type="button" class="act primary question-submit">Submit</button></div>`;
+      const input = form.querySelector(".question-other"), submit = form.querySelector(".question-submit");
+      input.value = state.text;
+      const refresh = () => {
+        const count = questions.filter((_, i) => !!answer(i)).length;
+        submit.disabled = count !== questions.length;
+        form.querySelector(".question-progress").textContent = `${count} of ${questions.length} answered`;
+      };
+      input.oninput = () => { state.text = input.value; refresh(); };
+      form.querySelectorAll("[data-tab]").forEach((b) => {
+        b.onclick = () => { tab = Number(b.dataset.tab); render(); form.querySelector(`[data-tab="${tab}"]`).focus(); };
+        b.onkeydown = (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          tab = event.key === "Home" ? 0 : event.key === "End" ? questions.length - 1
+            : (tab + (event.key === "ArrowRight" ? 1 : -1) + questions.length) % questions.length;
+          render(); form.querySelector(`[data-tab="${tab}"]`).focus();
+        };
+      });
+      form.querySelectorAll("[data-choice]").forEach((b) => b.onclick = () => {
+        if (c.classList.contains("resolved")) return;
+        state.selected = b.dataset.choice === "other" ? "other" : Number(b.dataset.choice);
+        render();
+        form.querySelector(state.selected === "other" ? ".question-other" : `[data-choice="${state.selected}"]`).focus();
+      });
+      const next = form.querySelector(".question-next");
+      if (next) next.onclick = () => { tab = (tab + 1) % questions.length; render(); form.querySelector(`[data-tab="${tab}"]`).focus(); };
+      submit.onclick = () => {
+        if (questions.some((_, i) => !answer(i)) || !resolveCard(c)) return;
+        const answers = Object.fromEntries(questions.map((q, i) => [q.id, answer(i)]));
+        c.querySelector(".question-summary").textContent = questions.map((q, i) => `${q.question}\n${answer(i)}`).join("\n\n");
+        form.hidden = true;
+        vscode.postMessage({ type: "options_response", id: ev.id,
+          ...(grouped ? { answers } : { choice: answer(0) }) });
+      };
+      refresh();
+    }
+    render();
+  }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
-    c.querySelectorAll(".btns button, .opts button, .feedback, .mcp-form input, .mcp-form select, .mcp-form textarea, .mcp-form button")
+    c.querySelectorAll("button, input, select, textarea")
       .forEach((control) => { control.disabled = true; });
+    updateInputActivity();
     return true;
   }
   function expireOpenRequests() {
@@ -1326,17 +1395,7 @@
       }
       case "options_request": {
         ensureTurn();
-        speak(ev.question);
-        // Stacked, numbered, wrapping rows — long options stay fully visible (never overflow
-        // the card), and the recommended one is marked with an accent bar, not an unreadable
-        // solid-purple fill.
-        const opts = ev.options.map((o, i) =>
-          `<button type="button" class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
-        const c = requestCard(decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`, "Choose an option"), ev.id);
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-          if (!resolveCard(c)) return;
-          vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) });
-        });
+        showQuestionForm(ev);
         break;
       }
       case "mcp_input_request": {
@@ -1573,7 +1632,7 @@
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card);
         });
-        sysLine("Approval request expired; the action was denied.", true); break;
+        sysLine("Input request closed. No unanswered choice was selected."); break;
       case "compacted": {
         compacting = false; lastCompaction = ev;
         contextState = { ...contextState, used: ev.after_tokens, size: ev.context_size };

@@ -890,6 +890,9 @@
             },
             "options": {
               "type": "array"
+            },
+            "questions": {
+              "type": "array"
             }
           },
           "required": [
@@ -2775,6 +2778,9 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "question_forms": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -2861,12 +2867,14 @@
                   "maximum": 9007199254740991
                 }
               ]
+            },
+            "answers": {
+              "type": "object"
             }
           },
           "required": [
             "type",
-            "id",
-            "choice"
+            "id"
           ],
           "additionalProperties": false
         },

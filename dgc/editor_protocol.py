@@ -99,7 +99,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
-    "options_request": {"id": _S(), "question": _S(), "options": _A()},
+    "options_request": {"id": _S(), "question": _S(), "options": _A(), "questions": _A(False)},
     "mcp_input_request": {
         "id": _S(), "server": _S(),
         "kind": _f("string", enum=("elicitation", "sampling_request", "sampling_response")),
@@ -257,7 +257,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
-    "set_workspace_roots": {"roots": _A(), "request_id": _S(False)},
+    "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False),
@@ -267,7 +267,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "decision": _f("string", enum=("auto", "acceptEdits", "default", "reject")),
         "feedback": _S(False),
     },
-    "options_response": {"id": _S(), "choice": _f("string", "integer")},
+    "options_response": {"id": _S(), "choice": _f("string", "integer", required=False), "answers": _O(False)},
     "mcp_input_response": {
         "id": _S(), "action": _f("string", enum=("accept", "decline", "cancel")),
         "content": _O(False),

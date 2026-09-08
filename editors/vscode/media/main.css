@@ -111,6 +111,7 @@ body {
 .thinking .tmark .s1 { animation: dgc-mark1 1.2s linear infinite; }
 .thinking .tmark .s2 { animation: dgc-mark2 1.2s linear infinite; }
 .thinking .tmark .s3 { animation: dgc-mark3 1.2s linear infinite; }
+.thinking.waiting-input .tmark path { animation: none; opacity: 1; }
 @keyframes dgc-mark1 { 0%, 100% { opacity: .16; } 12%, 90% { opacity: 1; } }
 @keyframes dgc-mark2 { 0%, 30%, 100% { opacity: .16; } 42%, 90% { opacity: 1; } }
 @keyframes dgc-mark3 { 0%, 54%, 100% { opacity: .16; } 66%, 90% { opacity: 1; } }
@@ -219,6 +220,16 @@ button.opt:hover { border-color: var(--accent); background: var(--surface); }
 button.opt.rec { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 button.opt.rec .n { color: var(--accent-text); }
 .card.resolved .opts { display: none; }
+.question-tabs { display: flex; gap: 3px; overflow-x: auto; margin: -2px 0 12px; border-bottom: 1px solid var(--border); }
+.question-tab { flex: 0 0 auto; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px; color: var(--muted); background: transparent; cursor: pointer; font: inherit; }
+.question-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
+button.opt.selected { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.question-form button.opt.rec:not(.selected) { border-color: var(--border); background: var(--surface); box-shadow: none; }
+.question-hint { display: block; font-size: 11px; color: var(--muted); }
+.question-other { box-sizing: border-box; width: 100%; margin-top: 8px; resize: vertical; }
+.question-other[hidden], .question-form[hidden] { display: none; }
+.question-progress { color: var(--muted); margin-right: auto; font-size: 11px; }
+.question-summary { white-space: pre-wrap; overflow-wrap: anywhere; }
 .card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
 .card.resolved .btns { display: none; }
 

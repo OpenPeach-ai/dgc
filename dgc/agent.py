@@ -741,6 +741,9 @@ class _SubUI:
     def propose_options(self, question, options):
         return self._interact("propose_options", "", question, options)
 
+    def propose_questions(self, questions):
+        return self._interact("propose_questions", None, questions)
+
     def on_todo(self, todos):
         # A child todo list is useful inside its own prompt but must not replace the parent's plan.
         if not self._buffered:
@@ -3602,6 +3605,8 @@ class Agent(GoalLifecycle):
                 except Exception:
                     pass
             choice = self.ui.present_plan(safe_plan)
+            if self.cancelled.is_set():
+                return "Plan review cancelled. No approval was granted; remain in plan mode."
             if choice is None:
                 feedback = redact_text(
                     str(getattr(self.ui, "plan_feedback", "") or "").strip(), secrets)
@@ -3615,11 +3620,27 @@ class Agent(GoalLifecycle):
             return f"Plan APPROVED. Plan mode exited; permission mode is now '{target}'. Execute the plan now."
 
         if name == "propose_options":
-            question = redact_text(str(args.get("question", "")), secrets)
-            options = [redact_text(str(o), secrets) for o in (args.get("options") or [])]
-            if not options:
-                return "No options were provided. Ask a normal question or make the call yourself."
-            choice = self.ui.propose_options(question, options)
+            from .questions import normalize_questions, valid_answers
+            try:
+                questions = normalize_questions(redact_value(args, secrets))
+            except ValueError as exc:
+                return f"error: {exc}"
+            grouped = "questions" in args
+            show_form = getattr(type(self.ui), "propose_questions", None)
+            if grouped and callable(show_form):
+                answers = self.ui.propose_questions(questions)
+            else:
+                answers = {}
+                for question in questions:
+                    choice = self.ui.propose_options(question["question"], question["options"])
+                    if not choice:
+                        break
+                    answers[question["id"]] = choice
+            if not valid_answers(questions, answers) or self.cancelled.is_set():
+                return "No decision was submitted. Do not assume a choice or act on unanswered questions."
+            if grouped:
+                return "The user submitted these decisions: " + json.dumps(answers, ensure_ascii=False)
+            choice = answers[questions[0]["id"]]
             return f"The user chose: {choice!r}. Continue with that decision."
 
         if name == "update_goal":

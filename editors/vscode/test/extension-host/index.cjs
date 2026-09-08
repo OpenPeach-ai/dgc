@@ -151,6 +151,8 @@ async function run() {
     command.base_url === initialEndpoint && command.api_key === fixtureSecret));
 
   const initialCount = rootsCommands().length;
+  assert.ok(rootsCommands().some(command => command.question_forms === true),
+    "the installed host must opt into grouped question events when supported");
   assert.equal(vscode.workspace.updateWorkspaceFolders(1, 1), true,
     "the installed host must allow removing the secondary workspace folder");
   await waitFor(() => (vscode.workspace.workspaceFolders || []).length === 1);
@@ -210,6 +212,14 @@ async function run() {
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "plan_response" && command.id === "host-plan"
       && command.decision === "reject" && command.feedback === feedback));
+  await waitFor(() => posted().some((item) =>
+    item.type === "event" && item.eventType === "options_request" && item.id === "host-questions"));
+  const answers = { storage: "Local", accent: "Custom lavender" };
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "options_response", id: "host-questions", answers });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "options_response" && command.id === "host-questions"
+      && command.answers?.storage === answers.storage && command.answers?.accent === answers.accent));
   await waitFor(() => posted().some((item) =>
     item.type === "event" && item.eventType === "turn_end"));
   assert.ok(posted().some((item) => item.eventType === "request_expired"

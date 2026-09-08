@@ -677,6 +677,12 @@ const EVENT_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "array"
       ],
       "required": true
+    },
+    "questions": {
+      "types": [
+        "array"
+      ],
+      "required": false
     }
   },
   "mcp_input_request": {
@@ -2268,6 +2274,12 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string"
       ],
       "required": false
+    },
+    "question_forms": {
+      "types": [
+        "boolean"
+      ],
+      "required": false
     }
   },
   "permission_response": {
@@ -2334,7 +2346,13 @@ const COMMAND_FIELDS: Record<string, Record<string, FieldSpec>> = {
         "string",
         "integer"
       ],
-      "required": true
+      "required": false
+    },
+    "answers": {
+      "types": [
+        "object"
+      ],
+      "required": false
     }
   },
   "mcp_input_response": {
