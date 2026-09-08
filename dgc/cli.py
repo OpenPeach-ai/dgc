@@ -1300,7 +1300,7 @@ class CLI:
             mode = self.agent.mode
             th = style_mod.theme()
             acc, dim, rst = style_mod.ansi_fg(th.accent), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
-            if queue:                                   # run a follow-up queued during the last turn
+            if queue and not getattr(self, "_queue_paused", False):
                 line = queue.pop(0)
                 self.console.print(
                     f"  [{DIM}]{glyphs.ARROW} {_markup_literal(line)}[/]", highlight=False)
@@ -1356,9 +1356,10 @@ class CLI:
 
     def _run_turn_live(self, text: str, queue: list[str]) -> None:
         """Run a turn on a worker thread while the main thread watches the keyboard:
-        Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
+        Esc / Ctrl-C interrupts the turn; Enter steers native turns, Tab queues the next turn.
         The reader cleanly hands stdin back when a tool needs an approval prompt."""
         self._followup_queue = queue
+        self._queue_paused = False
         self.agent.cancelled.clear()
         self.ui._tool_count = 0
         t0 = time.time()
@@ -1375,6 +1376,12 @@ class CLI:
                 outcome["failed"] = True
                 self.ui.error(f"{type(e).__name__}: {e}")
             finally:
+                take = getattr(self.agent, "take_deferred_steers", None)
+                deferred = take() if callable(take) else []
+                queue[:0] = deferred
+                self._queue_paused = bool(queue) and (outcome["failed"] or self.agent.cancelled.is_set())
+                if self._queue_paused:
+                    self.ui.info("Follow-ups retained. Send a new prompt to continue the queue.")
                 self.ui.stop_working()
                 done.set()
 
@@ -1395,6 +1402,8 @@ class CLI:
         self.ui._live = live
         old = termios.tcgetattr(fd)
         buf = ""
+        import codecs
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             tty.setcbreak(fd)  # char-at-a-time, ECHO off, but keep \n->\r\n and signals
             while not done.is_set():
@@ -1407,23 +1416,35 @@ class CLI:
                 if not r:
                     continue
                 try:
-                    ch = os.read(fd, 1).decode("utf-8", "replace")
+                    ch = decoder.decode(os.read(fd, 1))
                 except OSError:
                     break
                 if ch in ("\x1b", "\x03"):       # Esc / Ctrl-C — interrupt this turn
                     self.agent.cancelled.set()
                     self.console.print("\n[dim]⎋ interrupting…[/dim]", highlight=False)
                     buf = ""
-                elif ch in ("\r", "\n"):         # Enter — queue what was typed so far
+                elif ch in ("\r", "\n", "\t"):
                     if buf.strip():
                         entry = buf.strip()
                         action = entry.lower()
-                        if action in ("/goal pause", "/goal clear", "/goal delete"):
+                        from .commands import resolve_command
+                        name, _, arguments = entry[1:].partition(" ") if entry.startswith("/") else ("", "", "")
+                        spec = resolve_command(name, "classic")
+                        if spec and spec.name == "skills":
+                            from .skills import manage_skills
+                            try:
+                                output = manage_skills(self.config, arguments, catalog=self.agent.skills, read_only=True)
+                                self.console.print(terminal_safe_text(redact_text(output, secret_values(self.config))), markup=False)
+                            except (OSError, ValueError) as exc:
+                                self.ui.error(str(exc))
+                        elif spec and spec.name == "mode":
+                            self.handle_slash(entry)
+                        elif action in ("/goal pause", "/goal clear", "/goal delete"):
                             self.agent.request_goal_control("pause" if action.endswith("pause") else "clear")
                         elif action in ("/goal", "/goal review", "/goal status"):
                             from .goals import review_markdown
                             self.console.print(render.render_markdown(terminal_safe_text(review_markdown(self.agent.goal_snapshot()))))
-                        elif not entry.startswith("/") and self.agent.steer(entry):
+                        elif ch != "\t" and not entry.startswith("/") and self.agent.steer(entry):
                             self.console.print("↳ applying follow-up", style="dim")
                         else:
                             queue.append(entry)

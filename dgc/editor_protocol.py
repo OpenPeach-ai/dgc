@@ -158,6 +158,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
     "mode_changed": {
         "request_id": _S(False),
+        "message": _S(False),
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
         "workspace_trusted": _B(False),
     },
@@ -219,7 +220,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "markdown": _S(), "path": _NS(False), "error": _NS(False),
     },
     "queued": {"count": _I(), "text": _S()},
-    "prompt_accepted": {"request_id": _S(), "state": _f("string", enum=("started", "queued"))},
+    "prompt_accepted": {"request_id": _S(), "state": _f("string", enum=("started", "queued", "steered")),
+                        "message": _S(False)},
+    "steering_update": {"request_id": _S(), "state": _f("string", enum=("applied", "queued", "returned")),
+                        "message": _S(False)},
+    "permission_resolved": {"id": _S(), "decision": _f("string", enum=("once", "no")), "message": _S()},
     "command_rejected": {
         "message": _S(), "command": _S(False), "reason": _S(False), "count": _I(False),
         "request_id": _S(False),
@@ -248,6 +253,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_workspace_changes": {"request_id": _S()},
     "get_workspace_change": {"root": _S(), "path": _S(), "request_id": _S()},
     "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
+               "delivery": _f("string", required=False, enum=("steer", "queue")),
                "skills": _A(False), "templates": _A(False),
                "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
@@ -270,6 +276,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "interrupt": {},
     "set_mode": {
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
+        "live": _B(False),
         "acknowledge_workspace_trust": _B(False), "request_id": _S(False),
     },
     "set_model": {

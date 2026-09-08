@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 import tempfile
+import threading
 import types
 import unittest
 from unittest.mock import patch
@@ -80,7 +81,7 @@ class ComposerTests(SkillFixture):
         backend.config = types.SimpleNamespace(project_root=self.root, get=lambda key, default=None: default)
         events, prompts = [], []
         backend.em = types.SimpleNamespace(emit=lambda kind, **data: events.append({"type": kind, **data}))
-        backend._start_turn = lambda *args: prompts.append(args) or ("started", 0)
+        backend._start_turn = lambda *args, **kwargs: prompts.append(args) or ("started", 0)
         backend.dispatch({"type": "prompt", "text": "Inspect", "skills": ["missing"], "request_id": "p1"})
         self.assertFalse(prompts)
         self.assertEqual(events[-1]["reason"], "invalid_selection")
@@ -95,7 +96,7 @@ class ComposerTests(SkillFixture):
         backend.config = types.SimpleNamespace(project_root=self.root, get=lambda key, default=None: default)
         events, prompts = [], []
         backend.em = types.SimpleNamespace(emit=lambda kind, **data: events.append({"type": kind, **data}))
-        backend._start_turn = lambda *args: prompts.append(args) or ("started", 0)
+        backend._start_turn = lambda *args, **kwargs: prompts.append(args) or ("started", 0)
         context = {"type": "mcp_context", "server": "fixture", "uri": "fixture://first", "text": "Full snapshot " * 2000}
         backend.dispatch({"type": "prompt", "text": "Inspect", "context": [context], "request_id": "p1"})
         self.assertEqual(prompts[-1][2][0]["text"], context["text"])
@@ -108,6 +109,7 @@ class ComposerTests(SkillFixture):
     def tui(self, text, cursor=None):
         tui = object.__new__(TUI)
         tui._overlay = None
+        tui._turn = threading.Event()
         tui.input_buf = Buffer()
         tui.input_buf.set_document(Document(text, len(text) if cursor is None else cursor))
         tui._invalidate = lambda: None
@@ -142,6 +144,19 @@ class ComposerTests(SkillFixture):
         tui._overlay["sel"] = next(i for i, row in enumerate(rows) if row["value"] == ("skill", "fixture"))
         tui._overlay_select()
         self.assertEqual(tui.input_buf.text, "Review existing request $fixture ")
+
+    def test_terminal_library_browses_the_active_snapshot_without_mutations(self):
+        tui = self.tui("Keep this draft")
+        tui._turn.set()
+        notices = []
+        tui._flash = notices.append
+        with patch("dgc.skills.discover_skills", side_effect=AssertionError("active catalog reloaded")):
+            tui._extensions_modal()
+            rows = tui._overlay_rows()
+            self.assertEqual([row["value"] for row in rows], [("skill", "fixture")])
+            tui._overlay["on_action"]("x", rows[0])
+        self.assertIn("after this turn", notices[-1])
+        self.assertTrue(self.skill.path.exists())
 
 
 class SkillExecutionTests(SkillFixture):

@@ -842,11 +842,79 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   assert.ok(prompt, "submit did not post a prompt");
   assert.equal(prompt.text, "explain this file");
   assert.ok(doc.querySelector(".msg.user .bubble"), "user bubble did not render");
-  assert.equal(doc.getElementById("send").title, "Stop");
+  assert.equal(doc.getElementById("send").title, "Stop generation");
   send({ type: "prompt_rejected" });
-  assert.equal(doc.getElementById("send").title, "Send");
+  assert.equal(doc.getElementById("send").title, "Send message");
   assert.deepEqual(errors, [], "webview raised JS errors on submit");
   dom.window.close();
+});
+
+test("live composer steers with Enter, queues with Alt+Enter and retains a separate stop", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: { live_steering: true, steering_native: true } });
+  event({ type: "turn_start", turn_id: "one", prompt: "Inspect" });
+  const input = doc.getElementById("input");
+  input.value = "Use the smaller change";
+  input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Steer current run");
+  assert.equal(doc.getElementById("stop-run").hidden, false);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const steer = posted.find(m => m.type === "prompt");
+  assert.equal(steer.delivery, "steer");
+  event({ type: "prompt_accepted", request_id: steer.requestId, state: "steered" });
+  event({ type: "text_delta", text: "Initial approach" });
+  event({ type: "steering_update", request_id: steer.requestId, state: "applied" });
+  event({ type: "text_delta", text: "Updated approach" });
+  input.value = "Then add documentation";
+  input.dispatchEvent(new dom.window.Event("input"));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  assert.equal(posted.filter(m => m.type === "prompt").at(-1).delivery, "queue");
+  assert.equal(posted.some(m => m.type === "cancel"), false);
+  event({ type: "turn_end", reason: "completed" });
+  const response = doc.querySelector(".msg.dgc");
+  assert.match(response.querySelector(".text.commentary").textContent, /Initial approach/);
+  assert.match(response.querySelector(".msg.user").textContent, /Use the smaller change/);
+  assert.match(response.querySelector(".text.final").textContent, /Updated approach/);
+  assert.deepEqual(errors, []);
+});
+
+test("cancelled steering restores its draft and live mode resolves the approval card", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: { live_steering: true } });
+  event({ type: "turn_start", turn_id: "one", prompt: "Inspect" });
+  event({ type: "permission_request", id: "approval", name: "write_file", args: { path: "example.py" } });
+  event({ type: "permission_resolved", id: "approval", decision: "once", message: "Approved by the current permission mode" });
+  assert.equal(doc.querySelector('.card[data-request-id="approval"] button').disabled, true);
+  const input = doc.getElementById("input");
+  input.value = "Preserve this follow-up";
+  input.dispatchEvent(new dom.window.Event("input"));
+  doc.getElementById("send").click();
+  const prompt = posted.find(m => m.type === "prompt");
+  event({ type: "prompt_accepted", request_id: prompt.requestId, state: "steered" });
+  doc.getElementById("send").click();
+  assert.equal(posted.at(-1).type, "cancel");
+  event({ type: "steering_update", request_id: prompt.requestId, state: "returned", message: "Not applied" });
+  event({ type: "turn_end", reason: "cancelled" });
+  assert.equal(input.value, "Preserve this follow-up");
+  assert.equal(posted.filter(m => m.type === "prompt").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("delegated and older backends expose queue delivery without claiming live steering", () => {
+  for (const capabilities of [{}, { live_steering: true, steering_native: false }]) {
+    const { dom, errors, posted, send, doc } = makeDom();
+    send({ type: "event", event: { type: "ready", capabilities } });
+    send({ type: "event", event: { type: "turn_start", turn_id: "one", prompt: "Inspect" } });
+    doc.getElementById("input").value = "Next request";
+    doc.getElementById("input").dispatchEvent(new dom.window.Event("input"));
+    assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Queue next turn");
+    assert.equal(doc.getElementById("queue-send").hidden, true);
+    doc.getElementById("send").click();
+    assert.equal(posted.find(m => m.type === "prompt").delivery, "queue");
+    assert.deepEqual(errors, []);
+  }
 });
 
 test("IME confirmation does not submit and late model results cannot reopen a dismissed menu", () => {
@@ -1099,7 +1167,7 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
     "built-in slash commands must not be sent as model prompts");
   assert.equal(doc.querySelector(".goal-prompt .role").textContent, "goal");
   assert.equal(doc.querySelector(".goal-prompt .bubble").textContent, "ship the release");
-  assert.equal(doc.getElementById("send").title, "Stop",
+  assert.equal(doc.getElementById("send").title, "Stop generation",
     "a goal objective must immediately look like a running turn while its state is persisted");
 
   input.value = "ship the release safely /g";

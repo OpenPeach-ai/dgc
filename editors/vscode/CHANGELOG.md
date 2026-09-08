@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.2 — 2026-09-08
+
+- Browse and select skills while a turn runs. Skill installation, enablement and reload wait until it finishes.
+- Send follow-ups into an active native-model turn with Enter or Send; use Alt+Enter or Queue for a later turn. Keep Stop available while drafting. Subscription CLI follow-ups queue for the next turn.
+- Acknowledge steering delivery and restore unapplied inputs after cancellation or failure, including images and selected context.
+- Change permission mode during a run and recheck pending approvals without bypassing explicit ask/deny rules or workspace trust. Delegated CLI permissions change on the next turn.
+- Match the Settings Save button to the standard action-button style. Use CLI 0.29.2 for live controls; retain protocol v6 compatibility.
+
 ## 0.16.1 — 2026-09-07
 
 - Fix new chats showing pre-existing Git changes as chat work. The composer card now shows changes recorded during this chat's runs; **Workspace changes** opens the separate repository review.

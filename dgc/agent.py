@@ -867,6 +867,8 @@ class Agent(GoalLifecycle):
         self.steer_queue: deque = deque()    # mid-turn user messages, injected into the running turn
         self._steer_lock = threading.Lock()
         self._accepting_steer = False        # false once a final response owns the completion boundary
+        self._mode_lock = threading.RLock()
+        self._mode_prompt_dirty = False
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.chat_changes = ChatChanges(self.config.project_root)
@@ -1394,6 +1396,8 @@ class Agent(GoalLifecycle):
 
     def _chat(self, tools, effort, *, cancel=None, read_timeout: int | None = None,
               defer_text: bool = False, request_reason: str = "other"):
+        if getattr(self, "_mode_prompt_dirty", False):
+            self._refresh_system()
         repaired, changed = _repair_tool_transcript(self.messages)
         if changed:
             self.messages = repaired
@@ -1466,10 +1470,20 @@ class Agent(GoalLifecycle):
         return self.config.data.get("mode", "default")
 
     def set_mode(self, mode: str) -> None:
-        if mode == "plan" and self.mode != "plan":
-            self.plan_return_mode = self.mode
-        self.config.set("mode", mode)    # persisted — restarts keep your last mode
-        self._refresh_system()
+        if mode not in ("default", "acceptEdits", "plan", "auto"):
+            raise ValueError("Unknown permission mode")
+        with self._mode_lock:
+            previous = self.mode
+            try:
+                self.config.set("mode", mode)
+            except Exception:
+                self.config.data["mode"] = previous
+                raise
+            if mode == "plan" and previous != "plan":
+                self.plan_return_mode = previous
+            self._mode_prompt_dirty = True
+            # Never mutate a transcript from a control thread, including unsaved sessions.
+            # Permission decisions use the new mode immediately; _chat refreshes the prompt.
 
     def exit_plan(self, to_mode: str | None = None) -> str:
         target = to_mode or self.plan_return_mode or "default"
@@ -1531,8 +1545,10 @@ class Agent(GoalLifecycle):
             }
 
     def _refresh_system(self) -> None:
-        if self.messages and self.messages[0]["role"] == "system":
-            self.messages[0]["content"] = self.system_prompt()
+        with self._mode_lock:
+            if self.messages and self.messages[0]["role"] == "system":
+                self.messages[0]["content"] = self.system_prompt()
+            self._mode_prompt_dirty = False
 
     # ------------------------------------------------------ system prompt ---
     def system_prompt(self) -> str:
@@ -1762,7 +1778,7 @@ class Agent(GoalLifecycle):
         from .ultra import native_effort
         return native_effort(self.config, level)
 
-    def steer(self, text: str) -> bool:
+    def steer(self, text: str, *, images=None, request_id: str = "") -> bool:
         """Queue a message the user typed WHILE a turn is running; it's injected at the next
         tool-loop boundary so the model reads it and adjusts (not a separate later turn).
 
@@ -1773,46 +1789,73 @@ class Agent(GoalLifecycle):
         clean = self._safe_text(text)
         if not clean.strip():
             return False
+        from .attachments import validate_image_data_uris, MAX_EDITOR_IMAGE_TOTAL_BYTES, MAX_IMAGE_FILES
+        try:
+            image_values = validate_image_data_uris(list(images) if isinstance(images, tuple) else images or [],
+                maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
+                maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
+        except ValueError:
+            return False
+        item = {"text": clean, "images": image_values, "request_id": request_id}
         with self._steer_lock:
-            if not self._accepting_steer:
+            if not self._accepting_steer or self.cancelled.is_set():
                 return False
             if (len(self.steer_queue) >= _MAX_STEER_MESSAGES
-                    or sum(len(message) for message in self.steer_queue) + len(clean)
-                    > _MAX_STEER_CHARS):
+                    or sum(len(message["text"]) for message in self.steer_queue) + len(clean)
+                    > _MAX_STEER_CHARS
+                    or sum(len(message["images"]) for message in self.steer_queue) + len(image_values)
+                    > MAX_IMAGE_FILES
+                    or sum(sum(len(image) for image in message["images"]) for message in self.steer_queue)
+                    + sum(len(image) for image in image_values) > 8 * 1024 * 1024):
                 return False
-            self.steer_queue.append(clean)
+            self.steer_queue.append(item)
             return True
 
     def _drain_steer(self, *, close_if_empty: bool = False) -> bool:
         """Fold queued steering into context, optionally owning an empty final boundary."""
         with self._steer_lock:
             msgs = list(self.steer_queue)
-            self.steer_queue.clear()
             if close_if_empty and not msgs:
                 # steer() now rejects atomically; the TUI will preserve later text as a new turn.
                 self._accepting_steer = False
-        joined = "\n".join(m for m in msgs if m and m.strip())
-        if not joined:
-            return False
-        tools_changed = self._activate_tool_intents(joined)
-        skills_changed = self._activate_skill_intents(joined)
-        self._mcp_query_text = (self._mcp_query_text + "\n"
-                                + _trusted_intent_text(joined))[-40_000:]
-        if tools_changed or skills_changed or joined:
+            joined = "\n".join(m["text"] for m in msgs if m["text"].strip())
+            if not joined or self.cancelled.is_set():
+                return False
+            # Keep ownership until preparation succeeds, so a missing skill or read failure
+            # returns the complete original input instead of losing accepted steering.
+            for item in msgs:
+                self._activate_tool_intents(item["text"])
+                self._activate_skill_intents(item["text"])
+                self._mcp_query_text = (self._mcp_query_text + "\n"
+                                        + _trusted_intent_text(item["text"]))[-40_000:]
             self._refresh_system()
-        self.messages.append({"role": "user", "content":
-            "<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
-            f"course now if it changes anything:\n{joined}\n</user-interjection>"})
+            from .workflows import STEERING_PREFIX, STEERING_SUFFIX
+            content = STEERING_PREFIX + joined + STEERING_SUFFIX
+            images = [image for item in msgs for image in item["images"]]
+            self.messages.append({"role": "user", "content": (
+                [{"type": "text", "text": content},
+                 *({"type": "image_url", "image_url": {"url": image}} for image in images)]
+                if images else content)})
+            self.steer_queue.clear()
+        applied = getattr(self.ui, "steering_applied", None)
+        if callable(applied):
+            for item in msgs:
+                if item["request_id"]:
+                    applied(item["request_id"])
         self.ui.info(f"↳ steering: {joined[:80]}")
         return True
 
     def take_deferred_steers(self) -> list[str]:
         """Close steering and hand unconsumed messages back to a serialized frontend."""
+        return [item["text"] for item in self.take_deferred_inputs()]
+
+    def take_deferred_inputs(self) -> list[dict]:
+        """Return unconsumed inputs, preserving image attachments and delivery identity."""
         with self._steer_lock:
             self._accepting_steer = False
             messages = list(self.steer_queue)
             self.steer_queue.clear()
-        return [message for message in messages if message.strip()]
+        return [message for message in messages if message["text"].strip()]
 
     # ------------------------------------------------------------- main loop ---
     @contextmanager
@@ -3617,18 +3660,26 @@ class Agent(GoalLifecycle):
                     f"can open that URL in a browser; '/artifact' lists and stops previews. Do NOT start "
                     f"another server yourself.")
 
-        permission_rules = {action: [*(self.config.permissions.get(action, []) or []),
-                                     *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
-                            for action in ("allow", "ask", "deny")}
-        perms = PermissionEngine(self.mode, permission_rules,
-                                 self.config.project_root)  # fresh: mode may have just changed
+        def current_permissions():
+            with self._mode_lock:
+                rules = {action: [*(self.config.permissions.get(action, []) or []),
+                                  *(getattr(self.config, "session_permissions", {}).get(action, []) or [])]
+                         for action in ("allow", "ask", "deny")}
+                return PermissionEngine(self.mode, rules, self.config.project_root)
+        perms = current_permissions()
         external_paths = perms.external_paths(name, args)
         decision, reason = perms.decide(name, args)
         if decision == DENY:
             self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
             return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
         if decision == ASK:
-            verdict = self.ui.approve(name, display_args, call_id)
+            def recheck():
+                result, _ = current_permissions().decide(name, args)
+                return "once" if result == ALLOW else "no" if result == DENY else None
+            # Opt in via a real method, not a permissive fixture's __getattr__ fallback.
+            live_approve = getattr(type(self.ui), "approve_live", None)
+            verdict = (live_approve(self.ui, name, display_args, call_id, recheck=recheck)
+                       if callable(live_approve) else self.ui.approve(name, display_args, call_id))
             if verdict == "no":
                 reason = redact_text(getattr(self.ui, "deny_reason", "") or "", secrets)
                 if hasattr(self.ui, "deny_reason"):
@@ -3644,6 +3695,12 @@ class Agent(GoalLifecycle):
                     self.ui.add_permission_rule("external_directory", {"path": external_paths[0]})
                 else:
                     self.ui.add_permission_rule(name, perms.canonical_args(name, args))
+
+            # A newly selected plan/deny policy still wins over an earlier approval response.
+            decision, reason = current_permissions().decide(name, args)
+            if decision == DENY:
+                self.ui.tool_denied(name, display_args, redact_text(reason, secrets), call_id)
+                return f"PERMISSION DENIED: {reason}. Do not retry this exact action."
 
         exec_args = dict(args)
         if external_paths:

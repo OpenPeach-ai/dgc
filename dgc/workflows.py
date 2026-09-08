@@ -99,8 +99,15 @@ def expand_workflow_prompt(text: str, expand) -> str:
     return expand(text)
 
 
+STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
+                   "course now if it changes anything:\n")
+STEERING_SUFFIX = "\n</user-interjection>"
+
+
 def display_prompt(text: str) -> str:
     """Render the user's command for human history; never used to construct execution inputs."""
+    if text.startswith(STEERING_PREFIX) and text.endswith(STEERING_SUFFIX):
+        text = text[len(STEERING_PREFIX):-len(STEERING_SUFFIX)]
     start = text.find("<dgc-workflow-json>\n", 0, 1024)
     if start < 0 or not re.fullmatch(r"(?:\$[a-z0-9][a-z0-9._-]{0,63}\s*)*", text[:start]):
         return text
