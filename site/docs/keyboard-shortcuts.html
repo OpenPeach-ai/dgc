@@ -81,6 +81,8 @@
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+<a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
+<a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
@@ -126,6 +128,16 @@
 <li><strong>/mode MODE</strong> — change native permission decisions during work; explicit ask/deny rules remain</li>
 </ul>
 <p>Unconsumed terminal follow-ups remain queued after interruption; a new prompt continues the queue. In the editor, Enter steers and <strong>Alt+Enter</strong> or <strong>Queue</strong> submits a later turn. Unapplied steering can be restored to the draft. Subscription CLI mode changes apply to the next launched turn.</p>
+<div class="heading-row h2-row"><h2 id="files-pane-files">Files pane (<code>/files</code>)</h2><a class="anchor" href="#files-pane-files" aria-label="Link to this section">#</a></div>
+<ul>
+<li><strong>j / k · ↑ ↓</strong> move · <strong>h / l · ← →</strong> parent / enter · <strong>gg / G</strong> top / bottom · <strong>H / L</strong> back / forward</li>
+<li><strong>Space</strong> select · <strong>v</strong> visual select · <strong>Ctrl+A</strong> all · <strong>Esc</strong> clear selection, filter, or help</li>
+<li><strong>y / x / p</strong> copy / cut / paste · <strong>P</strong> paste overwriting · <strong>a</strong> new (end with <code>/</code> for a folder) · <strong>r</strong> rename</li>
+<li><strong>d</strong> trash · <strong>D</strong> delete permanently · <strong>u</strong> undo the last change</li>
+<li><strong>f</strong> filter · <strong>/</strong> find, <strong>n / N</strong> next / previous · <strong>.</strong> hidden files · <strong>s / S</strong> sort / reverse</li>
+<li><strong>Enter</strong> insert <code>@path</code> into the prompt · <strong>c</strong> insert the plain path · <strong>i / Tab</strong> inspect · <strong>J / K</strong> scroll the preview</li>
+<li><strong>?</strong> all keys · <strong>q</strong> return to DGC · <strong>Ctrl+C</strong> still stops the agent</li>
+</ul>
 <div class="heading-row h2-row"><h2 id="navigate">Navigate</h2><a class="anchor" href="#navigate" aria-label="Link to this section">#</a></div>
 <ul>
 <li><strong>PageUp / PageDn</strong> — scroll the transcript · <strong>End</strong> — jump to the latest</li>
@@ -142,6 +154,7 @@
   </article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#compose" data-id="compose" class="lvl2">Compose</a>
 <a href="#this-turn" data-id="this-turn" class="lvl2">This turn</a>
+<a href="#files-pane-files" data-id="files-pane-files" class="lvl2">Files pane (`/files`)</a>
 <a href="#navigate" data-id="navigate" class="lvl2">Navigate</a>
 <a href="#session" data-id="session" class="lvl2">Session</a></aside>
 </div>
@@ -159,6 +172,8 @@
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+<a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
+<a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>

@@ -81,6 +81,8 @@
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+<a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
+<a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
@@ -178,6 +180,15 @@
 <li><code>subscription_engine</code> — which vendor CLI drives the turn.</li>
 <li><code>subscription_model</code>, <code>subscription_effort</code> — model and effort passed through to that CLI.</li>
 </ul>
+<div class="heading-row h2-row"><h2 id="turns">Turns</h2><a class="anchor" href="#turns" aria-label="Link to this section">#</a></div>
+<ul>
+<li><code>eta</code> (default <code>true</code>) — show the calibrated &quot;~2–4 min left&quot; range while a turn runs.</li>
+<li><code>notify</code> (default <code>off</code>) — <code>on</code> pings after every turn over 20 seconds; <code>/notify</code> arms a single one.</li>
+</ul>
+<div class="heading-row h2-row"><h2 id="files-pane">Files pane</h2><a class="anchor" href="#files-pane" aria-label="Link to this section">#</a></div>
+<ul>
+<li><code>trash_mode</code> (default <code>dgc</code>) — where <code>/files</code> sends deleted entries: <code>dgc</code> keeps them in <code>~/.dgc/trash</code> for 30 days (undo with <strong>u</strong>), <code>os</code> uses the system trash (freedesktop layout on Linux, <code>~/.Trash</code> on macOS; other platforms fall back to <code>dgc</code>).</li>
+</ul>
 <div class="heading-row h2-row"><h2 id="appearance">Appearance</h2><a class="anchor" href="#appearance" aria-label="Link to this section">#</a></div>
 <ul>
 <li><code>logo_animation</code> (default <code>true</code>) — the animated mark on the welcome screen. Turn it off for a static logo.</li>
@@ -193,6 +204,8 @@
 <a href="#artifacts" data-id="artifacts" class="lvl2">Artifacts</a>
 <a href="#native-route-unattended-runs" data-id="native-route-unattended-runs" class="lvl2">Native-route unattended runs</a>
 <a href="#subscriptions" data-id="subscriptions" class="lvl2">Subscriptions</a>
+<a href="#turns" data-id="turns" class="lvl2">Turns</a>
+<a href="#files-pane" data-id="files-pane" class="lvl2">Files pane</a>
 <a href="#appearance" data-id="appearance" class="lvl2">Appearance</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
@@ -209,6 +222,8 @@
 <a href="plan-mode.html" class="" data-title="Plan mode" data-desc="read-only planning, then one-tap approve">Plan mode</a>
 <a href="sessions-rewind.html" class="" data-title="Sessions &amp; rewind" data-desc="resume, jump, and undo whole turns">Sessions &amp; rewind</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
+<a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
+<a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>

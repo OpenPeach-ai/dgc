@@ -187,6 +187,7 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
 
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private turnStartedAt = 0;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", ultra: false,
                     baseUrl: "", workspaceTrusted: false,
@@ -1086,6 +1087,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       }
       case "turn_start":
         this.turnActive = this.confirmedTurnActive = true;
+        this.turnStartedAt = Date.now();
         break;
       case "handoff_started":
         this.turnActive = this.confirmedTurnActive = true;
@@ -1118,6 +1120,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.mcpUrls.clear();
         this.turnActive = this.confirmedTurnActive = false;
         this.syncWorkspaceRoots();
+        this.notifyTurnEnd(String(ev.reason || "completed"));
         break;
     }
     if (ev.type === "error" && (ev as any).notInstalled) {
@@ -1147,6 +1150,19 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       } else if (choice === SETPATH) {
         vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
+    });
+  }
+
+  /** A walk-away ping: only for turns over 20 s, only while the panel is not on screen. */
+  private notifyTurnEnd(reason: string): void {
+    const started = this.turnStartedAt;
+    this.turnStartedAt = 0;
+    if (!started || !vscode.workspace.getConfiguration("dgc").get<boolean>("notifyOnTurnEnd", false)) return;
+    const seconds = Math.round((Date.now() - started) / 1000);
+    if (seconds < 20 || this.view?.visible) return;
+    const verb = reason === "cancelled" ? "stopped" : reason === "error" ? "failed" : "finished";
+    void vscode.window.showInformationMessage(`DGC ${verb} after ${seconds}s`, "Show").then((choice) => {
+      if (choice === "Show") this.view?.show?.(true);
     });
   }
 

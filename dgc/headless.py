@@ -686,6 +686,7 @@ class Backend:
                     if title and name_session(title):
                         self.em.emit("session_named", name=title)
                 self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt)
+                eta_stop = self._start_eta_ticker(tid)
                 failed = False
                 try:
                     config_get = getattr(active_config, "get", None)
@@ -714,6 +715,7 @@ class Backend:
                         {"traceback": traceback.format_exc()},
                         secret_values(active_config))["traceback"])
                 cancelled = self.agent.cancelled.is_set()
+                eta_stop.set()
                 self._finish_steering(cancelled, failed)
                 try:
                     est = self.agent.estimate_tokens()
@@ -1079,6 +1081,37 @@ class Backend:
         manager = getattr(self.agent, "mcp", None)
         if manager is not None:
             manager.stop_all()
+
+    def _start_eta_ticker(self, turn_id: str) -> threading.Event:
+        """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
+        stop = threading.Event()
+        agent = self.agent
+
+        def tick() -> None:
+            last_label, last_emit = "", 0.0
+            while not stop.wait(1.5):
+                try:
+                    snapshot = agent.eta_snapshot()
+                except Exception:
+                    snapshot = None
+                if snapshot is None or not snapshot.visible:
+                    continue
+                now = time.monotonic()
+                if snapshot.label == last_label and now - last_emit < 15.0:
+                    continue
+                last_label, last_emit = snapshot.label, now
+                try:
+                    self.em.emit("turn_eta", turn_id=turn_id,
+                                 elapsed_seconds=round(float(snapshot.elapsed), 1),
+                                 remaining_low_seconds=round(float(snapshot.low), 1),
+                                 remaining_high_seconds=round(float(snapshot.high), 1),
+                                 confidence=round(float(snapshot.confidence), 3),
+                                 label=snapshot.label, tasks_done=int(snapshot.tasks_done),
+                                 tasks_total=int(snapshot.tasks_total))
+                except Exception:
+                    return
+        threading.Thread(target=tick, name="dgc-eta", daemon=True).start()
+        return stop
 
     def _emit_context(self, request_id: str | None = None) -> None:
         try:

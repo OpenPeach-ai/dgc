@@ -1,8 +1,8 @@
 {
   "name": "dgc",
-  "displayName": "Vibe DGC \u2014 coding agent for your own models",
+  "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.16.2",
+  "version": "0.17.0",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -269,7 +269,7 @@
           "type": "string",
           "default": "dgc",
           "scope": "machine",
-          "description": "Path to the DGC CLI executable (v0.29.2+ recommended; editor protocol v6 required)."
+          "description": "Path to the DGC CLI executable (v0.30.0+ recommended; editor protocol v6 required)."
         },
         "dgc.checkForUpdates": {
           "type": "boolean",
@@ -279,7 +279,7 @@
         "dgc.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "Main model host \u2014 a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
+          "description": "Main model host — a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
         "dgc.model": {
           "type": "string",
@@ -294,7 +294,7 @@
         "dgc.subagentBaseUrl": {
           "type": "string",
           "default": "",
-          "description": "Host for `task` sub-agents \u2014 run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
+          "description": "Host for `task` sub-agents — run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
         },
         "dgc.subagentApiMode": {
           "type": "string",
@@ -346,6 +346,12 @@
           "type": "number",
           "default": 0,
           "description": "Bound on failed autonomous-gate retries before the turn stops. 0 = use the CLI's config (default 30)."
+        },
+        "dgc.notifyOnTurnEnd": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "Show a notification when a DGC turn longer than 20 seconds finishes while the DGC panel is not visible."
         }
       }
     },
