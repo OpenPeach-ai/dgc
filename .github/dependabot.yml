@@ -5,11 +5,33 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # `[build-system] requires` is a FLOOR, not a version to track: pip already
+      # resolves the newest setuptools under `>=68`. Raising it only shrinks the set
+      # of indexes on which `install.sh` and `dgc update` succeed — a surface no CI
+      # job can exercise. Scoped to majors so security advisories still open a PR,
+      # because this dependency executes on every end user's machine at install time.
+      - dependency-name: "setuptools"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /editors/vscode
     schedule:
       interval: weekly
+    # Never rewrite a declared range. The default `increase` strategy edits
+    # package.json as well as the lockfile, and `@types/vscode ^1.136.0` against
+    # `engines.vscode ^1.84.0` makes vsce refuse to package the extension at all.
+    # This also keeps @types/node inside ^20, which matters because the typings
+    # must not outrun the Node that the OLDEST supported editor bundles: the
+    # extension imports only child_process/crypto/path plus fetch and
+    # AbortSignal.timeout, all present there. Typing against a newer Node buys
+    # nothing and lets future code compile against APIs absent at runtime.
+    versioning-strategy: lockfile-only
     open-pull-requests-limit: 5
+    ignore:
+      # Tracks the editor API floor declared in engines.vscode, not npm latest.
+      # Raising it drops every older VS Code and Cursor, which is a product
+      # decision — and check-extension-vsix.py asserts the floor in two places.
+      - dependency-name: "@types/vscode"
   - package-ecosystem: github-actions
     directory: /
     schedule:
