@@ -132,3 +132,27 @@ test("manifest declares the executable machine-scoped and disables untrusted wor
   assert.equal(manifest.contributes.configuration.properties["dgc.command"].scope, "machine");
   assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
 });
+
+test("a repository cannot choose the endpoint or the gate command through workspace settings", () => {
+  // A checked-in .vscode/settings.json used to be able to redirect the conversation to another
+  // endpoint, or run any command as the autonomous gate, on the first turn. These four are
+  // machine-scoped like dgc.command, and the panel reads them from the user scope only.
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  for (const key of ["dgc.autonomousGate", "dgc.baseUrl", "dgc.subagentBaseUrl", "dgc.fallbackBaseUrl"]) {
+    assert.equal(manifest.contributes.configuration.properties[key].scope, "machine", key);
+  }
+  const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  for (const key of ["baseUrl", "subagentBaseUrl", "fallbackBaseUrl", "autonomousGate"]) {
+    assert.doesNotMatch(panel, new RegExp(`c\\.get<string>\\("${key}"`), `${key} must not be read through the merged scope`);
+    assert.match(panel, new RegExp(`userScopedString\\("${key}"\\)`), `${key} must be read from the user scope`);
+  }
+});
+
+test("keybindings do not collide with the host or with Claude Code", () => {
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  const keys = manifest.contributes.keybindings.map((kb) => [kb.key, kb.mac].filter(Boolean)).flat();
+  // ctrl+escape is Claude Code's focus chord, ctrl+shift+m is Toggle Problems, ctrl+i is Cursor's Composer.
+  for (const taken of ["ctrl+escape", "cmd+escape", "ctrl+shift+m", "cmd+shift+m", "ctrl+i", "cmd+i"]) {
+    assert.ok(!keys.includes(taken), `${taken} is claimed by the host or another harness`);
+  }
+});

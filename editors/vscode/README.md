@@ -26,7 +26,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 ## Commands
 
-- **Chat:** Focus Chat (`Ctrl/Cmd+Escape`), Open Command Menu, Add Selection (`Ctrl/Cmd+I`).
+- **Chat:** Focus Chat (`Ctrl/Cmd+Alt+D`), Open Command Menu, Add Selection (`Ctrl/Cmd+Alt+I`), Cycle Mode (`Ctrl/Cmd+Alt+M`).
 - **Runtime:** Select Model, Connect Provider, Set/Cycle Permission Mode, Set Thinking, Restart Backend.
 - **Sessions:** New, Resume, Rewind, Name, Compact, Generate Handoff.
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.

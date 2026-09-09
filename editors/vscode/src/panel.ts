@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { realpath } from "fs/promises";
 import { basename, isAbsolute, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
-import { resolveDgcExecutable } from "./configuration";
+import { resolveDgcExecutable, userScopedString } from "./configuration";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
@@ -2602,7 +2602,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       return setup ? be.sendSetup(command) : be.send(command);
     };
     const c = vscode.workspace.getConfiguration("dgc");
-    const baseUrl = c.get<string>("baseUrl", "");
+    // Endpoints and the gate command come from the USER scope only: a repository must not be able
+    // to redirect the conversation or run a shell command by carrying workspace settings.
+    const baseUrl = userScopedString("baseUrl").value;
     const effectiveBase = baseUrl || this.state.baseUrl || PROVIDERS.ollama.url;
     const apiKey = await this.storedSecret("apiKey", effectiveBase);
     const model = c.get<string>("model", "");
@@ -2613,21 +2615,21 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const values: any = {};
     const put = (key: string, cfgKey: string) => { const v = c.get<string>(cfgKey, ""); if (v) { values[key] = v; } };
     put("subagent_model", "subagentModel");
-    put("subagent_base_url", "subagentBaseUrl");
+    const subagentBase = userScopedString("subagentBaseUrl").value;
+    if (subagentBase) { values.subagent_base_url = subagentBase; }
     put("subagent_api_mode", "subagentApiMode");
-    const effectiveSubagentBase = c.get<string>("subagentBaseUrl", "")
-      || this.routeState.subagentBaseUrl || effectiveBase;
+    const effectiveSubagentBase = subagentBase || this.routeState.subagentBaseUrl || effectiveBase;
     const subagentKey = await this.storedSecret("subagentApiKey", effectiveSubagentBase);
     if (subagentKey) { values.subagent_api_key = subagentKey; }
     put("fallback_model", "fallbackModel");
-    put("fallback_base_url", "fallbackBaseUrl");
+    const fallbackBase = userScopedString("fallbackBaseUrl").value;
+    if (fallbackBase) { values.fallback_base_url = fallbackBase; }
     put("fallback_api_mode", "fallbackApiMode");
-    const effectiveFallbackBase = c.get<string>("fallbackBaseUrl", "")
-      || this.routeState.fallbackBaseUrl || effectiveBase;
+    const effectiveFallbackBase = fallbackBase || this.routeState.fallbackBaseUrl || effectiveBase;
     const fallbackKey = await this.storedSecret("fallbackApiKey", effectiveFallbackBase);
     if (fallbackKey) { values.fallback_api_key = fallbackKey; }
     const cs = c.get<number>("contextSize", 0); if (cs) { values.context_size = cs; }
-    const gate = c.get<string>("autonomousGate", ""); if (gate) { values.autonomous_gate = gate; }
+    const gate = userScopedString("autonomousGate").value; if (gate) { values.autonomous_gate = gate; }
     const gateMax = c.get<number>("autonomousMaxTurns", 0);
     if (gateMax) { values.autonomous_max_turns = gateMax; }
     if (Object.keys(values).length) { send("config-setup", { type: "set_config", values }); }
