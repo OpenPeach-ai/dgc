@@ -517,3 +517,93 @@ class RealTuiSmokeTests(unittest.TestCase):
                     if ui.app:
                         ui.app.exit()
                     thread.join(timeout=3)
+
+
+class RootGuardAndRowContractTests(unittest.TestCase):
+    """The explorer never operates on the project root itself, and a frame is exactly ``height``
+    rows whatever a file is called or a status says."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="dgc-files-guard-")
+        self.outer = Path(self.tmp.name).resolve()
+        self.root = self.outer / "project"
+        (self.root / "src").mkdir(parents=True)
+        (self.root / "src" / "main.py").write_text("print(1)\n")
+        self.trash = self.outer / "trash-bin"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def pane(self, mode="acceptEdits"):
+        host = Host(mode=mode)
+        pane = FilesPane(self.root, host=host, ops=FileOps(Trash("dgc", dgc_dir=self.trash)), now=0.0)
+        return pane, host
+
+    def assert_intact(self, pane, detail):
+        self.assertNotEqual(pane.mode, "confirm", detail)
+        self.assertTrue(self.root.is_dir(), detail)
+        self.assertTrue((self.root / "src" / "main.py").is_file(), detail)
+        self.assertIn("project root", pane.status, detail)
+
+    def test_the_project_root_is_never_trashed_deleted_renamed_or_moved(self):
+        for mode in ("acceptEdits", "auto", "default"):
+            pane, _host = self.pane(mode)
+            drive(pane, "h")                                   # parent listing, cursor on "project"
+            self.assertEqual(pane.cwd, self.outer)
+            self.assertEqual(pane.listing.entries[pane.cursor].path, self.root, mode)
+            for key in ("d", "D"):
+                pane.status = ""
+                drive(pane, key)
+                self.assert_intact(pane, (mode, key))
+            pane.status = ""
+            drive(pane, "r")
+            self.assertEqual(pane.mode, "text")
+            type_text(pane, "-renamed")
+            drive(pane, "enter")
+            self.assert_intact(pane, (mode, "rename"))
+            self.assertFalse((self.outer / "project-renamed").exists(), mode)
+            pane.status = ""
+            drive(pane, "x", "l")                              # cut the root, step inside it …
+            self.assertEqual(pane.cwd, self.root)
+            drive(pane, "p")                                   # … and try to move it into itself
+            self.assert_intact(pane, (mode, "move"))
+
+    def test_a_parent_of_the_project_root_is_never_an_operand_either(self):
+        pane, _host = self.pane("auto")
+        drive(pane, "h", "h")                                  # two levels up, cursor on the outer dir
+        self.assertEqual(pane.cwd, self.outer.parent)
+        self.assertEqual(pane.listing.entries[pane.cursor].path, self.outer)
+        drive(pane, "d")
+        self.assertNotEqual(pane.mode, "confirm")
+        self.assertIn("project root", pane.status)
+        self.assertTrue((self.root / "src" / "main.py").is_file())
+
+    def test_line_breaking_names_and_messages_never_add_a_row(self):
+        hostile = {"dir\nbreak": True, "file\x1cbreak.txt": False, "line sep.md": False,
+                   "tab\there.txt": False}
+        try:
+            for name, is_dir in hostile.items():
+                target = self.root / name
+                if is_dir:
+                    target.mkdir()
+                    (target / "inner.txt").write_text("x\n")
+                else:
+                    target.write_text("one\rtwo\x0cthree\n")
+        except OSError as exc:                                  # a filesystem that refuses such names
+            self.skipTest(f"cannot create hostile names here: {exc}")
+        pane, _host = self.pane()
+        pane._say("status\nwith\x1dbreaks")
+        for _ in range(6):
+            for width, height in ((20, 4), (40, 8), (60, 12), (100, 16), (200, 40)):
+                panel = render_frame(pane.snapshot(width - 2, height - 2), width, height,
+                                     agent_state="WORKING", theme=theme())
+                rows = panel.plain.splitlines()
+                self.assertEqual(len(rows), height, (width, height, pane.cwd, rows))
+                self.assertTrue(all(len(row) <= width for row in rows), (width, height))
+            drive(pane, "j")
+        drive(pane, "g", "g", "l")                              # enter "dir\nbreak": the crumb carries it
+        self.assertEqual(pane.cwd.name, "dir\nbreak")
+        panel = render_frame(pane.snapshot(98, 14), 100, 16, agent_state="IDLE", theme=theme())
+        self.assertEqual(len(panel.plain.splitlines()), 16)
+        self.assertIn("dir·break", panel.plain)
+        self.assertNotIn("\n\n", panel.plain)

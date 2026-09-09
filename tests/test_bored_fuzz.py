@@ -50,8 +50,11 @@ class FilesFuzzTests(unittest.TestCase):
             def flash(self, m): pass
             def insert_reference(self, t): pass
             def changed_paths(self): return set()
+        # The tree sits alone inside a fresh parent so "h" lands the cursor on the project root itself
+        # on every platform (a macOS runner's TMPDIR did that by accident and trashed the root).
         with tempfile.TemporaryDirectory(prefix="dgc-files-fuzz-") as tmp:
-            root = Path(tmp).resolve()
+            root = (Path(tmp).resolve() / "project")
+            root.mkdir()
             for name in ("a", "b/c", "b/d/e"):
                 (root / name).mkdir(parents=True)
             for name in ("a/one.txt", "b/two.md", "b/c/three.py", "top.txt"):
@@ -78,9 +81,11 @@ class FilesFuzzTests(unittest.TestCase):
                         for width, height in SIZES:
                             rows = render_frame(pane.snapshot(width - 2, height - 2), width, height,
                                                 agent_state="IDLE", theme=theme()).plain.splitlines()
-                            self.assertEqual(len(rows), height)
-                            self.assertTrue(all(len(row) <= width for row in rows))
-                self.assertTrue(root.exists(), "the tree root survives")
+                            state = (f"seed={seed} step={step} size={width}x{height} cwd={str(pane.cwd)!r} "
+                                     f"mode={pane.mode} help={pane.help} status={pane.status!r}")
+                            self.assertEqual(len(rows), height, state + " rows=" + repr(rows))
+                            self.assertTrue(all(len(row) <= width for row in rows), state)
+                self.assertTrue(root.exists(), f"the tree root survives (seed={seed} cwd={pane.cwd})")
             import shutil
             shutil.rmtree(trash, ignore_errors=True)
 

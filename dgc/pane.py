@@ -139,6 +139,21 @@ def _style(role: str, theme) -> str:
     return styles.get(role, theme.text)
 
 
+_CLEAN = {code: "·" for code in range(0x00, 0x20)}
+_CLEAN.update({code: "·" for code in range(0x7F, 0xA0)})
+_CLEAN.update({0x2028: "·", 0x2029: "·", 0x09: " "})
+
+
+def clean_text(text: str) -> str:
+    """One terminal row of text: no line break or other control character survives.
+
+    ``str.splitlines`` also breaks on \x1c-\x1e, \x85 and U+2028/2029, and rich strips only a few
+    C0 codes, so an occupant that shows raw file names or foreign text could otherwise turn one row
+    into two and break the frame's exact-height contract.
+    """
+    return text if text.isprintable() else text.translate(_CLEAN)
+
+
 def _fit(line: Text, width: int) -> Text:
     line.truncate(width, overflow="ellipsis")
     if line.cell_len < width:
@@ -148,13 +163,15 @@ def _fit(line: Text, width: int) -> Text:
 
 def _header(frame: PaneFrame, width: int, agent_state: str, theme) -> Text:
     inner = max(1, width - 2)
-    left = f"─ {frame.title} "
-    state = f" · DGC: {agent_state} ─"
-    right = f" {frame.score}{f' · {frame.best}' if frame.best else ''}{state}"
-    if len(left) + len(right) > inner and frame.best:
-        right = f" {frame.score}{state}"
+    title, score = clean_text(str(frame.title)), clean_text(str(frame.score))
+    best = clean_text(str(frame.best)) if frame.best else ""
+    left = f"─ {title} "
+    state = f" · DGC: {clean_text(str(agent_state))} ─"
+    right = f" {score}{f' · {best}' if best else ''}{state}"
+    if len(left) + len(right) > inner and best:
+        right = f" {score}{state}"
     if len(left) + len(right) > inner:
-        right = f" {frame.score} ─"
+        right = f" {score} ─"
     if len(left) + len(right) > inner:
         right = "─"
     middle = "─" * max(0, inner - len(left) - len(right))
@@ -168,19 +185,20 @@ def _header(frame: PaneFrame, width: int, agent_state: str, theme) -> Text:
 
 def _footer(frame: PaneFrame, width: int, theme) -> Text:
     inner = max(1, width - 2)
+    status, footer = clean_text(str(frame.status or "")), clean_text(str(frame.footer or ""))
     if frame.paused:
-        label = f" {frame.status} · P RESUME · Q/ESC RETURN "
-    elif frame.status:
+        label = f" {status} · P RESUME · Q/ESC RETURN "
+    elif status:
         # Terminal states already advertise their recovery key.  Transient states (a conflict,
         # selection, milestone, and so on) keep the occupant's real controls visible instead of
         # replacing them with a misleading generic restart action.
-        has_recovery = any(token in frame.status for token in
+        has_recovery = any(token in status for token in
                            ("· R RESTART", "· R RETRY", "· R REMATCH", "· ENTER AGAIN"))
-        label = (f" {frame.status} · Q/ESC RETURN " if has_recovery else
-                 f" {frame.status} · {frame.footer} ")
+        label = (f" {status} · Q/ESC RETURN " if has_recovery else
+                 f" {status} · {footer} ")
     else:
-        label = f" {frame.footer} "
-    text = Text(label, style=(f"bold {theme.warn}" if frame.status else theme.faint))
+        label = f" {footer} "
+    text = Text(label, style=(f"bold {theme.warn}" if status else theme.faint))
     text.truncate(max(1, inner - 2), overflow="ellipsis")
     line = Text("╰─", style=theme.border_strong)
     line.append_text(text)
@@ -205,7 +223,7 @@ def render_frame(frame: PaneFrame, width: int, height: int, *, agent_state: str,
     for segments in lines:
         content = Text()
         for segment in segments:
-            content.append(segment.text, style=_style(segment.role, theme))
+            content.append(clean_text(segment.text), style=_style(segment.role, theme))
         _fit(content, inner)
         row = Text("│", style=theme.border_strong)
         row.append_text(content)

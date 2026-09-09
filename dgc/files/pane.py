@@ -227,6 +227,8 @@ class FilesPane:
         mode = self._mode()
         if mode == "plan":
             return "deny", "read-only in plan mode · /mode to change"
+        if any(is_within(self.root, p) for p in paths):   # the project root itself, or a parent of it
+            return "deny", "the project root stays put · choose something inside it"
         targets = list(paths) + ([dest] if dest is not None else [])
         outside = [p for p in targets if not is_within(p, self.root)]
         count = len(paths)
