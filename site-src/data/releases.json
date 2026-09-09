@@ -1,13 +1,25 @@
 {
-  "refreshed_at": "2026-09-08T15:52:58Z",
+  "refreshed_at": "2026-09-09T18:17:36Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.31.0",
+      "date": "2026-09-10",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.31.0",
+      "status": "current",
+      "notes": [
+        "Close two holes a side-by-side with Claude Code and Codex found. A cloned repository’s .dgc/permissions.json was in force before the trust gate ran, and under dgc -p the gate never runs at all; a project’s own rules now load only once its folder is trusted, and the gate says so. dgc update --help piped the installer into bash instead of printing help; every subcommand now answers --help before anything runs, and flags given with -p, such as --model, apply to that run only instead of silently becoming your default.",
+        "Text gets out. Ctrl+Y or /copy puts the last reply on your system clipboard through the terminal (OSC 52, so it works over SSH and inside tmux); /copy code takes the last code block, /copy N an earlier reply and /copy all the whole conversation. /export writes the session as Markdown outside the project tree (also dgc export ID), /select hands the mouse to your terminal for drag-select, and /mouse off remembers that. During a turn, a command that has to wait, such as /model, is refused visibly instead of being sent to the model as a prompt.",
+        "A quieter, clearer screen. An idle DGC no longer repaints twelve times a second, which cost a quarter of a core, and the streaming answer is re-parsed at most every 80 ms. A file read folds to one line with its length, a failed step says so on its header and shows its output in readable text, long output keeps its head and its tail so a test runner’s verdict stays visible, diffs carry their +/− count, tabs render as indentation, and the header shows the working directory and branch."
+      ],
+      "headline": "clipboard, export and trust-gated rules"
+    },
+    {
       "version": "0.30.3",
       "date": "2026-09-09",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.3",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Stop a redraw costing the whole session. Every stored transcript entry was re-parsed into display fragments on every frame, so one keystroke paid for the entire scrollback and the terminal grew slower the longer you worked. Entries are now reused until something they are derived from changes, the cursor marker splits only the entry on its line, and lines are counted once while the frame is assembled. On a 200-turn session a frame fell from about 130 ms to under 5 ms.",
         "Show command and skill tokens as commands while you type. A trailing /goal, /plan, /review or /init is applied as a verb to the text before it, so “Set this as your /goal” ran the goal command instead of sending that sentence, which read as the prompt being silently truncated. Only names that actually resolve are marked, so paths and ordinary words stay plain.",
@@ -204,10 +216,21 @@
   ],
   "extension": [
     {
+      "version": "0.17.2",
+      "date": "2026-09-10",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "current",
+      "notes": [
+        "Keep the autonomous gate and every model route under the user’s control: DGC: Autonomous Gate, DGC: Base Url, DGC: Subagent Base Url and DGC: Fallback Base Url are now machine-scoped, so a cloned repository’s .vscode/settings.json can no longer point the panel’s model traffic at its own server or disable the gate. A workspace value for any of them is ignored.",
+        "Stop fighting VS Code’s own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts.",
+        "Pairs with CLI 0.31.0; editor protocol v6 is unchanged, so CLI 0.30.0 and newer keep working exactly as before."
+      ]
+    },
+    {
       "version": "0.17.1",
       "date": "2026-09-09",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Update the packaging toolchain for a js-yaml advisory (GHSA-2883-xcg3-v3hh). It is a development-only dependency of the packager, so no shipped extension code changed.",
         "Recommend CLI 0.30.2, which stops the /files explorer from trashing the project root. Editor protocol v6 is unchanged, so older CLIs keep working exactly as before.",
