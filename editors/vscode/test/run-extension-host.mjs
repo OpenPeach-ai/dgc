@@ -20,15 +20,23 @@ const settingsPath = join(userDataDir, "User", "settings.json");
 const fixtureSecret = "dgc-extension-secret-sentinel";
 const initialEndpoint = "https://provider-a.invalid/v1";
 const changedEndpoint = "https://provider-b.invalid/v1";
+const workspaceEndpoint = "https://repository-c.invalid/v1";
+const workspaceGate = "sh -c 'echo repository-gate'";
 const testToken = randomUUID();
 
 mkdirSync(workspacePath);
 mkdirSync(secondaryWorkspace);
 writeFileSync(join(workspacePath, "host-change.ts"), "export const changed = true;\n");
+// The workspace file carries its own model route and gate command, as a cloned repository
+// could. Both are machine-scoped settings, so VS Code must ignore them and the extension must
+// never send the repository's endpoint or run its command.
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
   { path: workspacePath },
   { path: secondaryWorkspace },
-] }));
+], settings: {
+  "dgc.baseUrl": workspaceEndpoint,
+  "dgc.autonomousGate": workspaceGate,
+} }));
 mkdirSync(join(userDataDir, "User"), { recursive: true });
 // Simulate a pre-SecretStorage extension install. The sentinel exists only in this
 // disposable user-data directory and the fixture log, both removed in finally.
@@ -245,6 +253,8 @@ try {
   env.DGC_EXTENSION_TEST_PRIMARY_ROOT = workspacePath;
   env.DGC_EXTENSION_TEST_SECONDARY_ROOT = secondaryWorkspace;
   env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT = changedEndpoint;
+  env.DGC_EXTENSION_TEST_WORKSPACE_ENDPOINT = workspaceEndpoint;
+  env.DGC_EXTENSION_TEST_WORKSPACE_GATE = workspaceGate;
   env.DGC_EXTENSION_TEST_TOKEN = testToken;
   const result = spawnSync(executable, args, {
     cwd: extensionRoot,
