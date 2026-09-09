@@ -325,6 +325,7 @@ DEFAULTS: dict = {
     "approval_timeout_s": 300,                  # bounded MCP input; native human decisions wait for reply/Stop
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
     "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)
+    "mouse": "capture",                         # capture (wheel scrolls DGC, rows clickable) | off (terminal selection)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;
                                                 # exact file rewind snapshots stay private and unchanged
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
@@ -744,17 +745,42 @@ class Config:
                     self._provider_secret_identity[key] = _provider_secret_identity(self.data, key)
         for action in ("allow", "ask", "deny"):
             self.permissions[action] = list(perms.get(action, []))
-        # project-level permission rules merge in (never persisted back to global)
-        proj_perms = self.project_dir / "permissions.json"
-        if proj_perms.exists():
-            try:
-                pp = json.loads(proj_perms.read_text())
-                for action in ("allow", "ask", "deny"):
-                    self.permissions[action] += list(pp.get(action, []))
-            except json.JSONDecodeError:
-                pass
+        # Project-local permission rules load ONLY once the directory is trusted. Loading them
+        # first and asking afterwards meant a cloned repository's `.dgc/permissions.json` was in
+        # force before the trust gate ran — and under `dgc -p` the gate never runs at all.
+        # trust.mark_trusted() applies them the moment trust is granted.
+        self._project_permissions_applied = False
+        from .trust import is_trusted
+        if is_trusted(self, self.project_root):
+            self.apply_project_permissions()
         if migrated:
             self.save()
+
+    def apply_project_permissions(self) -> bool:
+        """Merge `<project>/.dgc/permissions.json` into the live rules (never persisted back).
+
+        Idempotent, and the only path by which project-controlled rules reach the engine, so the
+        caller must have established trust first. Returns whether anything was merged.
+        """
+        if getattr(self, "_project_permissions_applied", False):
+            return False
+        self._project_permissions_applied = True
+        proj_perms = self.project_dir / "permissions.json"
+        if not proj_perms.exists():
+            return False
+        try:
+            pp = json.loads(proj_perms.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(pp, dict):
+            return False
+        merged = False
+        for action in ("allow", "ask", "deny"):
+            rules = pp.get(action, [])
+            if isinstance(rules, list) and rules:
+                self.permissions[action] += [str(rule) for rule in rules]
+                merged = True
+        return merged
 
     def save(self) -> None:
         if not self._persist:
@@ -835,7 +861,7 @@ class Config:
         """True when `key` was present in the user's config.json rather than inherited."""
         return key in getattr(self, "_explicit_keys", set())
 
-    def set(self, key: str, value) -> None:
+    def set(self, key: str, value, *, persist: bool = True) -> None:
         # Provider credentials are endpoint-scoped. Reusing an old key after a host change can
         # disclose a cloud credential to an unrelated server, so invalidate both the live and
         # persisted value before saving the new route. A caller that owns the new key sets it next.
@@ -870,7 +896,8 @@ class Config:
                 self._stored_provider_identity.pop(key, None)
         if key not in SECRET_KEYS:
             self._explicit_keys.add(key)
-        self.save()
+        if persist:
+            self.save()
 
     def set_runtime_secret(self, key: str, value: str) -> None:
         """Install an environment/editor-owned provider key without persisting its value."""
