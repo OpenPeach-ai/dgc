@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.2 — 2026-09-10
+
+- Keep the autonomous gate and every model route under the user's control: **DGC: Autonomous Gate**, **DGC: Base Url**, **DGC: Subagent Base Url** and **DGC: Fallback Base Url** are now machine-scoped settings, so a cloned repository's `.vscode/settings.json` can no longer point the panel's model traffic at its own server or disable the gate. A workspace value for any of them is ignored and the user setting (or the default) is used.
+- Stop fighting VS Code's own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts.
+- Pairs with CLI 0.31.0; editor protocol v6 is unchanged, so CLI 0.30.0 and newer keep working exactly as before.
+
 ## 0.17.1 — 2026-09-09
 
 - Update the packaging toolchain for a js-yaml advisory (GHSA-2883-xcg3-v3hh). It is a development-only dependency of the packager, so no shipped extension code changed.
