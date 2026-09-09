@@ -11893,6 +11893,202 @@ def test_bored_mode():
           all(smoke.values()), str(smoke))
 
 
+def test_transcript_reuses_unchanged_entries():
+    """A frame must not cost the whole history, and the cursor must land exactly where it did.
+
+    Entries were re-parsed into fragments on every frame, so one keystroke paid for the entire
+    scrollback (130 ms at 1000 entries in a realistic session). Fragments are now reused until an
+    entry's identity changes, the line count is tallied while the frame is built, and the cursor
+    marker splits only the one entry that straddles its line.
+    """
+    import random
+    from types import SimpleNamespace
+    from dgc.tui import TUI
+
+    def reference(scroll_off, frags):
+        """The original cursor placement, kept here as the thing the fast path must agree with."""
+        total = 1 + sum(f[1].count("\n") for f in frags)
+        target = total - 1 - max(0, min(scroll_off, total - 1))
+        if target <= 0:
+            return [("[SetCursorPosition]", "")] + frags
+        out, line, placed = [], 0, False
+        for frag in frags:
+            style, txt = frag[0], frag[1]
+            handler = frag[2] if len(frag) > 2 else None
+            if placed or "\n" not in txt:
+                out.append(frag); continue
+            for k, seg in enumerate(txt.split("\n")):
+                if seg:
+                    out.append((style, seg, handler) if handler else (style, seg))
+                if k < txt.count("\n"):
+                    line += 1
+                    out.append((style, "\n"))
+                    if not placed and line >= target:
+                        out.append(("[SetCursorPosition]", "")); placed = True
+        if not placed:
+            out.append(("[SetCursorPosition]", ""))
+        return out
+
+    def rendered(frags):
+        """Every visible character with its style, and where the marker sits. Newline characters
+        carry no clickable cell, so a handler on one is not part of what the user sees."""
+        out, marker = [], None
+        for f in frags:
+            if f[0] == "[SetCursorPosition]":
+                marker = len(out); continue
+            handler = f[2] if len(f) > 2 else None
+            for ch in f[1]:
+                out.append((f[0], ch, None if ch == "\n" else handler))
+        return out, marker
+
+    rng = random.Random(11)
+    styles = ["", "fg:#aaa", "bold fg:#7C5CFF"]
+    def click(): pass
+    mismatched = 0
+    for _ in range(300):
+        frags = []
+        for _ in range(rng.randint(1, 18)):
+            text = "".join(rng.choice(["a", "bb", "\n", "\n\n", " ", "x\ny"])
+                           for _ in range(rng.randint(1, 4)))
+            style = rng.choice(styles)
+            frags.append((style, text, click) if rng.random() < 0.25 else (style, text))
+        total = 1 + sum(f[1].count("\n") for f in frags)
+        for scroll in {0, 1, 2, max(0, total - 1), total, total + 5}:
+            probe = object.__new__(TUI); probe._scroll_off = scroll
+            if rendered(probe._place_cursor(list(frags))) != rendered(reference(scroll, list(frags))):
+                mismatched += 1
+    check("the spliced cursor placement renders identically to the original", mismatched == 0,
+          f"{mismatched} mismatching fragment lists")
+
+    ui = object.__new__(TUI)
+    ui._width, ui._height, ui._scroll_off = 100, 40, 0
+    ui._think, ui._buf, ui._follow = "", "", True
+    ui._ft_cache = {}
+    tool = {"kind": "tool", "name": "bash", "summary": "pytest", "running": False,
+            "error": False, "exp": False, "out": "a\nb\nc"}
+    live = {"kind": "tool", "name": "bash", "summary": "running", "running": True,
+            "error": False, "exp": False, "out": "working"}
+    ui.blocks = [{"kind": "user", "text": "fix the test", "tag": ""},
+                 {"kind": "think", "secs": 1.0, "exp": False, "text": "reasoning"},
+                 tool, "plain assistant reply", live]
+
+    counts = {"tool": 0, "band": 0}
+    real_tool, real_band = ui._tool_frags, ui._user_band
+    ui._tool_frags = lambda b: (counts.__setitem__("tool", counts["tool"] + 1), real_tool(b))[1]
+    ui._user_band = lambda t, g="": (counts.__setitem__("band", counts["band"] + 1), real_band(t, g))[1]
+
+    def frame():
+        """One frame, plus the line count the cursor pass was handed."""
+        seen = {}
+        real_place = ui._place_cursor
+        ui._place_cursor = lambda frags, total=None: (
+            seen.update(given=total, actual=1 + sum(f[1].count("\n") for f in frags)),
+            real_place(frags, total))[1]
+        try:
+            return ui._transcript(), seen
+        finally:
+            ui._place_cursor = real_place
+
+    _first, seen1 = frame()
+    base_tool, base_band = counts["tool"], counts["band"]
+    _second, seen2 = frame()
+    check("a finished entry is parsed once, not again on the next frame",
+          base_tool == 2 and base_band == 1
+          and counts["tool"] - base_tool == 1 and counts["band"] - base_band == 0,
+          f"tool {base_tool}->{counts['tool']} band {base_band}->{counts['band']}")
+    check("the running tool is the one entry rebuilt every frame",
+          counts["tool"] - base_tool == 1)
+    check("the tallied line count matches a fresh recount",
+          seen1["given"] == seen1["actual"] and seen2["given"] == seen2["actual"],
+          f"{seen1} {seen2}")
+
+    before = counts["tool"]
+    tool["exp"] = True
+    ui._transcript()
+    check("expanding a tool step rebuilds that entry", counts["tool"] - before == 2)
+    before = counts["band"]
+    ui._width = 70
+    ui._transcript()
+    check("a resize re-plans the full-width prompt band", counts["band"] - before == 1)
+    before = counts["band"]
+    ui._transcript()
+    check("the re-planned band is then reused at the new width", counts["band"] - before == 0)
+    ui.blocks = [b for b in ui.blocks if b is not tool]
+    ui._transcript()
+    check("an entry that left the transcript leaves no cache behind",
+          all(key[0] != "tool" or key[1] != "bash" or key[2] != "pytest"
+              for key in ui._ft_cache if isinstance(key, tuple) and key[0] == "tool"
+              and len(key) > 2 and key[2] == "pytest"))
+
+
+def test_composer_marks_commands_and_goal_rail():
+    """A command token is visibly a command, and the standing goal keeps a row above the composer.
+
+    Typing "Set this as your /goal" does not send that sentence: the trailing token is consumed as
+    a verb and the goal command runs with the preceding text. Nothing distinguished such a token
+    from prose, so the prompt read as silently truncated. Only names that resolve are marked, so
+    paths and prices stay plain.
+    """
+    from types import SimpleNamespace
+    from prompt_toolkit.document import Document
+    from rich.text import Text as RichText
+    from dgc.tui import TUI, _ComposerLexer
+
+    host = SimpleNamespace(_input=None, config=SimpleNamespace(project_root=None),
+                           agent=SimpleNamespace(skills={}))
+    lexer = _ComposerLexer(host)
+
+    def marked(text, line=0):
+        return [chunk for style, chunk in lexer.lex_document(Document(text))(line) if "bold" in style]
+
+    check("a real command token is marked wherever it sits",
+          marked("Set this as your /goal") == ["/goal"]
+          and marked("/goal ship it") == ["/goal"]
+          and marked("mid /goal and /plan too") == ["/goal", "/plan"])
+    check("absolute paths and ordinary words are never marked as commands",
+          marked("look in /etc/hosts and /usr/bin") == [] and marked("use and/or here") == []
+          and marked("costs $5 and $50") == [] and marked("no tokens at all") == [])
+    check("an unknown slash word stays plain rather than promising a command",
+          marked("/definitelynotacommand x") == [])
+    check("the lexer reproduces each line exactly",
+          all("".join(c for _s, c in lexer.lex_document(Document(t))(0)) == t
+              for t in ("Set this as your /goal", "/etc/hosts", "", "plain")))
+    _secret_lexer = _ComposerLexer(SimpleNamespace(
+        _input={"secret": True}, config=SimpleNamespace(project_root=None),
+        agent=SimpleNamespace(skills={})))
+    check("a secret entry marks nothing",
+          [c for st, c in _secret_lexer.lex_document(Document("/goal x"))(0) if "bold" in st] == [])
+
+    check("goal clock reads in whole units",
+          [TUI._goal_clock(v) for v in (0, 45, 60, 754, 3600, 7530)]
+          == ["0s", "45s", "1m", "12m", "1h00m", "2h05m"])
+
+    ui = object.__new__(TUI)
+    ui._pane = None
+    ui._width = 100
+
+    def goal(text, status, elapsed):
+        ui.agent = SimpleNamespace(goal=text, goal_status=status,
+                                   goal_elapsed_seconds=lambda: elapsed)
+
+    goal("", "none", 0)
+    check("no goal means no rail", not ui._goal_panel_visible() and ui._goal_pane_height() == 0)
+    goal("Ship 0.30.2 to the marketplace", "active", 754)
+    _row = RichText.from_ansi(ui._goal_pane().value).plain
+    check("an active goal shows its objective, state and work time on one row",
+          ui._goal_panel_visible() and ui._goal_pane_height() == 1 and "\n" not in _row
+          and "Goal" in _row and "active" in _row and "12m" in _row
+          and "Ship 0.30.2 to the marketplace" in _row)
+    goal("A very long objective " * 12, "active", 5)
+    _long = RichText.from_ansi(ui._goal_pane().value).plain
+    check("a long objective is truncated to the terminal width, never wrapped",
+          len(_long) <= ui._width and "\n" not in _long and _long.endswith("\u2026"))
+    ui._pane = object()
+    goal("still set", "active", 5)
+    check("the focus pane borrows the rail's row without clearing the goal",
+          not ui._goal_panel_visible() and ui.agent.goal == "still set")
+
+
 def test_slash_palette():
     """The `/` command palette filters commands by prefix and never fires without a leading slash."""
     import ast
@@ -16813,6 +17009,8 @@ def main():
         test_acp_protocol()
         test_bored_mode()
         test_slash_palette()
+        test_composer_marks_commands_and_goal_rail()
+        test_transcript_reuses_unchanged_entries()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

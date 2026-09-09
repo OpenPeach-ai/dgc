@@ -137,6 +137,15 @@ can be restored to the draft. Subscription CLI mode changes apply to the next la
 - **PageUp / PageDn** — scroll the transcript · **End** — jump to the latest
 - click **◆ Thought** — expand the reasoning · click the token count — context details
 
+## Select & copy text
+DGC captures the mouse so the wheel scrolls its own transcript and menu rows stay clickable.
+That capture is also what stops your terminal starting its own selection.
+
+- **/copy** (or `/select`) — hand the mouse back to the terminal, then drag-select and copy as
+  usual. The hint bar switches to *select mode*; **/copy** again restores scrolling and clicks.
+- **Shift+drag** (**Option+drag** on some terminals) — select without leaving scroll mode at all,
+  in any terminal that passes the modifier through.
+
 ## Session
 - **Ctrl+N** — new session · **/resume** — reopen a past one · **/name** — rename
 """.strip()),
@@ -710,6 +719,10 @@ are dropped so each record is a clean, portable conversation.
 `/goal <objective>` saves the objective and starts work in the terminal or editor.
 DGC continues an active goal across work cycles on native local/API and delegated
 subscription routes. Ordinary prompts do not create goals.
+
+In the terminal, an active goal keeps a row directly above the composer: the objective, its
+status, and the work time counted so far — so what DGC is holding you to, and how long it has
+been at it, are visible without asking.
 
 In VS Code/Cursor, entering `/goal <objective>` first saves the tagged goal and
 then immediately starts that exact objective as an agent turn. Its status, active

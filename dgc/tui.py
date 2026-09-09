@@ -36,6 +36,7 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
+from prompt_toolkit.lexers import Lexer
 from rich.console import Console
 from rich.text import Text
 
@@ -99,6 +100,74 @@ class SlashCompleter(Completer):
         for row in completion_rows("tui", self.project_root, trigger=trigger, query=query):
             yield Completion(row["label"], start_position=start - document.cursor_position,
                              display=row["label"], display_meta=row["desc"])
+
+
+class _ComposerLexer(Lexer):
+    """Mark real command and skill tokens in the composer so they never read as ordinary prose.
+
+    A trailing ``/goal``, ``/plan``, ``/review`` or ``/init`` is consumed as a verb applied to the
+    text before it, so "Set this as your /goal" sends the goal command, not that sentence. Nothing
+    distinguished such a token from a normal word, so the prompt looked silently truncated. Only
+    names that actually resolve are marked, which keeps ``/etc/hosts``, ``and/or`` and ``$5`` plain.
+    """
+
+    _TOKEN = re.compile(r"(?:(?<=\s)|\A)([/$])([A-Za-z0-9][A-Za-z0-9._-]*)")
+    _TTL = 2.0                      # names come from disk; re-reading them per keystroke would stutter
+
+    def __init__(self, tui) -> None:
+        self._tui = tui
+        self._names = {"/": frozenset(), "$": frozenset()}
+        self._deadline = 0.0
+        self._version = 0
+
+    def _known(self) -> dict:
+        now = time.monotonic()
+        if now < self._deadline:
+            return self._names
+        self._deadline = now + self._TTL
+        try:
+            from .composer import completion_rows
+            agent = getattr(self._tui, "agent", None)
+            rows = completion_rows("tui", self._tui.config.project_root,
+                                   skills=getattr(agent, "skills", {}) or {})
+            names = {"/": frozenset(row["value"] for row in rows if row["label"][:1] == "/"),
+                     "$": frozenset(row["value"] for row in rows if row["label"][:1] == "$")}
+        except Exception:
+            return self._names          # a catalog we cannot read simply marks nothing
+        if names != self._names:
+            self._names, self._version = names, self._version + 1
+        return self._names
+
+    def invalidation_hash(self):
+        return (self._version, style_mod.theme().accent_bright)
+
+    def lex_document(self, document):
+        entry = getattr(self._tui, "_input", None)
+        secret = bool(entry and entry.get("secret"))
+        known = self._known() if not secret else {"/": frozenset(), "$": frozenset()}
+        marked = f"bold fg:{style_mod.theme().accent_bright}"
+        lines = document.lines
+
+        def get_line(lineno: int):
+            try:
+                text = lines[lineno]
+            except IndexError:
+                return []
+            spans, index = [], 0
+            for match in self._TOKEN.finditer(text):
+                if match[2] not in known[match[1]]:
+                    continue
+                if match.start() > index:
+                    spans.append(("", text[index:match.start()]))
+                spans.append((marked, match[0]))
+                index = match.end()
+            if not spans:
+                return [("", text)]
+            if index < len(text):
+                spans.append(("", text[index:]))
+            return spans
+
+        return get_line
 
 
 class _NextSuggest(AutoSuggest):
@@ -290,6 +359,7 @@ class TUI:
         self._pane = None                  # focus-pane occupant (arcade game or /files explorer); never enters a session
         self._notify_armed = False         # /notify without arguments: ping once when this turn ends
         self._pane_render_cache = None     # ((occupant/revision/geometry/theme/state), ANSI text)
+        self._ft_cache: dict = {}          # transcript entry identity -> its parsed fragments
         self._arcade_scores = None          # lazy owner-private high scores; never enters a session
         self._refresh_task = None           # adaptive 12.5/20 FPS asyncio UI pulse
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
@@ -1268,30 +1338,61 @@ class TUI:
         th = style_mod.theme()
         ft = []
         prev = None                             # kind of the previous block (None = first)
-        def add(frags, kind):
-            nonlocal prev
+        lines = 0                               # newlines already in ft, tallied as we go
+        def add(frags, kind, nl=None):
+            nonlocal prev, lines
+            if nl is None:
+                nl = sum(f[1].count("\n") for f in frags)
             if prev is not None:
                 # spacing rhythm — a 1-row inter-entry gap: one untinted blank row around assistant
                 # prose, reasoning, AND the user band — so each breathes on both sides. Only adjacent
                 # tool rows pack together. The band's own tinted vpad sits INSIDE this untinted gap.
                 spaced = kind in ("text", "think", "user") or prev in ("text", "think", "user")
-                ft.append(("", "\n\n" if spaced else "\n"))
+                separator = "\n\n" if spaced else "\n"
+                ft.append(("", separator)); lines += len(separator)
             elif kind == "user":
                 # first block: keep the tinted band from butting against the slim header
-                ft.append(("", "\n"))
+                ft.append(("", "\n")); lines += 1
             ft.extend(frags)
+            lines += nl
             prev = kind
+        # _append stores each entry already rendered, but re-parsing every stored entry into
+        # fragments on EVERY frame made one keystroke cost the whole history (linear: ~17 ms at
+        # 1000 short entries, far more with real tool output). Entries are immutable once written,
+        # so their fragments are reused until something they are derived from actually changes.
+        theme_key = (th.accent, th.accent_dim, th.faint, th.border_strong, th.err, th.text)
+        # Probes build a bare TUI with object.__new__, which never runs __init__.
+        cached, fresh = getattr(self, "_ft_cache", None) or {}, {}
+
+        def reuse(blk, build):
+            """Fragments and line count for one entry, reused until its identity changes."""
+            key = self._block_key(blk, theme_key)
+            if key is None:                       # animated entry — no stable form to reuse
+                frags = build()
+                return frags, sum(f[1].count("\n") for f in frags)
+            got = cached.get(key)
+            if got is None:
+                frags = build()
+                got = (frags, sum(f[1].count("\n") for f in frags))
+            fresh[key] = got                      # only entries seen this frame survive
+            return got
+
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "think":
-                add(self._think_frags(blk), "think")
+                frags, nl = reuse(blk, lambda b=blk: self._think_frags(b))
+                add(frags, "think", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
-                add(self._tool_frags(blk), "tool")
+                frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
+                add(frags, "tool", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "user":
-                # re-rendered every frame at the CURRENT width so the full-width band reflows on
-                # resize instead of keeping stale padding (the "box dismantles on resize" bug).
-                add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))), "user")
+                # Still exact on resize: the geometry it reflows to is part of its cache identity.
+                frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(
+                    ANSI(self._user_band(b["text"], b.get("tag", ""))))))
+                add(frags, "user", nl)
             elif blk:
-                add(list(to_formatted_text(ANSI(blk))), "text")
+                frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(ANSI(b))))
+                add(frags, "text", nl)
+        self._ft_cache = fresh
         if self._think:                     # in-flight reasoning: a header + a rolling last-N tail,
             m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
             frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
@@ -1308,8 +1409,31 @@ class TUI:
         if prev is None:
             self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
-        ft.append(("", "\n"))
-        return self._place_cursor(ft)
+        ft.append(("", "\n")); lines += 1
+        return self._place_cursor(ft, 1 + lines)
+
+    def _block_key(self, blk, theme_key):
+        """The cache identity of one transcript entry: everything its fragments are derived from.
+
+        ``None`` means the entry has no stable form and must be rebuilt every frame — a running
+        tool animates both its rail (a travelling wave) and its live marker.
+        """
+        if not isinstance(blk, dict):
+            return ("text", blk, theme_key)
+        kind = blk.get("kind")
+        if kind == "think":
+            return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""), theme_key)
+        if kind == "tool":
+            if blk.get("running"):
+                return None
+            return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
+                    bool(blk.get("error")), blk.get("diff") or "", blk.get("out") or "", theme_key)
+        if kind == "user":
+            # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
+            # width and height in the identity preserves the resize reflow exactly.
+            return ("user", blk.get("text", ""), blk.get("tag", ""),
+                    self._width, getattr(self, "_height", 0), theme_key)
+        return None
 
     def _think_frags(self, b: dict):
         """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
@@ -1407,32 +1531,44 @@ class TUI:
         from prompt_toolkit.formatted_text import to_formatted_text
         return self._place_cursor(list(to_formatted_text(ANSI(text))))
 
-    def _place_cursor(self, frags):
-        """Insert a [SetCursorPosition] marker into a fragment list at the line to keep visible
-        (scroll-follow). Preserves per-fragment mouse handlers (3-tuples) so clickable blocks
-        (e.g. collapsible thinking) keep working."""
-        total = 1 + sum(f[1].count("\n") for f in frags)
+    def _place_cursor(self, frags, total=None):
+        """Insert a [SetCursorPosition] marker at the line to keep visible (scroll-follow).
+
+        Exactly one fragment straddles that line, so only it is split; everything before and after
+        is spliced in whole. The marker normally belongs on the LAST line (following new output),
+        so the search walks back from the end and touches a couple of fragments rather than all of
+        them — rebuilding the whole list every frame was 95% of a redraw in a long session.
+        ``total`` is the caller's already-known line count, which avoids recounting them too.
+        Preserves per-fragment mouse handlers (3-tuples) so clickable blocks keep working.
+        """
+        if total is None:
+            total = 1 + sum(f[1].count("\n") for f in frags)
         target = total - 1 - max(0, min(self._scroll_off, total - 1))
+        marker = ("[SetCursorPosition]", "")
         if target <= 0:
-            return [("[SetCursorPosition]", "")] + frags
-        out, line, placed = [], 0, False
-        for frag in frags:
-            style, txt = frag[0], frag[1]
-            handler = frag[2] if len(frag) > 2 else None
-            if placed or "\n" not in txt:
-                out.append(frag); continue
-            segs = txt.split("\n")
-            for k, seg in enumerate(segs):
-                if seg:
-                    out.append((style, seg, handler) if handler else (style, seg))
-                if k < len(segs) - 1:
-                    line += 1
-                    out.append((style, "\n"))
-                    if not placed and line >= target:
-                        out.append(("[SetCursorPosition]", "")); placed = True
-        if not placed:
-            out.append(("[SetCursorPosition]", ""))
-        return out
+            return [marker] + frags
+        # The marker sits immediately after the target-th newline, which is the
+        # (total - target)-th counting back from the end.
+        behind, seen = total - target, 0
+        for i in range(len(frags) - 1, -1, -1):
+            text = frags[i][1]
+            count = text.count("\n")
+            if not count:
+                continue
+            if seen + count < behind:
+                seen += count
+                continue
+            # Split inside this fragment, after its (count - (behind - seen) + 1)-th newline.
+            cut, position = count - (behind - seen), -1
+            for _ in range(cut + 1):
+                position = text.index("\n", position + 1)
+            style, handler = frags[i][0], (frags[i][2] if len(frags[i]) > 2 else None)
+            head, tail = text[:position + 1], text[position + 1:]
+            middle = [(style, head, handler) if handler else (style, head), marker]
+            if tail:
+                middle.append((style, tail, handler) if handler else (style, tail))
+            return frags[:i] + middle + frags[i + 1:]
+        return frags + [marker]
 
     def _tip(self):
         th = style_mod.theme()
@@ -2250,6 +2386,44 @@ class TUI:
         return bool(self._todos) and (self._turn.is_set()
                                       or any(t.get("status") not in ("done", "cancelled") for t in self._todos))
 
+    _GOAL_TONE = {"active": "ok", "paused": "warn", "blocked": "err", "completed": "muted"}
+
+    def _goal_panel_visible(self) -> bool:
+        """Parity with the editor, which keeps the goal and its work time above the composer."""
+        agent = getattr(self, "agent", None)
+        return (self._pane is None and bool(getattr(agent, "goal", ""))
+                and str(getattr(agent, "goal_status", "none")) != "none")
+
+    def _goal_pane_height(self) -> int:
+        return 1 if self._goal_panel_visible() else 0
+
+    @staticmethod
+    def _goal_clock(seconds) -> str:
+        seconds = max(0, int(seconds))
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m"
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+    def _goal_pane(self):
+        """One row: the standing objective, its state, and the work time already spent on it."""
+        th = style_mod.theme()
+        agent = self.agent
+        status = str(getattr(agent, "goal_status", "none"))
+        tone = getattr(th, self._GOAL_TONE.get(status, "muted"))
+        try:
+            clock = self._goal_clock(agent.goal_elapsed_seconds())
+        except Exception:
+            clock = "0s"
+        rail = f"[{th.border_strong}]{glyphs.RAIL}[/]"
+        text = " ".join(str(getattr(agent, "goal", "")).split())
+        room = max(8, self._width - _cell_len(f"  Goal {status} {clock} ") - 2)
+        if _cell_len(text) > room:
+            text = text[:max(1, room - 1)] + "\u2026"
+        return ANSI(self._rich(f"{rail} [bold {th.muted}]Goal[/] [{tone}]{status}[/] "
+                               f"[{th.faint}]{clock}[/] [{th.text}]{_esc(text)}[/]"))
+
     def _todo_panel_visible(self) -> bool:
         """The focus pane borrows the task pane's rows; task state itself continues updating."""
         return self._pane is None and self._todos_visible()
@@ -2791,6 +2965,7 @@ class TUI:
         secret_input = Condition(lambda: self._input is not None and self._input.get("secret") is True)
         composer = Window(BufferControl(
                               self.input_buf, focus_on_click=True,
+                              lexer=_ComposerLexer(self),
                               input_processors=[ConditionalProcessor(
                                   PasswordProcessor(char="•"), filter=secret_input)]),
                           get_line_prefix=self._line_prefix, wrap_lines=True,
@@ -2826,7 +3001,13 @@ class TUI:
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
             filter=Condition(self._todo_panel_visible))
-        root = HSplit([header, transcript, pane_panel, overlay_panel, todo_panel,
+        # The standing goal sits with the task list, directly above the composer, so the terminal
+        # shows the same objective + work time the editor keeps pinned there.
+        goal_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._goal_pane), height=self._goal_pane_height,
+                   dont_extend_height=True),
+            filter=Condition(self._goal_panel_visible))
+        root = HSplit([header, transcript, pane_panel, overlay_panel, goal_panel, todo_panel,
                        status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
