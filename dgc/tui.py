@@ -895,7 +895,7 @@ class TUI:
                         else "notification cancelled")
 
     def _maybe_notify(self, sess, verb: str, elapsed: float) -> None:
-        armed, self._notify_armed = self._notify_armed, False
+        armed, self._notify_armed = getattr(self, "_notify_armed", False), False
         always = str(self.config.get("notify", "off") or "off").lower() == "on"
         if not (armed or (always and elapsed >= 20.0)):
             return
