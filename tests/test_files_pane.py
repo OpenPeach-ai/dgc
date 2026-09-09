@@ -524,8 +524,13 @@ class RootGuardAndRowContractTests(unittest.TestCase):
     rows whatever a file is called or a status says."""
 
     def setUp(self):
+        # Two levels of our own directories above the project, so walking up twice lands in a
+        # directory this test owns. Rooting `outer` at the temp directory itself would make the
+        # second step land in the shared system temp directory, whose contents decide where the
+        # cursor sits — the test would then pass or fail on what else happens to be in /tmp.
         self.tmp = tempfile.TemporaryDirectory(prefix="dgc-files-guard-")
-        self.outer = Path(self.tmp.name).resolve()
+        self.base = Path(self.tmp.name).resolve()
+        self.outer = self.base / "workspace"
         self.root = self.outer / "project"
         (self.root / "src").mkdir(parents=True)
         (self.root / "src" / "main.py").write_text("print(1)\n")
@@ -571,7 +576,7 @@ class RootGuardAndRowContractTests(unittest.TestCase):
     def test_a_parent_of_the_project_root_is_never_an_operand_either(self):
         pane, _host = self.pane("auto")
         drive(pane, "h", "h")                                  # two levels up, cursor on the outer dir
-        self.assertEqual(pane.cwd, self.outer.parent)
+        self.assertEqual(pane.cwd, self.base)
         self.assertEqual(pane.listing.entries[pane.cursor].path, self.outer)
         drive(pane, "d")
         self.assertNotEqual(pane.mode, "confirm")
