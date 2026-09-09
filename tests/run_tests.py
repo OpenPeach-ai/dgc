@@ -12018,6 +12018,386 @@ def test_recall_archive_is_display_only():
           not recall_file.exists() and not session.exists())
 
 
+def test_overnight_parity_fixes():
+    """Days 1–3 of the parity plan: closed holes, text that gets out, cheaper rendering.
+
+    Each check guards a defect the side-by-side with Claude Code and Codex surfaced: a cloned
+    repository's `.dgc/permissions.json` in force before the trust gate ran, `dgc update --help`
+    piping the installer into bash, a mid-turn `/model` silently becoming a prompt, a `/copy`
+    that copied nothing, an idle screen repainted 12.5 times a second, a file read dumped as ten
+    faint lines, tabs on screen as ^I, a test runner's verdict hidden below a head-only preview.
+    """
+    import base64 as _b64
+    import contextlib as _ctx
+    import io as _io
+    import json as _json
+    import shutil as _shutil
+    import subprocess as _sp
+    import tempfile as _tempfile
+    import threading as _threading
+    import time as _time
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+    from prompt_toolkit.formatted_text import fragment_list_to_text as _fltt
+    from dgc import cli as _cli
+    from dgc import config as _C
+    from dgc import sessions as _sessions
+    from dgc import style as _style
+    from dgc import trust as _trust
+    from dgc.agent import _COMPACT_ACK, _COMPACT_PREFIX
+    from dgc.tui import TUI
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-parity-")).resolve()
+    project = root / "workspace" / "project"
+    (project / ".dgc").mkdir(parents=True)
+    (project / ".dgc" / "permissions.json").write_text(_json.dumps({"allow": ["bash:rm -rf *"]}))
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    env_tmux = os.environ.pop("TMUX", None)
+    try:
+        # ---- Day 1 · a project's own rules load only once the folder is trusted ----------------
+        _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        _C.USER_CONFIG.write_text(_json.dumps({"model": "m", "trusted_dirs": []}))
+        cfg = _C.Config(project)
+        check("an untrusted folder's .dgc/permissions.json stays out of the live rules",
+              "bash:rm -rf *" not in cfg.permissions["allow"])
+        _trust.mark_trusted(cfg, project)
+        check("granting trust loads the project's rules at once, not on the next launch",
+              "bash:rm -rf *" in cfg.permissions["allow"])
+        check("the merge is idempotent",
+              cfg.apply_project_permissions() is False
+              and cfg.permissions["allow"].count("bash:rm -rf *") == 1)
+        again = _C.Config(project)
+        check("a folder trusted earlier loads its rules at startup",
+              "bash:rm -rf *" in again.permissions["allow"])
+        before = _C.USER_CONFIG.read_text()
+        again.set("model", "one-run-model", persist=False)
+        check("set(persist=False) changes the live value without touching config.json",
+              again.get("model") == "one-run-model" and _C.USER_CONFIG.read_text() == before)
+        again.set("model", "saved-model")
+        check("set() still persists by default", '"saved-model"' in _C.USER_CONFIG.read_text())
+
+        # ---- Day 1 · `--help` on every subcommand prints usage and runs NOTHING ----------------
+        class _Ran(AssertionError):
+            pass
+
+        def _boom(*a, **k):
+            raise _Ran("a subcommand ran under --help")
+        real_popen, real_system = _sp.Popen, os.system
+        _sp.Popen, os.system = _boom, _boom
+        try:
+            for argv in (["update", "--help"], ["setup", "-h"], ["doctor", "--help"], ["serve", "-h"],
+                         ["mcp", "--help"], ["skills", "-h"], ["export", "--help"], ["bug", "-h"]):
+                out = _io.StringIO()
+                try:
+                    with _ctx.redirect_stdout(out):
+                        code = _cli.main(argv)
+                except _Ran as exc:
+                    code = exc
+                check(f"`dgc {' '.join(argv)}` prints usage and runs nothing",
+                      code == 0 and out.getvalue().startswith("usage: dgc " + argv[0]), out.getvalue()[:80])
+            out = _io.StringIO()
+            with _ctx.redirect_stdout(out):
+                _cli.main(["update", "--help"])
+            check("`dgc update --help` says what update would execute",
+                  "install.sh" in out.getvalue() and "bash" in out.getvalue())
+        finally:
+            _sp.Popen, os.system = real_popen, real_system
+
+        # ---- Day 1 · mid-turn commands: refused visibly, never sent to the model as a prompt -----
+        ui = object.__new__(TUI)
+        ui._width = 80; ui._height = 24; ui._scroll_off = 0; ui._follow = True
+        ui._invalidate = lambda: None; ui._buf = ""; ui._think = ""; ui._tool_count = 0; ui._cur_tool = None
+        ui.blocks = []; ui._turn = _threading.Event(); ui._mouse_on = True; ui.config = again
+        ui.agent = SimpleNamespace(
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "reply one\n\n```python\nprint(1)\n```\n"},
+                {"role": "user", "content": _COMPACT_PREFIX + "\nsummary text"},
+                {"role": "assistant", "content": _COMPACT_ACK},
+                {"role": "user", "content": "<system-reminder>never shown</system-reminder>"},
+                {"role": "tool", "content": "tool output"},
+                {"role": "user", "content": "second"},
+                {"role": "assistant", "content": "reply two, secret sk-live-abcdef"},
+            ],
+            session_file=None, session_root=project, session_name="parity",
+            _secret_values=lambda: ("sk-live-abcdef",))
+        routed, flashes = [], []
+        ui._route_followup = lambda text: routed.append(text) or "follow-up"
+        ui._flash = lambda msg, secs=2.2: flashes.append(msg)
+        ui._turn.set()
+        check("a mid-turn /model is refused visibly instead of becoming a prompt",
+              ui._dispatch_composer_text("/model gpt") == "local-command"
+              and flashes and "waits for this turn" in flashes[-1] and not routed, flashes[-1:])
+        check("mid-turn text that is not a command still steers the turn",
+              ui._dispatch_composer_text("/not-a-command really") == "follow-up"
+              and routed == ["/not-a-command really"])
+        check("a mid-turn ! or # is refused, not sent to the model",
+              ui._dispatch_composer_text("!ls") == "local-command" and "direct shell" in flashes[-1]
+              and ui._dispatch_composer_text("# remember this") == "local-command"
+              and "memory" in flashes[-1] and routed == ["/not-a-command really"])
+
+        # ---- Day 2 · /copy puts the reply on the system clipboard through the terminal ----------
+        out = _io.StringIO()
+        with _ctx.redirect_stdout(out):
+            result = ui._dispatch_composer_text("/copy")
+        seq = out.getvalue()
+        check("/copy runs during a turn and copies the last reply via OSC 52",
+              result == "local-command" and seq.startswith("\x1b]52;c;") and seq.endswith("\x07")
+              and _b64.b64decode(seq[7:-1]).decode() == "reply two, secret sk-live-abcdef"
+              and "copied the last reply" in flashes[-1], (seq[:30], flashes[-1:]))
+        ui._turn.clear()
+        check("/copy code takes the most recent reply that has a fenced block",
+              ui._copy_target("code") == ("the last code block", "print(1)\n"))
+        check("/copy N counts back from the newest reply, and past the end says so",
+              ui._copy_target("2")[1].startswith("reply one") and ui._copy_target("9") == ("reply 9", ""))
+        label, whole = ui._copy_target("all")
+        check("/copy all renders the whole conversation as Markdown, without the compaction wrapper",
+              label == "the whole conversation" and "> first" in whole and "reply one" in whole
+              and "> second" in whole and _COMPACT_PREFIX not in whole and "never shown" not in whole
+              and "tool output" not in whole)
+        ui._buf = "still streaming"
+        check("while streaming, /copy takes the live answer", ui._copy_target("")[1] == "still streaming")
+        ui._buf = ""
+        os.environ["TMUX"] = "/tmp/tmux-1000/default,1,0"
+        out = _io.StringIO()
+        with _ctx.redirect_stdout(out):
+            ui._clipboard_write("hi")
+        del os.environ["TMUX"]
+        check("inside tmux the OSC 52 sequence is wrapped in a DCS passthrough",
+              out.getvalue().startswith("\x1bPtmux;\x1b\x1b]52;c;") and out.getvalue().endswith("\x1b\\"))
+        out = _io.StringIO()
+        with _ctx.redirect_stdout(out):
+            ok, note = ui._clipboard_write("x" * 80_000)
+        check("a payload past the terminal's limit is cut and reported",
+              ok and note == "truncated" and len(_b64.b64decode(out.getvalue()[7:-1])) == 74_000)
+
+        # ---- Day 2 · /select releases the mouse for drag-select; /mouse remembers a choice --------
+        ui._handle_slash("/select")
+        check("/select hands the mouse to the terminal for drag-select",
+              ui._mouse_on is False and "select mode" in flashes[-1])
+        ui._handle_slash("/select")
+        check("/select again recaptures it", ui._mouse_on is True)
+        ui._handle_slash("/mouse off")
+        check("/mouse off is remembered in config.json",
+              ui._mouse_on is False and again.get("mouse") == "off"
+              and _json.loads(_C.USER_CONFIG.read_text()).get("mouse") == "off")
+        check("the remembered choice decides capture at the next start",
+              TUI._mouse_from_config(again) is False
+              and TUI._mouse_from_config(SimpleNamespace(get=lambda k, d=None: "capture")) is True
+              and TUI._mouse_from_config(SimpleNamespace(get=lambda k, d=None: d)) is True)
+        ui._handle_slash("/mouse on")
+        check("/mouse on restores capture", ui._mouse_on is True and again.get("mouse") == "capture")
+
+        # ---- Day 2 · Markdown export: archive first, redacted, outside the project tree ---------
+        rows = _sessions.display_rows(ui.agent.messages)
+        check("display rows skip the compaction wrapper, its acknowledgement, reminders and tool results",
+              [(r["who"], r["body"][:9], r["tools"]) for r in rows]
+              == [("user", "first", ""), ("assistant", "reply one", ""),
+                  ("user", "second", ""), ("assistant", "reply two", "")], rows)
+        check("a reply's tool calls are named on its row",
+              _sessions.display_rows([{"role": "assistant", "content": "",
+                                       "tool_calls": [{"function": {"name": "bash"}},
+                                                      {"function": {"name": "read_file"}}]}])
+              == [{"who": "assistant", "body": "", "tools": "bash, read_file"}])
+        ui._handle_slash("/export")
+        check("/export on an unsaved session explains itself", "not been saved" in flashes[-1])
+        session = _Path(_sessions.project_dir(project)) / "20260909-230000-aaaa0000.json"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        with _sessions._lock_for(session):
+            _sessions._atomic_write(session, _json.dumps(
+                {"messages": ui.agent.messages, "project": str(project), "name": "parity"}))
+        _, revision = _sessions._generation(session, project)
+        _sessions.save_recall(session, project, [
+            {"who": "user", "body": "the archived question", "tools": ""},
+            {"who": "assistant", "body": "archived answer, token sk-live-abcdef", "tools": "bash"},
+        ], checkpoint_index=0, redact_secrets=(), expected_revision=revision, expected_exists=True)
+        ui.agent.session_file = session
+        ui._model_label = lambda: "qwen-test"
+        target = root / "out" / "conv.md"
+        ui._handle_slash(f"/export {target}")
+        text = target.read_text(encoding="utf-8") if target.exists() else ""
+        check("/export FILE writes the conversation as Markdown and says where",
+              flashes[-1] == f"saved {target}" and text.startswith("# parity\n"), flashes[-1:])
+        check("the export restores the archived turns first and names them",
+              "2 earlier turns restored from the archive" in text
+              and text.index("> the archived question") < text.index("> first")
+              and "_used bash_" in text and "model `qwen-test`" in text)
+        check("the export is redacted with the session's secrets",
+              "sk-live-abcdef" not in text and "[REDACTED]" in text)
+        check("the compaction wrapper never reaches the export",
+              _COMPACT_PREFIX not in text and _COMPACT_ACK not in text and "never shown" not in text)
+        check("the export is private to the user", (target.stat().st_mode & 0o777) == 0o600)
+        default = _sessions.export_markdown(session, project, ui.agent.messages)
+        check("without a target the export lands in ~/.dgc/exports, never the project tree",
+              default.parent == _sessions.export_dir() and default.name == session.stem + ".md"
+              and (default.parent.stat().st_mode & 0o777) == 0o700
+              and str(_sessions.export_dir()).startswith(os.environ["HOME"]))
+        into = root / "out"
+        check("a directory target names the file after the session",
+              _sessions.export_markdown(session, project, [], target=into) == into / (session.stem + ".md"))
+
+        real_config = _cli.Config
+        _cli.Config = lambda: again
+        again.data["api_key"] = "sk-live-abcdef"       # live only: the session store redacts at save
+        try:
+            out = _io.StringIO()
+            with _ctx.redirect_stdout(out):
+                code = _cli.run_export([session.stem, str(root / "out" / "cli.md")])
+            check("`dgc export <id> FILE` writes the Markdown, redacted with the config's secrets",
+                  code == 0 and (root / "out" / "cli.md").exists()
+                  and out.getvalue().strip().endswith("cli.md")
+                  and "sk-live-abcdef" not in (root / "out" / "cli.md").read_text()
+                  and "[REDACTED]" in (root / "out" / "cli.md").read_text(), out.getvalue())
+            out = _io.StringIO()
+            with _ctx.redirect_stdout(out):
+                latest_code = _cli.run_export([])
+            check("`dgc export` alone takes the most recent session",
+                  latest_code == 0 and out.getvalue().strip().endswith(session.stem + ".md"))
+            out = _io.StringIO()
+            with _ctx.redirect_stdout(out):
+                missing = _cli.run_export(["no-such-session"])
+            check("`dgc export` with an unknown id fails plainly",
+                  missing == 1 and "no session found" in out.getvalue())
+        finally:
+            _cli.Config = real_config
+            again.data["api_key"] = ""
+
+        # ---- Day 3 · tool steps: file reads fold, failures read, tails survive, tabs render -----
+        th = _style.theme()
+        ot = object.__new__(TUI)
+        ot._width = 80; ot._scroll_off = 0; ot._follow = True
+        ot._invalidate = lambda: None; ot._buf = ""; ot._think = ""; ot._tool_count = 0; ot._cur_tool = None
+        ot.blocks = []; ot.config = again; ot._flash = lambda msg, secs=2.2: flashes.append(msg)
+        ot.tool_call("read_file", {"path": "src/app.py"})
+        ot.tool_result("read_file", "sha256\tdeadbeef\n\tdef main():\n\t\treturn 1\nline3")
+        blk = ot.blocks[0]
+        shown = _fltt(ot._transcript())
+        check("a file read folds to its header, with the length as the outcome and no digest",
+              blk["out"].startswith("\tdef main") and blk["lines"] == 3 and "deadbeef" not in shown
+              and "· 3 lines" in shown and "def main" not in shown
+              and "▸ 3 lines — click / /expand" in shown and ot._block_lines(blk) == 2, shown)
+        ot._handle_slash("/expand")
+        shown = _fltt(ot._transcript())
+        check("/expand shows the file with tabs as spaces and offers to fold it back",
+              blk["exp"] and "    def main():" in shown and "        return 1" in shown
+              and "\t" not in shown and "show less" in shown and ot._block_lines(blk) == 5, shown)
+
+        ot.tool_call("bash", {"command": "pytest"})
+        ot.tool_result("bash", "exit code: 1\nFAILED tests/test_x.py::test_y - boom")
+        frags = ot._transcript()
+        err = ot.blocks[-1]
+        check("a failed step says so on its header and shows its output in readable text",
+              err["error"] and "failed · 2 lines" in _fltt(frags)
+              and any("FAILED tests" in f[1] and f"fg:{th.text}" in f[0] for f in frags))
+        ot.tool_call("bash", {"command": "npm test"})
+        ot.tool_result("bash", "\n".join(f"out{i}" for i in range(15)))
+        shown = _fltt(ot._transcript())
+        check("a long output keeps its head and its tail; the hidden middle is the toggle",
+              "out0" in shown and "out2" in shown and "out3" not in shown and "out7" not in shown
+              and "out8" in shown and "out14" in shown and "… 5 more lines" in shown
+              and "· 15 lines" in shown and ot._block_lines(ot.blocks[-1]) == 12, shown)
+
+        diff = "--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,29 @@\n-old\n" + "\n".join(f"+new{i}" for i in range(28))
+        ot.tool_call("edit_file", {"path": "x.py"})
+        ot.tool_result("edit_file", diff)
+        dblk = ot.blocks[-1]
+        shown = _fltt(ot._transcript())
+        check("a diff carries its +/− count on the header and folds past the budget",
+              bool(dblk.get("diff")) and dblk["diff_stats"] == (28, 1) and "+28 −1" in shown
+              and "new27" not in shown and "more line" in shown and ot._tool_collapsible(dblk), shown)
+        ot._handle_slash("/expand")
+        shown = _fltt(ot._transcript())
+        check("/expand on a diff-only block opens it without touching a missing output",
+              dblk["exp"] and "new27" in shown and "show less" in shown)
+
+        # ---- Day 3 · the idle pulse: nothing moving, nothing repainted -------------------------
+        pu = object.__new__(TUI)
+        pu._turn = _threading.Event(); pu.blocks = ["a"]; pu._buf = ""; pu._think = ""
+        pu._pane = None; pu._overlay = None; pu._req = None; pu._input = None
+        pu._flash_until = 0.0; pu._quit_armed = 0.0
+        check("an idle transcript needs no repaint", not any(pu._needs_pulse(t) for t in range(6)))
+        pu._turn.set()
+        check("a running turn animates", pu._needs_pulse(0))
+        pu._turn.clear(); pu._buf = "tok"
+        check("streamed text animates", pu._needs_pulse(1))
+        pu._buf = ""; pu._flash_until = _time.monotonic() + 1.0
+        check("a flash keeps painting until it expires", pu._needs_pulse(1))
+        pu._flash_until = 0.0; pu._req = object()
+        check("a pending question keeps a slow heartbeat",
+              [pu._needs_pulse(t) for t in range(6)] == [True, False, False, True, False, False])
+        pu._req = None; pu.blocks = []
+        check("the empty welcome shimmers at a third of the rate",
+              [pu._needs_pulse(t) for t in range(3)] == [True, False, False])
+        pu.blocks = ["a"]; pu._pane = SimpleNamespace(paused=False)
+        check("an open pane keeps its own clock", pu._needs_pulse(1))
+        pu._pane = SimpleNamespace(paused=True)
+        check("a paused pane does not", not pu._needs_pulse(1))
+
+        # ---- Day 3 · the streaming answer is parsed once per burst, not once per frame ----------
+        la = object.__new__(TUI)
+        la._width = 80; la._buf = "# Title\n\nsome **bold** text"
+        calls = []
+        real_md = TUI._md
+        la._md = lambda text: calls.append(text) or real_md(text)
+        first = la._live_answer_frags("dark")
+        second = la._live_answer_frags("dark")
+        check("an unchanged streaming buffer is parsed once",
+              len(calls) == 1 and second is first and "bold" in _fltt(first))
+        la._buf += " more"
+        key, head, rendered, _stamp = la._live_answer_cache
+        la._live_answer_cache = (key, head, rendered, _time.monotonic() - 1.0)   # past the window
+        third = la._live_answer_frags("dark")
+        check("new tokens past the throttle window are re-parsed",
+              len(calls) == 2 and "more" in _fltt(third))
+        la._buf = "a brand new answer"
+        check("a new answer is never served from the old one's parse",
+              "brand new" in _fltt(la._live_answer_frags("dark")))
+
+        # ---- Day 3 · where am I: directory and branch on the header ---------------------------
+        lo = object.__new__(TUI)
+        home = os.path.expanduser("~")
+        lo._branch_cache = ("", _time.monotonic())            # fresh: no git call
+        lo.config = SimpleNamespace(project_root=str(project))
+        check("a deep path outside home is shortened to its last two parts",
+              lo._location_label() == "…" + os.sep + "workspace" + os.sep + "project")
+        lo.config = SimpleNamespace(project_root=os.path.join(home, "code", "app"))
+        check("a path under home is shown with ~", lo._location_label() == "~/code/app")
+        lo.config = SimpleNamespace(project_root=os.path.join(home, "a", "b", "c", "d"))
+        lo._branch_cache = ("feature/x", _time.monotonic())
+        check("the branch follows the directory, and can be left out",
+              lo._location_label() == "…/c/d · feature/x"
+              and lo._location_label(skip_branch=True) == "…/c/d")
+        lo.config = None
+        check("no config, no label", lo._location_label() == "")
+        if _shutil.which("git"):
+            repo = root / "repo"
+            repo.mkdir()
+            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
+                       GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+            _sp.run(["git", "init", "-q", "-b", "parity-branch"], cwd=repo, env=env, check=True)
+            (repo / "f").write_text("x")
+            _sp.run(["git", "add", "f"], cwd=repo, env=env, check=True)
+            _sp.run(["git", "commit", "-q", "-m", "one"], cwd=repo, env=env, check=True)
+            lo.config = SimpleNamespace(project_root=str(repo))
+            lo._branch_cache = ("", 0.0)
+            check("the branch is read from git and cached",
+                  lo._git_branch() == "parity-branch" and lo._branch_cache[0] == "parity-branch")
+            lo.config = SimpleNamespace(project_root=str(root / "out"))
+            lo._branch_cache = ("", 0.0)
+            check("outside a repository there is no branch", lo._git_branch() == "")
+    finally:
+        for p, data in snapshot.items():
+            if data is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(data)
+        if env_tmux is not None:
+            os.environ["TMUX"] = env_tmux
+        _shutil.rmtree(root, ignore_errors=True)
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -17137,6 +17517,7 @@ def main():
         test_composer_marks_commands_and_goal_rail()
         test_transcript_reuses_unchanged_entries()
         test_recall_archive_is_display_only()
+        test_overnight_parity_fixes()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

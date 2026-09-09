@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import json
 import math
 import re
@@ -356,8 +357,10 @@ class TUI:
         self._width, self._height = _sz.columns, _sz.lines   # os.terminal_size uses .lines
         self._flash_msg = ""               # transient confirmation (clicks / mode switch)
         self._flash_until = 0.0
-        self._mouse_on = True              # mouse capture (wheel-scroll/clicks); /copy toggles it OFF
-                                           # so the terminal's own text selection + copy work
+        # Mouse capture: the wheel scrolls DGC and rows are clickable, at the cost of the terminal's
+        # own drag-select. `mouse: off` remembers the other choice; /select toggles it per session.
+        self._mouse_on = self._mouse_from_config(config)
+        self._branch_cache = ("", 0.0)     # git branch of the project root, refreshed lazily
         self._naming = False               # inline "name this new session" prompt is active
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
@@ -986,6 +989,83 @@ class TUI:
         self._terminal_notification(title, body)
         self._flash(f"{glyphs.DIAMOND} {body}")
 
+    def _clipboard_write(self, text: str) -> tuple[bool, str]:
+        """Put text on the system clipboard through the terminal: OSC 52.
+
+        Works over SSH and, wrapped in a passthrough, inside tmux (`set-clipboard on`). Most
+        terminals accept roughly 100 KB of base64, so the payload is bounded and the caller is
+        told when it was cut.
+        """
+        import base64
+        import sys
+        data = text.encode("utf-8")
+        limit = 74_000
+        truncated = len(data) > limit
+        payload = base64.b64encode(data[:limit]).decode("ascii")
+        seq = f"\x1b]52;c;{payload}\x07"
+        if os.environ.get("TMUX"):
+            seq = "\x1bPtmux;" + seq.replace("\x1b", "\x1b\x1b") + "\x1b\\"
+        try:
+            out = getattr(self.app, "output", None) if getattr(self, "app", None) else None
+            if out is not None and hasattr(out, "write_raw"):
+                out.write_raw(seq)
+                out.flush()
+            else:
+                sys.stdout.write(seq)
+                sys.stdout.flush()
+        except Exception as exc:                 # a closed pipe or an output without raw writes
+            return False, type(exc).__name__
+        return True, "truncated" if truncated else ""
+
+    def _assistant_texts(self) -> list[str]:
+        """Plain text of every assistant reply so far, oldest first; the live one last if streaming."""
+        from .agent import _COMPACT_ACK
+        texts = []
+        for message in getattr(self.agent, "messages", []) or []:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            content = message.get("content")
+            if content == _COMPACT_ACK:              # the canned compaction reply is not a reply
+                continue
+            if isinstance(content, str) and content.strip():
+                texts.append(content.strip())
+        live = getattr(self, "_buf", "")
+        if live and live.strip():
+            texts.append(live.strip())
+        return texts
+
+    def _copy_target(self, spec: str) -> tuple[str, str]:
+        """Resolve `/copy [all|code|N]` to (label, text). Empty text means nothing to copy."""
+        spec = (spec or "").strip().lower()
+        if spec == "all":
+            from . import sessions
+            rows = []
+            try:
+                if self.agent.session_file:
+                    rows = sessions.load_recall(self.agent.session_file, self.agent.session_root)
+            except Exception:
+                rows = []
+            rows += sessions.display_rows(getattr(self.agent, "messages", []))
+            if getattr(self, "_buf", "").strip():
+                rows.append({"who": "assistant", "body": self._buf.strip(), "tools": ""})
+            return "the whole conversation", sessions.render_markdown_transcript(
+                rows, title=self.agent.session_name or "DGC session") if rows else ""
+        texts = self._assistant_texts()
+        if not texts:
+            return "the last reply", ""
+        if spec == "code":
+            for text in reversed(texts):            # the most recent reply that has a fence
+                blocks = re.findall(r"```[^\n]*\n(.*?)```", text, flags=re.S)
+                if blocks:
+                    return "the last code block", blocks[-1].rstrip("\n") + "\n"
+            return "the last reply (no code block)", texts[-1]
+        if spec.isdigit() and int(spec) >= 1:
+            n = int(spec)
+            if n > len(texts):
+                return f"reply {n}", ""
+            return f"reply {n} from the end", texts[-n]
+        return "the last reply", texts[-1]
+
     @staticmethod
     def _terminal_notification(title: str, body: str) -> None:
         """OSC 9 (iTerm2/ConEmu/Windows Terminal), OSC 777 (rxvt/WezTerm/kitty), then BEL."""
@@ -1103,15 +1183,50 @@ class TUI:
             return
 
         async def pulse() -> None:
+            tick = 0
             while True:
                 occupant = getattr(self, "_pane", None)
                 interval = 0.08
                 if occupant is not None and not getattr(occupant, "paused", False):
                     interval = min(interval, float(getattr(occupant, "redraw_interval", interval)))
                 await asyncio.sleep(max(0.04, interval))
-                app.invalidate()
+                tick += 1
+                if self._needs_pulse(tick):
+                    app.invalidate()
 
         self._refresh_task = app.create_background_task(pulse())
+
+    @staticmethod
+    def _mouse_from_config(config) -> bool:
+        """`mouse: off` leaves the mouse to the terminal; anything else captures it."""
+        try:
+            return str(config.get("mouse", "capture") or "capture").strip().lower() != "off"
+        except Exception:
+            return True
+
+    def _needs_pulse(self, tick: int = 0) -> bool:
+        """Whether anything on screen is animating right now.
+
+        The pulse used to repaint the whole layout 12.5 times a second whether or not anything
+        changed: an idle DGC cost a quarter of a core against ~2% for the inline harnesses. Every
+        state change already calls _invalidate(); the pulse exists only for things that move on
+        their own, and those are enumerable.
+        """
+        now = time.monotonic()
+        if self._turn.is_set() or getattr(self, "_buf", "") or getattr(self, "_think", ""):
+            return True                                 # spinner, rail wave, streamed text, ETA
+        occupant = getattr(self, "_pane", None)
+        if occupant is not None and not getattr(occupant, "paused", False):
+            return True                                 # a game or the explorer's own clock
+        if now < getattr(self, "_flash_until", 0.0) + 0.25:
+            return True                                 # one more paint clears an expired flash
+        if now - getattr(self, "_quit_armed", 0.0) < 2.3:
+            return True                                 # the "press again to quit" window
+        if getattr(self, "_req", None) is not None or getattr(self, "_input", None) is not None:
+            return tick % 3 == 0                        # a pending question keeps a slow heartbeat
+        if not self.blocks and getattr(self, "_overlay", None) is None:
+            return tick % 3 == 0                        # welcome shimmer at ~4 fps instead of 12.5
+        return False
 
     def _close_pane(self) -> None:
         occupant = self._pane
@@ -1232,8 +1347,13 @@ class TUI:
             return True
         name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
         spec = resolve_command(name, "tui")
-        if spec is None or not spec.available_while_running:
-            return False
+        if spec is None:
+            return False                      # not a command: ordinary steering text
+        if not spec.available_while_running:
+            # It used to fall through to steering, so "/model", "/compact" or "/help" typed during
+            # a turn was silently sent to the model as a prompt. Refuse it visibly instead.
+            self._flash(f"/{spec.name} waits for this turn to finish \u00b7 Esc stops the turn")
+            return True
         self._run_command(text)
         return True
 
@@ -1243,6 +1363,11 @@ class TUI:
             return "empty"
         if self._turn.is_set():
             if self._handle_running_local_command(text):
+                return "local-command"
+            if text.startswith("!") or text.startswith("#"):
+                # A direct shell command or a memory note is not a follow-up for the model.
+                self._flash(("the direct shell" if text.startswith("!") else "saving memory")
+                            + " waits for this turn to finish \u00b7 Esc stops the turn")
                 return "local-command"
             return "full" if self._route_followup(text) == "full" else "follow-up"
         from .composer import composer_token
@@ -1418,13 +1543,35 @@ class TUI:
         if self._buf:                       # in-flight assistant text — animated marker on the live line
             m = self._live_marker()
             frags = [(f"bold fg:{th.accent}", m + " ")]
-            frags += list(to_formatted_text(ANSI(self._rich(self._md(self._buf)))))
+            frags += self._live_answer_frags(theme_key)
             add(frags, "text")
         if prev is None:
             self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
         ft.append(("", "\n")); lines += 1
         return self._place_cursor(ft, 1 + lines)
+
+    def _live_answer_frags(self, theme_key):
+        """Fragments for the answer still streaming in, re-parsed at most every 80 ms.
+
+        Rendering the whole answer-so-far through Markdown on every repaint is quadratic in its
+        length (measured 2.1 / 5.2 / 12.8 ms per frame at 0.9 / 3.6 / 10.9 KB). The buffer only
+        grows within one answer, so a frame that arrives before the next token, or inside the
+        throttle window, reuses the last parse; the display lags by at most that window.
+        """
+        from prompt_toolkit.formatted_text import to_formatted_text
+        buf = self._buf
+        key = (len(buf), self._width, theme_key)
+        cached = getattr(self, "_live_answer_cache", None)
+        now = time.monotonic()
+        if cached is not None:
+            old_key, head, rendered, stamp = cached
+            same_answer = buf.startswith(head) and old_key[1:] == key[1:]
+            if same_answer and (old_key[0] == key[0] or now - stamp < 0.08):
+                return rendered
+        rendered = list(to_formatted_text(ANSI(self._rich(self._md(buf)))))
+        self._live_answer_cache = (key, buf[:64], rendered, now)
+        return rendered
 
     def _block_key(self, blk, theme_key):
         """The cache identity of one transcript entry: everything its fragments are derived from.
@@ -1558,6 +1705,39 @@ class TUI:
         return frags
 
     _TOOL_HEAD = 10                        # tool-output lines shown before it collapses
+    _DIFF_HEAD = 24                        # rendered diff lines shown before it collapses
+
+    def _preview_budget(self, b: dict) -> int:
+        """How many output lines a finished tool step shows before collapsing.
+
+        A file read shows none: the header already names the file and its length, and the body
+        is text the user owns — Claude Code and Codex both collapse it to one line. Everything
+        else keeps the ten-line preview. A failure always shows its output.
+        """
+        if b.get("error"):
+            return self._TOOL_HEAD
+        name = b.get("route_name") or b.get("name") or ""
+        if name == "read_file":
+            return 0
+        return self._TOOL_HEAD
+
+    def _tool_collapsible(self, b: dict) -> bool:
+        """Whether a tool block has output hidden behind its expand toggle."""
+        if b.get("diff"):
+            return b["diff"].count("\n") + 1 > self._DIFF_HEAD
+        return len((b.get("out") or "").splitlines()) > self._preview_budget(b)
+
+    def _tool_outcome(self, b: dict) -> str:
+        """What the step produced, for its header row: the fact a reader actually wants."""
+        if b.get("running"):
+            return ""
+        stats = b.get("diff_stats")
+        if stats:
+            return f"+{stats[0]} \u2212{stats[1]}"
+        n = int(b.get("lines") or 0)
+        if b.get("error"):
+            return "failed" + (f" \u00b7 {n} line{'s' if n != 1 else ''}" if n else "")
+        return f"{n} line{'s' if n != 1 else ''}" if n else ""
 
     def _tool_frags(self, b: dict):
         """One tool step: a rail-prefixed header (tense-aware verb + summary) then its output
@@ -1583,7 +1763,10 @@ class TUI:
 
         frags = [rail(), (f"bold fg:{th.accent}", f"{glyphs.tool_icon(name)} {verb}")]
         if summary:
-            frags.append((f"fg:{th.faint}", f" {summary}"))
+            frags.append((f"fg:{th.faint}", f" {summary.expandtabs(4)}"))
+        outcome = self._tool_outcome(b)
+        if outcome:
+            frags.append((f"fg:{th.err if error else th.faint}", f"  \u00b7 {outcome}"))
         if running:                                     # a live marker on the header while it works
             frags.append((f"fg:{th.accent}", f"  {self._live_marker()}"))
 
@@ -1602,24 +1785,51 @@ class TUI:
             color = th.err if level in ("error", "critical", "alert", "emergency") else th.faint
             frags.append((f"fg:{color}", f"{str(progress.get('message') or '')[:500]}{amount}"))
 
+        def toggle_row(label: str) -> None:
+            frags.append(("", "\n"))
+            frags.append(rail())
+            frags.append((f"fg:{th.accent_dim}", label, toggle))
+
         diff = b.get("diff")
         if diff:                                        # pre-rendered (coloured) diff — rail each line
-            for ln in diff.split("\n"):
+            dlines = diff.split("\n")
+            for ln in (dlines if exp else dlines[:self._DIFF_HEAD]):
                 frags.append(("", "\n"))
                 frags.append(rail())
                 frags.extend(to_formatted_text(ANSI(ln)))
+            if len(dlines) > self._DIFF_HEAD:
+                hidden = len(dlines) - self._DIFF_HEAD
+                toggle_row("\u25be show less" if exp else
+                           f"\u25b8 \u2026 {hidden} more line{'s' if hidden != 1 else ''} \u2014 click / /expand")
         else:
-            lines = (b.get("out") or "").splitlines()
-            for ln in (lines if exp else lines[:self._TOOL_HEAD]):
-                frags.append(("", "\n"))
-                frags.append(rail())
-                frags.append((f"fg:{th.faint}", ln))
-            if len(lines) > self._TOOL_HEAD:
-                frags.append(("", "\n"))
-                frags.append(rail())
-                caret = "▾" if exp else "▸"
-                label = "show less" if exp else f"{len(lines) - self._TOOL_HEAD} more lines — click /  expand"
-                frags.append((f"fg:{th.accent_dim}", f"{caret} {label}", toggle))
+            # Tabs used to reach the screen as a literal ^I, destroying the indentation of every
+            # tab-indented file; failures used to render in the same faint style as success.
+            lines = [ln.expandtabs(4) for ln in (b.get("out") or "").splitlines()]
+            budget = self._preview_budget(b)
+            body = f"fg:{th.text}" if error else f"fg:{th.faint}"
+            if exp or len(lines) <= budget:
+                for ln in lines:
+                    frags.append(("", "\n"))
+                    frags.append(rail())
+                    frags.append((body, ln))
+                if len(lines) > budget:
+                    toggle_row("\u25be show less")
+            else:
+                # Tail-biased: a test runner prints its verdict at the END, which a head-only window
+                # hides. The elided middle is itself the expand toggle.
+                head = budget * 3 // 10
+                tail = budget - head
+                hidden = len(lines) - head - tail
+                for ln in lines[:head]:
+                    frags.append(("", "\n"))
+                    frags.append(rail())
+                    frags.append((body, ln))
+                toggle_row(f"\u25b8 {'\u2026 ' if head else ''}{hidden} "
+                           f"{'more ' if head or tail else ''}line{'s' if hidden != 1 else ''} \u2014 click / /expand")
+                for ln in (lines[-tail:] if tail else []):
+                    frags.append(("", "\n"))
+                    frags.append(rail())
+                    frags.append((body, ln))
         return frags
 
     def _cursor_ft(self, text: str):
@@ -1692,7 +1902,7 @@ class TUI:
         if armed and not self._turn.is_set() and self._overlay is None and self._req is None:
             chips = [("Ctrl+C", "press again to quit")]
         elif not self._mouse_on:
-            chips = [("select mode", "drag to select & copy"), ("/copy", "back to scroll")]
+            chips = [("select mode", "drag to select"), ("PgUp/PgDn", "scroll"), ("/select", "back")]
         elif self._req is not None or self._input is not None or self._naming:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
@@ -1705,7 +1915,7 @@ class TUI:
             chips = [("Esc", "stop"), ("Enter", "follow up"), ("Tab", "queue")]
         else:
             chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
-                     ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
+                     ("Ctrl+Y", "copy"), ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
         key, lbl, sep = f"bold {th.muted}", th.faint, th.faint
         body = f"[{sep}]  {glyphs.RAIL}  [/]".join(
             f"[{key}]{_esc(k)}[/] [{lbl}]{_esc(l)}[/]" for k, l in chips)
@@ -1735,10 +1945,12 @@ class TUI:
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             branch = getattr(self.active, "workspace_branch", "")
             ws = f" · {branch}" if branch else ""
+            where = self._location_label(skip_branch=bool(branch))
+            loc = f" · {where}" if where else ""
             left_text = Text.from_markup(
                 f" [bold {th.accent}]Vibe DGC[/] "
                 f"[{th.faint}]· {_esc(self._model_label())} · {_esc(self.agent.mode)}"
-                f"{_esc(nm)}{_esc(ws)}[/]")
+                f"{_esc(loc)}{_esc(nm)}{_esc(ws)}[/]")
             chip, _ = self._context_chip(self._ctx_hover)      # top-right token counter
             right_text = Text.from_markup(chip)
             usable = max(1, self._width - 1)
@@ -1829,9 +2041,12 @@ class TUI:
             return len(rows) + (0 if compact else 2)
         if isinstance(blk, dict) and blk.get("kind") == "tool":
             if blk.get("diff"):
-                return 1 + blk["diff"].count("\n") + 1          # header + rendered diff lines
+                n = blk["diff"].count("\n") + 1
+                body = (n if blk.get("exp") else min(n, self._DIFF_HEAD)) + (1 if n > self._DIFF_HEAD else 0)
+                return 1 + body
             n = len((blk.get("out") or "").splitlines())
-            body = (n if blk.get("exp") else min(n, self._TOOL_HEAD)) + (1 if n > self._TOOL_HEAD else 0)
+            budget = self._preview_budget(blk)
+            body = (n if blk.get("exp") else min(n, budget)) + (1 if n > budget else 0)
             return 1 + body + (1 if blk.get("running") and blk.get("progress") else 0)
         return re.sub(r"\x1b\[[0-9;?]*m", "", str(blk)).count("\n") + 1
 
@@ -2450,12 +2665,19 @@ class TUI:
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
             if len(diff) < 8000:
-                blk["diff"] = self._rich(render_mod.render_diff(diff))
+                blk["diff"] = self._rich(render_mod.render_diff(diff.expandtabs(4)))
                 blk["out"] = None
+                rows = diff.splitlines()
+                blk["diff_stats"] = (sum(1 for r in rows if r.startswith("+") and not r.startswith("+++")),
+                                     sum(1 for r in rows if r.startswith("-") and not r.startswith("---")))
             else:
                 blk["out"] = out
         else:
+            if (blk.get("route_name") == "read_file" and out.startswith("sha256\t")):
+                # The digest is the model's evidence of what it read; the reader wants the file.
+                out = out.split("\n", 1)[1] if "\n" in out else ""
             blk["out"] = out                            # full output kept; collapses past the preview
+        blk["lines"] = len((blk.get("out") or "").splitlines())
         if self._follow:
             self._scroll_off = 0
         self._invalidate()
@@ -3707,13 +3929,55 @@ class TUI:
             self._open_plan_view()
         elif cmd in ("artifact", "artifacts"):
             self._open_artifacts()
-        elif cmd in ("copy", "select", "selection"):
+        elif cmd == "copy":
+            # DGC owns its buffer, so it can copy without selection or scroll position: the reply
+            # goes to the system clipboard through the terminal (OSC 52), which works over SSH
+            # and inside tmux. `/copy` used to only release the mouse and copy nothing.
+            label, text = self._copy_target(rest.strip())
+            if not text:
+                self._flash("nothing to copy yet")
+            else:
+                ok, note = self._clipboard_write(text)
+                size = f"{len(text) / 1000:.1f}K" if len(text) >= 1000 else f"{len(text)}"
+                if ok:
+                    self._flash(f"copied {label} \u00b7 {size} chars"
+                                + (" \u00b7 truncated to the terminal's limit" if note == "truncated" else "")
+                                + " \u00b7 /select to drag-select instead")
+                else:
+                    self._flash(f"clipboard write failed ({note}) \u00b7 /select to drag-select instead")
+        elif cmd in ("select", "selection"):
             # toggle mouse capture: OFF hands selection back to the terminal so the user can
-            # drag-select and copy model responses; ON restores wheel-scroll + clickable menus.
+            # drag-select; ON restores wheel-scroll + clickable rows. /mouse off remembers it.
             self._mouse_on = not self._mouse_on
             self._invalidate()
-            self._flash("mouse ON — wheel scrolls, /copy to select text" if self._mouse_on
-                        else "select mode — drag to select & copy in your terminal · /copy to exit")
+            self._flash("mouse captured \u2014 wheel scrolls, rows clickable \u00b7 /select to drag-select"
+                        if self._mouse_on else
+                        "select mode \u2014 drag to select in your terminal \u00b7 PageUp/PageDn scroll \u00b7 /select to exit")
+        elif cmd == "mouse":
+            choice = rest.strip().lower()
+            if choice in ("on", "capture"):
+                self._mouse_on = True
+                self.config.set("mouse", "capture")
+                self._flash("mouse: captured (remembered) \u00b7 /select toggles for this session")
+            elif choice in ("off", "terminal"):
+                self._mouse_on = False
+                self.config.set("mouse", "off")
+                self._flash("mouse: left to the terminal (remembered) \u00b7 PageUp/PageDn scroll \u00b7 Ctrl+Y copies")
+            else:
+                self._flash(f"mouse is {'captured' if self._mouse_on else 'left to the terminal'} \u00b7 /mouse on|off remembers a choice")
+            self._invalidate()
+        elif cmd == "export":
+            from . import sessions
+            try:
+                if not self.agent.session_file:
+                    raise ValueError("this session has not been saved yet")
+                path = sessions.export_markdown(
+                    self.agent.session_file, self.agent.session_root, self.agent.messages,
+                    target=rest.strip() or None, name=self.agent.session_name or "",
+                    model=self._model_label(), redact_secrets=self.agent._secret_values())
+                self._flash(f"saved {path}")
+            except Exception as exc:
+                self._flash(f"export failed: {style_mod.terminal_safe_text(str(exc))[:120]}")
         elif cmd in ("recall", "earlier"):
             # The keyboard path: in /copy select mode the clickable header is unreachable.
             target = next((b for b in self.blocks
@@ -3726,7 +3990,7 @@ class TUI:
                             else f"showing {target.get('rows', 0)} earlier messages")
         elif cmd in ("expand", "expandall"):
             hits = [b for b in self.blocks if isinstance(b, dict) and b.get("kind") == "tool"
-                    and len(b.get("out", "").splitlines()) > self._TOOL_HEAD]
+                    and self._tool_collapsible(b)]
             if not hits:
                 self._flash("no collapsed tool output to expand")
             else:
@@ -4144,6 +4408,48 @@ class TUI:
         return True
 
     # ---- command flows that use the picker / input prompts ----
+    def _git_branch(self) -> str:
+        """The project root's current branch, refreshed at most every ten seconds; "" outside git."""
+        branch, stamp = getattr(self, "_branch_cache", ("", 0.0))
+        now = time.monotonic()
+        if now - stamp < 10.0:
+            return branch
+        branch = ""
+        root = getattr(getattr(self, "config", None), "project_root", None)
+        if not root:
+            return ""
+        try:
+            from .worktree import _run_git
+            res = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root,
+                           timeout=1.0, max_stdout=4096, text=True, read_only=True)
+            if res.returncode == 0:
+                value = str(res.stdout or "").strip()
+                branch = "" if value == "HEAD" else style_mod.terminal_safe_text(value)[:40]
+        except Exception:
+            branch = ""
+        self._branch_cache = (branch, now)
+        return branch
+
+    def _location_label(self, *, skip_branch: bool = False) -> str:
+        """Where the agent is working: the project root, shortened, and its branch.
+
+        The full-screen app hides the shell prompt that would otherwise answer this, and
+        /worktree and session switching make it genuinely ambiguous. Shown once on the trust
+        gate and then never again was not enough.
+        """
+        config = getattr(self, "config", None)
+        root = str(getattr(config, "project_root", "") or "")
+        if not root:
+            return ""
+        home = os.path.expanduser("~")
+        short = ("~" + root[len(home):]) if root == home or root.startswith(home + os.sep) else root
+        parts = [part for part in short.split(os.sep) if part]
+        if len(parts) > 3:
+            short = "\u2026" + os.sep + os.sep.join(parts[-2:])
+        label = style_mod.terminal_safe_text(short)
+        branch = "" if skip_branch else self._git_branch()
+        return f"{label} \u00b7 {branch}" if branch else label
+
     def _status_block(self) -> str:
         th = style_mod.theme()
         cfg = self.config
@@ -4159,6 +4465,8 @@ class TUI:
                 ("thinking", thinking), ("profile", profile),
                 ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
+                ("directory", str(self.config.project_root)),
+                ("branch", self._git_branch() or "(not a git checkout)"),
                 ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
             f"  [{th.faint}]{k:<9}[/] [{th.text}]{_esc(str(v))}[/]" for k, v in rows)
@@ -5378,6 +5686,10 @@ class TUI:
         @kb.add("c-g", filter=Condition(lambda: self._overlay is None and self._req is None))
         def _(ev):
             self._open_cheatsheet()         # keyboard cheatsheet
+
+        @kb.add("c-y", filter=Condition(lambda: self._overlay is None and self._req is None))
+        def _(ev):
+            self._run_command("/copy")      # last reply → clipboard, mid-turn included
 
         @kb.add("tab", filter=Condition(lambda: self.input_buf.suggestion is not None
                                         and self._overlay is None and self.input_buf.complete_state is None))
