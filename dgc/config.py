@@ -324,6 +324,7 @@ DEFAULTS: dict = {
     "request_timeout": 1800,                    # seconds to wait BETWEEN streamed chunks (slow-prefill guard)
     "approval_timeout_s": 300,                  # bounded MCP input; native human decisions wait for reply/Stop
     "compact_threshold": 0.85,                  # summarize older turns at this fraction of context_size
+    "recall_max_bytes": 524288,                 # /recall scrollback archive per session (0.5 MiB)
     "session_redaction": True,                  # strip credentials from durable transcript/plan history;
                                                 # exact file rewind snapshots stay private and unchanged
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng

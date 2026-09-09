@@ -656,6 +656,7 @@ Every conversation is a session, saved as you go.
 - **/name** — rename the current session.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
+- **/recall** — read the earlier conversation a compaction summarised away (see below).
 - **dgc export-training** / **/export-training** — export your sessions as scrubbed
   fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The
   slash command runs the same export for the current project; the VS Code palette
@@ -663,6 +664,23 @@ Every conversation is a session, saved as you go.
 - **/handoff** — create a bounded, redacted continuation document from one stable
   session generation. DGC saves it as a new private `HANDOFF-*.md` through the
   workspace lease; an overlapping turn is rejected instead of mixed into the file.
+## Your earlier conversation after a compaction
+
+When a session grows past `compact_threshold` of the context window, DGC replaces the older
+turns with a summary. That is the **model's** limit, not yours: the turns themselves are kept
+beside the session, so scrolling up shows *Your earlier conversation is still here* instead of a
+bare summary. Click it, or run **/recall**, to read those turns back in place; click again to
+hide them. `/recall` also works in `/copy` select mode, where the header is not clickable.
+
+What is kept is a display copy — the text of your prompts and the model's replies, plus which
+tools each turn used. It carries no tool results and nothing that could be fed back to a model,
+and showing it never changes what the model sees or what the turn costs. Secrets are removed with
+the same redaction that protects the saved session, including retroactively: a credential DGC
+learns about later is scrubbed from turns archived earlier.
+
+The archive is bounded (`recall_max_bytes`, 512 KB by default) and drops the oldest turns first
+when it is full, saying so on the same line. Deleting a session deletes it too.
+
 - **/rewind** — restore both the code *and* the conversation to how they were at
   a chosen turn. Exact conversation prefixes and project-root file snapshots are
   saved with the private session, so rewind survives resume and context compaction.
