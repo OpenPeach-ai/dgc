@@ -83,6 +83,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("autonomous-gate", "a check command a native turn must pass (exit 0) before it may stop",
                 _TC, usage="autonomous-gate [CMD|off]", aliases=("auto-gate",)),
     CommandSpec("expand", "expand the last collapsed tool output", _T),
+    CommandSpec("recall", "read the earlier conversation a compaction summarised away", _T,
+                aliases=("earlier",)),
     CommandSpec("expandall", "expand every collapsed tool output", _T),
     CommandSpec("files", "browse, pick, and manage files in the focus pane while the agent works", _T,
                 accepts_args=True, usage="files [PATH]", available_while_running=True),

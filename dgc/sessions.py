@@ -26,6 +26,14 @@ SCHEMA_VERSION = 8
 METRICS_SCHEMA_VERSION = 3
 WORKSPACE_SCHEMA_VERSION = 1
 _MAX_WORKSPACE_SIDECAR_BYTES = 64 * 1024
+RECALL_SCHEMA_VERSION = 1
+_RECALL_SUFFIX = ".recall"
+_DEFAULT_RECALL_BYTES = 512 * 1024          # config `recall_max_bytes`
+_MIN_RECALL_BYTES, _MAX_RECALL_BYTES = 64 * 1024, 4 * 1024 * 1024
+_MAX_RECALL_ROWS = 800
+_MAX_RECALL_BODY_CHARS = 4000
+_MAX_RECALL_READ_BYTES = _MAX_RECALL_BYTES + 64 * 1024
+_RECALL_ROW_KEYS = frozenset({"gen", "cp", "who", "body", "tools"})
 USAGE_KEYS = ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens", "requests")
 ACTIVITY_KEYS = ("tool_calls", "edits", "edit_fails")
 TIMING_KEYS = ("builtin_tool_us", "builtin_tool_samples")
@@ -53,7 +61,7 @@ def _session_family(path: Path) -> Path:
     path = Path(path).resolve(strict=False)
     if path.name.endswith(".plan.md"):
         return path.with_name(path.name[:-len(".plan.md")] + ".json")
-    if path.suffix in (".metrics", ".workspace"):
+    if path.suffix in (".metrics", ".workspace", _RECALL_SUFFIX):
         return path.with_suffix(".json")
     return path
 
@@ -652,6 +660,244 @@ def clear_workspace(session_file, project_root, *, expected_revision: int | None
         return False
 
 
+def recall_path(session_file, project_root) -> Path:
+    """Display-only pre-compaction history beside a transcript.
+
+    The non-JSON suffix keeps it out of `*.json` session scans and pickers, exactly as
+    metrics_path/workspace_path do. Rows here are a DISPLAY projection: they carry no role,
+    no content and no tool-call ids, so nothing can turn one back into a model message.
+    """
+    return resolve_path(project_root, session_file).with_suffix(_RECALL_SUFFIX)
+
+
+def _recall_cap(max_bytes=None) -> int:
+    try:
+        value = int(max_bytes) if max_bytes is not None else _DEFAULT_RECALL_BYTES
+    except (TypeError, ValueError):
+        value = _DEFAULT_RECALL_BYTES
+    return max(_MIN_RECALL_BYTES, min(_MAX_RECALL_BYTES, value))
+
+
+def _clean_recall_row(row, secrets) -> dict | None:
+    """Validate, redact and bound ONE display row; None for anything not row-shaped.
+
+    Applied on write AND on read, so a hand-edited file cannot smuggle a message-shaped dict
+    into the transcript, and a secret learned after a row was written is scrubbed on the next
+    rewrite — the transcript itself is re-redacted on every save for the same reason.
+    """
+    if not isinstance(row, dict) or not set(row) <= _RECALL_ROW_KEYS:
+        return None
+    who = str(row.get("who") or "")
+    if who not in ("user", "assistant"):
+        return None
+    from .redaction import bounded_redacted_view, redact_text
+    secrets = tuple(secrets or ())
+    body = bounded_redacted_view(redact_text(str(row.get("body") or ""), secrets),
+                                 _MAX_RECALL_BODY_CHARS)
+    tools = redact_text(str(row.get("tools") or ""), secrets)[:200]
+    if not body and not tools:
+        return None
+    cp = row.get("cp")
+    gen = row.get("gen")
+    return {"gen": gen if isinstance(gen, int) and not isinstance(gen, bool) and gen >= 0 else 0,
+            "cp": cp if isinstance(cp, int) and not isinstance(cp, bool) else -1,
+            "who": who, "body": body, "tools": tools}
+
+
+def _read_recall_lines(p: Path) -> list[str]:
+    """Bounded, symlink-refusing read of a recall sidecar. Never raises."""
+    fd = None
+    try:
+        if p.is_symlink():
+            return []
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(p, flags)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_RECALL_READ_BYTES:
+            return []
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, min(65536, _MAX_RECALL_READ_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > _MAX_RECALL_READ_BYTES:
+                return []
+        return b"".join(chunks).decode("utf-8", "replace").splitlines()
+    except (OSError, ValueError):
+        return []
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _recall_header(lines: list[str], p: Path, project_root) -> dict:
+    """Parse and bind line 1 to THIS session, so a copied file is inert."""
+    if not lines:
+        return {}
+    try:
+        header = json.loads(lines[0])
+    except (ValueError, TypeError):
+        return {}
+    if (not isinstance(header, dict)
+            or header.get("schema_version") != RECALL_SCHEMA_VERSION
+            or str(header.get("id") or "") != p.stem):
+        return {}
+    try:
+        if Path(str(header.get("project") or "")).resolve(strict=False) != Path(project_root).resolve(strict=False):
+            return {}
+    except (OSError, ValueError):
+        return {}
+    return header
+
+
+def recall_summary(session_file, project_root) -> dict:
+    """Row/dropped counts for the transcript marker. Never raises."""
+    try:
+        p = recall_path(session_file, project_root)
+        with _lock_for(p):
+            header = _recall_header(_read_recall_lines(p), p, project_root)
+    except (OSError, ValueError):
+        return {}
+    if not header:
+        return {}
+    return {"rows": int(header.get("rows") or 0), "dropped": int(header.get("dropped") or 0),
+            "generations": int(header.get("generations") or 0)}
+
+
+def load_recall(session_file, project_root) -> list:
+    """Every retained display row, re-redacted. Never raises; [] on any problem."""
+    try:
+        p = recall_path(session_file, project_root)
+        with _lock_for(p):
+            lines = _read_recall_lines(p)
+            if not _recall_header(lines, p, project_root):
+                return []
+        secrets = ()          # re-redaction on display is the reader's job (it knows the config)
+        rows = []
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            try:
+                candidate = json.loads(line)
+            except (ValueError, TypeError):
+                continue                       # a torn tail loses one row, never the file
+            cleaned = _clean_recall_row(candidate, secrets)
+            if cleaned is not None:
+                rows.append(cleaned)
+            if len(rows) >= _MAX_RECALL_ROWS:
+                break
+        return rows
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def save_recall(session_file, project_root, rows, *, checkpoint_index: int = -1,
+                expected_revision: int | None = None, expected_exists: bool | None = None,
+                redact_secrets=None, max_bytes=None) -> dict:
+    """Append display rows to the recall sidecar, pruning oldest-first within the cap.
+
+    Rewrites the whole file rather than appending, which re-redacts every retained row against
+    the secrets known NOW — an append-only file would be strictly weaker than the transcript,
+    which sessions.save() re-scrubs on every write.
+    """
+    failed = {"saved": False, "rows": 0, "dropped": 0, "generation": 0}
+    try:
+        session = resolve_path(project_root, session_file)
+        p = recall_path(session, project_root)
+        cap = _recall_cap(max_bytes)
+        secrets = tuple(redact_secrets or ())
+        with _lock_for(p):
+            exists, revision = _generation(session, project_root)
+            if not _expected_generation_matches(exists, revision, expected_revision, expected_exists):
+                return failed
+            lines = _read_recall_lines(p)
+            header = _recall_header(lines, p, project_root)
+            retained = []
+            for line in lines[1:] if header else []:
+                try:
+                    cleaned = _clean_recall_row(json.loads(line), secrets)
+                except (ValueError, TypeError):
+                    continue
+                if cleaned is not None:
+                    retained.append(cleaned)
+            generation = int(header.get("generations") or 0) + 1
+            dropped = int(header.get("dropped") or 0)
+            try:
+                point = int(checkpoint_index)
+            except (TypeError, ValueError):
+                point = -1
+            fresh = []
+            for row in rows or ():
+                if not isinstance(row, dict):
+                    continue
+                cleaned = _clean_recall_row(
+                    {"gen": generation, "cp": point, "who": row.get("who"),
+                     "body": row.get("body"), "tools": row.get("tools")}, secrets)
+                if cleaned is not None:
+                    fresh.append(cleaned)
+            if not fresh:
+                return {"saved": True, "rows": len(retained), "dropped": dropped,
+                        "generation": generation - 1}
+            keep = retained + fresh
+            encoded = [json.dumps(row, ensure_ascii=True, default=str) for row in keep]
+            def _fits() -> bool:
+                return (len(keep) <= _MAX_RECALL_ROWS
+                        and sum(len(line) + 1 for line in encoded) + 512 <= cap)
+            while keep and not _fits():
+                keep.pop(0); encoded.pop(0); dropped += 1
+            head = json.dumps({"schema_version": RECALL_SCHEMA_VERSION, "id": p.stem,
+                               "project": str(Path(project_root).resolve(strict=False)),
+                               "updated": time.time(), "rows": len(keep),
+                               "dropped": dropped, "generations": generation},
+                              ensure_ascii=True, default=str)
+            _atomic_write(p, "\n".join([head, *encoded]) + "\n")
+        return {"saved": True, "rows": len(keep), "dropped": dropped, "generation": generation}
+    except (OSError, TypeError, ValueError):
+        return failed
+
+
+def truncate_recall(session_file, project_root, *, keep_before_cp: int,
+                    expected_revision: int | None = None,
+                    expected_exists: bool | None = None) -> bool:
+    """Drop rows a rewind is about to restore into the live transcript.
+
+    A row written during checkpoint C's turn describes messages present at C. Rewinding to
+    `idx <= C` restores those messages, so keeping the row would render them twice.
+    """
+    try:
+        session = resolve_path(project_root, session_file)
+        p = recall_path(session, project_root)
+        with _lock_for(p):
+            exists, revision = _generation(session, project_root)
+            if not _expected_generation_matches(exists, revision, expected_revision, expected_exists):
+                return False
+            lines = _read_recall_lines(p)
+            header = _recall_header(lines, p, project_root)
+            if not header:
+                return False
+            keep = []
+            for line in lines[1:]:
+                try:
+                    row = _clean_recall_row(json.loads(line), ())
+                except (ValueError, TypeError):
+                    continue
+                if row is not None and row["cp"] < int(keep_before_cp):
+                    keep.append(row)
+            encoded = [json.dumps(row, ensure_ascii=True, default=str) for row in keep]
+            head = json.dumps({**header, "rows": len(keep), "updated": time.time()},
+                              ensure_ascii=True, default=str)
+            _atomic_write(p, "\n".join([head, *encoded]) + "\n")
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def delete(path, project_root, *, expected_revision: int | None = None,
            expected_exists: bool | None = None) -> bool:
     turn_lease = None
@@ -668,7 +914,7 @@ def delete(path, project_root, *, expected_revision: int | None = None,
                     exists, revision, expected_revision, expected_exists):
                 return False
             sidecars = (plan_path(p, project_root), metrics_path(p, project_root),
-                        workspace_path(p, project_root))
+                        workspace_path(p, project_root), recall_path(p, project_root))
             for member in (p, *sidecars):
                 _reclaim_stale_temporary(member)
             p.unlink()

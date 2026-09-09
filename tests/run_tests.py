@@ -11893,6 +11893,131 @@ def test_bored_mode():
           all(smoke.values()), str(smoke))
 
 
+def test_recall_archive_is_display_only():
+    """A compaction no longer destroys the user's scrollback, and what it keeps can never be context.
+
+    Compaction protects the MODEL's context window; the user's screen has no such limit. The
+    dropped turns are archived beside the session in a display shape — no role, no content, no
+    tool-call ids — so no code path can turn one back into a message.
+    """
+    import json as _json
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+    from dgc import sessions as _sessions
+    from dgc import training_export as _training
+    from dgc.agent import _COMPACT_ACK, _COMPACT_PREFIX
+    from dgc.tui import TUI
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-recall-")).resolve()
+    session = _Path(_sessions.project_dir(root)) / "20260909-210000-ffff0000.json"
+    session.parent.mkdir(parents=True, exist_ok=True)
+    with _sessions._lock_for(session):
+        _sessions._atomic_write(session, _json.dumps({"messages": [], "project": str(root)}))
+    _, revision = _sessions._generation(session, root)
+    guard = {"expected_revision": revision, "expected_exists": True}
+
+    saved = _sessions.save_recall(session, root, [
+        {"who": "user", "body": "why does the retry test flake?", "tools": ""},
+        {"who": "assistant", "body": "The sleep races the lease. Token sk-live-abcdef.",
+         "tools": "read_file, bash"},
+        {"who": "tool", "body": "tool results are never archived", "tools": ""},
+        {"role": "user", "content": "message-shaped and must be refused"},
+    ], checkpoint_index=3, redact_secrets=("sk-live-abcdef",), **guard)
+    check("a compaction archives the dropped user and assistant turns only",
+          saved["saved"] and saved["rows"] == 2, saved)
+
+    recall_file = _sessions.recall_path(session, root)
+    raw = recall_file.read_text(encoding="utf-8")
+    check("a secret in a dropped turn is redacted on disk",
+          "sk-live-abcdef" not in raw and "[REDACTED]" in raw)
+    check("the archive carries no key that could make a row a model message",
+          not any(f'"{key}"' in raw for key in
+                  ("role", "content", "tool_call_id", "tool_calls", "_responses", "_provider")))
+    rows = _sessions.load_recall(session, root)
+    check("every loaded row has exactly the display keys",
+          rows and all(set(r) == {"gen", "cp", "who", "body", "tools"} for r in rows)
+          and all(r["who"] in ("user", "assistant") for r in rows))
+
+    check("the archive joins the session lock family",
+          _sessions._lock_for(recall_file) is _sessions._lock_for(session))
+    check("the archive is not a session and not training data",
+          all(row[0] != recall_file.name for row in _sessions.listing(root))
+          and _training._load_session_file(recall_file) is None)
+
+    for broken in ("", "not json at all\n", '{"schema_version":1}\n',
+                   _json.dumps({"schema_version": 1, "id": "someone-else", "project": str(root)}) + "\n",
+                   raw.rsplit("\n", 2)[0] + "\n{\"gen\": 1, \"cp\": 3, \"who\": \"us"):
+        recall_file.write_text(broken, encoding="utf-8")
+        check("a corrupt archive reads as empty and raises nothing",
+              _sessions.load_recall(session, root) == [] or broken.startswith(raw[:40]),
+              repr(broken[:40]))
+        _sessions.recall_summary(session, root)
+    recall_file.write_text(raw, encoding="utf-8")
+
+    many = [{"who": "user", "body": f"turn {i} " + "x" * 900, "tools": ""} for i in range(400)]
+    capped = _sessions.save_recall(session, root, many, checkpoint_index=4,
+                                   max_bytes=64 * 1024, **guard)
+    check("the archive stays inside its byte cap by dropping the oldest turns first",
+          capped["saved"] and capped["dropped"] > 0
+          and recall_file.stat().st_size <= 64 * 1024
+          and _sessions.load_recall(session, root)[-1]["body"].startswith("turn 399"), capped)
+    check("a 20 KB turn is bounded without slicing the redaction sentinel",
+          all(len(r["body"]) <= _sessions._MAX_RECALL_BODY_CHARS
+              for r in _sessions.load_recall(session, root)))
+
+    _sessions.save_recall(session, root, [{"who": "user", "body": "and the key is hunter2-secret",
+                                           "tools": ""}], checkpoint_index=5, **guard)
+    check("a turn archived before a secret was known is scrubbed by the next write",
+          "hunter2-secret" in recall_file.read_text(encoding="utf-8"))
+    _sessions.save_recall(session, root, [{"who": "user", "body": "later turn", "tools": ""}],
+                          checkpoint_index=6, redact_secrets=("hunter2-secret",), **guard)
+    check("a secret learned later is swept out of rows written earlier",
+          "hunter2-secret" not in recall_file.read_text(encoding="utf-8"))
+
+    only = [path for path in _Path("dgc").rglob("*.py")
+            if "load_recall" in path.read_text(encoding="utf-8", errors="replace")]
+    check("only the store and the transcript may read the archive",
+          {path.name for path in only} == {"sessions.py", "tui.py"},
+          sorted(path.as_posix() for path in only))
+
+    agent = SimpleNamespace(
+        session_file=session, session_root=root,
+        messages=[{"role": "system", "content": "sys"},
+                  {"role": "user", "content": _COMPACT_PREFIX + "\nGoal: fix the flaky test."},
+                  {"role": "assistant", "content": _COMPACT_ACK},
+                  {"role": "user", "content": "did that land?"}])
+    ui = object.__new__(TUI)                      # bare, as the other TUI probes build it
+    ui.agent, ui.blocks, ui._turn_marks = agent, [], []
+    ui._width, ui._height, ui._scroll_off = 100, 40, 0
+    ui._think = ui._buf = ""
+    ui._follow, ui._ft_cache, ui.config = True, {}, None
+    ui._render_history()
+    view = lambda: "".join(f[1] for f in ui._transcript())
+    seam = next((b for b in ui.blocks if isinstance(b, dict) and b.get("kind") == "recall"), None)
+    collapsed = view()
+    check("the compaction seam offers the earlier conversation instead of a bare summary",
+          seam is not None and "earlier conversation is still here" in collapsed)
+    check("the internal compaction wrapper is never shown as a turn",
+          _COMPACT_PREFIX not in collapsed and _COMPACT_ACK not in collapsed
+          and "did that land?" in collapsed)
+
+    before, count = _json.dumps(agent.messages), len(ui.blocks)
+    ui._toggle_recall(seam)
+    expanded = view()
+    check("expanding shows the archived turns with the tools they used",
+          "turn 399" in expanded and "later turn" in expanded)
+    check("showing the archive never touches the model's context",
+          _json.dumps(agent.messages) == before)
+    ui._toggle_recall(seam)
+    check("collapsing restores the transcript exactly",
+          len(ui.blocks) == count and "later turn" not in view())
+
+    _sessions.delete(session, root)
+    check("deleting a session takes its archived conversation with it",
+          not recall_file.exists() and not session.exists())
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -17011,6 +17136,7 @@ def main():
         test_slash_palette()
         test_composer_marks_commands_and_goal_rail()
         test_transcript_reuses_unchanged_entries()
+        test_recall_archive_is_display_only()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

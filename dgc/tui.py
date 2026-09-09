@@ -71,6 +71,17 @@ def _cell_len(value: str) -> int:
     return Text(style_mod.terminal_safe_text(value)).cell_len
 
 
+def _fit_cells(value: str, width: int) -> str:
+    """Truncate plain text to a terminal-cell budget, ellipsising rather than wrapping."""
+    text = style_mod.terminal_safe_text(str(value))
+    limit = max(1, int(width) - 1)
+    if _cell_len(text) <= limit:
+        return text
+    out = Text(text)
+    out.truncate(limit, overflow="ellipsis")
+    return out.plain
+
+
 def _ansi_cell_len(value: str) -> int:
     """Terminal cells occupied by Rich-rendered ANSI text."""
     return Text.from_ansi(str(value)).cell_len
@@ -1381,6 +1392,9 @@ class TUI:
             if isinstance(blk, dict) and blk.get("kind") == "think":
                 frags, nl = reuse(blk, lambda b=blk: self._think_frags(b))
                 add(frags, "think", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "recall":
+                frags, nl = reuse(blk, lambda b=blk: self._recall_frags(b))
+                add(frags, "text", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
                 frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
                 add(frags, "tool", nl)
@@ -1422,7 +1436,13 @@ class TUI:
             return ("text", blk, theme_key)
         kind = blk.get("kind")
         if kind == "think":
-            return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""), theme_key)
+            return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""),
+                    blk.get("head"), theme_key)
+        if kind == "recall":
+            # uid first: two markers in one transcript must never share fragments, because
+            # each carries a handler bound to its own block.
+            return ("recall", blk.get("uid"), bool(blk.get("exp")), blk.get("rows"),
+                    blk.get("dropped"), bool(blk.get("gone")), self._width, theme_key)
         if kind == "tool":
             if blk.get("running"):
                 return None
@@ -1435,6 +1455,87 @@ class TUI:
                     self._width, getattr(self, "_height", 0), theme_key)
         return None
 
+    def _recall_frags(self, b: dict):
+        """The compaction seam: one clickable line offering the user's real earlier turns back.
+
+        The model kept a summary; the conversation itself is archived beside the session. The
+        rows are display-only — they never re-enter the model's context.
+        """
+        from prompt_toolkit.mouse_events import MouseEventType
+        th = style_mod.theme()
+        rows, dropped = int(b.get("rows") or 0), int(b.get("dropped") or 0)
+        if b.get("gone"):
+            return [(f"fg:{th.faint}", _fit_cells(
+                f"{glyphs.DIAMOND} \u00b7 Your earlier conversation could not be read", self._width))]
+        if not rows:
+            return [(f"fg:{th.faint}", _fit_cells(
+                f"{glyphs.DIAMOND} \u00b7 Earlier conversation compacted \u00b7 nothing was archived",
+                self._width))]
+        caret = "\u25be" if b.get("exp") else "\u25b8"
+        turns = f"{rows} message{'s' if rows != 1 else ''}"
+        action = "click to hide" if b.get("exp") else "click to read"
+        tail = f" \u00b7 {dropped} older no longer retained" if dropped else ""
+        head = (f"{glyphs.DIAMOND} {caret} Your earlier conversation is still here "
+                f"\u00b7 {turns}{tail} \u00b7 {action}")
+
+        def toggle(mouse_event, uid=b.get("uid")):
+            # Resolve by uid, never by closing over `b`: a rebuild replaces the dict, and dict
+            # blocks compare by value so list.index() would find the wrong one.
+            if mouse_event.event_type != MouseEventType.MOUSE_UP:
+                return
+            try:
+                target = next((x for x in self.blocks if isinstance(x, dict)
+                               and x.get("kind") == "recall" and x.get("uid") == uid), None)
+                if target is not None:
+                    self._toggle_recall(target)
+            except Exception:
+                pass
+            self._invalidate()
+
+        return [(f"fg:{th.accent_dim}", _fit_cells(head, self._width), toggle)]
+
+    def _shift_marks(self, at: int, delta: int) -> None:
+        """Keep /jump targets pointing at the same turns after blocks are spliced in or out."""
+        self._turn_marks = [(i + delta if i >= at else i, preview)
+                            for i, preview in self._turn_marks]
+
+    def _toggle_recall(self, b: dict) -> None:
+        """Splice the archived turns in below the seam, or take them back out."""
+        try:
+            here = next(i for i, x in enumerate(self.blocks) if x is b)   # identity, not equality
+        except StopIteration:
+            return
+        if b.get("exp"):
+            span = int(b.get("span") or 0)
+            if span:
+                del self.blocks[here + 1:here + 1 + span]
+                self._shift_marks(here + 1, -span)
+            b["exp"], b["span"] = False, 0
+            self._ft_cache = {}
+            return
+        try:
+            from . import sessions
+            from .redaction import redact_text, secret_values
+            rows = sessions.load_recall(self.agent.session_file, self.agent.session_root)
+            secrets = secret_values(self.config)
+            rows = [{**row,
+                     "body": redact_text(row.get("body", ""), secrets),
+                     "tools": redact_text(row.get("tools", ""), secrets)}
+                    for row in rows]
+        except Exception:
+            b["gone"] = True
+            self._ft_cache = {}
+            return
+        if not rows:
+            b["gone"] = True
+            self._ft_cache = {}
+            return
+        blocks, _ = self._history_blocks(rows, marks=False)   # archived turns get no /jump numbers
+        self.blocks[here + 1:here + 1] = blocks
+        self._shift_marks(here + 1, len(blocks))
+        b["exp"], b["span"], b["rows"] = True, len(blocks), len(rows)
+        self._ft_cache = {}
+
     def _think_frags(self, b: dict):
         """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
         (▾) to the full reasoning on click  collapse/expand."""
@@ -1442,7 +1543,7 @@ class TUI:
         th = style_mod.theme()
         secs = b.get("secs", 0)
         tstr = f"{secs:.1f}s" if secs < 60 else f"{int(secs // 60)}m{int(secs % 60)}s"
-        head = f"Thought for {tstr}" if secs else "Thought"
+        head = b.get("head") or (f"Thought for {tstr}" if secs else "Thought")
         caret = "▾" if b.get("exp") else "▸"
 
         def toggle(mouse_event):
@@ -1718,6 +1819,8 @@ class TUI:
                            footer="Esc close", accent=True, info=True)
 
     def _block_lines(self, blk) -> int:
+        if isinstance(blk, dict) and blk.get("kind") == "recall":
+            return 1                       # expanded rows are their own blocks
         if isinstance(blk, dict) and blk.get("kind") == "think":
             return 1 + (len(blk.get("text", "").strip().split("\n")) if blk.get("exp") else 0)
         if isinstance(blk, dict) and blk.get("kind") == "user":
@@ -1783,6 +1886,7 @@ class TUI:
             self._flash("rewind could not complete; recovery point retained")
             return
         self.blocks.clear(); self._turn_marks = []; self._buf = ""; self._think = ""
+        self._ft_cache = {}                 # cached fragments hold handlers bound to the old blocks
         self._render_history()
         self._scroll_off = 0
         self._flash(f"{glyphs.ARROW_L if hasattr(glyphs, 'ARROW_L') else '↩'} rewound — restored {nfiles} file(s)")
@@ -3360,6 +3464,7 @@ class TUI:
         if sess is None:
             return
         sess.blocks.clear(); sess._buf = ""; sess._think = ""
+        self._ft_cache = {}
         self._render_history()
         count = max(0, len(sess.agent.messages) - 1)
         self._flash(f"opened ({count} messages) · "
@@ -3607,6 +3712,16 @@ class TUI:
             self._invalidate()
             self._flash("mouse ON — wheel scrolls, /copy to select text" if self._mouse_on
                         else "select mode — drag to select & copy in your terminal · /copy to exit")
+        elif cmd in ("recall", "earlier"):
+            # The keyboard path: in /copy select mode the clickable header is unreachable.
+            target = next((b for b in self.blocks
+                           if isinstance(b, dict) and b.get("kind") == "recall"), None)
+            if target is None:
+                self._flash("no earlier conversation archived for this session")
+            else:
+                self._toggle_recall(target)
+                self._flash("earlier conversation hidden" if not target.get("exp")
+                            else f"showing {target.get('rows', 0)} earlier messages")
         elif cmd in ("expand", "expandall"):
             hits = [b for b in self.blocks if isinstance(b, dict) and b.get("kind") == "tool"
                     and len(b.get("out", "").splitlines()) > self._TOOL_HEAD]
@@ -3989,6 +4104,7 @@ class TUI:
                                      worktree=sess.workspace_path, branch=sess.workspace_branch,
                                      **_session_generation_guard(sess.agent))
             sess.blocks.clear()
+            self._ft_cache = {}
             sess._turn_marks = []
             sess._buf = ""
             sess._think = ""
@@ -4132,9 +4248,43 @@ class TUI:
         self._show_picker(f"{'Sub-agent model' if subagent else 'Model'} @ {base or self.config.base_url}",
                           models, lambda i: self._set_model_tui(models[i], subagent=subagent))
 
-    def _render_history(self) -> None:
-        """Repopulate the transcript from the loaded session so a resumed chat is actually visible."""
+    def _rule(self, label: str) -> str:
+        """A width-aware divider, so a resumed or compacted seam is obvious at any terminal size."""
         th = style_mod.theme()
+        text = f" {label} " if label else ""
+        room = max(0, self._width - _cell_len(text) - 2)
+        left = room // 2
+        return self._rich(f"[{th.faint}]{'─' * left}{_esc(text)}{'─' * (room - left)}[/]")
+
+    def _history_blocks(self, rows, *, marks: bool = True):
+        """Turn display rows into transcript blocks — the one shape both paths render.
+
+        Live messages and archived rows go through here, so a recalled turn looks exactly like
+        the turn it used to be.
+        """
+        th = style_mod.theme()
+        blocks, made = [], []
+        for row in rows or ():
+            who, body = row.get("who"), (row.get("body") or "").strip()
+            if who == "user":
+                if body:
+                    blocks.append({"kind": "user", "text": body[:6000]})
+                    if marks:
+                        made.append((len(blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
+            elif who == "assistant":
+                if body:
+                    blocks.append(self._rich(self._md(body)))   # _md → renderable; blocks need ANSI str
+                names = row.get("tools") or ""
+                if names:
+                    blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
+        return blocks, made
+
+    def _message_rows(self, messages):
+        """Project the live transcript to display rows, splitting at each compaction marker.
+
+        Returns [(rows, brief)] where `brief` is the summary the model was left with, or None.
+        """
+        from .agent import _COMPACT_ACK, _COMPACT_PREFIX
 
         def _text(content) -> str:
             if isinstance(content, str):
@@ -4144,30 +4294,70 @@ class TUI:
                                 if isinstance(p, dict) and p.get("type") == "text")
             return ""
 
-        for m in self.agent.messages:
+        segments, rows, skip_ack = [], [], False
+        for m in messages or ():
             role = m.get("role")
             body = _text(m.get("content")).strip()
+            if skip_ack and role == "assistant" and m.get("content") == _COMPACT_ACK:
+                skip_ack = False
+                continue                        # the model's canned "understood" is not a turn
+            skip_ack = False
             if role == "user":
                 from .editor_context import _strip_editor_context
                 from .workflows import display_prompt
                 body = display_prompt(_strip_editor_context(body))
+                if body.startswith(_COMPACT_PREFIX):
+                    segments.append((rows, body.split("\n", 1)[-1].strip()))
+                    rows, skip_ack = [], True
+                    continue
                 if body.startswith("<system-reminder>"):
                     continue                    # internal nudges aren't part of the chat
                 if body.startswith("<user-interjection>"):
                     body = body.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
                 if body:
-                    self.blocks.append({"kind": "user", "text": body[:6000]})   # tinted band, same as live submit
-                    self._turn_marks.append((len(self.blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
+                    rows.append({"who": "user", "body": body, "tools": ""})
             elif role == "assistant":
-                if body:
-                    self.blocks.append(self._rich(self._md(body)))   # _md → renderable; blocks need ANSI str
-                tcs = m.get("tool_calls") or []
-                if tcs:
-                    names = ", ".join(tc.get("function", {}).get("name", "?") for tc in tcs)
-                    self.blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
+                names = ", ".join(tc.get("function", {}).get("name", "?")
+                                  for tc in (m.get("tool_calls") or []))
+                if body or names:
+                    rows.append({"who": "assistant", "body": body, "tools": names})
             # role == "tool" (results) and "system" are omitted — too verbose for the recap
+        segments.append((rows, None))
+        return segments
+
+    def _render_history(self) -> None:
+        """Repopulate the transcript from the loaded session so a resumed chat is actually visible.
+
+        Where the context was compacted, the model kept only a summary — but the user's own
+        earlier turns are archived beside the session, so the seam offers them back instead of
+        pretending they never happened.
+        """
+        th = style_mod.theme()
+        segments = self._message_rows(self.agent.messages)
+        for rows, brief in segments:
+            blocks, made = self._history_blocks(rows)
+            base = len(self.blocks)
+            self.blocks.extend(blocks)
+            self._turn_marks.extend((base + i, preview) for i, preview in made)
+            if brief is None:
+                continue
+            summary = {}
+            try:
+                from . import sessions
+                if self.agent.session_file:
+                    summary = sessions.recall_summary(self.agent.session_file, self.agent.session_root)
+            except Exception:
+                summary = {}
+            self._blk_seq = getattr(self, "_blk_seq", 0) + 1
+            self.blocks.append({"kind": "recall", "uid": self._blk_seq, "exp": False, "span": 0,
+                                "rows": int(summary.get("rows") or 0),
+                                "dropped": int(summary.get("dropped") or 0), "gone": False})
+            self.blocks.append(self._rule("context compacted here"))
+            if brief:
+                self.blocks.append({"kind": "think", "head": "The model continues from this brief",
+                                    "text": brief, "exp": False})
         if self.blocks:
-            self.blocks.append(self._rich(f"[{th.faint}]{'─' * 20} resumed here {'─' * 20}[/]"))
+            self.blocks.append(self._rule("resumed here"))
         self._scroll_off = 0               # resumed conversation: show the newest end, not the top
 
     def _resume_flow(self) -> None:
@@ -4186,6 +4376,7 @@ class TUI:
                 return
             n = self.agent.load_session(items[i][0])
             self.blocks.clear(); self._buf = ""; self._think = ""
+            self._ft_cache = {}
             self._render_history()          # show the loaded conversation, not a blank screen
             self._flash(f"resumed ({n} messages)"
                         + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
@@ -4812,6 +5003,7 @@ class TUI:
                              worktree=project_root, branch=branch,
                              **_session_generation_guard(new_agent))
         self.blocks.clear(); self._buf = ""
+        self._ft_cache = {}
         prior = (f" · retained prior {prior_result.branch}" if prior_result is not None
                  and prior_result.status != "cleaned" else "")
         self._flash(f"worktree {branch} — switched, fresh session{prior}")

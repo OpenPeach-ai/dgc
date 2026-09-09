@@ -116,8 +116,15 @@
 <li><strong>/name</strong> — rename the current session.</li>
 <li><strong>/history</strong> (Ctrl+R) — search and recall any past prompt.</li>
 <li><strong>/jump</strong> — scroll the transcript straight to a past turn.</li>
+<li><strong>/recall</strong> — read the earlier conversation a compaction summarised away (see below).</li>
 <li><strong>dgc export-training</strong> / <strong>/export-training</strong> — export your sessions as scrubbed fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The slash command runs the same export for the current project; the VS Code palette exposes it as *DGC: Export Training Data*.</li>
 <li><strong>/handoff</strong> — create a bounded, redacted continuation document from one stable session generation. DGC saves it as a new private <code>HANDOFF-*.md</code> through the workspace lease; an overlapping turn is rejected instead of mixed into the file.</li>
+</ul>
+<div class="heading-row h2-row"><h2 id="your-earlier-conversation-after-a-compaction">Your earlier conversation after a compaction</h2><a class="anchor" href="#your-earlier-conversation-after-a-compaction" aria-label="Link to this section">#</a></div>
+<p>When a session grows past <code>compact_threshold</code> of the context window, DGC replaces the older turns with a summary. That is the <strong>model&#x27;s</strong> limit, not yours: the turns themselves are kept beside the session, so scrolling up shows *Your earlier conversation is still here* instead of a bare summary. Click it, or run <strong>/recall</strong>, to read those turns back in place; click again to hide them. <code>/recall</code> also works in <code>/copy</code> select mode, where the header is not clickable.</p>
+<p>What is kept is a display copy — the text of your prompts and the model&#x27;s replies, plus which tools each turn used. It carries no tool results and nothing that could be fed back to a model, and showing it never changes what the model sees or what the turn costs. Secrets are removed with the same redaction that protects the saved session, including retroactively: a credential DGC learns about later is scrubbed from turns archived earlier.</p>
+<p>The archive is bounded (<code>recall_max_bytes</code>, 512 KB by default) and drops the oldest turns first when it is full, saying so on the same line. Deleting a session deletes it too.</p>
+<ul>
 <li><strong>/rewind</strong> — restore both the code *and* the conversation to how they were at a chosen turn. Exact conversation prefixes and project-root file snapshots are saved with the private session, so rewind survives resume and context compaction. Direct file-tool and integrated sub-agent changes are captured before mutation; the edit is refused if that durable capture fails. Arbitrary shell writes are not guaranteed rewindable, and approved external-path snapshots last only for the current process so resume never gains ambient authority outside the project.</li>
 </ul>
       <nav class="pager" aria-label="Pagination">
@@ -125,7 +132,7 @@
 <a class="next" href="standing-goals.html"><div class="k">Next →</div><div class="t">Standing goals</div></a>
 </nav>
   </article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#content" data-id="content" class="lvl2">Top</a></aside>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#your-earlier-conversation-after-a-compaction" data-id="your-earlier-conversation-after-a-compaction" class="lvl2">Your earlier conversation after a compaction</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
 <div class="grp-h">Getting started</div>

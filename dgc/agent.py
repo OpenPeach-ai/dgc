@@ -876,6 +876,7 @@ class Agent(GoalLifecycle):
         self._mode_lock = threading.RLock()
         self._mode_prompt_dirty = False
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
+        self._recall_pending: list[dict] = []   # display rows the last compaction dropped
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.chat_changes = ChatChanges(self.config.project_root)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
@@ -3949,6 +3950,16 @@ class Agent(GoalLifecycle):
                     rewind_pending = False
                     return (-1, 0)
                 self.checkpoints.commit_rewind()
+                if conversation is not None and self.session_file:
+                    # Rewinding restores the very messages a later compaction archived; keeping
+                    # those rows would render them twice.
+                    try:
+                        from . import sessions
+                        sessions.truncate_recall(
+                            self.session_file, self.session_root, keep_before_cp=idx,
+                            expected_revision=self._session_revision, expected_exists=True)
+                    except Exception:
+                        pass
                 rewind_pending = False
                 return msg_count, n_files
             finally:
@@ -4401,6 +4412,60 @@ class Agent(GoalLifecycle):
             return
         self.maybe_compact(force=True, deadline=time.monotonic(), trigger="resume")
 
+    def _recall_rows(self, messages) -> list[dict]:
+        """Project wire messages to DISPLAY rows, applying the transcript's own skip rules.
+
+        Never returns a message-shaped dict: no role, no content, no tool-call ids, so no code
+        path can turn a row back into model context. Tool results are omitted exactly as
+        TUI._render_history omits them.
+        """
+        rows: list[dict] = []
+        for message in messages or ():
+            if not isinstance(message, dict):
+                continue
+            role, content = message.get("role"), message.get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(part.get("text", "") for part in content
+                                if isinstance(part, dict) and part.get("type") == "text")
+            else:
+                text = ""
+            text = text.strip()
+            if role == "user":
+                from .editor_context import _strip_editor_context
+                from .workflows import display_prompt
+                text = display_prompt(_strip_editor_context(text))
+                if text.startswith("<system-reminder>") or text.startswith("<tool_results>"):
+                    continue
+                text = text.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
+                if text:
+                    rows.append({"who": "user", "body": text, "tools": ""})
+            elif role == "assistant":
+                names = ", ".join((call.get("function") or {}).get("name", "?")
+                                  for call in (message.get("tool_calls") or [])
+                                  if isinstance(call, dict))
+                if text or names:
+                    rows.append({"who": "assistant", "body": text, "tools": names})
+        return rows
+
+    def _archive_recall(self) -> None:
+        """Persist the dropped rows for display. Best effort: a failure costs scrollback, not a turn."""
+        rows, self._recall_pending = list(getattr(self, "_recall_pending", None) or []), []
+        if not rows or self.depth or not self.session_file:
+            return
+        try:
+            from . import sessions
+            sessions.save_recall(
+                self.session_file, self.session_root, rows,
+                checkpoint_index=len(self.checkpoints.points) - 1,
+                expected_revision=self._session_revision, expected_exists=True,
+                # Unconditional: the archive is never less redacted than the transcript.
+                redact_secrets=self._secret_values(),
+                max_bytes=self.config.get("recall_max_bytes"))
+        except Exception:
+            pass
+
     def _publish_compaction(self, result: dict[str, object]) -> None:
         """Publish one truthful post-persistence outcome to any frontend.
 
@@ -4458,6 +4523,7 @@ class Agent(GoalLifecycle):
                 }
                 return False
             before = copy.deepcopy(self.messages)
+            self._recall_pending = []      # a prune, an early return or a rollback leaks nothing
             try:
                 strategy, fallback_reason = self._compact(
                     force=force, deadline=deadline, tools=tools)
@@ -4483,6 +4549,7 @@ class Agent(GoalLifecycle):
                         self._publish_compaction(result)
                 return True
             if self._persist():
+                self._archive_recall()    # only once the compacted transcript is durable
                 try:
                     after_tokens = self.estimate_tokens(tools=tools)
                 except Exception:
@@ -4556,6 +4623,10 @@ class Agent(GoalLifecycle):
                     and self.messages[2].get("content") == _COMPACT_ACK):
                 middle_start = 3
         middle = self.messages[middle_start:split]
+        # What the user is about to lose from their scrollback. middle_start already skips a
+        # prior summary/ack pair, so each real turn is captured by the first compaction that
+        # drops it and never again.
+        self._recall_pending = self._recall_rows(middle)
         transcript_lines = []
         for m in middle:
             role = m.get("role", "?")
