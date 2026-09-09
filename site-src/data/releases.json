@@ -4,16 +4,27 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.30.2",
+      "date": "2026-09-09",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.2",
+      "status": "current",
+      "notes": [
+        "Fix a /files explorer case where the project itself could be thrown away: from the parent listing the cursor sits on the project folder, and one d sent the whole project to the trash without asking. The explorer now refuses to trash, delete, rename, or move the project root or any folder above it, in every permission mode.",
+        "Keep focus-pane frames exactly as tall as the pane when a file name, breadcrumb, or status carries a control or line-separator character. Such characters are neutralised wherever the renderer places pane text, so a strangely named file can no longer push a row out of the frame.",
+        "Wait for a killed tool's whole process group to exit, bounded, before reporting the kill complete, so a grandchild process that ignored the polite signal cannot outlive the tool that spawned it."
+      ],
+      "headline": "/files safety fix"
+    },
+    {
       "version": "0.30.1",
       "date": "2026-09-09",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.1",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Add /files: a file explorer in the focus pane under the transcript — Miller columns, previews, copy/cut/paste, rename, trash with undo, Enter inserts @path — while the agent keeps working. Writes follow the permission mode and stay inside the project.",
         "Show a calibrated turn ETA range in the status line, per-project and measured (/eta stats); /notify pings the terminal when a turn finishes. Promote the hidden arcade's pane into a shared focus-pane host.",
         "Fix the /files natural sort raising when a folder mixes digit-leading and letter-leading names; the focus pane now closes itself on an occupant error instead of taking the transcript down. Test suite runs hermetically with a canonical temporary HOME."
-      ],
-      "headline": "/files · turn ETA"
+      ]
     },
     {
       "version": "0.29.2",
@@ -182,10 +193,21 @@
   ],
   "extension": [
     {
-      "version": "0.17.0",
+      "version": "0.17.1",
       "date": "2026-09-09",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
+      "notes": [
+        "Update the packaging toolchain for a js-yaml advisory (GHSA-2883-xcg3-v3hh). It is a development-only dependency of the packager, so no shipped extension code changed.",
+        "Recommend CLI 0.30.2, which stops the /files explorer from trashing the project root. Editor protocol v6 is unchanged, so older CLIs keep working exactly as before.",
+        "No change to the panel, the turn ETA chip, or DGC: Notify On Turn End. This release exists so the published package and the reviewed source agree byte for byte."
+      ]
+    },
+    {
+      "version": "0.17.0",
+      "date": "2026-09-09",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "shipped",
       "notes": [
         "Show the turn ETA beside the elapsed timer while a native turn runs — a calibrated range such as `~2–4 min left · 3/5 tasks` from the additive protocol-v6 turn_eta event, hidden on older CLIs.",
         "Add DGC: Notify On Turn End — a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.",

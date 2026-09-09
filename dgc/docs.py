@@ -804,6 +804,7 @@ from a read-only `git status` that never runs filters or transports.
 - It never runs a shell command and nothing it does enters the model's context unless you insert a path.
 - Writes follow the permission mode: **plan** makes the pane read-only; **default** asks before trash, move, and overwrite; **acceptEdits** and **auto** act immediately with undo. Permanent deletion asks in every mode.
 - Writes stay inside the project. Browsing above the root is read-only, except in **auto** mode, which asks first.
+- The project root itself is never an operand. Trash, delete, rename, and move refuse it and every folder above it, in every mode, so browsing up to the parent and pressing **d** cannot throw the project away.
 - Trees over 5,000 entries or 512 MB are refused rather than half-copied; use the shell for those.
 """.strip()),
     ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
