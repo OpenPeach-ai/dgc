@@ -43,6 +43,10 @@ def mark_trusted(config, path) -> None:
     if p not in lst:
         lst.append(p)
         config.save()
+    # Trust is what lets a project's own rules load — apply them now, not on the next launch.
+    apply = getattr(config, "apply_project_permissions", None)
+    if callable(apply) and is_trusted(config, config.project_root):
+        apply()
 
 
 def confirm_trust(config, project_root) -> bool:
@@ -90,17 +94,23 @@ def confirm_trust(config, project_root) -> bool:
                                 style=f"bold {th.text_strong}"), cols))
         out.append(Text(""))
         out.append(_center(Text("Vibe DGC may run or modify contents in this directory,", style=th.faint), cols))
-        out.append(_center(Text("posing security risks.", style=th.faint), cols))
+        out.append(_center(Text("and files here can reach the model as untrusted input.", style=th.faint), cols))
+        out.append(_center(Text("Trusting it also loads the project's own DGC rules (.dgc/permissions.json).",
+                                style=th.faint), cols))
+        out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
+                                style=th.faint), cols))
         if not in_git_repo(project_root):        # a warning when changes aren't tracked
             out.append(Text(""))
             out.append(_center(Text("Not inside a git repository — changes here are not version-controlled.",
                                     style=th.err), cols))
         out.append(Text(""))
         opt = Text()
+        opt.append("\u276f ", style=th.accent)                      # the selected row: Enter = yes
         opt.append("Yes, proceed", style=f"bold {th.text_strong}")
-        opt.append("        "); opt.append("y", style=th.faint); opt.append("\n")
+        opt.append("    "); opt.append("y \u00b7 Enter", style=th.faint); opt.append("\n")
+        opt.append("  ")
         opt.append("No, quit    ", style=f"bold {th.text_strong}")
-        opt.append("    "); opt.append("n", style=th.faint)
+        opt.append("    "); opt.append("n \u00b7 Esc", style=th.faint)
         out.append(_center(opt, cols))
         c.print(Group(*out))
         return ANSI(c.file.getvalue().rstrip("\n"))
@@ -114,7 +124,7 @@ def confirm_trust(config, project_root) -> bool:
                     width=cols, highlight=False)
         tag = f"Vibe DGC v{__version__}"
         c.print(f"[{th.faint}]{' ' * max(0, cols - len(tag) - 12)}[/][bold {th.muted}]{tag}[/]"
-                f"  [{th.faint}][stable][/]", end="")
+                f"  [{th.faint}]\\[stable][/]", end="")
         return ANSI(c.file.getvalue().rstrip("\n"))
 
     kb = KeyBindings()
@@ -141,7 +151,7 @@ def confirm_trust(config, project_root) -> bool:
         Window(FormattedTextControl(footer), height=1),
     ])
     app = Application(layout=Layout(root), key_bindings=kb, full_screen=True,
-                      mouse_support=True, refresh_interval=0.08,
+                      mouse_support=True, refresh_interval=0.16,
                       color_depth=style_mod.detect_color_depth())
     app.run()
 
