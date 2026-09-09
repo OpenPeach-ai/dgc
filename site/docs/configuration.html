@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.30.3">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · faster terminal redraw <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · clipboard, export and trust-gated rules <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -187,6 +187,8 @@
 </ul>
 <div class="heading-row h2-row"><h2 id="files-pane">Files pane</h2><a class="anchor" href="#files-pane" aria-label="Link to this section">#</a></div>
 <ul>
+<li><code>mouse</code> (default <code>capture</code>) — <code>capture</code> lets the wheel scroll DGC and rows respond to clicks; <code>off</code> leaves the mouse to your terminal so drag-select works. <code>/select</code> toggles it for one session; <code>/mouse on|off</code> changes this setting.</li>
+<li><code>recall_max_bytes</code> (default <code>524288</code>) — how much earlier conversation <code>/recall</code> keeps per session after compaction, oldest turns dropped first.</li>
 <li><code>trash_mode</code> (default <code>dgc</code>) — where <code>/files</code> sends deleted entries: <code>dgc</code> keeps them in <code>~/.dgc/trash</code> for 30 days (undo with <strong>u</strong>), <code>os</code> uses the system trash (freedesktop layout on Linux, <code>~/.Trash</code> on macOS; other platforms fall back to <code>dgc</code>).</li>
 </ul>
 <div class="heading-row h2-row"><h2 id="appearance">Appearance</h2><a class="anchor" href="#appearance" aria-label="Link to this section">#</a></div>
