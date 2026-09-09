@@ -1670,6 +1670,30 @@ def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = 
         proc.wait(timeout=2)
     except Exception:
         pass
+    if pgid is not None:
+        _await_process_group_exit(pgid)
+
+
+def _await_process_group_exit(pgid: int, timeout: float = 0.25) -> bool:
+    """Block briefly until no member of ``pgid`` remains, so a reap reported as complete is complete.
+
+    ``killpg(pgid, SIGKILL)`` only queues the signal: a grandchild that ignored SIGTERM dies a
+    scheduler tick later, and a liveness probe taken right after the kill can still see it running.
+    ``killpg(pgid, 0)`` succeeds while any member exists and raises ``ProcessLookupError`` once the
+    group is empty.  The wait is bounded so a member stuck in uninterruptible sleep cannot stall the
+    agent; ``False`` means the bound was hit (or the group is not ours to probe).
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except (PermissionError, OSError):
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.002)
 
 
 def _join_background_reader(entry: dict, timeout: float = 2.0) -> bool:
