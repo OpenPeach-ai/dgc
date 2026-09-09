@@ -63,9 +63,11 @@ async function run() {
   const primaryRoot = process.env.DGC_EXTENSION_TEST_PRIMARY_ROOT;
   const secondaryRoot = process.env.DGC_EXTENSION_TEST_SECONDARY_ROOT;
   const changedEndpoint = process.env.DGC_EXTENSION_TEST_CHANGED_ENDPOINT;
+  const workspaceEndpoint = process.env.DGC_EXTENSION_TEST_WORKSPACE_ENDPOINT;
+  const workspaceGate = process.env.DGC_EXTENSION_TEST_WORKSPACE_GATE;
   const testToken = process.env.DGC_EXTENSION_TEST_TOKEN;
   assert.ok(backendPath && backendLogPath && settingsPath && primaryRoot && secondaryRoot
-    && changedEndpoint && testToken,
+    && changedEndpoint && workspaceEndpoint && workspaceGate && testToken,
   "the host runner must provide its fixture backend, workspace roots, and bridge token");
   assert.equal(typeof testApi?.testOnlyWebviewMessage, "function",
     "test activation must expose the isolated webview-message bridge");
@@ -112,6 +114,16 @@ async function run() {
   "a mismatched workspace-root acknowledgement must not release queued user commands");
   const migratedCommand = modelCommands().find((command) => command.base_url === initialEndpoint);
   assert.ok(migratedCommand, "native settings must send the configured initial endpoint");
+  // The repository's workspace file names its own endpoint and gate command. Both settings
+  // are machine-scoped, so the installed host must resolve the user's values and the backend
+  // must never see the repository's endpoint or be told to run its command.
+  assert.equal(config.get("baseUrl", ""), initialEndpoint,
+    "a workspace value for the machine-scoped endpoint must not resolve");
+  assert.notEqual(config.get("autonomousGate", ""), workspaceGate,
+    "a workspace value for the machine-scoped autonomous gate must not resolve");
+  assert.ok(modelCommands().every((command) => command.base_url !== workspaceEndpoint
+    && command.autonomous_gate !== workspaceGate),
+  "a repository's endpoint or gate command must never reach the backend");
   assert.equal(migratedCommand.api_key === fixtureSecret, true,
     "legacy plaintext must migrate through SecretStorage into backend setup");
   await waitFor(() => !hasOwn(JSON.parse(readFileSync(settingsPath, "utf8")), "dgc.apiKey"));
@@ -133,10 +145,11 @@ async function run() {
     "a restarted host must restore its saved chat after native settings and root setup");
   assert.equal(typeof restored.request_id, "string");
 
-  // Endpoint binding is part of the credential boundary. Moving to another host must send no
-  // credential there, but it must not let a workspace/config override erase the user-owned key.
+  // Endpoint binding is part of the credential boundary. When the user moves to another host
+  // (the endpoint is machine-scoped, so only the user can), no credential may be sent there, and
+  // the move must not erase the user-owned key.
   const beforeEndpointChange = modelCommands().length;
-  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Workspace);
+  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Global);
   await waitFor(() => modelCommands().slice(beforeEndpointChange).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
   const changedRootCount = rootsCommands().length;
@@ -146,7 +159,7 @@ async function run() {
   await waitFor(() => modelCommands().slice(changedModelCount).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
   const beforeEndpointRestore = modelCommands().length;
-  await config.update("baseUrl", undefined, vscode.ConfigurationTarget.Workspace);
+  await config.update("baseUrl", initialEndpoint, vscode.ConfigurationTarget.Global);
   await waitFor(() => modelCommands().slice(beforeEndpointRestore).some((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret));
 
