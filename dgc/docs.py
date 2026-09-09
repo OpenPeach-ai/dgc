@@ -112,6 +112,7 @@ Press **Ctrl+G** any time for this cheatsheet as an overlay.
 - **! command** — run a bounded direct shell command · **# note** — atomically save project memory
 - **/memory add TEXT** — save project memory · **/memory add user TEXT** — save personal memory
 - **Ctrl+R** — recall a past prompt · **Tab / →** — accept the ghost suggestion
+- **Ctrl+Y** — copy the last reply to your clipboard (works mid-turn) · **/copy code** — its code block
 
 ## This turn
 - **Esc** — stop the turn · **Ctrl+C** — cancel · clear draft · quit
@@ -137,14 +138,20 @@ can be restored to the draft. Subscription CLI mode changes apply to the next la
 - **PageUp / PageDn** — scroll the transcript · **End** — jump to the latest
 - click **◆ Thought** — expand the reasoning · click the token count — context details
 
-## Select & copy text
-DGC captures the mouse so the wheel scrolls its own transcript and menu rows stay clickable.
-That capture is also what stops your terminal starting its own selection.
+## Copy text
+DGC owns its screen, so it can copy without you selecting anything, from any position, even
+while a turn is still running. The text goes to your system clipboard through the terminal
+(OSC 52), which works over SSH and inside tmux with `set-clipboard on`.
 
-- **/copy** (or `/select`) — hand the mouse back to the terminal, then drag-select and copy as
-  usual. The hint bar switches to *select mode*; **/copy** again restores scrolling and clicks.
-- **Shift+drag** (**Option+drag** on some terminals) — select without leaving scroll mode at all,
-  in any terminal that passes the modifier through.
+- **Ctrl+Y** or **/copy** — the last reply · **/copy code** — its last fenced code block
+- **/copy 2** — the reply before that · **/copy all** — the whole conversation as Markdown
+- **/export** — save the conversation as Markdown (`~/.dgc/exports/`, or `/export PATH`)
+
+If you would rather drag-select with the mouse: DGC captures the mouse so the wheel scrolls its
+own transcript and rows stay clickable, and that capture is what stops your terminal's own
+selection. **/select** hands the mouse back for this session (PageUp/PageDn still scroll), and
+**/mouse off** remembers that choice. **Shift+drag** (**Option+drag** on some terminals) selects
+without leaving scroll mode at all, where the terminal passes the modifier through.
 
 ## Session
 - **Ctrl+N** — new session · **/resume** — reopen a past one · **/name** — rename
@@ -657,6 +664,9 @@ Every conversation is a session, saved as you go.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
 - **/recall** — read the earlier conversation a compaction summarised away (see below).
+- **/export** (`dgc export [ID] [FILE]`) — save a session as Markdown, archived turns included.
+  Nothing the full-screen app shows survives in your terminal's scrollback; this does, and so
+  does `dgc --classic`, the inline mode.
 - **dgc export-training** / **/export-training** — export your sessions as scrubbed
   fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The
   slash command runs the same export for the current project; the VS Code palette
@@ -1219,6 +1229,11 @@ configured in `config.json`.
 
 ## Files pane
 
+- `mouse` (default `capture`) — `capture` lets the wheel scroll DGC and rows respond to clicks;
+  `off` leaves the mouse to your terminal so drag-select works. `/select` toggles it for one
+  session; `/mouse on|off` changes this setting.
+- `recall_max_bytes` (default `524288`) — how much earlier conversation `/recall` keeps per
+  session after compaction, oldest turns dropped first.
 - `trash_mode` (default `dgc`) — where `/files` sends deleted entries: `dgc` keeps them in
   `~/.dgc/trash` for 30 days (undo with **u**), `os` uses the system trash (freedesktop layout on
   Linux, `~/.Trash` on macOS; other platforms fall back to `dgc`).

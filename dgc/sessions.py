@@ -660,6 +660,119 @@ def clear_workspace(session_file, project_root, *, expected_revision: int | None
         return False
 
 
+def display_rows(messages) -> list[dict]:
+    """Project wire messages to display rows — {who, body, tools} — the way the transcript shows them.
+
+    The compaction wrapper and its canned acknowledgement are not turns and are skipped; tool
+    results are omitted exactly as the transcript omits them. Shared by the recall archive, the
+    Markdown export and the clipboard, so every reader sees one shape.
+    """
+    from .agent import _COMPACT_ACK, _COMPACT_PREFIX
+    rows: list[dict] = []
+    skip_ack = False
+    for message in messages or ():
+        if not isinstance(message, dict):
+            continue
+        role, content = message.get("role"), message.get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = " ".join(part.get("text", "") for part in content
+                            if isinstance(part, dict) and part.get("type") == "text")
+        else:
+            text = ""
+        text = text.strip()
+        if skip_ack and role == "assistant" and content == _COMPACT_ACK:
+            skip_ack = False
+            continue
+        skip_ack = False
+        if role == "user":
+            from .editor_context import _strip_editor_context
+            from .workflows import display_prompt
+            text = display_prompt(_strip_editor_context(text))
+            if text.startswith(_COMPACT_PREFIX):
+                skip_ack = True
+                continue
+            if text.startswith("<system-reminder>") or text.startswith("<tool_results>"):
+                continue
+            text = text.replace("<user-interjection>", "").replace("</user-interjection>", "").strip()
+            if text:
+                rows.append({"who": "user", "body": text, "tools": ""})
+        elif role == "assistant":
+            names = ", ".join((call.get("function") or {}).get("name", "?")
+                              for call in (message.get("tool_calls") or []) if isinstance(call, dict))
+            if text or names:
+                rows.append({"who": "assistant", "body": text, "tools": names})
+    return rows
+
+
+def export_dir() -> Path:
+    return USER_HOME / "exports"
+
+
+def render_markdown_transcript(rows, *, title: str = "", model: str = "", session_id: str = "",
+                               archived: int = 0) -> str:
+    """One Markdown document for a conversation: prompts as blockquotes, replies as prose."""
+    out = [f"# {title or 'DGC session'}", ""]
+    meta = [m for m in (f"session `{session_id}`" if session_id else "",
+                        f"model `{model}`" if model else "",
+                        f"{archived} earlier turn{'s' if archived != 1 else ''} restored from the archive"
+                        if archived else "") if m]
+    if meta:
+        out += [" · ".join(meta), ""]
+    for row in rows:
+        body = str(row.get("body") or "").rstrip()
+        if row.get("who") == "user":
+            out.append("> " + body.replace("\n", "\n> "))
+            out.append("")
+        else:
+            if body:
+                out += [body, ""]
+            tools = str(row.get("tools") or "")
+            if tools:
+                out += [f"_used {tools}_", ""]
+    return "\n".join(out).rstrip() + "\n"
+
+
+def export_markdown(session_file, project_root, messages, *, target=None, name: str = "",
+                    model: str = "", redact_secrets=None) -> Path:
+    """Write a session — archived turns first, then the live transcript — as Markdown.
+
+    Defaults to ~/.dgc/exports/<session>.md so the project tree is never polluted. Redacted with
+    the same secrets the session save uses; a caller that has none passes an empty tuple.
+    """
+    from .redaction import redact_text
+    session = resolve_path(project_root, session_file)
+    secrets = tuple(redact_secrets or ())
+    rows = [{**r, "body": redact_text(r["body"], secrets), "tools": redact_text(r["tools"], secrets)}
+            for r in load_recall(session, project_root)]
+    archived = len(rows)
+    for row in display_rows(messages):
+        rows.append({**row, "body": redact_text(row["body"], secrets),
+                     "tools": redact_text(row["tools"], secrets)})
+    text = render_markdown_transcript(rows, title=name or session.stem, model=model,
+                                      session_id=session.stem, archived=archived)
+    if target:
+        path = Path(str(target)).expanduser()
+        if path.is_dir():
+            path = path / f"{session.stem}.md"
+    else:
+        path = export_dir() / f"{session.stem}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+    return path
+
+
 def recall_path(session_file, project_root) -> Path:
     """Display-only pre-compaction history beside a transcript.
 

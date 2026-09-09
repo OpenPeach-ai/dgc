@@ -1815,24 +1815,53 @@ def run_help() -> None:
     c.print("  dgc --mode MODE         default | acceptEdits | plan | auto")
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
+    c.print("  dgc --classic           inline mode: the transcript stays in your terminal's scrollback")
     c.print("  dgc update              update DGC to the latest version")
+    c.print("  dgc export [ID] [FILE]  save a session as Markdown")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
-    c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
-    c.print("  dgc skills             list, create, install and manage skill packages")
-    c.print("  dgc mcp                manage servers, resources, prompts and connections")
+    c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
+    c.print("  dgc skills              list, create, install and manage skill packages")
+    c.print("  dgc mcp                 manage servers, resources, prompts and connections")
+    c.print("  dgc serve · dgc acp     editor back-ends (JSON over stdio · Agent Client Protocol)")
+    c.print("  dgc bug                 where to report a bug")
+    c.print("  dgc <command> --help    usage for any of the above")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
 
+SUBCOMMAND_USAGE: dict[str, str] = {
+    "setup": "dgc setup                          configure provider, model and context interactively",
+    "doctor": "dgc doctor                         check that the endpoint and model are reachable",
+    "help": "dgc help                           the command overview",
+    "update": "dgc update                         reinstall the latest DGC from vibedgc.com (runs the installer)",
+    "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
+    "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
+    "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
+    "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
+    "protocol": "dgc protocol describe|validate     inspect or validate the editor/headless contract",
+    "bug": "dgc bug                            where to report a bug or request a feature",
+    "skills": "dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]",
+    "mcp": "dgc mcp ...                        manage MCP servers, resources, prompts and connections",
+}
+
+
+def _subcommand_help(name: str) -> int:
+    """`--help` on a subcommand prints its usage and exits; it never runs the subcommand."""
+    print("usage: " + SUBCOMMAND_USAGE[name])
+    if name == "update":
+        print("  Downloads and executes https://vibedgc.com/install.sh with bash.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
-    if raw_argv and raw_argv[0] in (
-            "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
-            "export-training", "skills", "mcp"):
+    if raw_argv and raw_argv[0] in SUBCOMMAND_USAGE:
+        # Every subcommand honours the universal help reflex BEFORE anything can run. Six of
+        # eleven used to execute instead — `dgc update --help` piped a remote installer into bash.
+        if any(value in ("--help", "-h") for value in raw_argv[1:]) and raw_argv[0] not in ("export-training", "protocol"):
+            return _subcommand_help(raw_argv[0])
         if raw_argv[0] == "mcp":
             from .mcp_management import manage_mcp, USAGE
-            if any(value in ("--help", "-h") for value in raw_argv[1:]):
-                print("dgc " + USAGE.lstrip("/")); return 0
             cfg = Config()
             from .mcp import MCPManager
             ui = UI()
@@ -1857,9 +1886,6 @@ def main(argv: list[str] | None = None) -> int | None:
                 agent.mcp.stop_all()
         if raw_argv[0] == "skills":
             from .skills import manage_skills
-            if any(value in ("--help", "-h") for value in raw_argv[1:]):
-                print("dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]")
-                return 0
             cfg = Config()
             try:
                 print(terminal_safe_text(redact_text(manage_skills(cfg, shlex.join(raw_argv[1:])), secret_values(cfg))))
@@ -1877,6 +1903,8 @@ def main(argv: list[str] | None = None) -> int | None:
             return
         if raw_argv[0] == "update":
             run_update(); return
+        if raw_argv[0] == "export":
+            return run_export(raw_argv[1:])
         if raw_argv[0] == "serve":
             # headless JSON backend for editor front-ends — stdout is protocol-only,
             # so this returns before the banner / update-check ever run.
@@ -1900,7 +1928,8 @@ def main(argv: list[str] | None = None) -> int | None:
     parser = argparse.ArgumentParser(
         allow_abbrev=False,
         prog="dgc", description="DGC — a coding-agent CLI for the models you run",
-        epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
+        epilog="commands: setup · doctor · help · update · export · export-training · protocol · skills · mcp · "
+               "serve · acp · bug  (dgc <command> --help for each)  ·  dgc -p '<task>' runs one task")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
     parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,
@@ -1911,11 +1940,11 @@ def main(argv: list[str] | None = None) -> int | None:
     ultra_group.add_argument("--no-ultra", dest="ultra", action="store_false",
                              help="disable the Ultra execution profile for this session")
     parser.add_argument("--model",
-                        help="model name (persisted natively; with -p --engine, that delegated turn only)")
+                        help="model name (interactive: saved as your default; with -p: this run only)")
     parser.add_argument("--engine", metavar="NAME", default=None,
                         help="with -p, run the one-shot turn through a subscription CLI "
                              "(claude|codex|qwen|kimi|copilot) via your own login, without changing config")
-    parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
+    parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (interactive: saved; with -p: this run only)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
     parser.add_argument("--trust", action="store_true",
@@ -1965,8 +1994,12 @@ def main(argv: list[str] | None = None) -> int | None:
                     _override_engine, args.mode or str(config.get("mode", "default")))
             except _subscriptions.EngineModeUnsupported as exc:
                 parser.error(str(exc))
+    # One-shot runs are scripts and benchmarks: a --model/--base-url there is for THIS run and must
+    # not become the user's default. The interactive launch keeps the documented behaviour of
+    # `dgc --model N --base-url URL` as a way to configure without exposing a key.
+    _persist_flags = args.prompt is None
     if args.base_url:
-        config.set("base_url", args.base_url)
+        config.set("base_url", args.base_url, persist=_persist_flags)
     if args.api_key_env:
         if args.api_key_env not in os.environ:
             parser.error(f"environment variable {args.api_key_env!r} is not set")
@@ -1975,7 +2008,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if _interactive_engine:
             config.data["subscription_model"] = args.model
         else:
-            config.set("model", args.model)
+            config.set("model", args.model, persist=_persist_flags)
     if args.mode:
         config.data["mode"] = args.mode
     if args.think and not _oneshot_engine:
@@ -2195,6 +2228,31 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     return 0 if res.get("ok") else 1
 
 
+def run_export(argv: list[str]) -> int:
+    """`dgc export [ID] [FILE]` — save a session as Markdown, the most recent one by default."""
+    from rich.console import Console
+    c = Console()
+    cfg = Config()
+    ident = argv[0] if argv and not argv[0].startswith("-") else ""
+    target = argv[1] if len(argv) > 1 and not argv[1].startswith("-") else None
+    path = sessions_mod.by_id(cfg.project_root, ident) if ident else sessions_mod.latest(cfg.project_root)
+    if path is None:
+        c.print("  [yellow]no session found[/yellow] "
+                + ("for that id" if ident else "in this project — start one with dgc"))
+        return 1
+    try:
+        record = sessions_mod.load_record(path, cfg.project_root)
+        out = sessions_mod.export_markdown(
+            path, cfg.project_root, record.get("messages", []), target=target,
+            name=str(record.get("name") or ""), model=str(cfg.model or ""),
+            redact_secrets=secret_values(cfg))
+    except (OSError, ValueError) as exc:
+        c.print(f"  [red]export failed:[/red] {_markup_literal(terminal_safe_text(str(exc)))}")
+        return 1
+    print(terminal_safe_text(str(out)))
+    return 0
+
+
 def _print_resume_hint(agent, config) -> None:
     """The single epilogue printed to the normal screen after the full-screen app exits — ONE block
     offering both ways to come back (the quick `--continue` and the exact `--resume <id>`), so there
@@ -2212,12 +2270,17 @@ def _print_resume_hint(agent, config) -> None:
     dim, bold, rst = ("\x1b[2m", "\x1b[1m", "\x1b[0m") if tty else ("", "", "")
     cont = "dgc --continue"
     res = f"dgc --resume {terminal_safe_text(sf.stem)}"
-    w = max(len(cont), len(res)) + 4                       # align the descriptions past the longer command
+    exp = f"dgc export {terminal_safe_text(sf.stem)}"
+    cls = "dgc --classic"
+    w = max(len(cont), len(res), len(exp), len(cls)) + 4   # align the descriptions past the longest command
     safe_name = terminal_safe_text(name).replace("\n", " ") if name else ""
     nm = f" {dim}({safe_name}){rst}" if safe_name else ""
     sys.stdout.write(f"\n  Resume this session{nm}:\n")
     sys.stdout.write(f"    {bold}{cont}{rst}{' ' * (w - len(cont))}{dim}the most recent in this folder{rst}\n")
-    sys.stdout.write(f"    {bold}{res}{rst}{' ' * (w - len(res))}{dim}this exact session{rst}\n\n")
+    sys.stdout.write(f"    {bold}{res}{rst}{' ' * (w - len(res))}{dim}this exact session{rst}\n")
+    # Nothing the full-screen app showed survives in the terminal's scrollback; these do.
+    sys.stdout.write(f"    {bold}{exp}{rst}{' ' * (w - len(exp))}{dim}save it as Markdown{rst}\n")
+    sys.stdout.write(f"    {bold}{cls}{rst}{' ' * (w - len(cls))}{dim}inline mode: the transcript stays in your scrollback{rst}\n\n")
     sys.stdout.flush()
 
 
