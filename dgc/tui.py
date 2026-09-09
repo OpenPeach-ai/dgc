@@ -1824,8 +1824,9 @@ class TUI:
                     frags.append(("", "\n"))
                     frags.append(rail())
                     frags.append((body, ln))
-                toggle_row(f"\u25b8 {'\u2026 ' if head else ''}{hidden} "
-                           f"{'more ' if head or tail else ''}line{'s' if hidden != 1 else ''} \u2014 click / /expand")
+                lead = "\u2026 " if head else ""          # no backslash inside an f-string
+                more = "more " if head or tail else ""     # expression: Python 3.10/3.11 reject it
+                toggle_row(f"\u25b8 {lead}{hidden} {more}line{'s' if hidden != 1 else ''} \u2014 click / /expand")
                 for ln in (lines[-tail:] if tail else []):
                     frags.append(("", "\n"))
                     frags.append(rail())

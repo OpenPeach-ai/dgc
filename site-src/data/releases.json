@@ -1,17 +1,17 @@
 {
-  "refreshed_at": "2026-09-09T18:17:36Z",
+  "refreshed_at": "2026-09-09T18:52:27Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli_releases_last_14_days": 14,
   "cli": [
     {
-      "version": "0.31.0",
+      "version": "0.31.1",
       "date": "2026-09-10",
-      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.31.0",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.31.1",
       "status": "current",
       "notes": [
         "Close two holes a side-by-side with Claude Code and Codex found. A cloned repository’s .dgc/permissions.json was in force before the trust gate ran, and under dgc -p the gate never runs at all; a project’s own rules now load only once its folder is trusted, and the gate says so. dgc update --help piped the installer into bash instead of printing help; every subcommand now answers --help before anything runs, and flags given with -p, such as --model, apply to that run only instead of silently becoming your default.",
         "Text gets out. Ctrl+Y or /copy puts the last reply on your system clipboard through the terminal (OSC 52, so it works over SSH and inside tmux); /copy code takes the last code block, /copy N an earlier reply and /copy all the whole conversation. /export writes the session as Markdown outside the project tree (also dgc export ID), /select hands the mouse to your terminal for drag-select, and /mouse off remembers that. During a turn, a command that has to wait, such as /model, is refused visibly instead of being sent to the model as a prompt.",
-        "A quieter, clearer screen. An idle DGC no longer repaints twelve times a second, which cost a quarter of a core, and the streaming answer is re-parsed at most every 80 ms. A file read folds to one line with its length, a failed step says so on its header and shows its output in readable text, long output keeps its head and its tail so a test runner’s verdict stays visible, diffs carry their +/− count, tabs render as indentation, and the header shows the working directory and branch."
+        "A quieter, clearer screen. An idle DGC no longer repaints twelve times a second, which cost a quarter of a core, and the streaming answer is re-parsed at most every 80 ms. A file read folds to one line with its length, a failed step says so on its header and shows its output in readable text, long output keeps its head and its tail so a test runner’s verdict stays visible, diffs carry their +/− count, tabs render as indentation, and the header shows the working directory and branch. (0.31.1 corrects a Python 3.10/3.11 syntax error in that renderer; the 0.31.0 tag was never served by the site.)"
       ],
       "headline": "clipboard, export and trust-gated rules"
     },
