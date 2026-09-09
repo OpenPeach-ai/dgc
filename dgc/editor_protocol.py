@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v4 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v6 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 6
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -39,22 +39,36 @@ _NA = lambda required=True: _f("null", "array", required=required)
 # still declared and type-checked; undeclared fields fail closed so a mismatched or compromised
 # backend cannot smuggle arbitrary data into the editor webview.
 EVENT_FIELDS: dict[str, dict[str, dict]] = {
+    "chat_changes": {"roots": _A(), "session_id": _S(), "request_id": _S()},
+    "chat_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
+                    "session_id": _S(), "request_id": _S()},
+    "workspace_changes": {"roots": _A(), "request_id": _S()},
+    "workspace_change": {"root": _S(), "path": _S(), "before": _S(), "after": _S(), "kind": _S(),
+                         "request_id": _S()},
     "ready": {
         "version": _S(), "protocol_version": _I(), "capabilities": _O(),
         "model": _S(),
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
         "think": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "ultra_mode": _B(False),
         "base_url": _S(), "subagent_base_url": _S(False), "fallback_base_url": _S(False),
         "project_root": _S(False),
         "workspace_trusted": _B(), "commands": _A(), "custom_commands": _A(),
         "session_id": _NS(False), "tools_supported": _B(False), "provider": _S(False),
         "provider_capabilities": _O(False), "tools": _A(False), "skills": _A(False),
         "goal": _O(), "context_size": _I(),
+        "session_name": _S(False),
     },
     "turn_start": {"turn_id": _S(), "prompt": _S()},
     "turn_end": {
         "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error")),
         "token_estimate": _I(),
+    },
+    # A calibrated range for the running turn; emitted only while it changes, never as a promise.
+    "turn_eta": {
+        "turn_id": _S(), "elapsed_seconds": _N(), "remaining_low_seconds": _N(),
+        "remaining_high_seconds": _N(), "confidence": _N(), "label": _S(),
+        "tasks_done": _I(False), "tasks_total": _I(False),
     },
     "text_delta": {"text": _S()},
     "thinking_delta": {"text": _S()},
@@ -77,8 +91,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "artifact_ready": {"id": _S(), "name": _S(), "url": _S(), "rel": _S()},
     "goal_changed": {
         "goal": _S(),
-        "status": _f("string", enum=("none", "active", "completed", "blocked")),
+        "status": _f("string", enum=("none", "active", "paused", "completed", "blocked")),
         "elapsed_seconds": _I(False),
+        "details": _O(False),
         "request_id": _S(False),
     },
     "info": {"message": _S()},
@@ -90,7 +105,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
-    "options_request": {"id": _S(), "question": _S(), "options": _A()},
+    "options_request": {"id": _S(), "question": _S(), "options": _A(), "questions": _A(False)},
     "mcp_input_request": {
         "id": _S(), "server": _S(),
         "kind": _f("string", enum=("elicitation", "sampling_request", "sampling_response")),
@@ -98,9 +113,19 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     },
     "context": {
         "request_id": _S(False),
-        "used": _I(), "size": _I(), "input_tokens": _I(False),
+        "used": _I(), "size": _I(), "compact_threshold": _N(False),
+        "compact_at": _I(False), "input_tokens": _I(False),
         "output_tokens": _I(False), "cached_input_tokens": _I(False),
         "reasoning_tokens": _I(False), "requests": _I(False),
+    },
+    "compacted": {
+        "request_id": _S(False),
+        "status": _f("string", enum=("compacted", "pruned", "unchanged")),
+        "strategy": _f("string", enum=(
+            "provider_native", "model_summary", "mechanical", "tool_prune", "none")),
+        "trigger": _f("string", enum=("automatic", "manual", "overflow", "resume")),
+        "before_tokens": _I(), "after_tokens": _I(), "context_size": _I(),
+        "freed_tokens": _I(), "fallback_reason": _S(False),
     },
     "artifacts": {"items": _A(), "request_id": _S(False)},
     "config": {
@@ -118,6 +143,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "context_size": _I(False), "goal": _O(),
         "sandbox": _B(False), "sandbox_network": _B(False),
         "show_reasoning": _B(False), "preserve_thinking": _B(False),
+        "ultra_mode": _B(False),
         "code_action": _B(False), "suggest": _B(False),
         "plan_artifact": _B(False), "artifact_autostart": _B(False),
         "artifact_in_plan": _B(False), "tool_profile": _S(False),
@@ -129,18 +155,21 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
         "model": _S(),
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
-        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "base_url": _S(),
+        "subscription_engine": _S(False),
+        "ultra_mode": _B(False),
         "goal": _O(), "context_used": _I(), "context_size": _I(),
     },
     "model_changed": {"model": _S(), "base_url": _S(), "request_id": _S(False)},
     "mode_changed": {
         "request_id": _S(False),
+        "message": _S(False),
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
         "workspace_trusted": _B(False),
     },
     "think_changed": {
-        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "think": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "request_id": _S(False),
     },
     "models": {
@@ -185,12 +214,23 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "configured": _I(), "duration_ms": _I(), "message": _NS(False),
     },
     "handoff_started": {"request_id": _S()},
+    "skill_package": {"request_id": _S(), "name": _S(), "path": _S(), "operation": _S(), "files": _I()},
+    "mcp_context_catalog": {"request_id": _S(), "server": _S(), "kind": _S(), "items": _A(), "error": _S(False)},
+    "mcp_context": {"request_id": _S(), "server": _S(), "kind": _S(), "identifier": _S(),
+                    "text": _S(), "omitted": _A(), "error": _S(False)},
+    "mcp_command_result": {"request_id": _S(), "output": _S(), "context": _O(False),
+                           "catalog": _O(False), "error": _S(False)},
     "handoff": {
         "request_id": _S(),
         "status": _f("string", enum=("completed", "cancelled", "error")),
         "markdown": _S(), "path": _NS(False), "error": _NS(False),
     },
     "queued": {"count": _I(), "text": _S()},
+    "prompt_accepted": {"request_id": _S(), "state": _f("string", enum=("started", "queued", "steered")),
+                        "message": _S(False)},
+    "steering_update": {"request_id": _S(), "state": _f("string", enum=("applied", "queued", "returned")),
+                        "message": _S(False)},
+    "permission_resolved": {"id": _S(), "decision": _f("string", enum=("once", "no")), "message": _S()},
     "command_rejected": {
         "message": _S(), "command": _S(False), "reason": _S(False), "count": _I(False),
         "request_id": _S(False),
@@ -200,9 +240,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "session": {
         "kind": _f("string", enum=("new", "cleared", "resumed")),
         "message_count": _I(), "session_id": _S(False), "path": _S(False),
+        "name": _S(False),
         "request_id": _S(False),
     },
-    "history": {"items": _A()},
+    "history": {"items": _A(), "request_id": _S(False)},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},
     "checkpoints": {"items": _A(), "request_id": _S(False)},
     "rewound": {"ok": _B(), "files_restored": _I(), "request_id": _S(False)},
@@ -213,9 +254,16 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
 
 
 COMMAND_FIELDS: dict[str, dict[str, dict]] = {
-    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False)},
+    "get_chat_changes": {"request_id": _S()},
+    "get_chat_change": {"root": _S(), "path": _S(), "session_id": _S(), "request_id": _S()},
+    "get_workspace_changes": {"request_id": _S()},
+    "get_workspace_change": {"root": _S(), "path": _S(), "request_id": _S()},
+    "prompt": {"text": _S(), "images": _NA(False), "context": _NA(False), "request_id": _S(False),
+               "delivery": _f("string", required=False, enum=("steer", "queue")),
+               "skills": _A(False), "templates": _A(False),
+               "workflow": _f("string", required=False, enum=("plan", "review", "init"))},
     "slash_command": {"text": _S()},
-    "set_workspace_roots": {"roots": _A(), "request_id": _S(False)},
+    "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
         "rule": _S(False),
@@ -225,7 +273,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
         "decision": _f("string", enum=("auto", "acceptEdits", "default", "reject")),
         "feedback": _S(False),
     },
-    "options_response": {"id": _S(), "choice": _f("string", "integer")},
+    "options_response": {"id": _S(), "choice": _f("string", "integer", required=False), "answers": _O(False)},
     "mcp_input_response": {
         "id": _S(), "action": _f("string", enum=("accept", "decline", "cancel")),
         "content": _O(False),
@@ -234,10 +282,12 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "interrupt": {},
     "set_mode": {
         "mode": _f("string", enum=("default", "acceptEdits", "plan", "auto")),
+        "live": _B(False),
         "acknowledge_workspace_trust": _B(False), "request_id": _S(False),
     },
     "set_model": {
         "model": _S(False), "base_url": _S(False), "api_key": _S(False),
+        "route": _f("string", required=False, enum=("native", "subscription")),
         "clear_stored_api_key": _B(False), "request_id": _S(False),
     },
     "list_models": {"request_id": _S(False)},
@@ -250,11 +300,23 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_skills": {"request_id": _S()},
     "reload_skills": {"request_id": _S()},
     "get_skill": {"request_id": _S(), "name": _S()},
+    "set_skill_enabled": {"request_id": _S(), "name": _S(), "enabled": _B()},
+    "create_skill": {"request_id": _S(), "name": _S(), "description": _S(False), "scope": _S(False)},
+    "install_skill": {"request_id": _S(), "source": _S(), "scope": _S(False), "allow_external": _B(False)},
+    "list_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S()},
+    "get_history": {"request_id": _S()},
+    "start_goal": {"request_id": _S(), "text": _S(), "token_budget": _I(False),
+                   "skills": _A(False), "templates": _A(False), "images": _A(False), "context": _A(False)},
+    "mcp_command": {"request_id": _S(), "arguments": _S()},
+    "get_mcp_context": {"request_id": _S(), "server": _S(), "kind": _S(), "identifier": _S(), "arguments": _O(False)},
+    "set_mcp_enabled": {"request_id": _S(), "name": _S(), "enabled": _B()},
+    "reconnect_mcp_server": {"request_id": _S(), "name": _S()},
     "list_docs": {"request_id": _S()},
     "get_doc": {"request_id": _S(), "id": _S()},
     "list_mcp_servers": {"request_id": _S()},
     "upsert_mcp_server": {
         "request_id": _S(), "name": _S(), "runtime": _O(), "persisted": _O(),
+        "interactive": _B(False),
     },
     "remove_mcp_server": {"request_id": _S(), "name": _S()},
     "reload_mcp_servers": {"request_id": _S()},
@@ -274,13 +336,15 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "list_hooks": {"request_id": _S()},
     "generate_handoff": {"request_id": _S(), "save": _B(False)},
     "set_think": {
-        "level": _f("string", enum=("off", "low", "medium", "high", "xhigh")),
+        "level": _f("string", enum=("off", "low", "medium", "high", "xhigh", "max")),
         "request_id": _S(False),
     },
     "set_goal": {
         "text": _S(False),
         "status": _f("string", required=False,
-                     enum=("none", "active", "completed", "blocked")),
+                     enum=("none", "active", "paused", "completed", "blocked")),
+        "token_budget": _I(False),
+        "replace": _B(False),
         "request_id": _S(False),
     },
     "get_goal": {"request_id": _S(False)},

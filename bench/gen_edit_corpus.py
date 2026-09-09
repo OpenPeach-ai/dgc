@@ -13,14 +13,17 @@ gets it slightly wrong) while content/expected_after stay fixed — so a correct
   ambiguous — the window occurs twice → must raise _Ambiguous (never guess)
   miss      — old_string is garbled beyond recognition → must return None
 
-Run once and commit the output:  python3 gen_edit_corpus.py > edit_corpus/all.jsonl
+Regenerate the ignored local fixture:
+  python3 gen_edit_corpus.py > edit_corpus/all.jsonl
 """
 from __future__ import annotations
-import json, sys
+import json, os, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
-DATA = REPO / "data" / "polyglot-benchmark"
+# Release CI supplies a temporary checkout of the exact pinned upstream commit. Maintainers may
+# omit the variable and use the conventional ignored local checkout.
+DATA = Path(os.environ.get("DGC_EDIT_DATASET", REPO / "data" / "polyglot-benchmark")).resolve()
 LANGS = ["python", "go", "rust", "javascript", "cpp", "java"]
 
 CONF = {"'": "’", '"': "“", "-": "–"}     # ascii → curly/en-dash confusables

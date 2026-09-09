@@ -33,6 +33,7 @@ from .redaction import REDACTED, StreamingRedactor, redact_text, secret_values
 from .workspace import (
     WorkspaceBoundaryError,
     atomic_write_bytes as _atomic_write_bytes,
+    canonicalize_trusted_os_alias,
     list_directory,
     read_regular_bytes,
     resolve_path,
@@ -166,6 +167,13 @@ TOOL_SCHEMAS = [
         "and language-aware symbol definitions. Use this near the start of unfamiliar multi-file work.",
         {"path": {"type": "string", "description": "Subdirectory to map (default: project root)"},
          "max_files": {"type": "integer", "description": "Maximum files (default 300, max 1000)"}}, []),
+    _fn("git_diff", "Inspect local Git changes without executing shell, filters, or network helpers. "
+        "Defaults to staged + working + untracked changes. Base compares merge-base to HEAD; "
+        "commit compares one commit to its first parent. Narrow path when output is partial. "
+        "Working files are compared as raw bytes, without checkout conversion.",
+        {"path": {"type": "string", "description": "Literal file/directory scope (default project root)"},
+         "view": {"type": "string", "enum": ["uncommitted", "working", "staged", "base", "commit"]},
+         "ref": {"type": "string", "description": "Local branch/tag/commit for base or commit view"}}, []),
     _fn("code_intel", "Find language-aware symbols, exact definitions/references, or diagnostics. "
         "Uses a managed configured language server when available and a bounded dependency-free "
         "static fallback otherwise. Prefer this over broad grep for code navigation.",
@@ -202,14 +210,26 @@ TOOL_SCHEMAS = [
     _fn("present_plan", "Plan mode only: present the finished implementation plan for user approval.",
         {"plan": {"type": "string", "description": "The full plan, markdown"}}, ["plan"]),
     _fn("update_goal", "Mark the session's standing goal completed or genuinely blocked. Use only when the whole goal, not merely this turn, reached that state.",
-        {"status": {"type": "string", "enum": ["completed", "blocked"]}}, ["status"]),
+        {"status": {"type": "string", "enum": ["completed", "blocked"]},
+         "summary": {"type": "string", "description": "Outcome or observed external blocker for the entire goal"},
+         "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                      "description": "Concrete checks, artifacts, or observations supporting this status"}},
+        ["status", "summary", "evidence"]),
     _fn("propose_options", "Ask the user to CHOOSE between options when the decision is genuinely theirs "
-        "(two valid approaches, an ambiguous request). Presents the choices and waits for their pick. "
-        "Don't use it for things you can decide yourself.",
+        "(two valid approaches, an ambiguous request). Waits for an explicit answer, with Other/free text. "
+        "Use questions to group 1–6 separate decisions into tabs with one Submit. "
+        "Use question/options for a single decision. Don't use it for things you can decide yourself.",
         {"question": {"type": "string", "description": "What you're asking them to decide"},
          "options": {"type": "array", "items": {"type": "string"},
-                     "description": "The choices, most-recommended first"}},
-        ["question", "options"]),
+                     "description": "The choices, most-recommended first; Other is added by the client"},
+         "questions": {"type": "array", "minItems": 1, "maxItems": 6,
+                       "items": {"type": "object", "properties": {
+                           "id": {"type": "string", "description": "Unique answer key"},
+                           "header": {"type": "string", "maxLength": 32, "description": "Short tab label"},
+                           "question": {"type": "string"},
+                           "options": {"type": "array", "maxItems": 8, "items": {"type": "string"}}},
+                           "required": ["id", "header", "question", "options"]}}},
+        []),
     _fn("artifact", "SHOW the user a page by serving it on a local URL — a web page, small app, chart, "
         "or report. This tool call is the ONLY way to make a page live; calling it is the action, "
         "describing the page is not. First write a self-contained .html file, then call this with its "
@@ -1384,6 +1404,11 @@ def bash(args: dict, ctx) -> str:
         except (OSError, ValueError):
             pass
         finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except (OSError, ValueError):
+                    pass
             capture.finish()
 
     reader = _threading.Thread(target=read_output, daemon=True)
@@ -1554,6 +1579,11 @@ def _bash_background(command: str, ctx) -> str:
         except Exception:
             pass
         finally:
+            if proc.stdout is not None:
+                try:
+                    proc.stdout.close()
+                except (OSError, ValueError):
+                    pass
             append(redactor.flush())
         try:
             proc.wait()
@@ -1640,6 +1670,30 @@ def _terminate_background(proc: subprocess.Popen, *, sweep_exited_group: bool = 
         proc.wait(timeout=2)
     except Exception:
         pass
+    if pgid is not None:
+        _await_process_group_exit(pgid)
+
+
+def _await_process_group_exit(pgid: int, timeout: float = 0.25) -> bool:
+    """Block briefly until no member of ``pgid`` remains, so a reap reported as complete is complete.
+
+    ``killpg(pgid, SIGKILL)`` only queues the signal: a grandchild that ignored SIGTERM dies a
+    scheduler tick later, and a liveness probe taken right after the kill can still see it running.
+    ``killpg(pgid, 0)`` succeeds while any member exists and raises ``ProcessLookupError`` once the
+    group is empty.  The wait is bounded so a member stuck in uninterruptible sleep cannot stall the
+    agent; ``False`` means the bound was hit (or the group is not ours to probe).
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except (PermissionError, OSError):
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.002)
 
 
 def _join_background_reader(entry: dict, timeout: float = 2.0) -> bool:
@@ -2203,7 +2257,14 @@ def _prepare_search_target(target: Path) -> tuple[str, Path] | None:
 
 
 def _display_search_path(path: Path, ctx) -> str:
-    relative = _safe_output(os.path.relpath(path, ctx.project_root), ctx)
+    # Descriptor-backed workspace reads canonicalize protected Darwin aliases such as
+    # /var -> /private/var. Use the same spelling for output only, without resolving a mutable
+    # repository descendant, so relative search paths do not leak as ../../private/var/....
+    candidate = canonicalize_trusted_os_alias(
+        Path(os.path.normpath(os.path.abspath(str(path)))))
+    project = canonicalize_trusted_os_alias(
+        Path(os.path.normpath(os.path.abspath(str(ctx.project_root)))))
+    relative = _safe_output(os.path.relpath(candidate, project), ctx)
     escaped = []
     for character in relative:
         code = ord(character)
@@ -2732,7 +2793,7 @@ def repo_map(args: dict, ctx) -> str:
             continue
         text = raw.decode("utf-8", errors="replace")
         digest = hashlib.sha256(raw).hexdigest()[:12]
-        rel = os.path.relpath(path, ctx.project_root)
+        rel = _display_search_path(path, ctx)
         symbols = _symbol_lines(path, text)
         suffix = " · " + ", ".join(symbols) if symbols else ""
         rows.append(f"{rel}  [{len(raw)} B · {digest}]{suffix}")
@@ -2743,6 +2804,15 @@ def repo_map(args: dict, ctx) -> str:
     elif state["truncated"] and len(files) < max_files:
         rows.append("… (repository scan limit reached; results are partial)")
     return "\n".join(rows)
+
+
+def git_diff(args: dict, ctx) -> str:
+    from .git_review import review_diff
+    target = _resolve(str(args.get("path") or "."), ctx.project_root,
+                      allow_external=_allow_external(args))
+    return _safe_output(review_diff(
+        ctx.project_root, target, view=args.get("view", "uncommitted"),
+        ref=args.get("ref", ""), cancel=getattr(ctx, "cancelled", None)), ctx)
 
 
 def code_intel(args: dict, ctx) -> str:
@@ -2887,6 +2957,8 @@ def skill_tool(args: dict, ctx) -> str:
     sk = ctx.skills.get(name)
     if not sk:
         return f"error: unknown skill {name!r}. Available: {', '.join(ctx.skills) or '(none)'}"
+    if not getattr(sk, "enabled", True):
+        return f"error: skill ${name} is disabled. The user can enable it in Skills."
     return f"<skill name={sk.name!r}>\n{sk.render(str(args.get('args', '')))}\n</skill>"
 
 
@@ -2933,11 +3005,14 @@ def add_skill(args: dict, ctx) -> str:
     if candidate is None or candidate.name != name:
         return "error: the downloaded skill has invalid metadata or exceeds the instruction limit"
     try:
-        _atomic_write_bytes(dest / "SKILL.md", content.encode("utf-8"), mode=0o600)
+        _atomic_write_bytes(dest / "SKILL.md", content.encode("utf-8"), mode=0o600, expected=None)
     except (OSError, ValueError, WorkspaceBoundaryError) as e:
         return f"error saving the skill: {e}"
     try:
-        ctx.skills.clear(); ctx.skills.update(discover_skills(ctx.project_root))  # live, usable now
+        ctx.skills.clear()
+        config = getattr(ctx, "config", None)
+        ctx.skills.update(discover_skills(
+            ctx.project_root, disabled_names=config.get("disabled_skills", []) if config else []))
     except Exception:
         pass
     return (f"installed skill '{name}' → {dest / 'SKILL.md'} ({len(content)} bytes). "
@@ -2957,6 +3032,7 @@ EXECUTORS = {
     "apply_patch": apply_patch_tool,
     "bash": bash, "bash_output": bash_output, "bash_kill": bash_kill, "python": python,
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
+    "git_diff": git_diff,
     "web_fetch": web_fetch,
     "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
     "save_memory": save_memory,

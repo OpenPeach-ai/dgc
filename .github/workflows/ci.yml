@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      lighthouse_scope:
+        description: Lighthouse coverage for the site-acceptance job
+        required: true
+        default: representative
+        type: choice
+        options:
+          - representative
+          - all-routes
 
 permissions:
   contents: read
@@ -14,6 +23,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  site:
+    name: Website build and Worker contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install capture inspection dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+      - run: python scripts/build-site.py --check
+      - run: python scripts/check-site.py --allow-unpublished-source-tag
+      - run: node --no-warnings scripts/check-site-worker.mjs
+
+  site-acceptance:
+    name: Website browser and Lighthouse acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run qa:site
+      - if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ inputs.lighthouse_scope }}" == "all-routes" ]]; then
+            npm run qa:site:lighthouse:all
+          else
+            npm run qa:site:lighthouse
+          fi
+      - name: Preserve browser QA evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dgc-site-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/site-qa/
+          if-no-files-found: ignore
+          retention-days: 14
+
   python:
     name: Python ${{ matrix.python }} · ${{ matrix.os }}
     strategy:
@@ -62,17 +123,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - run: npm ci
-      - run: npm run check-types
-      - run: npm test
-      - run: npm audit --audit-level=moderate
-      - run: npm run package
-      - run: npm run test:host
-      - run: ./node_modules/.bin/vsce package --no-dependencies -o dgc-ci.vsix
+      - name: Install pinned VS Code extension host
+        shell: bash
+        run: test/install-pinned-vscode.sh "$RUNNER_TEMP/dgc-vscode-host"
+      - name: Build and validate both release VSIX flavors in the real extension host
+        shell: bash
+        env:
+          DGC_EXTENSION_OUT: ${{ runner.temp }}/dgc-extension-release
+          DGC_VSCODE_EXECUTABLE: ${{ runner.temp }}/dgc-vscode-host/code
+          DGC_EXPECT_VSCODE_VERSION: 1.107.1
+        run: xvfb-run -a bash ../../scripts/release-extension.sh --build
       - uses: actions/upload-artifact@v4
         with:
           name: dgc-extension-ci
-          path: editors/vscode/dgc-ci.vsix
+          path: ${{ runner.temp }}/dgc-extension-release/*
 
   package:
     name: Python package and release archive
@@ -87,7 +151,7 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - run: DGC_ALLOW_DIRTY=1 bash scripts/build-release.sh
-      - run: sha256sum -c dist/release/dgc.tar.gz.sha256
+      - run: (cd dist/release && sha256sum -c dgc.tar.gz.sha256)
       - uses: actions/upload-artifact@v4
         with:
           name: dgc-release-candidate

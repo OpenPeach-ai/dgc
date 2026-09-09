@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { existsSync, readFileSync, writeFileSync } = require("node:fs");
-const { resolve } = require("node:path");
+const { basename, resolve } = require("node:path");
 const vscode = require("vscode");
 
 async function waitFor(predicate, timeoutMs = 10_000) {
@@ -121,16 +121,22 @@ async function run() {
   const migratedModelCount = modelCommands().filter((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret).length;
   const migratedRootCount = rootsCommands().length;
+  const beforeResumeCount = backendCommands(backendLogPath).filter(command => command.type === "resume_session").length;
   await vscode.commands.executeCommand("dgc.restart");
   await waitFor(() => rootsCommands().length > migratedRootCount);
   await waitFor(() => modelCommands().filter((command) =>
     command.base_url === initialEndpoint && command.api_key === fixtureSecret).length
       > migratedModelCount);
+  await waitFor(() => backendCommands(backendLogPath).filter(command => command.type === "resume_session").length > beforeResumeCount);
+  const restored = backendCommands(backendLogPath).filter(command => command.type === "resume_session").at(-1);
+  assert.match(restored.path, /^host-\d+\.json$/,
+    "a restarted host must restore its saved chat after native settings and root setup");
+  assert.equal(typeof restored.request_id, "string");
 
-  // Endpoint binding is part of the credential boundary. Moving to another host
-  // must delete the prior key and send no credential to the new endpoint.
+  // Endpoint binding is part of the credential boundary. Moving to another host must send no
+  // credential there, but it must not let a workspace/config override erase the user-owned key.
   const beforeEndpointChange = modelCommands().length;
-  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Global);
+  await config.update("baseUrl", changedEndpoint, vscode.ConfigurationTarget.Workspace);
   await waitFor(() => modelCommands().slice(beforeEndpointChange).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
   const changedRootCount = rootsCommands().length;
@@ -139,8 +145,14 @@ async function run() {
   await waitFor(() => rootsCommands().length > changedRootCount);
   await waitFor(() => modelCommands().slice(changedModelCount).some((command) =>
     command.base_url === changedEndpoint && !hasOwn(command, "api_key")));
+  const beforeEndpointRestore = modelCommands().length;
+  await config.update("baseUrl", undefined, vscode.ConfigurationTarget.Workspace);
+  await waitFor(() => modelCommands().slice(beforeEndpointRestore).some((command) =>
+    command.base_url === initialEndpoint && command.api_key === fixtureSecret));
 
   const initialCount = rootsCommands().length;
+  assert.ok(rootsCommands().some(command => command.question_forms === true),
+    "the installed host must opt into grouped question events when supported");
   assert.equal(vscode.workspace.updateWorkspaceFolders(1, 1), true,
     "the installed host must allow removing the secondary workspace folder");
   await waitFor(() => (vscode.workspace.workspaceFolders || []).length === 1);
@@ -159,6 +171,25 @@ async function run() {
   // actual buttons emit these messages; this installed-host layer proves that correlated permission
   // and plan requests reach the live webview and that each response reaches the child exactly once.
   const posted = () => testApi.testOnlyPostedMessages(testToken);
+  const beforeChanges = posted().filter(item => item.type === "workspace_changes" && item.fileCount === 1).length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "webviewReady" });
+  try {
+    await waitFor(() => posted().filter(item => item.type === "workspace_changes" && item.fileCount === 1).length > beforeChanges
+      && backendCommands(backendLogPath).some(command => command.type === "get_workspace_changes"));
+  } catch {
+    throw new Error("Change inspection did not complete: " + JSON.stringify({ beforeChanges,
+      changes: posted().filter(item => item.type === "workspace_changes").length,
+      posted: posted().slice(-25), commands: backendCommands(backendLogPath).slice(-25).map(command => command.type) }));
+  }
+  await waitFor(() => posted().some(item => item.type === "chat_changes" && item.fileCount === 0));
+  assert.ok(backendCommands(backendLogPath).some(command => command.type === "get_chat_changes"));
+  await testApi.testOnlyWebviewMessage(testToken, { type: "reviewChange", path: `${basename(primaryRoot)}/host-change.ts` });
+  await waitFor(() => backendCommands(backendLogPath).some(command =>
+    command.type === "get_workspace_change" && command.root === primaryRoot && command.path === "host-change.ts"));
+  await waitFor(() => vscode.window.visibleTextEditors.some(editor =>
+    editor.document.uri.scheme === "dgc-review" && editor.document.getText() === "export const changed = true;\n"));
+  assert.equal(posted().some(item => ["workspace_changes", "workspace_change"].includes(item.eventType)), false,
+    "raw roots and preview bodies must not be forwarded as webview chat events");
   assert.throws(() => testApi.testOnlyPostedMessages("wrong-token"), /unavailable/,
     "the installed-host bridge must reject a caller outside its isolated test token");
   await assert.rejects(() => testApi.testOnlyWebviewMessage("wrong-token", { type: "cancel" }),
@@ -182,6 +213,14 @@ async function run() {
     command.type === "plan_response" && command.id === "host-plan"
       && command.decision === "reject" && command.feedback === feedback));
   await waitFor(() => posted().some((item) =>
+    item.type === "event" && item.eventType === "options_request" && item.id === "host-questions"));
+  const answers = { storage: "Local", accent: "Custom lavender" };
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "options_response", id: "host-questions", answers });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "options_response" && command.id === "host-questions"
+      && command.answers?.storage === answers.storage && command.answers?.accent === answers.accent));
+  await waitFor(() => posted().some((item) =>
     item.type === "event" && item.eventType === "turn_end"));
   assert.ok(posted().some((item) => item.eventType === "request_expired"
     && item.id === "host-permission"), "permission resolution must retire its exact webview card");
@@ -202,19 +241,86 @@ async function run() {
     command.type === "plan_response" && command.id === "host-plan").length, 1,
   "one installed-host plan request must reach the backend at most once");
 
+  const beforeWorkflow = posted().filter(item => item.eventType === "turn_end").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "prompt", text: "/review --staged host workflow",
+    requestId: "host-workflow", skills: ["verify"],
+    context: [{ type: "mcp_context", server: "docs", uri: "docs://workflow", text: "Workflow snapshot" }] });
+  await waitFor(() => posted().filter(item => item.eventType === "turn_end").length > beforeWorkflow);
+  const workflowCommand = backendCommands(backendLogPath).find(command => command.request_id === "host-workflow");
+  assert.equal(workflowCommand?.workflow, "review");
+  assert.equal(workflowCommand?.text, "--staged host workflow");
+  assert.deepEqual(workflowCommand?.skills, ["verify"]);
+  assert.ok(workflowCommand?.context.some(item => item.text === "Workflow snapshot"));
+
   // Exercise both awaited and fire-and-forget editor state routes. The installed backend advertises
   // correlation, so every optional query/mutation must carry a unique bounded request ID.
+  const turnsBeforeGoal = posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "setMode", mode: "plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
-  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/goal host matrix" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "startGoal", text: "host matrix", requestId: "host-goal-input",
+    skills: ["verify"], context: [{ type: "mcp_context", server: "docs", uri: "docs://fixture", text: "Selected fixture context" }] });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/view-plan" });
   await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/status" });
-  const correlatedTypes = new Set(["set_mode", "set_think", "set_goal", "get_plan", "status"]);
+  const correlatedTypes = new Set(["set_mode", "set_think", "start_goal", "get_plan", "status"]);
   await waitFor(() => {
-    const seen = new Set(backendCommands(backendLogPath)
+    const commands = backendCommands(backendLogPath);
+    const seen = new Set(commands
       .filter((command) => correlatedTypes.has(command.type)).map((command) => command.type));
-    return [...correlatedTypes].every((type) => seen.has(type));
+    return [...correlatedTypes].every((type) => seen.has(type))
+      && commands.some((command) => command.type === "start_goal" && command.text === "host matrix");
   });
+  const goalStartCommands = backendCommands(backendLogPath);
+  const startGoal = goalStartCommands.find(command => command.type === "start_goal" && command.text === "host matrix");
+  assert.ok(startGoal, "the host must submit the complete goal as one backend command");
+  assert.equal(startGoal.request_id, "host-goal-input");
+  assert.deepEqual(startGoal.skills, ["verify"]);
+  assert.ok(startGoal.context.some(item => item.type === "mcp_context" && item.text === "Selected fixture context"));
+  assert.equal(goalStartCommands.some(command => command.type === "set_goal" && command.text === "host matrix"), false);
+  await waitFor(() => posted().some((item) => item.type === "event"
+    && item.eventType === "turn_start"));
+  const initialGoalPrompts = goalStartCommands.filter((command) => command.type === "prompt"
+    && command.text === "host matrix").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "pauseGoal" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.status === "paused"));
+  const pausedCommands = backendCommands(backendLogPath);
+  const pauseCancelIndex = pausedCommands.findIndex((command) => command.type === "cancel");
+  const pauseSetIndex = pausedCommands.findIndex((command) => command.type === "set_goal"
+    && command.status === "paused");
+  assert.ok(pauseCancelIndex !== -1 && pauseSetIndex > pauseCancelIndex,
+    "pausing an active goal must stop its turn before crossing the backend's busy mutation gate");
+  assert.equal(posted().filter((item) => item.eventType === "command_rejected"
+    && item.command === "set_goal").length, 0,
+  "the installed-host pause lifecycle must not race a goal mutation into an active turn");
+  await waitFor(() => posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length > turnsBeforeGoal);
+  const turnsBeforeResume = posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "resumeGoal" });
+  await waitFor(() => backendCommands(backendLogPath).filter((command) =>
+    command.type === "prompt" && command.text === "host matrix").length > initialGoalPrompts);
+  const resumed = backendCommands(backendLogPath);
+  const resumeSetIndex = resumed.findLastIndex((command) => command.type === "set_goal"
+    && command.status === "active");
+  const resumePromptIndex = resumed.findLastIndex((command) => command.type === "prompt"
+    && command.text === "host matrix");
+  assert.ok(resumeSetIndex !== -1 && resumePromptIndex > resumeSetIndex,
+    "the goal play control must reactivate the tagged goal before resuming its agent turn");
+  await waitFor(() => posted().filter((item) => item.type === "event"
+    && item.eventType === "turn_end").length > turnsBeforeResume);
+  const promptsBeforeEdit = backendCommands(backendLogPath)
+    .filter((command) => command.type === "prompt").length;
+  await testApi.testOnlyWebviewMessage(testToken,
+    { type: "updateGoal", text: "host matrix refined" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.text === "host matrix refined"));
+  await waitFor(() => backendCommands(backendLogPath).filter((command) => command.type === "prompt").length > promptsBeforeEdit);
+  assert.equal(backendCommands(backendLogPath).filter((command) => command.type === "prompt").at(-1).text,
+    "host matrix refined", "editing an active goal must continue using the saved revised objective");
+  await testApi.testOnlyWebviewMessage(testToken, { type: "clearGoal" });
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "set_goal" && command.text === "" && command.status === "none"));
   const correlated = backendCommands(backendLogPath)
     .filter((command) => correlatedTypes.has(command.type));
   assert.ok(correlated.every((command) =>
@@ -224,11 +330,44 @@ async function run() {
   assert.equal(new Set(correlated.map((command) => command.request_id)).size, correlated.length,
     "editor state/query request IDs must remain unique across concurrent UI paths");
 
+  // Activate a delegated route through the real config event, then cross the installed extension
+  // boundary for every model/thinking surface. Vendor model discovery must stay local to the
+  // engine metadata instead of touching the native endpoint.
+  const settingsPosts = posted().filter((item) => item.type === "settings_open").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "openSettings" });
+  await waitFor(() => posted().filter((item) => item.type === "settings_open").length > settingsPosts);
+  const nativeListCount = backendCommands(backendLogPath)
+    .filter((command) => command.type === "list_models").length;
+  await testApi.testOnlyWebviewMessage(testToken, { type: "listModels" });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(backendCommands(backendLogPath)
+    .filter((command) => command.type === "list_models").length, nativeListCount,
+  "the active subscription picker must not query the native model endpoint");
+
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setModel", model: "vendor-direct" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "setThink", level: "high" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/model vendor-slash" });
+  await testApi.testOnlyWebviewMessage(testToken, { type: "slashText", text: "/think xhigh" });
+  await waitFor(() => {
+    const changes = backendCommands(backendLogPath).filter((command) => command.type === "set_config");
+    return changes.some((command) => command.values?.subscription_model === "vendor-direct")
+      && changes.some((command) => command.values?.subscription_model === "vendor-slash")
+      && changes.some((command) => command.values?.subscription_effort === "high")
+      && changes.some((command) => command.values?.subscription_effort === "xhigh");
+  });
+  const delegatedChanges = backendCommands(backendLogPath)
+    .filter((command) => command.type === "set_config"
+      && (hasOwn(command.values || {}, "subscription_model")
+        || hasOwn(command.values || {}, "subscription_effort")));
+  assert.ok(delegatedChanges.every((command) =>
+    typeof command.request_id === "string" && command.request_id.length > 0),
+  "delegated editor controls must retain correlated state acknowledgements");
+
   const resultPath = process.env.DGC_EXTENSION_TEST_RESULT;
   assert.ok(resultPath, "the host runner must provide a result path");
   writeFileSync(resultPath, JSON.stringify({ activated: true, commands: declared.length,
     handshake: true, multiRootLifecycle: true, secretStorageLifecycle: true,
-    decisionLifecycle: true }));
+    decisionLifecycle: true, vscodeVersion: vscode.version, appName: vscode.env.appName }));
 }
 
 module.exports = { run };

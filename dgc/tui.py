@@ -11,6 +11,7 @@ the composer via a cross-thread request + event.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import math
@@ -26,6 +27,7 @@ from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Layout, VSplit, Window
@@ -34,6 +36,7 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import ConditionalProcessor, PasswordProcessor
+from prompt_toolkit.lexers import Lexer
 from rich.console import Console
 from rich.text import Text
 
@@ -41,7 +44,9 @@ from . import (__version__, attachments as attachments_mod, glyphs, logo as logo
                render as render_mod, style as style_mod)
 from .update import cached_update
 from .agent import Agent
-from .commands import canonical_command_name, command_pairs, command_pairs_with_custom
+from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
+                       resolve_command)
+from .config import persisted_mcp_args_safe, valid_remote_mcp_url
 from .redaction import redact_text, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
@@ -50,6 +55,15 @@ SLASH_COMMANDS: list[tuple[str, str]] = command_pairs("tui")
 _MAX_QUEUED_FOLLOWUPS = 8
 _MAX_QUEUED_FOLLOWUP_CHARS = 64_000
 _MAX_TRANSITIONAL_FOLLOWUP_CHARS = 128_000  # queued + one older accepted steer batch
+_RICH_LINK = re.compile(r"\x1b\]8;[^\x1b\x07]*(?:\x1b\\|\x07)")
+
+
+def _tui_ansi(value: str) -> str:
+    """Retain styled link labels without OSC 8, which prompt_toolkit's ANSI parser
+    treats as visible text. Classic terminal output keeps Rich's clickable links.
+    This applies to generated Rich output; untrusted input is sanitized before rendering.
+    """
+    return _RICH_LINK.sub("", value).rstrip("\n")
 
 
 def _cell_len(value: str) -> int:
@@ -74,15 +88,86 @@ class SlashCompleter(Completer):
     """A live command palette: while the composer holds just `/word`, offer matching commands
     (name + description) as a dropdown. Filters as you type; picks with ↑/↓ + Enter."""
 
+    def __init__(self, project_root=None):
+        self.project_root = project_root
+
     def get_completions(self, document, complete_event):
-        text = document.text_before_cursor
-        if not text.startswith("/") or " " in text:     # only while typing the command word
+        from .composer import composer_token, completion_rows
+        token = composer_token(document.text, document.cursor_position)
+        if token is None or token[0] not in ("/", "$"):
             return
-        word = text[1:].lower()
-        for name, desc in SLASH_COMMANDS:
-            if name.startswith(word):
-                yield Completion("/" + name, start_position=-len(text),
-                                 display="/" + name, display_meta=desc)
+        trigger, query, start, _end = token
+        for row in completion_rows("tui", self.project_root, trigger=trigger, query=query):
+            yield Completion(row["label"], start_position=start - document.cursor_position,
+                             display=row["label"], display_meta=row["desc"])
+
+
+class _ComposerLexer(Lexer):
+    """Mark real command and skill tokens in the composer so they never read as ordinary prose.
+
+    A trailing ``/goal``, ``/plan``, ``/review`` or ``/init`` is consumed as a verb applied to the
+    text before it, so "Set this as your /goal" sends the goal command, not that sentence. Nothing
+    distinguished such a token from a normal word, so the prompt looked silently truncated. Only
+    names that actually resolve are marked, which keeps ``/etc/hosts``, ``and/or`` and ``$5`` plain.
+    """
+
+    _TOKEN = re.compile(r"(?:(?<=\s)|\A)([/$])([A-Za-z0-9][A-Za-z0-9._-]*)")
+    _TTL = 2.0                      # names come from disk; re-reading them per keystroke would stutter
+
+    def __init__(self, tui) -> None:
+        self._tui = tui
+        self._names = {"/": frozenset(), "$": frozenset()}
+        self._deadline = 0.0
+        self._version = 0
+
+    def _known(self) -> dict:
+        now = time.monotonic()
+        if now < self._deadline:
+            return self._names
+        self._deadline = now + self._TTL
+        try:
+            from .composer import completion_rows
+            agent = getattr(self._tui, "agent", None)
+            rows = completion_rows("tui", self._tui.config.project_root,
+                                   skills=getattr(agent, "skills", {}) or {})
+            names = {"/": frozenset(row["value"] for row in rows if row["label"][:1] == "/"),
+                     "$": frozenset(row["value"] for row in rows if row["label"][:1] == "$")}
+        except Exception:
+            return self._names          # a catalog we cannot read simply marks nothing
+        if names != self._names:
+            self._names, self._version = names, self._version + 1
+        return self._names
+
+    def invalidation_hash(self):
+        return (self._version, style_mod.theme().accent_bright)
+
+    def lex_document(self, document):
+        entry = getattr(self._tui, "_input", None)
+        secret = bool(entry and entry.get("secret"))
+        known = self._known() if not secret else {"/": frozenset(), "$": frozenset()}
+        marked = f"bold fg:{style_mod.theme().accent_bright}"
+        lines = document.lines
+
+        def get_line(lineno: int):
+            try:
+                text = lines[lineno]
+            except IndexError:
+                return []
+            spans, index = [], 0
+            for match in self._TOKEN.finditer(text):
+                if match[2] not in known[match[1]]:
+                    continue
+                if match.start() > index:
+                    spans.append(("", text[index:match.start()]))
+                spans.append((marked, match[0]))
+                index = match.end()
+            if not spans:
+                return [("", text)]
+            if index < len(text):
+                spans.append(("", text[index:]))
+            return spans
+
+        return get_line
 
 
 class _NextSuggest(AutoSuggest):
@@ -271,6 +356,12 @@ class TUI:
         self._picker: dict | None = None   # {labels, cb} numbered pick (models, sessions, …)
         self._input: dict | None = None    # {prompt, cb} free-text prompt (custom host URL, …)
         self._overlay: dict | None = None  # floating dropdown/modal above the composer
+        self._pane = None                  # focus-pane occupant (arcade game or /files explorer); never enters a session
+        self._notify_armed = False         # /notify without arguments: ping once when this turn ends
+        self._pane_render_cache = None     # ((occupant/revision/geometry/theme/state), ANSI text)
+        self._ft_cache: dict = {}          # transcript entry identity -> its parsed fragments
+        self._arcade_scores = None          # lazy owner-private high scores; never enters a session
+        self._refresh_task = None           # adaptive 12.5/20 FPS asyncio UI pulse
         self._quit_armed = 0.0             # monotonic time of the first Ctrl+C (double-press to quit)
         self._build()
         if len(self.agent.messages) > 1:   # a session was already loaded (dgc --continue) → show it
@@ -288,33 +379,57 @@ class TUI:
                       on_delete=None, on_action=None, rebuild=None, on_submit=None,
                       keep_input=False, header=None, accent=False, back=None, info=False,
                       reader=False) -> None:
+        previous = getattr(self, "_overlay", None)
+        draft = previous.get("composer_draft") if previous else None
+        if not keep_input and draft is None and self.input_buf.text:
+            draft = self.input_buf.document
         if not keep_input:
             self.input_buf.reset()                      # composer becomes the filter box
         self._overlay = {"rows": rows, "on_pick": on_pick, "title": title, "tabs": tabs, "tab": tab,
                          "footer": footer, "on_delete": on_delete, "on_action": on_action,
                          "rebuild": rebuild, "on_submit": on_submit, "header": header,
                          "accent": accent, "sel": 0, "scroll": 0, "back": back, "info": info,
-                         "reader": reader}
+                         "reader": reader, "composer_draft": draft}
         self._invalidate()
 
     def _open_command_palette(self) -> None:
         """The `/` menu as an overlay (same engine as the pickers): the composer holds `/query`,
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
+        from .composer import composer_token, completion_rows
+        from prompt_toolkit.document import Document
+
         def rebuild(ov):
-            q = self.input_buf.text.lstrip("/").strip().lower()
-            rows = command_pairs_with_custom("tui", self.config.project_root)
-            rows = [(n, d) for n, d in rows if not q or q in n.lower() or q in d.lower()]
-            if q:   # rank: exact name, then name-prefix, then name-substring, then description-only
-                rows.sort(key=lambda nd: (nd[0].lower() != q, not nd[0].lower().startswith(q),
-                                          q not in nd[0].lower(), nd[0]))
-            return [{"label": "/" + n, "desc": d, "value": n} for n, d in rows]
+            token = composer_token(self.input_buf.text, self.input_buf.cursor_position)
+            if token is None:
+                return []
+            return completion_rows("tui", self.config.project_root, skills=getattr(getattr(self, "agent", None), "skills", {}),
+                                   trigger=token[0], query=token[1])
 
         def submit(row, typed):
-            if " " in typed:                            # typed args → run verbatim (e.g. /model qwen)
-                self._run_command(typed)
-            elif row:                                   # selected a row → run it
-                self._run_command("/" + row["value"])
+            token = composer_token(self.input_buf.text, self.input_buf.cursor_position)
+            if row and token:
+                before, after = self.input_buf.text[:token[2]], self.input_buf.text[token[3]:]
+                draft = before + after
+                if row["kind"] == "skill":
+                    inserted = "$" + row["value"] + ("" if after.startswith(" ") else " ")
+                    self.input_buf.set_document(Document(before + inserted + after, len(before + inserted)))
+                    return
+                if row["kind"] == "template":
+                    self.input_buf.set_document(Document("/" + row["value"] + " " + draft,
+                                                         len(row["value"]) + 2 + len(draft)))
+                    return
+                self.input_buf.set_document(Document(draft, len(before)))
+                if row["value"] in ("plan", "review", "init"):
+                    prefix = "/" + row["value"] + " "
+                    self.input_buf.set_document(Document(prefix + draft, len(prefix) + len(before)))
+                elif row["value"] == "goal" and draft.strip():
+                    self.input_buf.reset()
+                    self._run_command("/goal " + draft.strip())
+                else:
+                    self._run_command("/" + row["value"])
+                return
             elif typed.startswith("/") and len(typed) > 1:
+                self.input_buf.reset()
                 self._run_command(typed)
             else:
                 return
@@ -324,6 +439,7 @@ class TUI:
                 self._overlay["back"] = self._palette_back
         self._open_overlay([], on_pick=lambda r: None, rebuild=rebuild, on_submit=submit,
                            footer="↑↓ move · type to filter · Enter run · Esc close", keep_input=True)
+        self._overlay["composer_palette"] = True
 
     def _palette_back(self) -> None:
         """Reopen the `/` palette — the Esc-back target for any menu opened from it."""
@@ -341,6 +457,9 @@ class TUI:
         "think": ([("Off", "off"), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
                    ("Extra-high", "xhigh")],
                   lambda s: s.config.get("thinking", "off")),
+        "ultra": ([("On — deepest reasoning + bounded parallel agents", "on"),
+                    ("Off — use the selected thinking level", "off")],
+                   lambda s: "on" if s.config.get("ultra_mode", False) else "off"),
         "mode": ([("Default — ask before writes", "default"), ("Accept edits — auto-edit, ask shell", "acceptEdits"),
                   ("Plan — read-only", "plan"), ("Auto — full access", "auto")],
                  lambda s: s.agent.mode),
@@ -365,6 +484,18 @@ class TUI:
     def _open_submenu(self, cmd: str) -> None:
         opts, current = self._SUBMENUS[cmd]
         cur = current(self)
+        if cmd == "think":
+            from . import subscriptions as subs
+            engine_key = str(self.config.get("subscription_engine", "")).strip().lower()
+            engine = subs.get_engine(engine_key)
+            if engine is not None and engine.supports_effort():
+                # Subscription CLIs expose a model-dependent session-only maximum in addition to
+                # DGC's native scale.  Keep the native menu unchanged when delegation is off.
+                opts = [("Default", "off"), ("Low", "low"), ("Medium", "medium"),
+                        ("High", "high"), ("Extra-high", "xhigh"), ("Maximum", "max")]
+                if engine.key == "codex":
+                    opts = [(label, level) for label, level in opts if level != "max"]
+                cur = str(self.config.get("subscription_effort", "")) or "off"
         rows = [{"label": ("● " if v == cur else "○ ") + label, "value": v} for label, v in opts]
         self._open_overlay(rows, on_pick=lambda r: self._handle_slash(f"/{cmd} {r['value']}"),
                            title=f"/{cmd}", footer="↑↓ move · Enter select · Esc back",
@@ -388,6 +519,7 @@ class TUI:
         ],
         "Behaviour": [
             ("mode", "Permission mode", "enum", ["default", "acceptEdits", "plan", "auto"]),
+            ("ultra_mode", "Ultra execution profile", "bool"),
             ("max_turns", "Max tool iterations", "int"), ("bash_timeout", "Bash timeout (s)", "int"),
             ("search_timeout", "Search timeout (s)", "int"),
             ("verify_before_done", "Verify before finishing", "bool"),
@@ -418,6 +550,13 @@ class TUI:
             ("show_reasoning", "Show reasoning", "bool"),
             ("preserve_thinking", "Preserve thinking in context", "bool"),
             ("logo_animation", "Animate logo", "bool"),
+        ],
+        "Files pane": [
+            ("trash_mode", "/files deletes go to", "enum", ["dgc", "os"]),
+        ],
+        "Turns": [
+            ("eta", "Show the turn ETA range", "bool"),
+            ("notify", "Ping when a turn finishes", "enum", ["off", "on"]),
         ],
         "Artifacts": [
             ("artifact_bind", "Reach", "enum", ["localhost", "lan"]),
@@ -486,7 +625,8 @@ class TUI:
         except ValueError:
             self._flash(f"'{raw}' isn't a valid value for {key}"); self._open_settings_cat(cat); return
         if key == "mode":
-            self._request_mode(str(val), after=lambda: self._open_settings_cat(cat))
+            reopen = lambda: self._open_settings_cat(cat)
+            self._request_mode(str(val), after=reopen, on_cancel=reopen)
             return
         elif key == "theme":
             self._handle_slash(f"/theme {val}")
@@ -502,8 +642,12 @@ class TUI:
         self._open_settings_cat(cat)            # back to the category page (values refreshed)
 
     def _close_overlay(self) -> None:
+        ov = self._overlay or {}
+        draft = self.input_buf.document if ov.get("composer_palette") else ov.get("composer_draft")
         self._overlay = None
         self.input_buf.reset()
+        if draft is not None:
+            self.input_buf.set_document(draft)
         self._invalidate()
 
     _OVERLAY_CAP = 14                                   # max rows shown at once (fits all built-in skills)
@@ -586,7 +730,7 @@ class TUI:
     def _overlay_select(self) -> None:
         """Commit the current overlay selection (shared by Enter and mouse-click)."""
         ov = self._overlay
-        if not ov or ov.get("tabs") or ov.get("reader"):   # tabbed modals use a/x/r; readers just scroll
+        if not ov or (ov.get("tabs") and not ov.get("selectable")) or ov.get("reader"):
             return
         rows = self._overlay_rows()
         sel = rows[ov["sel"]] if rows else None
@@ -659,7 +803,18 @@ class TUI:
         inner = W - 4
         lpad = max(0, (avail - W) // 2)                  # center within the ACTUAL console width
         rows = self._overlay_rows()
-        sel, cap = ov["sel"], self._OVERLAY_CAP
+        # The backing Window can be shorter than the catalog on split terminals. Derive the real
+        # row capacity from its allocated height so the selected item always scrolls on-screen.
+        panel_height = self._overlay_height()
+        show_footer = bool(ov.get("footer")) and panel_height >= 8
+        title_rows = 2 if ov.get("tabs") else (1 if ov.get("title") else 0)
+        header_rows = len(ov["header"]) + 1 if ov.get("header") else 0
+        footer_rows = 2 if show_footer else 0
+        cap = min(self._OVERLAY_CAP,
+                  max(1, panel_height - 2 - title_rows - header_rows - footer_rows))
+        if len(rows) > cap and cap > 1:                 # leave one line for the scroll indicator
+            cap -= 1
+        sel = ov["sel"]
         scroll = ov.get("scroll", 0)
         if ov.get("reader"):                            # a scrollable doc — scroll is independent of sel
             scroll = max(0, min(scroll, len(rows) - cap)) if len(rows) > cap else 0
@@ -742,7 +897,7 @@ class TUI:
             lines.append(line)
         if len(rows) > cap:                             # scroll indicator
             emit(Text(f"  {scroll + 1}–{scroll + len(visible)} of {len(rows)}", style=th.faint))
-        if ov.get("footer"):
+        if show_footer:
             lines.append(Text(""))
             emit(Text(style_mod.terminal_safe_text(ov["footer"]), style=th.faint))
         panel = Panel(Text("\n").join(lines), box=_box.ROUNDED,
@@ -751,6 +906,7 @@ class TUI:
         return ANSI(self._rich(Padding(panel, (0, 0, 0, lpad))))
 
     def _ask_input(self, prompt: str, cb, secret: bool = False) -> None:
+        self._pause_pane("DGC NEEDS INPUT")
         self._input = {"cb": cb, "prompt": prompt, "secret": secret}
         self._flash(prompt)
 
@@ -759,6 +915,339 @@ class TUI:
         self._flash_msg = msg
         self._flash_until = time.monotonic() + secs
         self._invalidate()
+
+    # ------------------------------------------------------- turn ETA + notify ---
+    def _eta_status_text(self) -> str:
+        if not self.config.get("eta", True):
+            return ""
+        snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+        snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        if snapshot is None or not snapshot.visible:
+            return ""
+        return snapshot.label
+
+    def _show_eta(self, rest: str = "") -> None:
+        from .eta import format_stats
+        if rest.strip().lower() in ("stats", "stat", "calibration"):
+            self._open_reader(format_stats(self.agent.eta_stats_summary()), footer="turn ETA calibration · Esc close")
+            return
+        if not self.config.get("eta", True):
+            self._flash("turn ETA is off · /set eta true or /settings")
+            return
+        snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+        snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        if snapshot is None:
+            self._flash("no turn is running · /eta stats shows calibration")
+            return
+        basis = {"prior": "from this project's history", "structure": "from the task list",
+                 "blend": "history + task list"}.get(snapshot.basis, snapshot.basis)
+        self._flash(f"{snapshot.label} · {basis} · confidence {snapshot.confidence:.0%}"
+                    if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
+
+    def _set_notify(self, rest: str = "") -> None:
+        choice = rest.strip().lower()
+        if choice in ("on", "always", "true"):
+            self.config.set("notify", "on")
+            self._flash("notify → on · every turn over 20 s pings when it finishes")
+        elif choice in ("off", "never", "false"):
+            self.config.set("notify", "off")
+            self._notify_armed = False
+            self._flash("notify → off")
+        elif choice:
+            self._flash("usage: /notify · /notify on · /notify off")
+        elif self._turn.is_set():
+            self._notify_armed = not self._notify_armed
+            self._flash("will ping when this turn finishes · Esc still stops it" if self._notify_armed
+                        else "notification cancelled")
+        else:
+            self._notify_armed = not self._notify_armed
+            self._flash("will ping when the next turn finishes" if self._notify_armed
+                        else "notification cancelled")
+
+    def _maybe_notify(self, sess, verb: str, elapsed: float) -> None:
+        armed, self._notify_armed = getattr(self, "_notify_armed", False), False
+        always = str(self.config.get("notify", "off") or "off").lower() == "on"
+        if not (armed or (always and elapsed >= 20.0)):
+            return
+        name = sess.name or self.agent.session_name or "DGC"
+        title = f"DGC · {verb}"
+        body = f"{name} · {verb} after {int(elapsed)}s"
+        self._terminal_notification(title, body)
+        self._flash(f"{glyphs.DIAMOND} {body}")
+
+    @staticmethod
+    def _terminal_notification(title: str, body: str) -> None:
+        """OSC 9 (iTerm2/ConEmu/Windows Terminal), OSC 777 (rxvt/WezTerm/kitty), then BEL."""
+        import sys
+        clean = lambda s: "".join(ch for ch in str(s) if ch.isprintable())[:120]
+        try:
+            sys.stdout.write(f"\x1b]9;{clean(body)}\x07\x1b]777;notify;{clean(title)};{clean(body)}\x07\a")
+            sys.stdout.flush()
+        except (OSError, ValueError):
+            pass
+
+    # ---------------------------------------------------------- focus pane ---
+    # One slot under the transcript with one occupant at a time: a hidden arcade game or the
+    # /files explorer. prompt_toolkit stays the only renderer/input owner, so the agent keeps
+    # streaming above. The occupant folds away whenever DGC needs the user's answer.
+    def _arcade_score_store(self):
+        store = getattr(self, "_arcade_scores", None)
+        if store is None:
+            from .arcade_scores import ArcadeScoreStore
+            store = self._arcade_scores = ArcadeScoreStore()
+        return store
+
+    def _open_bored_menu(self) -> None:
+        """Open the private game selector. The command is routable but omitted from discovery."""
+        from .bored import game_choices, tracks_high_score
+        scores = self._arcade_score_store()
+        scores.refresh()
+        rows = []
+        for choice in game_choices():
+            description = choice.description
+            if tracks_high_score(choice.key):
+                description += f" · best {scores.best(choice.key):,}"
+            rows.append({"label": choice.title, "desc": description, "value": choice.key})
+        self._open_overlay(
+            rows, on_pick=lambda row: self._start_bored(row["value"]),
+            title="Take five · DGC arcade", accent=True,
+            footer="↑↓ move · type to filter · Enter play · Esc return  ·  agent stays live")
+
+    def _start_bored(self, game: str) -> None:
+        from .bored import BoredController
+        try:
+            occupant = BoredController(game, scores=self._arcade_score_store())
+        except ValueError:
+            self._flash("that diversion is unavailable")
+            return
+        self._mount_pane(occupant, "game on · Q returns to DGC; Ctrl+C still stops the agent")
+
+    def _open_files(self, arg: str = "") -> None:
+        """Open the /files explorer in the focus pane (or jump it to a path)."""
+        from .files import FilesPane, FilesPaneError
+        current = self._pane if getattr(self._pane, "kind", "") == "files" else None
+        try:
+            if current is not None:
+                if arg.strip():
+                    current.go(arg.strip())
+                self._pane_render_cache = None
+                self._invalidate()
+                return
+            occupant = FilesPane(self.config.project_root, host=self._files_host(),
+                                 start=arg.strip() or None)
+        except FilesPaneError as exc:
+            self._flash(str(exc))
+            return
+        self._mount_pane(occupant, "files · Enter inserts @path · q returns to DGC")
+
+    def _files_host(self):
+        """The narrow surface the explorer may touch: composer, mode, flash, changed paths."""
+        tui = self
+
+        class _Host:
+            @property
+            def mode(self) -> str:
+                return str(getattr(tui.agent, "mode", "default") or "default")
+
+            @property
+            def config(self):
+                return tui.config
+
+            def flash(self, message: str) -> None:
+                tui._flash(message)
+
+            def insert_reference(self, text: str) -> None:
+                buf = tui.input_buf
+                prefix = buf.document.text_before_cursor
+                if prefix and not prefix[-1].isspace():
+                    text = " " + text
+                buf.insert_text(text)
+
+            def changed_paths(self) -> set[str]:
+                paths: set[str] = set()
+                manager = getattr(tui.agent, "checkpoints", None)
+                points = getattr(manager, "points", None) or []
+                if points:
+                    try:
+                        paths.update(str(item) for item in (points[-1].get("files") or {}))
+                    except AttributeError:
+                        pass
+                return paths
+
+            def agent_busy(self) -> bool:
+                return tui._turn.is_set()
+        return _Host()
+
+    def _mount_pane(self, occupant, message: str) -> None:
+        self._pane = occupant
+        self._pane_render_cache = None
+        self.input_buf.reset()
+        self._flash(message)
+        self._invalidate()
+
+    def _ensure_refresh_task(self, app) -> None:
+        """Start one adaptive redraw pulse after prompt_toolkit's event loop is running."""
+        current = getattr(self, "_refresh_task", None)
+        if current is not None and not current.done():
+            return
+
+        async def pulse() -> None:
+            while True:
+                occupant = getattr(self, "_pane", None)
+                interval = 0.08
+                if occupant is not None and not getattr(occupant, "paused", False):
+                    interval = min(interval, float(getattr(occupant, "redraw_interval", interval)))
+                await asyncio.sleep(max(0.04, interval))
+                app.invalidate()
+
+        self._refresh_task = app.create_background_task(pulse())
+
+    def _close_pane(self) -> None:
+        occupant = self._pane
+        if occupant is not None:
+            self._pane = None
+            self._pane_render_cache = None
+            close = getattr(occupant, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            self._flash("back to work" if getattr(occupant, "kind", "") == "game" else "files closed")
+            self._invalidate()
+
+    def _pause_pane(self, reason: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is not None and occupant.pause(reason):
+            self._invalidate()
+
+    def _pane_visible(self) -> bool:
+        return (getattr(self, "_pane", None) is not None
+                and self._overlay is None and self._req is None
+                and self._input is None and not self._naming)
+
+    def _pane_height(self) -> int:
+        if not self._pane_visible():
+            return 0
+        self._sync_width()
+        cap = 18 if getattr(self._pane, "kind", "") == "files" else 16
+        target = min(cap, max(10, (self._height * 3) // 5))
+        # The pane temporarily folds the task pane, so reserve header/chrome + four real transcript
+        # rows. Tasks remain live in memory and reappear unchanged when the pane closes.
+        available = self._height - self._chrome_below() - 1 - 4
+        return max(4, min(target, available))
+
+    def _pane_agent_state(self) -> str:
+        if self._req is not None:
+            return "NEEDS INPUT"
+        if not self._turn.is_set():
+            return "IDLE"
+        if self._cancel.is_set():
+            return "STOPPING"
+        if self._streaming:
+            return "RESPONDING"
+        if self._cur_tool:
+            return "USING TOOLS"
+        if self._thinking:
+            return "THINKING"
+        return "WORKING"
+
+    def _render_pane(self):
+        from .pane import render_frame
+        occupant = getattr(self, "_pane", None)
+        if occupant is None:
+            return ANSI("")
+        self._sync_width()
+        height = max(4, self._pane_height())
+        width = max(20, self._width - 2)
+        agent_state = self._pane_agent_state()
+        th = style_mod.theme()
+        revision = occupant.advance()
+        cache_key = (id(occupant), revision, width, height, agent_state, th.name)
+        cached = getattr(self, "_pane_render_cache", None)
+        if cached is not None and cached[0] == cache_key:
+            return ANSI(cached[1])
+        try:
+            frame = occupant.snapshot(width - 2, height - 2)
+            rendered = self._rich(render_frame(
+                frame, width, height, agent_state=agent_state, theme=th))
+        except Exception as exc:  # an occupant bug must never take the transcript down with it
+            self._pane = None
+            self._pane_render_cache = None
+            self._flash(f"pane closed: {type(exc).__name__}: {str(exc)[:80]}")
+            return ANSI("")
+        self._pane_render_cache = (cache_key, rendered)
+        return ANSI(rendered)
+
+    def _pane_key(self, key: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is None:
+            return
+        try:
+            result = occupant.handle_key(key)
+        except Exception as exc:
+            self._pane = None
+            self._pane_render_cache = None
+            self._flash(f"pane closed: {type(exc).__name__}: {str(exc)[:80]}")
+            self._invalidate()
+            return
+        if result == "exit":
+            self._close_pane()
+        else:
+            self._invalidate()
+
+    def _pane_text(self, text: str) -> None:
+        occupant = getattr(self, "_pane", None)
+        if occupant is None or not text:
+            return
+        if occupant.handle_text(text):
+            self._invalidate()
+
+    def _handle_running_local_command(self, text: str) -> bool:
+        """Run explicitly safe local commands before active-turn steering sees the text."""
+        if not text.startswith("/"):
+            return False
+        goal_command = text.strip().lower()
+        if goal_command in ("/goal", "/goal review", "/goal status"):
+            from .goals import review_markdown
+            self._open_reader(review_markdown(self.agent.goal_snapshot()), footer="goal review · Esc close")
+            return True
+        if goal_command in ("/goal pause", "/goal clear", "/goal delete"):
+            action = "pause" if goal_command.endswith("pause") else "clear"
+            if self.agent.request_goal_control(action):
+                self._flash("stopping goal…")
+            else:
+                self._flash("stop the current turn before changing its goal")
+            return True
+        name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+        spec = resolve_command(name, "tui")
+        if spec is None or not spec.available_while_running:
+            return False
+        self._run_command(text)
+        return True
+
+    def _dispatch_composer_text(self, text: str) -> str:
+        """Route a completed composer value, with local mid-turn commands taking priority."""
+        if not text:
+            return "empty"
+        if self._turn.is_set():
+            if self._handle_running_local_command(text):
+                return "local-command"
+            return "full" if self._route_followup(text) == "full" else "follow-up"
+        from .composer import composer_token
+        token = composer_token(text, len(text))
+        if token and token[0] == "/" and token[2] > 0 and token[1] in ("plan", "review", "init"):
+            text = "/" + token[1] + " " + text[:token[2]].rstrip()
+        if text.startswith("/") and self._handle_slash(text):
+            return "command"
+        if text.startswith("#"):
+            self._save_memory_direct(text[1:])
+            return "memory"
+        if text.startswith("!"):
+            self._submit_shell(text[1:])
+            return "shell"
+        self._submit(text)
+        return "prompt"
 
     # ------------------------------------------------------------ rendering ---
     def _sync_width(self) -> None:
@@ -778,7 +1267,7 @@ class TUI:
     def _rich(self, *renderables, **kw) -> str:
         c = self._console()
         c.print(*renderables, **kw)
-        return c.file.getvalue().rstrip("\n")
+        return _tui_ansi(c.file.getvalue())
 
     def _append(self, ansi: str) -> None:
         self.blocks.append(ansi)
@@ -820,7 +1309,7 @@ class TUI:
     def _rail_frag(self, running: bool, row: int, error: bool = False):
         """A left accent-bar fragment (a block rail), grouping a tool/reasoning block off the
         page. While it runs the bar is an animated downward traveling wave in the accent; on finish
-        it settles to a static faint rail (red on error). refresh_interval=0.08 animates it for free."""
+        it settles to a static faint rail (red on error). The adaptive UI pulse animates it."""
         import math
         th = style_mod.theme()
         if not running:
@@ -849,30 +1338,61 @@ class TUI:
         th = style_mod.theme()
         ft = []
         prev = None                             # kind of the previous block (None = first)
-        def add(frags, kind):
-            nonlocal prev
+        lines = 0                               # newlines already in ft, tallied as we go
+        def add(frags, kind, nl=None):
+            nonlocal prev, lines
+            if nl is None:
+                nl = sum(f[1].count("\n") for f in frags)
             if prev is not None:
                 # spacing rhythm — a 1-row inter-entry gap: one untinted blank row around assistant
                 # prose, reasoning, AND the user band — so each breathes on both sides. Only adjacent
                 # tool rows pack together. The band's own tinted vpad sits INSIDE this untinted gap.
                 spaced = kind in ("text", "think", "user") or prev in ("text", "think", "user")
-                ft.append(("", "\n\n" if spaced else "\n"))
+                separator = "\n\n" if spaced else "\n"
+                ft.append(("", separator)); lines += len(separator)
             elif kind == "user":
                 # first block: keep the tinted band from butting against the slim header
-                ft.append(("", "\n"))
+                ft.append(("", "\n")); lines += 1
             ft.extend(frags)
+            lines += nl
             prev = kind
+        # _append stores each entry already rendered, but re-parsing every stored entry into
+        # fragments on EVERY frame made one keystroke cost the whole history (linear: ~17 ms at
+        # 1000 short entries, far more with real tool output). Entries are immutable once written,
+        # so their fragments are reused until something they are derived from actually changes.
+        theme_key = (th.accent, th.accent_dim, th.faint, th.border_strong, th.err, th.text)
+        # Probes build a bare TUI with object.__new__, which never runs __init__.
+        cached, fresh = getattr(self, "_ft_cache", None) or {}, {}
+
+        def reuse(blk, build):
+            """Fragments and line count for one entry, reused until its identity changes."""
+            key = self._block_key(blk, theme_key)
+            if key is None:                       # animated entry — no stable form to reuse
+                frags = build()
+                return frags, sum(f[1].count("\n") for f in frags)
+            got = cached.get(key)
+            if got is None:
+                frags = build()
+                got = (frags, sum(f[1].count("\n") for f in frags))
+            fresh[key] = got                      # only entries seen this frame survive
+            return got
+
         for blk in self.blocks:
             if isinstance(blk, dict) and blk.get("kind") == "think":
-                add(self._think_frags(blk), "think")
+                frags, nl = reuse(blk, lambda b=blk: self._think_frags(b))
+                add(frags, "think", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "tool":
-                add(self._tool_frags(blk), "tool")
+                frags, nl = reuse(blk, lambda b=blk: self._tool_frags(b))
+                add(frags, "tool", nl)
             elif isinstance(blk, dict) and blk.get("kind") == "user":
-                # re-rendered every frame at the CURRENT width so the full-width band reflows on
-                # resize instead of keeping stale padding (the "box dismantles on resize" bug).
-                add(list(to_formatted_text(ANSI(self._user_band(blk["text"], blk.get("tag", ""))))), "user")
+                # Still exact on resize: the geometry it reflows to is part of its cache identity.
+                frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(
+                    ANSI(self._user_band(b["text"], b.get("tag", ""))))))
+                add(frags, "user", nl)
             elif blk:
-                add(list(to_formatted_text(ANSI(blk))), "text")
+                frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(ANSI(b))))
+                add(frags, "text", nl)
+        self._ft_cache = fresh
         if self._think:                     # in-flight reasoning: a header + a rolling last-N tail,
             m = self._live_marker()         #   each line rail-wrapped, instead of one growing grey smear
             frags = [(f"bold fg:{th.accent}", m + " "), (f"fg:{th.muted}", "Thinking…")]
@@ -889,8 +1409,31 @@ class TUI:
         if prev is None:
             self._scroll_off = 0
             return ANSI("")                      # empty transcript (welcome state) — kept clear
-        ft.append(("", "\n"))
-        return self._place_cursor(ft)
+        ft.append(("", "\n")); lines += 1
+        return self._place_cursor(ft, 1 + lines)
+
+    def _block_key(self, blk, theme_key):
+        """The cache identity of one transcript entry: everything its fragments are derived from.
+
+        ``None`` means the entry has no stable form and must be rebuilt every frame — a running
+        tool animates both its rail (a travelling wave) and its live marker.
+        """
+        if not isinstance(blk, dict):
+            return ("text", blk, theme_key)
+        kind = blk.get("kind")
+        if kind == "think":
+            return ("think", blk.get("secs"), bool(blk.get("exp")), blk.get("text", ""), theme_key)
+        if kind == "tool":
+            if blk.get("running"):
+                return None
+            return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
+                    bool(blk.get("error")), blk.get("diff") or "", blk.get("out") or "", theme_key)
+        if kind == "user":
+            # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
+            # width and height in the identity preserves the resize reflow exactly.
+            return ("user", blk.get("text", ""), blk.get("tag", ""),
+                    self._width, getattr(self, "_height", 0), theme_key)
+        return None
 
     def _think_frags(self, b: dict):
         """A collapsible reasoning block: a clickable dim `◆ ▸ Thought for Xs` header that expands
@@ -988,36 +1531,49 @@ class TUI:
         from prompt_toolkit.formatted_text import to_formatted_text
         return self._place_cursor(list(to_formatted_text(ANSI(text))))
 
-    def _place_cursor(self, frags):
-        """Insert a [SetCursorPosition] marker into a fragment list at the line to keep visible
-        (scroll-follow). Preserves per-fragment mouse handlers (3-tuples) so clickable blocks
-        (e.g. collapsible thinking) keep working."""
-        total = 1 + sum(f[1].count("\n") for f in frags)
+    def _place_cursor(self, frags, total=None):
+        """Insert a [SetCursorPosition] marker at the line to keep visible (scroll-follow).
+
+        Exactly one fragment straddles that line, so only it is split; everything before and after
+        is spliced in whole. The marker normally belongs on the LAST line (following new output),
+        so the search walks back from the end and touches a couple of fragments rather than all of
+        them — rebuilding the whole list every frame was 95% of a redraw in a long session.
+        ``total`` is the caller's already-known line count, which avoids recounting them too.
+        Preserves per-fragment mouse handlers (3-tuples) so clickable blocks keep working.
+        """
+        if total is None:
+            total = 1 + sum(f[1].count("\n") for f in frags)
         target = total - 1 - max(0, min(self._scroll_off, total - 1))
+        marker = ("[SetCursorPosition]", "")
         if target <= 0:
-            return [("[SetCursorPosition]", "")] + frags
-        out, line, placed = [], 0, False
-        for frag in frags:
-            style, txt = frag[0], frag[1]
-            handler = frag[2] if len(frag) > 2 else None
-            if placed or "\n" not in txt:
-                out.append(frag); continue
-            segs = txt.split("\n")
-            for k, seg in enumerate(segs):
-                if seg:
-                    out.append((style, seg, handler) if handler else (style, seg))
-                if k < len(segs) - 1:
-                    line += 1
-                    out.append((style, "\n"))
-                    if not placed and line >= target:
-                        out.append(("[SetCursorPosition]", "")); placed = True
-        if not placed:
-            out.append(("[SetCursorPosition]", ""))
-        return out
+            return [marker] + frags
+        # The marker sits immediately after the target-th newline, which is the
+        # (total - target)-th counting back from the end.
+        behind, seen = total - target, 0
+        for i in range(len(frags) - 1, -1, -1):
+            text = frags[i][1]
+            count = text.count("\n")
+            if not count:
+                continue
+            if seen + count < behind:
+                seen += count
+                continue
+            # Split inside this fragment, after its (count - (behind - seen) + 1)-th newline.
+            cut, position = count - (behind - seen), -1
+            for _ in range(cut + 1):
+                position = text.index("\n", position + 1)
+            style, handler = frags[i][0], (frags[i][2] if len(frags[i]) > 2 else None)
+            head, tail = text[:position + 1], text[position + 1:]
+            middle = [(style, head, handler) if handler else (style, head), marker]
+            if tail:
+                middle.append((style, tail, handler) if handler else (style, tail))
+            return frags[:i] + middle + frags[i + 1:]
+        return frags + [marker]
 
     def _tip(self):
         th = style_mod.theme()
-        if self.blocks or self._buf or self._overlay or self._welcome_metrics()[2] == "compact":
+        if (self.blocks or self._buf or self._overlay or self._pane is not None
+                or self._welcome_metrics()[2] == "compact"):
             return ANSI("")
         upd = cached_update()
         if upd:                                            # echo the update CTA in the tip, like 
@@ -1040,8 +1596,12 @@ class TUI:
             chips = [("Enter", "confirm"), ("Esc", "cancel")]
         elif self._overlay is not None:
             chips = [("↑↓", "move"), ("Enter", "select"), ("Esc", "close")]
+        elif self._pane_visible():
+            chips = list(self._pane.hint_chips())
+            if self._turn.is_set():
+                chips.append(("Ctrl+C", "stop agent"))
         elif self._turn.is_set():
-            chips = [("Esc", "stop"), ("Enter", "follow up")]
+            chips = [("Esc", "stop"), ("Enter", "follow up"), ("Tab", "queue")]
         else:
             chips = [("Enter", "send"), ("Shift+Tab", "mode"), ("/", "commands"),
                      ("Ctrl+N", "new"), ("Ctrl+C", "quit")]
@@ -1069,7 +1629,8 @@ class TUI:
     def _header(self):
         self._sync_width()                  # resize with the terminal, before laying anything out
         th = style_mod.theme()
-        if self.blocks or self._buf or self._overlay:   # conversation / overlay open → slim line
+        if (self.blocks or self._buf or self._overlay
+                or self._pane is not None):  # active surface → slim line
             nm = f" · {self.agent.session_name}" if self.agent.session_name else ""
             branch = getattr(self.active, "workspace_branch", "")
             ws = f" · {branch}" if branch else ""
@@ -1285,7 +1846,7 @@ class TUI:
         c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
                     width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
         c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md)))
-        ansi = c.file.getvalue().rstrip("\n")
+        ansi = _tui_ansi(c.file.getvalue())
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
         self._open_overlay(rows, on_pick=lambda r: None, reader=True, accent=True,
                            footer=footer, back=back)
@@ -1359,7 +1920,8 @@ class TUI:
         open_files = set()
         for s in sorted(self._sessions, key=lambda s: (not s.pinned, -s.last_activity)):
             st = "active" if s is self.active else s.state
-            preview = next((str(m.get("content", "")) for m in s.agent.messages if m.get("role") == "user"), "")
+            from .workflows import display_prompt
+            preview = next((display_prompt(str(m.get("content", ""))) for m in s.agent.messages if m.get("role") == "user"), "")
             title = (s.name or (preview[:40] if preview else "(new agent)"))[:40]
             pin = "⟐ " if s.pinned else ""
             tools = f" · {s._tool_count} tools" if s._tool_count else ""
@@ -1609,8 +2171,10 @@ class TUI:
             #  turn-status structure: spinner + activity + phase-timer (left); total-time + ⇣tokens + [stop] (right).
             tstr = f"{el:.0f}s" if el < 60 else f"{int(el // 60)}m{int(el % 60)}s"
             toks = render_mod.fmt_tokens(self.agent.estimate_tokens())
+            eta_text = self._eta_status_text()
             left = f"[{th.accent}]{fr}[/] [{th.muted}]{_esc(act)}…[/] [{th.faint}]{pstr}[/]"
-            right = f"[{th.faint}]{tstr}  ⇣{toks}[/]  [{th.err}][stop][/]"
+            right = (f"[{th.faint}]{tstr}[/]" + (f"  [{th.muted}]{_esc(eta_text)}[/]" if eta_text else "")
+                     + f"  [{th.faint}]⇣{toks}[/]  [{th.err}][stop][/]")
             return self._pad_lr(left, right)
         return ANSI("")                          # idle: the context bar now lives top-right in the header
 
@@ -1639,7 +2203,10 @@ class TUI:
         th = style_mod.theme()
         mode = self.agent.mode
         mc = {"default": th.muted, "acceptEdits": th.accent, "plan": th.accent_bright, "auto": th.err}
-        return ANSI(self._rich(f"[{th.faint}]{_esc(self._model_label())}[/]  "
+        profile = "Ultra" if self.config.get("ultra_mode", False) else None
+        extra = (f"  [{th.faint}]{glyphs.MIDDOT}[/]  [{th.accent_bright}]{profile}[/]"
+                 if profile else "")
+        return ANSI(self._rich(f"[{th.faint}]{_esc(self._model_label())}[/]{extra}  "
                                f"[{th.faint}]{glyphs.MIDDOT}[/]  "
                                f"[{mc.get(mode, th.muted)}]{_esc(mode)}[/]",
                                end=""))
@@ -1818,6 +2385,48 @@ class TUI:
     def _todos_visible(self) -> bool:
         return bool(self._todos) and (self._turn.is_set()
                                       or any(t.get("status") not in ("done", "cancelled") for t in self._todos))
+
+    _GOAL_TONE = {"active": "ok", "paused": "warn", "blocked": "err", "completed": "muted"}
+
+    def _goal_panel_visible(self) -> bool:
+        """Parity with the editor, which keeps the goal and its work time above the composer."""
+        agent = getattr(self, "agent", None)
+        return (self._pane is None and bool(getattr(agent, "goal", ""))
+                and str(getattr(agent, "goal_status", "none")) != "none")
+
+    def _goal_pane_height(self) -> int:
+        return 1 if self._goal_panel_visible() else 0
+
+    @staticmethod
+    def _goal_clock(seconds) -> str:
+        seconds = max(0, int(seconds))
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m"
+        return f"{seconds // 3600}h{(seconds % 3600) // 60:02d}m"
+
+    def _goal_pane(self):
+        """One row: the standing objective, its state, and the work time already spent on it."""
+        th = style_mod.theme()
+        agent = self.agent
+        status = str(getattr(agent, "goal_status", "none"))
+        tone = getattr(th, self._GOAL_TONE.get(status, "muted"))
+        try:
+            clock = self._goal_clock(agent.goal_elapsed_seconds())
+        except Exception:
+            clock = "0s"
+        rail = f"[{th.border_strong}]{glyphs.RAIL}[/]"
+        text = " ".join(str(getattr(agent, "goal", "")).split())
+        room = max(8, self._width - _cell_len(f"  Goal {status} {clock} ") - 2)
+        if _cell_len(text) > room:
+            text = text[:max(1, room - 1)] + "\u2026"
+        return ANSI(self._rich(f"{rail} [bold {th.muted}]Goal[/] [{tone}]{status}[/] "
+                               f"[{th.faint}]{clock}[/] [{th.text}]{_esc(text)}[/]"))
+
+    def _todo_panel_visible(self) -> bool:
+        """The focus pane borrows the task pane's rows; task state itself continues updating."""
+        return self._pane is None and self._todos_visible()
 
     def _todo_pane_height(self) -> int:
         return (len(self._todos) + 1) if self._todos_visible() else 0   # title row + one per task
@@ -2013,17 +2622,83 @@ class TUI:
         req = sess._req
         if not req:
             return
+        if req.get("kind") == "questions":
+            self._show_questions_overlay(sess)
+            return
         options = req.get("options", [])
         rows = [{"label": f"{i + 1}  {o}", "value": i} for i, o in enumerate(options)]   # 1-9 shortcuts
         self._open_overlay(rows, on_pick=sess._req_pick, title=req.get("title"), header=req.get("header"),
                            footer=req.get("footer", "↑↓ move · 1-9 or Enter select · Esc cancel"),
                            accent=True)
 
-    def _ask(self, req: dict, cancel=None):
+    def _show_questions_overlay(self, sess: "AgentSession") -> None:
+        """One persistent decision form: Tab changes questions; only Submit wakes the worker."""
+        from rich.text import Text
+        from .questions import valid_answers, MAX_ANSWER
+        req = sess._req
+        questions, answers = req["questions"], req["answers"]
+        req.setdefault("composer_draft", self.input_buf.document)
+        safe = style_mod.terminal_safe_text
+
+        def rebuild(ov):
+            req["tab"] = ov["tab"]
+            q = questions[ov["tab"]]
+            ov["header"] = [Text(safe(q["question"]), style="bold")]
+            rows = [{"label": f"{i + 1}  {'✓ ' if answers.get(q['id']) == o else ''}{safe(o)}",
+                     "value": i} for i, o in enumerate(q["options"])]
+            custom = answers.get(q["id"], "")
+            rows.append({"label": f"{len(rows) + 1}  Other — type your own answer",
+                         "desc": safe(custom) if custom not in q["options"] else "", "value": "other"})
+            rows.append({"label": f"Submit · {len(answers)}/{len(questions)} answered", "value": "submit"})
+            return rows
+
+        def pick(row):
+            if sess._req is not req:
+                return
+            q = questions[req.get("tab", 0)]
+            value = row["value"]
+            if value == "submit":
+                if valid_answers(questions, answers):
+                    sess._req_answer = dict(answers)
+                    sess._req_event.set()
+                    return
+                self._flash("Answer every question before submitting")
+            elif value == "other":
+                self.input_buf.reset()
+                custom = req.get("other_drafts", {}).get(q["id"], answers.get(q["id"], ""))
+                if custom and custom not in q["options"]:
+                    self.input_buf.insert_text(custom)
+                def entered(text):
+                    if sess._req is not req:
+                        return
+                    text = text.strip()
+                    req.setdefault("other_drafts", {})[q["id"]] = text
+                    if text and len(text) <= MAX_ANSWER:
+                        answers[q["id"]] = text
+                    elif len(text) > MAX_ANSWER:
+                        self._flash(f"Keep your answer within {MAX_ANSWER} characters")
+                    self.input_buf.set_document(req["composer_draft"])
+                    self._show_questions_overlay(sess)
+                self._input = {"cb": entered, "prompt": "Other — your answer (Esc returns to questions):",
+                               "question_owner": sess, "question_id": q["id"]}
+                self._invalidate()
+                return
+            else:
+                answers[q["id"]] = q["options"][value]
+            self._show_questions_overlay(sess)
+
+        self._open_overlay([], on_pick=pick, tabs=[q["header"] for q in questions], tab=req.get("tab", 0),
+                           rebuild=rebuild, accent=True,
+                           footer="Tab switch question · ↑↓ move · Enter select · Submit sends all · Esc cancel")
+        self._overlay["selectable"] = True
+
+    def _ask(self, req: dict, cancel=None, recheck=None):
         """A blocking prompt for the CALLING session. Runs on that session's worker thread; the UI
         thread answers via on_pick / number keys / Esc. If the session is on screen the card opens
         now; if it's a BACKGROUND agent, the request is parked (◆ needs you) until you switch to it."""
         sess = self._cur_session()
+        if sess is self.active:
+            self._pause_pane("DGC NEEDS INPUT")
         sess._req = req
         sess._req_event.clear()
 
@@ -2038,16 +2713,27 @@ class TUI:
         self._invalidate()
 
         while not sess._req_event.wait(0.1):
+            if recheck is not None:
+                answer = recheck()
+                if answer is not None:
+                    sess._req_answer = answer
+                    break
             if cancel is not None and cancel.is_set():
                 sess._req_answer = None
                 break
         sess._req = None
+        if req.get("kind") == "questions" and sess is self.active:
+            self._input = None
+            self.input_buf.set_document(req.get("composer_draft", self.input_buf.document))
         if sess is self.active and self._overlay is not None:
             self._overlay = None                        # close (option chosen or Esc-cancelled)
         self._invalidate()
         return sess._req_answer
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
+        return self.approve_live(name, args, call_id)
+
+    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         from rich.text import Text
         self._flush_text()
         th = style_mod.theme()
@@ -2063,7 +2749,8 @@ class TUI:
                 header.append(Text("  " + detail, style=th.muted))
         ans = self._ask({"kind": "approve", "header": header,
                          "options": ["Allow once", "Always allow this", "Deny", "Deny with a reason"],
-                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"})
+                         "footer": "↑↓ · 1 allow · 2 always · 3 deny · Enter select · Esc deny"},
+                        recheck=(lambda: {"once": 0, "no": 2}.get(recheck())) if recheck else None)
         if ans == 3:                                     # deny + tell the model why (steers the retry)
             self.deny_reason = self._ask_text("why / what to do instead:")
             return "no"
@@ -2072,6 +2759,7 @@ class TUI:
 
     def _ask_text(self, prompt: str, cancel=None) -> str:
         """A BLOCKING free-text prompt (worker thread) — used to capture a denial reason."""
+        self._pause_pane("DGC NEEDS INPUT")
         result = {"v": ""}
         self._req_event.clear()
 
@@ -2114,11 +2802,16 @@ class TUI:
         return None
 
     def propose_options(self, question: str, options: list[str]) -> str:
-        from rich.text import Text
+        answers = self.propose_questions([{"id": "q1", "header": "Question", "question": question,
+                                           "options": list(options)}])
+        return (answers or {}).get("q1", "")
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        from .questions import valid_answers
         self._flush_text()
-        ans = self._ask({"kind": "options", "options": list(options),
-                         "header": [Text(style_mod.terminal_safe_text(question), style="bold")]})
-        return options[ans] if isinstance(ans, int) and 0 <= ans < len(options) else options[0]
+        ans = self._ask({"kind": "questions", "questions": questions, "answers": {}, "tab": 0},
+                        cancel=self._cur_session().agent.cancelled)
+        return ans if valid_answers(questions, ans) else None
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -2272,6 +2965,7 @@ class TUI:
         secret_input = Condition(lambda: self._input is not None and self._input.get("secret") is True)
         composer = Window(BufferControl(
                               self.input_buf, focus_on_click=True,
+                              lexer=_ComposerLexer(self),
                               input_processors=[ConditionalProcessor(
                                   PasswordProcessor(char="•"), filter=secret_input)]),
                           get_line_prefix=self._line_prefix, wrap_lines=True,
@@ -2294,13 +2988,27 @@ class TUI:
                    height=self._overlay_height,
                    dont_extend_height=True),
             filter=Condition(lambda: self._overlay is not None))
+        # The focus pane (a game or the /files explorer) shares the layout instead of taking over
+        # the terminal. The transcript remains the weighted region above it and therefore
+        # continues to show live agent output.
+        pane_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._render_pane), height=self._pane_height,
+                   dont_extend_height=True),
+            filter=Condition(self._pane_visible))
         # A live task list pinned just above the composer  — shows while a turn
         # runs or any task is still open, then folds away.
         todo_panel = ConditionalContainer(
             Window(FormattedTextControl(self._todo_pane), height=self._todo_pane_height,
                    dont_extend_height=True),
-            filter=Condition(self._todos_visible))
-        root = HSplit([header, transcript, overlay_panel, todo_panel, status, composer_box, shortcut_bar])
+            filter=Condition(self._todo_panel_visible))
+        # The standing goal sits with the task list, directly above the composer, so the terminal
+        # shows the same objective + work time the editor keeps pinned there.
+        goal_panel = ConditionalContainer(
+            Window(FormattedTextControl(self._goal_pane), height=self._goal_pane_height,
+                   dont_extend_height=True),
+            filter=Condition(self._goal_panel_visible))
+        root = HSplit([header, transcript, pane_panel, overlay_panel, goal_panel, todo_panel,
+                       status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
@@ -2308,14 +3016,15 @@ class TUI:
         self.app = Application(layout=Layout(root, focused_element=composer),
                                key_bindings=self._keys(), full_screen=True,
                                mouse_support=Condition(lambda: self._mouse_on),
-                               style=self._pt_style(), refresh_interval=0.08,
+                               style=self._pt_style(), refresh_interval=None,
+                               before_render=self._ensure_refresh_task,
                                # NOT erase_when_done: full-screen uses the alternate screen, which the
                                # terminal restores on exit. erase_when_done ALSO erases on top of that
                                # and, with the tall centered header, left ~a screen of blank lines.
                                color_depth=style_mod.detect_color_depth())
 
     def _header_height(self) -> int:
-        if self.blocks or self._buf or self._overlay:
+        if self.blocks or self._buf or self._overlay or self._pane is not None:
             return 1
         self._sync_width()
         _, _, mode, card_h, _ = self._welcome_metrics()
@@ -2660,6 +3369,12 @@ class TUI:
         """Make session `idx` the active (on-screen) one; the others keep running in the background."""
         if not self._sessions:
             return
+        if self._input is not None and self._input.get("question_owner") is self.active:
+            req = self.active._req
+            if req is not None:
+                req.setdefault("other_drafts", {})[self._input["question_id"]] = self.input_buf.text
+                self.input_buf.set_document(req["composer_draft"])
+            self._input = None
         if self._overlay is None:                        # stash a REAL draft, not an overlay's filter text
             self.active.draft = self.input_buf.text
         self._active_idx = max(0, min(idx, len(self._sessions) - 1))
@@ -2668,6 +3383,7 @@ class TUI:
         if self.active.draft:
             self.input_buf.insert_text(self.active.draft)
         if self.active._req is not None:                 # this agent was waiting on you → show its card
+            self._pause_pane("DGC NEEDS INPUT")
             self._show_req_overlay(self.active)
         self._invalidate()
 
@@ -2775,11 +3491,22 @@ class TUI:
         cur = order.index(self.agent.mode) if self.agent.mode in order else 0
         self._request_mode(order[(cur + 1) % len(order)])
 
-    def _request_mode(self, mode: str, after=None) -> None:
+    def _request_mode(self, mode: str, after=None, on_cancel=None) -> None:
         """Apply a permission mode, with a modal acknowledgement before full auto."""
+        from . import subscriptions as subs
+        active_engine = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        try:
+            subs.validate_engine_mode(active_engine, mode)
+        except subs.EngineModeUnsupported as exc:
+            self._flash(str(exc))
+            self._invalidate()
+            return
+
         def commit() -> None:
             self.agent.set_mode(mode)
-            self._flash(f"mode → {mode}")
+            self._flash(f"mode → {mode}" + (" · next subscription turn" if active_engine and self._turn.is_set() else ""))
+            if self._req is not None and self._overlay is None:
+                self._show_req_overlay(self.active)
             self._invalidate()
             if after:
                 after()
@@ -2797,8 +3524,11 @@ class TUI:
         def picked(row) -> None:
             if row["value"] == "yes":
                 commit()
-            elif after:
-                after()
+            else:
+                if self._req is not None and self._overlay is None:
+                    self._show_req_overlay(self.active)
+                if on_cancel:
+                    on_cancel()
         self._open_overlay(rows, header=header, footer="Enter select · Esc cancel", accent=True,
                            on_pick=picked)
 
@@ -2856,6 +3586,14 @@ class TUI:
                 self._open_doc_reader(rest)
             else:
                 self._open_docs()
+        elif cmd == "bored":
+            self._open_bored_menu()
+        elif cmd == "files":
+            self._open_files(rest)
+        elif cmd == "eta":
+            self._show_eta(rest)
+        elif cmd == "notify":
+            self._set_notify(rest)
         elif cmd in ("history", "hist"):
             self._open_history()
         elif cmd in ("view-plan", "plan-view", "viewplan"):
@@ -2894,7 +3632,7 @@ class TUI:
             else:
                 self._flash(f"session: {self.agent.session_name or '(unnamed)'} — /name <name>")
         elif cmd == "goal":
-            if rest.lower() in ("clear", "off", "none", "remove"):
+            if rest.lower() in ("clear", "off", "none", "remove", "delete"):
                 self._flash("standing goal cleared" if self.agent.set_goal("") else
                             (getattr(self.agent, "_last_persist_error", "")
                              or "goal update was not saved"))
@@ -2903,25 +3641,30 @@ class TUI:
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to complete"))
             elif rest.lower() in ("blocked", "block", "pause", "paused"):
-                self._flash("standing goal → paused" if self.agent.update_goal("blocked")
+                state = "blocked" if rest.lower() in ("blocked", "block") else "paused"
+                self._flash(f"standing goal → {state}" if self.agent.update_goal(state)
                             else (getattr(self.agent, "_last_persist_error", "")
                                   or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
-                self._flash("standing goal → active" if self.agent.update_goal("active")
-                            else (getattr(self.agent, "_last_persist_error", "")
-                                  or "no standing goal to resume"))
-            elif rest:
-                self._flash(f"goal set — the agent keeps working toward it: {rest[:56]}"
-                            if self.agent.set_goal(rest) else
-                            (getattr(self.agent, "_last_persist_error", "")
-                             or "goal update was not saved"))
+                if self.agent.update_goal("active"):
+                    self._submit(self.agent.goal, expand_mentions=False)
+                else:
+                    self._flash(self.agent._last_persist_error or "no standing goal to resume")
+            elif rest and rest.lower() not in ("review", "status"):
+                from .goal_inputs import start_terminal_goal
+                try:
+                    notices = start_terminal_goal(rest, self.agent)
+                except ValueError as exc:
+                    self._flash(str(exc)); return True
+                for notice in notices:
+                    self.info(notice)
+                self._submit(self.agent.goal, expand_mentions=False)
             else:
                 g = getattr(self.agent, "goal", "")
                 if g:
-                    self._open_reader(
-                        f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{g}\n\n"
-                        "`/goal complete` · `/goal pause` · `/goal resume` · `/goal clear`",
-                        footer="the standing objective · ↑↓ scroll · Esc close")
+                    from .goals import review_markdown
+                    self._open_reader(review_markdown(self.agent.goal_snapshot()),
+                                      footer="the standing objective · ↑↓ scroll · Esc close")
                 else:
                     self._flash("no goal set — /goal <objective> to set one")
         elif cmd == "set":
@@ -3034,6 +3777,17 @@ class TUI:
                 self._request_mode(rest)
             else:
                 self._cycle_mode()
+        elif cmd in ("plan", "review", "init"):
+            from .workflows import activate_workflow, prepare_workflow
+            try:
+                workflow = prepare_workflow(cmd, rest, self.agent)
+                activate_workflow(workflow, self.agent)
+            except ValueError as exc:
+                self._flash(str(exc))
+                return True
+            self._flash(f"mode → {self.agent.mode}")
+            if workflow.prompt:
+                self._submit(workflow.prompt)
         elif cmd == "think":
             _se = str(cfg.get("subscription_engine", "")).strip().lower()
             if _se:                                    # /think steers the subscription's reasoning effort
@@ -3041,16 +3795,33 @@ class TUI:
                 eng = subs.get_engine(_se)
                 if eng is not None and not eng.supports_effort():
                     self._flash(f"{eng.short_label} takes no reasoning-effort flag — steer it via /model")
-                elif rest in ("off", "low", "medium", "high", "xhigh"):
+                elif rest in ("off", "low", "medium", "high", "xhigh", "max"):
                     val = "" if rest == "off" else rest
                     cfg.set("subscription_effort", val); self._flash(f"subscription effort → {val or 'default'}")
                 else:
                     self._flash(f"subscription effort: {cfg.get('subscription_effort', '') or 'default'}"
-                                " — /think off|low|medium|high|xhigh")
+                                " — /think off|low|medium|high|xhigh|max")
             elif rest in ("off", "low", "medium", "high", "xhigh"):
                 cfg.set("thinking", rest); self._flash(f"thinking → {rest}")
             else:
                 self._flash(f"thinking: {cfg.get('thinking', 'off')} — /think off|low|medium|high|xhigh")
+        elif cmd == "ultra":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes", "enable", "enabled"):
+                cfg.set("ultra_mode", True)
+                self.agent._refresh_system()
+                from .ultra import summary
+                self._flash(f"{summary(cfg)} · permission mode remains {self.agent.mode}", secs=7)
+            elif val in ("off", "false", "0", "no", "disable", "disabled"):
+                cfg.set("ultra_mode", False)
+                self.agent._refresh_system()
+                self._flash("DGC Ultra → off")
+            elif val in ("", "status"):
+                from .ultra import summary
+                state = "on" if cfg.get("ultra_mode", False) else "off"
+                self._flash(f"{summary(cfg)} → {state} · /ultra on|off", secs=7)
+            else:
+                self._flash("usage: /ultra [on|off]")
         elif cmd in ("thoughts", "reasoning", "reason"):   # display toggle (NOT the model's effort — that's /think)
             val = rest.strip().lower()
             if val in ("show", "on", "true", "1"):
@@ -3103,29 +3874,17 @@ class TUI:
         elif cmd == "context":
             self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
-            if self.agent.maybe_compact(force=True):
-                self._flash("context compacted")
-            else:
+            if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self._flash(getattr(self.agent, "_last_persist_error", "")
                             or "context compaction failed")
         elif cmd == "status":
             self._append(self._rich(self._status_block()))
         elif cmd == "mcp":
             sub = rest.strip().split()
-            if sub and sub[0] == "add":
+            if sub == ["add"]:
                 self._mcp_add_flow()
-            elif sub and sub[0] in ("remove", "rm") and len(sub) > 1:
-                servers = dict(cfg.get("mcp_servers", {}) or {})
-                if servers.pop(sub[1], None) is not None:
-                    cfg.set("mcp_servers", servers)
-                    live = self.agent.mcp.servers.pop(sub[1], None)
-                    self.agent.mcp.failures.pop(sub[1], None)
-                    if live:
-                        live.stop()
-                    self.agent.mcp._rebuild_routes()
-                    self._flash(f"removed MCP server '{sub[1]}'")
-                else:
-                    self._flash(f"no MCP server named '{sub[1]}'")
+            elif rest:
+                self._submit_mcp(rest)
             else:
                 self._extensions_modal(tab=1)           # open the tabbed Skills/MCP modal on MCP
         elif cmd == "hooks":
@@ -3154,7 +3913,19 @@ class TUI:
                                     f"  named  [{th.faint}]{_esc(defs)}[/]\n"
                                     f"  [{th.faint}]/subagent to change[/]"))
         elif cmd in ("skills", "extensions", "ext"):
-            self._extensions_modal(tab=0)               # open the tabbed Skills/MCP modal on Skills
+            if rest:
+                from .skills import manage_skills
+                try:
+                    running = self._turn.is_set()
+                    output = manage_skills(cfg, rest, read_only=running,
+                                           catalog=self.agent.skills if running else None)
+                    if not running and rest.split()[0] not in ("list", "show"):
+                        self.agent.reload_skills()
+                    self._append(self._rich(_esc(redact_text(output, secret_values(cfg)))))
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+            else:
+                self._extensions_modal(tab=0)
         elif cmd == "memory":
             match = re.match(r"add\s+(user\s+)?(.+)", rest, re.S) if rest else None
             if rest and rest != "show" and match is None:
@@ -3237,7 +4008,7 @@ class TUI:
                     self.app.exit()
             else:
                 self._flash(f"you're on the latest — DGC v{__version__}")
-        elif cmd in ("init", "search"):
+        elif cmd == "search":
             self._flash(f"/{cmd} is available in the classic REPL — run: dgc --classic")
         elif cmd in ("quit", "exit"):
             if self.app:
@@ -3259,8 +4030,16 @@ class TUI:
         th = style_mod.theme()
         cfg = self.config
         used, size = self.agent.estimate_tokens(), self._context_window_size()
-        rows = [("model", cfg.model), ("host", cfg.base_url), ("mode", self.agent.mode),
-                ("thinking", cfg.get("thinking", "off")), ("context", f"{used} / {size} tokens"),
+        engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+        model = (str(cfg.get("subscription_model", "") or "").strip()
+                 or f"{engine} default") if engine else cfg.model
+        host = f"{engine} CLI subscription" if engine else cfg.base_url
+        thinking = (str(cfg.get("subscription_effort", "") or "").strip()
+                    or "off") if engine else cfg.get("thinking", "off")
+        profile = "Ultra" if cfg.get("ultra_mode", False) else "standard"
+        rows = [("model", model), ("host", host), ("mode", self.agent.mode),
+                ("thinking", thinking), ("profile", profile),
+                ("context", f"{used} / {size} tokens"),
                 ("session", self.agent.session_name or "(unnamed)"),
                 ("workspace", getattr(self.active, "workspace_branch", "") or "shared checkout")]
         return f"[bold {th.accent}]status[/]\n" + "\n".join(
@@ -3328,7 +4107,7 @@ class TUI:
         self._flash(f"{name} model → {model or 'the CLI default'}")
 
     def _subscription_effort_flow(self, name: str) -> None:
-        levels = ["default", "low", "medium", "high", "xhigh"]
+        levels = ["default", "low", "medium", "high", "xhigh", "max"]
 
         def pick(i):
             val = "" if i == 0 else levels[i]
@@ -3369,6 +4148,9 @@ class TUI:
             role = m.get("role")
             body = _text(m.get("content")).strip()
             if role == "user":
+                from .editor_context import _strip_editor_context
+                from .workflows import display_prompt
+                body = display_prompt(_strip_editor_context(body))
                 if body.startswith("<system-reminder>"):
                     continue                    # internal nudges aren't part of the chat
                 if body.startswith("<user-interjection>"):
@@ -3421,8 +4203,11 @@ class TUI:
 
         def rebuild(ov):
             if ov["tab"] == 0:                          # Skills
-                sk = discover_skills(self.config.project_root)
-                return [{"label": name, "desc": (s.description or "skill"),
+                sk = (dict(self.agent.skills) if self._turn.is_set() else
+                      discover_skills(self.config.project_root, disabled_names=self.config.get("disabled_skills", [])))
+                return [{"label": name + (" · disabled" if not s.enabled else ""),
+                         "desc": f"{s.source} · " + (s.short_description or s.description or "skill"),
+                         "enabled": s.enabled,
                          "value": ("skill", name)} for name, s in sk.items()]
             servers = self.config.get("mcp_servers", {}) or {}   # MCP Servers
             out = []
@@ -3434,7 +4219,8 @@ class TUI:
                 failure = getattr(manager, "failures", {}).get(name, "") if manager else ""
                 if server is not None and not live:
                     failure = server.error or server._diagnostic_tail() or "process exited"
-                desc = f"failed: {failure}" if failure else tail
+                disabled = name in self.config.get("disabled_mcp_servers", [])
+                desc = "disabled · " + tail if disabled else f"failed: {failure}" if failure else tail
                 out.append({"label": ("● " if live else "○ ") + name, "desc": desc[:64],
                             "value": ("mcp", name)})
             return out
@@ -3442,35 +4228,179 @@ class TUI:
         def on_action(key, row):
             ov = self._overlay
             is_mcp = ov["tab"] == 1
+            if self._turn.is_set():
+                self._flash("Browse skills now; change installed skills or servers after this turn finishes.")
+                return
             if key == "a":                              # add
                 self._close_overlay()
                 if is_mcp:
                     self._mcp_add_flow()
                 else:
-                    self._ask_input("skill URL (a raw SKILL.md or a github link):", self._install_skill_url)
+                    self._skill_add_flow()
             elif key == "x" and row:                    # remove
                 kind, name = row["value"]
                 if kind == "mcp":
-                    servers = dict(self.config.get("mcp_servers", {}) or {}); servers.pop(name, None)
-                    self.config.set("mcp_servers", servers)
-                    if getattr(self.agent, "mcp", None):
-                        live = self.agent.mcp.servers.pop(name, None)
-                        self.agent.mcp.failures.pop(name, None)
-                        if live:
-                            live.stop()
-                        self.agent.mcp._rebuild_routes()
+                    self._close_overlay()
+                    self._submit_mcp(shlex.join(["remove", name]), on_result=lambda _: self._extensions_modal(tab=1))
+                    return
                 else:
-                    import shutil
-                    from .config import USER_SKILLS
-                    shutil.rmtree(USER_SKILLS / name, ignore_errors=True)
+                    from .skills import set_skill_enabled
+                    set_skill_enabled(self.config, name, False)
+                    self.agent.reload_skills()
                 ov["sel"] = 0
                 self._invalidate()
+            elif key == "e" and row and not is_mcp:
+                from .skills import set_skill_enabled
+                try:
+                    set_skill_enabled(self.config, row["value"][1], not row.get("enabled", True))
+                    self.agent.reload_skills()
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+                self._invalidate()
             elif key == "r":                            # reload (rebuild happens on render)
+                if is_mcp:
+                    self._close_overlay()
+                    self._submit_mcp("reconnect", on_result=lambda _: self._extensions_modal(tab=1))
+                    return
+                if hasattr(self.agent, "reload_skills"):
+                    self.agent.reload_skills()
                 self._invalidate()
 
-        self._open_overlay([], on_pick=lambda r: None, tabs=["Skills", "MCP Servers"], tab=tab,
-                           footer="Tab switch · ↑↓ move · a add · x remove · r reload · Esc close",
+        def pick(row):
+            kind, name = row["value"]
+            if kind == "skill":
+                if row.get("enabled") is False:
+                    self._flash("Enable this skill before using it.")
+                    self._extensions_modal(tab=0)
+                    return
+                prefix = " " if self.input_buf.cursor_position and not self.input_buf.document.text_before_cursor[-1].isspace() else ""
+                self.input_buf.insert_text(prefix + "$" + name + " ")
+            else:
+                self._mcp_server_menu(name)
+
+        self._open_overlay([], on_pick=pick, tabs=["Skills", "MCP Servers"], tab=tab,
+                           footer="Tab switch · Enter use · e enable/disable · a add · x disable skill/remove MCP · r reload · Esc close",
                            rebuild=rebuild, on_action=on_action)
+        self._overlay["selectable"] = True
+
+    def _skill_add_flow(self) -> None:
+        def pick(row):
+            self._close_overlay()
+            if row["value"] == "url":
+                self._ask_input("raw SKILL.md URL (single-file skills only):", self._install_skill_url)
+                return
+            action = row["value"]
+            def save(value):
+                if not value.strip():
+                    return
+                from .skill_packages import create_skill, install_skill
+                try:
+                    result = (create_skill(self.config, value.strip()) if action == "create" else
+                              install_skill(self.config, value.strip(), allow_external=True))
+                    self.agent.reload_skills()
+                    self._append(self._rich(_esc(f"Skill ${result['name']}: {result['path']} ({result['files']} files)")))
+                    self._extensions_modal(tab=0)
+                except (OSError, ValueError) as exc:
+                    self._flash(str(exc))
+            self._ask_input("new skill name:" if action == "create" else "local skill directory to copy (including supporting files):", save)
+        self._open_overlay([
+            {"label": "Create a project skill", "desc": "Scaffold an explicit-only workflow", "value": "create"},
+            {"label": "Install a local package", "desc": "Copy SKILL.md and supporting files into this project", "value": "local"},
+            {"label": "Install a single-file URL", "desc": "User skill from a raw SKILL.md; no overwrite", "value": "url"},
+        ], on_pick=pick, title="Add a skill", footer="Enter select · Esc cancel")
+
+    def _mcp_server_menu(self, name: str) -> None:
+        import shlex
+        disabled = name in self.config.get("disabled_mcp_servers", [])
+        def pick(row):
+            self._close_overlay()
+            action = row["value"]
+            if action in ("resources", "templates", "prompts"):
+                def loaded(result):
+                    rows = json.loads(result)
+                    if not rows:
+                        self._flash("This server returned no entries in that category.")
+                        return
+                    def selected(choice):
+                        self._close_overlay()
+                        item = choice["value"]
+                        if action == "resources":
+                            self._submit_mcp(shlex.join(["read", name, item["uri"]]))
+                        elif action == "templates":
+                            self._ask_input("resource URI using " + item["uriTemplate"] + ":",
+                                            lambda uri: self._submit_mcp(shlex.join(["read", name, uri])))
+                        else:
+                            arguments = item.get("arguments", [])
+                            values = []
+                            def next_argument(index=0):
+                                if index >= len(arguments):
+                                    self._submit_mcp(shlex.join(["prompt", name, item["name"], *values]))
+                                    return
+                                arg = arguments[index]
+                                def supplied(value):
+                                    if value or arg.get("required"):
+                                        values.append(arg["name"] + "=" + value)
+                                    next_argument(index + 1)
+                                self._ask_input(arg["name"] + (" (required)" if arg.get("required") else " (optional)") + ":", supplied)
+                            next_argument()
+                    self._open_overlay([{"label": item.get("title") or item["name"],
+                                         "desc": item.get("description", ""), "value": item} for item in rows],
+                                       on_pick=selected, title=f"{name} · {action}", footer="Enter choose · Esc cancel")
+                self._submit_mcp(shlex.join([action, name]), on_result=loaded)
+            else:
+                self._submit_mcp(shlex.join([action, name]))
+        self._open_overlay([
+            {"label": "Resources", "value": "resources"}, {"label": "Resource templates", "value": "templates"},
+            {"label": "Prompts", "value": "prompts"}, {"label": "Reconnect", "value": "reconnect"},
+            {"label": "Enable" if disabled else "Disable", "value": "enable" if disabled else "disable"},
+        ], on_pick=pick, title=name, footer="Enter select · Esc cancel")
+
+    def _submit_mcp(self, arguments: str, *, on_result=None) -> None:
+        """Run MCP I/O off the UI thread so consent cards, Esc, and session switching stay live."""
+        if self._turn.is_set():
+            self._flash("Finish or cancel the current operation first.")
+            return
+        sess = self._cur_session()
+        self._cancel_auxiliary()
+        self._cancel.clear()
+        self._turn.set()
+        self._turn_t0 = time.monotonic()
+        def work():
+            self._tls.session = sess
+            result = None
+            try:
+                self._foreground_aux_barrier()
+                from .mcp_management import manage_mcp
+                from .mcp_context import stage_context
+                result = manage_mcp(self.config, self.agent.mcp, arguments, agent=self.agent)
+                if isinstance(result, dict):
+                    stage_context(self.agent, result)
+                    result = f"Attached {result['server']} · {result['identifier']} to the next prompt. /mcp context lists snapshots; /mcp clear-context removes them."
+                result = redact_text(result, secret_values(self.config))
+                if on_result is None:
+                    self._append(self._rich(_esc(result)))
+            except Exception as exc:
+                self.error(redact_text(str(exc), secret_values(self.config)))
+            finally:
+                self._settle_running_tools()
+                self._turn.clear()
+                sess.last_activity = time.monotonic()
+                sess._worker_thread = None
+                self._invalidate()
+                if sess._closing:
+                    self._finalize_session_workspace(sess, "MCP operation stopped")
+                    return
+                queued = self._pop_followup(sess)
+                if queued is not None:
+                    queued_text, shown = queued
+                    self._submit(queued_text, echo=not shown)
+                elif result is not None and on_result and sess is self.active:
+                    try:
+                        on_result(result)
+                    except (OSError, ValueError) as exc:
+                        self.error(redact_text(str(exc), secret_values(self.config)))
+        sess._worker_thread = threading.Thread(target=work, name=f"dgc-mcp-{sess.id}", daemon=True)
+        sess._worker_thread.start()
 
     def _install_skill_url(self, url: str) -> None:
         url = url.strip()
@@ -3481,10 +4411,12 @@ class TUI:
         self._flash(res.split(".")[0][:70])
 
     def _mcp_add_flow(self, st: dict | None = None) -> None:
-        """A single FORM modal to add an MCP server: every field is visible; arrow to a field and
-        Enter to edit it (or toggle the type), then choose 'Add server'. Esc cancels."""
-        st = st if st is not None else {"name": "", "transport": "local", "target": "", "token": "", "env": ""}
-        st.setdefault("env", "")
+        """Collect a persisted MCP spec without ever accepting a literal credential value."""
+        st = st if st is not None else {
+            "name": "", "transport": "local", "target": "", "auth_env": "", "env_names": "",
+        }
+        st.setdefault("auth_env", "")
+        st.setdefault("env_names", "")
         remote = st["transport"] == "remote"
 
         def frow(label, value, key):
@@ -3496,10 +4428,10 @@ class TUI:
             frow("URL" if remote else "Command", st["target"] or "—", "target"),
         ]
         if remote:
-            rows.append(frow("Auth token", "•" * 8 if st["token"] else "(none)", "token"))
-        else:                                          # local servers get their token as an env var
-            keys = [kv.split("=", 1)[0] for kv in st["env"].split() if "=" in kv]
-            rows.append(frow("Env / token", ", ".join(keys) if keys else "(none)", "env"))
+            rows.append(frow("Auth env", st["auth_env"] or "(none)", "auth_env"))
+        else:
+            keys = [item for item in re.split(r"[\s,]+", st["env_names"].strip()) if item]
+            rows.append(frow("Env names", ", ".join(keys) if keys else "(none)", "env_names"))
         rows += [{"label": "✓  Add server", "value": "save"},
                  {"label": "✗  Cancel", "value": "cancel"}]
 
@@ -3517,17 +4449,47 @@ class TUI:
                     self._flash(("a URL" if remote else "a command") + " is required")
                     self._mcp_add_flow(st); return
                 name = re.sub(r"\s+", "-", st["name"].strip())
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name):
+                    self._flash("server name must use 1–64 letters, digits, ., _, or -")
+                    self._mcp_add_flow(st); return
+                env_text = st["auth_env"] if remote else st["env_names"]
+                env_names = [item for item in re.split(r"[\s,]+", env_text.strip()) if item]
+                invalid = [item for item in env_names
+                           if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", item)]
+                if invalid or len(env_names) > 64:
+                    self._flash("environment names must be valid identifiers (maximum 64)")
+                    self._mcp_add_flow(st); return
+                env_names = list(dict.fromkeys(env_names))
+                if remote and len(env_names) > 1:
+                    self._flash("remote Bearer authentication accepts one environment variable")
+                    self._mcp_add_flow(st); return
                 if st["transport"] == "remote":          # bridge via the standard mcp-remote stdio proxy
-                    args = ["-y", "mcp-remote", st["target"].strip()]
-                    if st["token"].strip():
-                        args += ["--header", f"Authorization: Bearer {st['token'].strip()}"]
-                    self._mcp_save(name, {"command": "npx", "args": args})
+                    url = st["target"].strip()
+                    if not valid_remote_mcp_url(url):
+                        self._flash("remote MCP requires HTTPS (or loopback HTTP) without URL credentials")
+                        self._mcp_add_flow(st); return
+                    args = ["-y", "mcp-remote", url]
+                    remote_spec = {
+                        "transport": "remote", "command": "npx", "args": args,
+                        "env_names": env_names, "url": url,
+                    }
+                    if env_names:
+                        remote_spec["auth_env"] = env_names[0]
+                    self._mcp_save(name, remote_spec)
                 else:
-                    parts = st["target"].split()
-                    spec = {"command": parts[0], "args": parts[1:]}
-                    env = dict(kv.split("=", 1) for kv in st["env"].split() if "=" in kv)
-                    if env:                             # service tokens etc. → passed as env vars
-                        spec["env"] = env
+                    try:
+                        parts = shlex.split(st["target"])
+                    except ValueError:
+                        self._flash("command contains unmatched quoting")
+                        self._mcp_add_flow(st); return
+                    if not parts or len(parts) > 129 or any(len(item) > 8192 for item in parts):
+                        self._flash("command is empty or exceeds the MCP argument limits")
+                        self._mcp_add_flow(st); return
+                    if not persisted_mcp_args_safe(parts[1:]):
+                        self._flash("store MCP credentials via environment names, not command arguments")
+                        self._mcp_add_flow(st); return
+                    spec = {"transport": "stdio", "command": parts[0], "args": parts[1:],
+                            "env_names": env_names}
                     self._mcp_save(name, spec)
                 return
             # a text field → close the form, prompt for the value, re-open the form on submit
@@ -3535,9 +4497,8 @@ class TUI:
                 "name": "Server name (e.g. github, filesystem)",
                 "target": ("Server URL (e.g. https://mcp.example.com/mcp)" if remote
                            else "Command (e.g. npx -y @modelcontextprotocol/server-filesystem ~/)"),
-                "token": "Auth token for the Authorization header (blank = none)",
-                "env": "Env vars as KEY=VALUE, space-separated "
-                       "(e.g. GITHUB_PERSONAL_ACCESS_TOKEN=ghp_… )",
+                "auth_env": "Environment variable containing the Bearer token (blank = none)",
+                "env_names": "Environment variable names to pass, separated by spaces or commas",
             }
 
             def got(val):
@@ -3551,18 +4512,21 @@ class TUI:
                            back=self._palette_back)
 
     def _mcp_save(self, name: str, spec: dict) -> None:
-        cfg = self.config
-        servers = dict(cfg.get("mcp_servers", {}) or {})
-        servers[name] = spec
-        cfg.set("mcp_servers", servers)
-        try:                                     # connect just the new one so it's live this session
-            self.agent.mcp.connect_all({name: spec})
-            live = name in getattr(self.agent.mcp, "servers", {})
-        except Exception:
-            live = False
-        tail = f"{spec.get('command')} {' '.join(spec.get('args', []))}".strip()
-        self._flash((f"MCP '{name}' added + connected" if live
-                     else f"MCP '{name}' saved (connects next launch)") + f" — {tail}"[:52])
+        servers = self.config.get("mcp_servers", {}) or {}
+        if name not in servers and len(servers) >= 64:
+            self._flash("at most 64 MCP servers are supported")
+            return
+        parts = ["add", name]
+        for env_name in spec.get("env_names", []):
+            parts.extend(["--env", env_name])
+        if spec.get("transport") == "remote":
+            parts.extend(["--url", spec["url"]])
+            if spec.get("auth_env"):
+                parts.extend(["--auth-env", spec["auth_env"]])
+        else:
+            parts.extend(["--", spec["command"], *spec.get("args", [])])
+        self._close_overlay()
+        self._submit_mcp(shlex.join(parts), on_result=lambda _: self._extensions_modal(tab=1))
 
     def _connect_flow(self, rest: str, subagent: bool = False) -> None:
         from .config import PROVIDERS
@@ -3596,18 +4560,32 @@ class TUI:
         def selected_engine(key: str) -> None:                # a subscription CLI (their own plan)
             prev = str(self.config.get("subscription_engine", "")).strip().lower()
             eng = subs.get_engine(key)
-            self.config.set("subscription_engine", key)
-            if key != prev:                    # model/effort are engine-specific — never carry them over
-                self.config.set("subscription_model", "")
-                self.config.set("subscription_effort", "")
-            if eng.resolve() is None:
-                self._offer_engine_install(eng)
-            elif not eng.logged_in() and not eng.auth_on_launch:
-                self._offer_engine_login(eng)
-            elif eng.auth_on_launch and not eng.logged_in():
-                self._flash(f"provider → {eng.label} — authentication checked by its CLI on launch", secs=8)
-            else:
-                self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
+            if eng is None:
+                self._flash(f"unknown subscription engine: {key}")
+                return
+
+            def commit_engine() -> None:
+                self.config.set("subscription_engine", key)
+                if key != prev:                # model/effort are engine-specific — never carry them over
+                    self.config.set("subscription_model", "")
+                    self.config.set("subscription_effort", "")
+                if eng.resolve() is None:
+                    self._offer_engine_install(eng)
+                elif not eng.logged_in() and not eng.auth_on_launch:
+                    self._offer_engine_login(eng)
+                elif eng.auth_on_launch and not eng.logged_in():
+                    self._flash(f"provider → {eng.label} — authentication checked by its CLI on launch", secs=8)
+                else:
+                    self._flash(f"provider → {eng.label} (your subscription) — signed in ✓", secs=8)
+
+            try:
+                subs.validate_engine_mode(key, self.agent.mode)
+            except subs.EngineModeUnsupported:
+                # Kimi's prompt mode is inherently full-auto.  Never persist that route until
+                # the user accepts the same warning used by every other TUI auto transition.
+                self._request_mode("auto", after=commit_engine)
+                return
+            commit_engine()
 
         if rest:                                       # /connect <engine|preset|url>
             if not subagent and subs.get_engine(rest) is not None:
@@ -3903,22 +4881,68 @@ class TUI:
         kb = KeyBindings()
 
         ov_open = Condition(lambda: self._overlay is not None)
+        pane_active = Condition(self._pane_visible)
+        pane_text = Condition(lambda: self._pane_visible()
+                              and bool(getattr(self._pane, "raw_text_input", False)))
+        pane_commands = pane_active & ~pane_text
+
+        # Pane controls are eager so input never leaks into the composer or transcript. Ctrl+C and
+        # Ctrl+Q remain deliberately untouched: they still stop the active agent. Navigation keys
+        # always reach the occupant; letters, digits and punctuation are commands unless the
+        # occupant is taking raw text (a file name, a filter), when Keys.Any delivers them
+        # verbatim so their case survives. WORD GRID keeps folding letters as before.
+        _pane_nav_keys = [
+            ("up", "up"), ("down", "down"), ("left", "left"), ("right", "right"),
+            ("enter", "enter"), ("backspace", "backspace"), ("delete", "delete"),
+            ("escape", "escape"), ("tab", "tab"), ("home", "home"),
+            ("end", "end"), ("pageup", "pageup"), ("pagedown", "pagedown"),
+            ("c-a", "c-a"), ("c-d", "c-d"), ("c-u", "c-u"), ("c-f", "c-f"), ("c-b", "c-b"),
+        ]
+        for _key, _pane_key in _pane_nav_keys:
+            @kb.add(_key, filter=pane_active, eager=True)
+            def _(ev, _pane_key=_pane_key):
+                self._pane_key(_pane_key)
+        _pane_command_keys = [
+            (" ", "space"),
+            *((str(number), str(number)) for number in range(10)),
+            *((letter, letter) for letter in "abcdefghijklmnopqrstuvwxyz"),
+            *((letter.upper(), letter.upper()) for letter in "abcdefghijklmnopqrstuvwxyz"),
+            *((mark, mark) for mark in "/.~?-,;:!@#$%^&*()[]{}<>=+\'\"`|_"),
+        ]
+        for _key, _pane_key in _pane_command_keys:
+            @kb.add(_key, filter=pane_commands, eager=True)
+            def _(ev, _pane_key=_pane_key):
+                self._pane_key(_pane_key)
+
+        @kb.add(Keys.Any, filter=pane_text, eager=True)
+        def _(ev):
+            data = getattr(ev, "data", "") or ""
+            if data and data.isprintable():
+                self._pane_text(data)
+
+        def open_composer_trigger(trigger):
+            b = self.input_buf
+            prefix = b.document.text_before_cursor
+            if (self._overlay is None and (not prefix or prefix[-1].isspace())
+                    and self._req is None and not self._naming and self._input is None):
+                b.insert_text(trigger)
+                self._open_command_palette()
+            else:
+                b.insert_text(trigger)
 
         @kb.add("/")
         def _(ev):
-            b = self.input_buf
-            if (self._overlay is None and not b.text
-                    and self._req is None and not self._naming and self._input is None):
-                b.insert_text("/")
-                self._open_command_palette()            # `/` on an empty composer → command palette
-                # (works mid-turn too — many commands like /copy, /expand, /thoughts are useful then)
-            else:
-                b.insert_text("/")
+            open_composer_trigger("/")
+
+        @kb.add("$")
+        def _(ev):
+            open_composer_trigger("$")
 
         @kb.add("backspace", filter=Condition(lambda: self._overlay is not None and self._overlay.get("on_submit")))
         def _(ev):
             self.input_buf.delete_before_cursor()
-            if not self.input_buf.text.startswith("/"):  # deleted the leading slash → close palette
+            from .composer import composer_token
+            if not composer_token(self.input_buf.text, self.input_buf.cursor_position):
                 self._close_overlay()
 
         @kb.add("up", filter=ov_open)
@@ -3973,7 +4997,7 @@ class TUI:
             rows = self._overlay_rows()
             ov["on_action"](key, rows[ov["sel"]] if rows else None)
 
-        for _ch in ("a", "x", "r", "p", "b"):
+        for _ch in ("a", "x", "r", "p", "b", "e"):
             @kb.add(_ch, filter=has_actions)
             def _(ev, _ch=_ch):
                 _ov_action(_ch)
@@ -4001,7 +5025,7 @@ class TUI:
                 else:
                     buf.cancel_completion()
                 # fall through and submit — one Enter runs the command
-            if self._req is not None:
+            if self._req is not None and not (self._req.get("kind") == "questions" and self._input is not None):
                 return                      # answered via number keys
             text = self.input_buf.text.strip()
             self.input_buf.reset()
@@ -4023,23 +5047,15 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            if not text:
-                return
-            if self._turn.is_set():
-                self._route_followup(text)
-                return
-            if text.startswith("/") and self._handle_slash(text):
-                return
-            if text.startswith("#"):
-                self._save_memory_direct(text[1:])
-                return
-            if text.startswith("!"):
-                self._submit_shell(text[1:])
-                return
-            self._submit(text)
+            if self._dispatch_composer_text(text) == "full":
+                self.input_buf.insert_text(text)
 
         @kb.add("escape")
         def _(ev):
+            if self._req is not None and self._req.get("kind") == "questions" and self._input is not None:
+                cb = self._input["cb"]; self._input = None
+                cb("")
+                return
             if self._req is not None:                       # blocking prompt (permission card) → deny/cancel
                 self._req_answer = None
                 self._req_event.set()
@@ -4138,6 +5154,7 @@ class TUI:
         # Arrow Up/Down scroll the transcript while the input is empty (browsing the chat); once you
         # start typing, arrows edit the prompt as usual. Overlay/completion nav is handled above.
         scroll_idle = Condition(lambda: self._overlay is None
+                                and self._pane is None
                                 and self.input_buf.complete_state is None
                                 and not self.input_buf.text)
 
@@ -4177,10 +5194,26 @@ class TUI:
             if s:
                 self.input_buf.insert_text(s.text)
 
-        for i in range(1, 5):               # number keys answer a blocking request
+        @kb.add("tab", filter=Condition(lambda: self._turn.is_set() and self._overlay is None
+                  and self._req is None and self._input is None and not self._naming
+                  and self.input_buf.complete_state is None and bool(self.input_buf.text.strip())
+                  and not self.input_buf.text.lstrip().startswith("/")))
+        def _(ev):
+            text = self.input_buf.text.strip()
+            if self._route_followup(text, queue_only=True) != "full":
+                self.input_buf.reset()
+
+        for i in range(1, 10):               # number keys select a blocking request's options
             @kb.add(str(i))
             def _(ev, n=i):
                 if self._req is not None:
+                    if self._req.get("kind") == "questions":
+                        if self._input is not None:
+                            self.input_buf.insert_text(str(n))
+                        elif self._overlay is not None and n <= len(self._overlay_rows()) - 1:
+                            self._overlay["sel"] = n - 1
+                            self._overlay_select()
+                        return
                     opts = self._req.get("options", [])
                     if n - 1 < len(opts):
                         self._req_answer = n - 1
@@ -4274,10 +5307,10 @@ class TUI:
         with sess._queue_lock:
             return sess._queue.pop(0) if sess._queue else None
 
-    def _route_followup(self, text: str) -> str:
+    def _route_followup(self, text: str, *, queue_only: bool = False) -> str:
         """Atomically steer the active model turn or retain text as the next turn."""
         sess = self._cur_session()
-        if sess.agent.steer(text):
+        if not queue_only and sess.agent.steer(text):
             sess.blocks.append({"kind": "user", "text": text,
                                 "tag": "follow-up · steering this turn"})
             sess._scroll_off = 0
@@ -4318,7 +5351,7 @@ class TUI:
             kind = ev.get("kind")
             if kind == "text" and ev.get("text"):            # the assistant's answer, streamed
                 shown["text"] = True
-                self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+                self.on_text(ev["text"])
             elif kind == "thinking" and ev.get("text"):      # dimmed reasoning, like a native turn
                 self.on_thinking(ev["text"])
             elif kind == "tool_call":                        # a real tool card (name + args)
@@ -4331,7 +5364,9 @@ class TUI:
                 self.tool_call(nm, ev.get("args") or {}, cid)
             elif kind == "tool_result":                      # fills the card; a diff renders as a diff
                 cid = ev.get("id") or None
-                self.tool_result(names.get(cid, ""), diffs.get(cid) or ev.get("output", ""), cid)
+                output = ("error: " + str(ev.get("output") or "tool failed") if ev.get("error")
+                          else diffs.get(cid) or ev.get("output", ""))
+                self.tool_result(names.get(cid, ""), output, cid)
             elif kind == "result" and not shown["text"] and ev.get("text"):
                 self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
             elif kind == "status" and ev.get("text"):
@@ -4340,15 +5375,21 @@ class TUI:
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
         mode = str(self.config.data.get("mode", "default"))
         model = str(self.config.get("subscription_model", "")).strip()
-        effort = str(self.config.get("subscription_effort", "")).strip()
+        configured_effort = str(self.config.get("subscription_effort", "")).strip()
+        from .ultra import delegated_effort, delegated_prompt
+        effort = delegated_effort(
+            self.config, engine.key, configured_effort, engine.supports_effort())
         session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
 
         def delegate(safe_prompt: str) -> dict:
+            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+            shown["text"] = False
             result = subs.run_turn(
-                engine, safe_prompt, self.config.project_root,
+                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self._cancel.is_set,
-                model=model, effort=effort)
+                model=model, effort=effort, goal_request=self.agent._active_goal_request,
+                redact_secrets=self.agent._secret_values())
             if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
                 self.agent.remember_subscription_session(
                     engine.key, result["session_id"], mode, model, effort)
@@ -4373,24 +5414,26 @@ class TUI:
             self.error(f"{engine.short_label} exited with status {res['rc']}")
         return bool(res.get("ok"))
 
-    def _submit(self, text: str, *, echo: bool = True) -> None:
+    def _submit(self, text: str, *, echo: bool = True, expand_mentions: bool = True) -> None:
+        from .workflows import display_prompt
+        shown_text = display_prompt(text)
         sess = self._cur_session()                    # this turn belongs to THIS session
         sess.last_activity = time.monotonic()
         self._cancel_auxiliary()                       # foreground work always preempts title/suggest
         self._cancel.clear()
         self._tool_count = 0
         self._suggestion = None                       # a new prompt supersedes the ghost text
-        if text.strip():
-            self._prompt_history.append(text)         # for /history (Ctrl+R) recall
+        if shown_text.strip():
+            self._prompt_history.append(shown_text)   # recall the command, not harness instructions
         if echo:
-            self.blocks.append({"kind": "user", "text": text})  # reflows at current width
+            self.blocks.append({"kind": "user", "text": shown_text})  # reflows at current width
             mark = len(self.blocks) - 1
         else:
             mark = next((index for index in range(len(self.blocks) - 1, -1, -1)
                          if self.blocks[index].get("kind") == "user"
-                         and self.blocks[index].get("text") == text), len(self.blocks) - 1)
+                         and self.blocks[index].get("text") == shown_text), len(self.blocks) - 1)
         if mark >= 0:
-            self._turn_marks.append((mark, text.replace("\n", " ")[:70]))  # for /jump
+            self._turn_marks.append((mark, shown_text.replace("\n", " ")[:70]))  # for /jump
         self._scroll_off = 0                # ALWAYS snap to the bottom so the prompt + stream are visible
         self._follow = True
         self._turn.set()
@@ -4403,7 +5446,12 @@ class TUI:
                 self._foreground_aux_barrier()
                 # _submit cleared stale state before marking the turn active. Preserve an Esc/Ctrl-C
                 # received while the worker waits at the auxiliary-generation barrier.
-                model_text = self._expand_mentions(text)
+                if expand_mentions:
+                    from .workflows import expand_workflow_prompt
+                    model_text = expand_workflow_prompt(text, self._expand_mentions)
+                else:
+                    self.agent._pending_images = None
+                    model_text = text
                 _se = str(self.config.get("subscription_engine", "")).strip().lower()
                 if _se:
                     succeeded = self._run_delegated_turn(_se, model_text)
@@ -4418,6 +5466,13 @@ class TUI:
                     # These bands were rendered when accepted as steering. The old turn ended before
                     # consuming them, so preserve their order as one subsequent prompt without echoing.
                     self._queue_followup(sess, "\n".join(deferred), shown=True, front=True)
+                    for deferred_text in reversed(deferred):
+                        for block in reversed(sess.blocks):
+                            if (isinstance(block, dict) and block.get("kind") == "user"
+                                    and block.get("text") == deferred_text
+                                    and block.get("tag") == "follow-up · steering this turn"):
+                                block["tag"] = "follow-up · queued"
+                                break
                 self._flush_text()
                 self._settle_running_tools()     # stop any tool rail still animating (e.g. cancelled mid-run)
                 self._turn.clear()
@@ -4438,12 +5493,17 @@ class TUI:
                     if result is not None and result.status != "cleaned":
                         self._flash(f"retained {result.branch} at {result.path}")
                     return
-                queued = self._pop_followup(sess)
+                queued = self._pop_followup(sess) if not self._cancel.is_set() and succeeded else None
+                if queued is None and sess._queue:
+                    self.info("Follow-ups retained. Send a new prompt to continue the queue.")
                 if queued is not None:
                     sess._worker_thread = None
                     queued_text, shown = queued
                     self._submit(queued_text, echo=not shown)
                     return
+                if sess is self.active:
+                    self._pause_pane(f"DGC {verb.upper()}")
+                self._maybe_notify(sess, verb, el)
                 if not succeeded:
                     sess._worker_thread = None
                     return
@@ -4551,6 +5611,8 @@ class TUI:
                     queued_text, shown = queued
                     self._submit(queued_text, echo=not shown)
                     return
+                if sess is self.active:
+                    self._pause_pane(f"DGC {verb.upper()}")
                 sess._worker_thread = None
 
         sess._worker_thread = threading.Thread(
@@ -4559,6 +5621,12 @@ class TUI:
 
     def _shutdown_fleet(self) -> None:
         """Cancel all workers and preserve every managed checkout before the TUI process exits."""
+        self._pane = None  # no external resources, but make the process-local lifetime explicit
+        task = getattr(self, "_refresh_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._refresh_task = None
+        self._pane_render_cache = None
         fleet = list(getattr(self, "_sessions", ()))
         for sess in fleet:
             sess._closing = True
@@ -4622,7 +5690,8 @@ def _tui_help() -> str:
         ("model & host", [("/model", "pick a model from the endpoint"),
                           ("/connect", "pick a provider, or enter a custom LAN host URL"),
                           ("/subagent", "sub-agent model + host + API transport"),
-                          ("/think off|low|medium|high|xhigh", "reasoning effort")]),
+                          ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max"),
+                          ("/ultra on|off", "deepest reasoning + bounded parallel agents")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
                       ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
                       ("/theme dark|light", "colour theme"),

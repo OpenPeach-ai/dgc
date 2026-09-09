@@ -6,13 +6,13 @@ Refactor this without changing behavior. Target (optional): $ARGUMENTS
 
 Refactoring means the code does the SAME thing after as before. Behavior change is a different task — if the request mixes the two, do the behavior change separately and say so.
 
-1. Lock behavior FIRST. Find and run the existing tests for the target with bash (the test file, the suite, the command). Read the output. If the target code has no tests covering it, you are refactoring blind — invoke the `write-tests` skill with the skill tool to add characterization tests that pin the CURRENT observable behavior, then run them. Do NOT touch the code until you have a GREEN suite.
+1. Establish the relevant baseline. Read and run the existing checks for the target. Add characterization coverage when the refactor's risk warrants it and behavior is otherwise unprotected; do not add tests merely to mirror a mechanical edit. Record unrelated pre-existing failures so new regressions can be distinguished. Do not treat an unavailable or unrelated failing suite as proof that all useful work must stop.
 
 2. Plan the transforms. Read the target with read_file. List the individual behavior-preserving moves you'll make — one per line, each ONE of: rename, extract function, inline, move, or dedupe. Put them in the todo tool. Never bundle several into one step.
 
 3. Do ONE transform. Apply exactly one move with edit_file. When you rename or move a symbol, grep for EVERY call site and update all of them in the same step — a missed reference is a break.
 
-4. Re-verify immediately. Run the tests, the type-check, and the linter with bash. Read the output. Green → commit this step with git via bash and move to the next todo. RED → you broke behavior: undo THIS step with git via bash (`git checkout -- <files>` or `git stash`), do not stack fixes on a broken tree. Return to a green state before trying again.
+4. Re-verify immediately with the relevant tests, type-check, or linter. Read the output. Green → move to the next todo; commit only when the user or repository workflow calls for it, using explicit reviewed paths. Red → inspect the regression and correct or reverse only your transform. Preserve the user's starting content and concurrent edits; broad checkout, reset, or stash commands are not a safe automatic undo.
 
 5. Repeat step 3–4 for each planned transform, one at a time. Small verified steps only.
 
@@ -21,7 +21,7 @@ Refactoring means the code does the SAME thing after as before. Behavior change 
 7. Finish with a runtime smoke: invoke the `verify` skill with the skill tool to drive the affected flow end-to-end and confirm it still works.
 
 Rules:
-- NEVER refactor on red. No green suite → write characterization tests first (`write-tests` skill).
+- Resolve failures caused by the refactor before calling it verified. Disclose existing failures and untested behavior; never weaken assertions to manufacture a passing baseline.
 - One transform per step, re-verify after each. No behavior changes — if you need one, stop and flag it.
-- On a failure, revert that single step with git (`git checkout`/`git stash`). Do not pile fixes onto a broken tree.
+- On a failure, inspect the regression and restore only the affected transform if needed. Preserve pre-existing and concurrent user changes.
 - Update every call site in the same step as the rename/move. A stale reference is a bug.

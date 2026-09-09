@@ -49,7 +49,7 @@ def _backend() -> tuple[str, Path] | None:
         executable = Path(candidate).resolve(strict=True)
         if not executable.is_file() or not os.access(executable, os.X_OK):
             return None
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         return None
     return name, executable
 
@@ -178,7 +178,11 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
     if backend is None:
         return None
     kind, executable = backend
-    root = Path(project_root).resolve(strict=False)
+    try:
+        executable = Path(executable).resolve(strict=False)
+        root = Path(project_root).resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
     if root == Path("/") or _inside(executable, root):
         # `/` has no outside boundary. A helper inside the model-writable workspace could be
         # replaced between turns and would execute on the host before confinement takes effect.

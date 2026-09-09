@@ -32,6 +32,8 @@ class CommandSpec:
     accepts_args: bool = False
     usage: str = ""
     aliases: tuple[str, ...] = ()
+    discoverable: bool = True
+    available_while_running: bool = False
 
 
 _T = frozenset({"tui"})
@@ -40,7 +42,7 @@ _TCE = frozenset({"tui", "classic", "editor"})
 
 # Order is the terminal palette order. A surface only advertises entries whose route it implements.
 BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
-    CommandSpec("help", "list every command", frozenset({"tui", "classic", "editor"}),
+    CommandSpec("help", "list available commands", frozenset({"tui", "classic", "editor"}),
                 "commandMenu", aliases=("?", "commands")),
     CommandSpec("keys", "keyboard shortcuts cheatsheet", _T,
                 aliases=("shortcuts", "cheatsheet")),
@@ -58,12 +60,17 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("subagent", "configure sub-agent model, host, transport, or inheritance", _TCE,
                 "subagent", usage="subagent [SETTING…]"),
     CommandSpec("mode", "permission mode: default · acceptEdits · plan · auto", _TCE, "pickMode",
-                usage="mode [MODE]"),
-    CommandSpec("plan", "toggle read-only plan mode", frozenset({"classic"})),
+                usage="mode [MODE]", available_while_running=True),
+    CommandSpec("plan", "enter read-only mode and plan a task", _TCE, "workflow:plan", True,
+                usage="plan [TASK]"),
+    CommandSpec("review", "review changes for bugs and regressions", _TCE, "workflow:review", True,
+                usage="review [OPTIONS] [FOCUS]"),
     CommandSpec("view-plan", "reopen the plan saved in plan mode", _TCE, "viewPlan",
                 aliases=("plan-view", "viewplan")),
     CommandSpec("think", "how hard the model reasons: off · low · medium · high · xhigh", _TCE,
                 "pickThink", usage="think [LEVEL]"),
+    CommandSpec("ultra", "extended reasoning + proactive bounded parallel agents", _TCE,
+                "toggleUltra", usage="ultra [on|off]"),
     CommandSpec("thoughts", "show or hide the model's thinking in the transcript",
                 frozenset({"tui", "editor"}), "toggleThoughts",
                 aliases=("reasoning", "reason")),
@@ -73,10 +80,16 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("code-action", "persistent `python` power tool: run code across calls",
                 _TCE, "toggleCodeAction", usage="code-action [on|off]",
                 aliases=("codeaction", "python-tool")),
-    CommandSpec("autonomous-gate", "a check command a turn must pass (exit 0) before it may stop",
+    CommandSpec("autonomous-gate", "a check command a native turn must pass (exit 0) before it may stop",
                 _TC, usage="autonomous-gate [CMD|off]", aliases=("auto-gate",)),
     CommandSpec("expand", "expand the last collapsed tool output", _T),
     CommandSpec("expandall", "expand every collapsed tool output", _T),
+    CommandSpec("files", "browse, pick, and manage files in the focus pane while the agent works", _T,
+                accepts_args=True, usage="files [PATH]", available_while_running=True),
+    CommandSpec("eta", "how long the running turn still needs · /eta stats shows calibration", _TC,
+                accepts_args=True, usage="eta [stats]", available_while_running=True),
+    CommandSpec("notify", "ping when this turn finishes · /notify on|off keeps it on", _T,
+                accepts_args=True, usage="notify [on|off]", available_while_running=True),
     CommandSpec("copy", "select & copy text — releases the mouse to your terminal", _T,
                 aliases=("select", "selection")),
     CommandSpec("worktree", "list or switch to a named git worktree", _TC,
@@ -98,8 +111,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 aliases=("dash", "home")),
     CommandSpec("name", "name this session", frozenset({"tui", "classic", "editor"}),
                 "nameSession", True, usage="name [NAME]"),
-    CommandSpec("goal", "inspect, set, complete, pause, resume, or clear the objective", _TCE,
-                "goal", True, usage="goal [TEXT|STATE]"),
+    CommandSpec("goal", "start, review, pause, resume, or clear the goal", _TCE,
+                "goal", True, usage="goal [--tokens N] [TEXT|STATE]"),
     CommandSpec("set", "tune a scalar setting live", _T, usage="set [KEY [VALUE]]"),
     CommandSpec("settings", "browse & edit all settings", frozenset({"tui", "editor"}),
                 "settings", aliases=("config", "prefs", "preferences")),
@@ -110,11 +123,11 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("hooks", "inspect configured lifecycle hooks", _TCE, "hooks",
                 aliases=("hook",)),
     CommandSpec("mcp", "inspect and manage MCP servers", frozenset({"tui", "classic", "editor"}),
-                "mcp"),
+                "mcp", True, usage="mcp [ACTION…]"),
     CommandSpec("agents", "sub-agent configuration", frozenset({"tui", "classic", "editor"}),
                 "subagent"),
-    CommandSpec("skills", "installed skills", _TCE, "skills",
-                aliases=("extensions", "ext")),
+    CommandSpec("skills", "browse and manage installed skills", _TCE, "skills", True,
+                usage="skills [ACTION…]", aliases=("extensions", "ext"), available_while_running=True),
     CommandSpec("skill", "invoke an installed skill", frozenset({"classic", "editor"}),
                 "skill", True, usage="skill NAME [ARGS]"),
     CommandSpec("memory", "show or add project/user memory",
@@ -123,7 +136,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("permissions", "list or add allow · ask · deny rules",
                 frozenset({"tui", "classic", "editor"}), "permissions",
                 usage="permissions [RULE…]"),
-    CommandSpec("init", "analyze the project and write DGC.md", frozenset({"classic"})),
+    CommandSpec("init", "inspect the project and prepare its DGC.md guide", _TCE, "workflow:init", True,
+                usage="init [FOCUS]"),
     CommandSpec("search", "configure the web-search provider", frozenset({"classic"}),
                 usage="search [PROVIDER [URL]]"),
     CommandSpec("bug", "report a bug / request a feature", frozenset({"tui", "editor"}), "bug",
@@ -131,6 +145,10 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("update", "update DGC to the latest version",
                 frozenset({"tui", "classic", "editor"}), "update"),
     CommandSpec("clear", "clear the transcript", _TCE, "clear"),
+    # A private TUI easter egg: reserved and routable, but intentionally absent from command
+    # palettes, completions, help, editor metadata, and every non-interactive surface.
+    CommandSpec("bored", "open a private terminal diversion", _T,
+                discoverable=False, available_while_running=True),
     CommandSpec("quit", "exit dgc", _TC, aliases=("exit", "q")),
 )
 
@@ -140,8 +158,9 @@ def _reserved_command_names() -> set[str]:
             for name in (spec.name, *spec.aliases)}
 
 
-def command_specs(surface: str) -> list[CommandSpec]:
-    return [spec for spec in BUILTIN_COMMANDS if surface in spec.surfaces]
+def command_specs(surface: str, *, include_hidden: bool = False) -> list[CommandSpec]:
+    return [spec for spec in BUILTIN_COMMANDS
+            if surface in spec.surfaces and (include_hidden or spec.discoverable)]
 
 
 def resolve_command(name: str, surface: str) -> CommandSpec | None:

@@ -78,6 +78,39 @@ function echoedCommand(event) {
   return JSON.parse(event.message.slice(5));
 }
 
+test("a correlated session restore crosses setup while queued prompts wait for its exact reply", async () => {
+  const command = executable("restore-handshake-backend", `
+const readline = require("node:readline");
+${protocolFixture()}
+ready.capabilities.correlated_state_requests = true;
+send(ready);
+let restored = false;
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const cmd = JSON.parse(line);
+  if (cmd.type === "shutdown") process.exit(0);
+  if (cmd.type === "resume_session") {
+    send({ type: "session", kind: "resumed", session_id: "wrong", message_count: 0, request_id: "stale" });
+    setTimeout(() => {
+      restored = true;
+      send({ type: "session", kind: "resumed", session_id: "saved", message_count: 0, request_id: cmd.request_id });
+    }, 70);
+  }
+  if (cmd.type === "prompt") send({ type: "info", message: restored ? "restored:" + cmd.text : "WRONG SESSION" });
+});`);
+  const backend = new DgcBackend(scratch, command);
+  let restore;
+  backend.on("ready", () => {
+    restore = backend.request({ type: "resume_session", path: "saved.json", request_id: "restore-1" }, "session", 1000, true);
+    restore.then(() => backend.completeHandshake());
+  });
+  const response = waitFor(backend, "info");
+  backend.send({ type: "prompt", text: "queued" });
+  try {
+    assert.equal((await response).message, "restored:queued");
+    assert.equal((await restore).session_id, "saved");
+  } finally { backend.dispose(); }
+});
+
 test("backend gates startup, survives error events, and restarts on the next command", async () => {
   const backend = new DgcBackend(scratch, echoBackend("healthy-backend"));
   const echoes = [];
@@ -211,7 +244,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   );
 
   await assert.rejects(
-    backend.request({ type: "compact", request_id: "compact-exact" }, "context", 1000),
+    backend.request({ type: "compact", request_id: "compact-exact" }, "compacted", 1000),
     /synthetic busy/,
     "only the rejection carrying the exact request ID may settle the command",
   );
@@ -231,7 +264,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   );
   assert.equal(backend.listenerCount("event"), eventListeners);
   assert.equal(backend.listenerCount("exit"), exitListeners);
+  const longCompactionWindow = backend.request(
+    { type: "status", request_id: "long-compaction-window" }, "status", 130_000);
+  backend.emit("event", { type: "status", request_id: "long-compaction-window" });
+  assert.equal((await longCompactionWindow).request_id, "long-compaction-window",
+    "manual compaction may wait through the backend's 120-second summary deadline");
+  await assert.rejects(
+    backend.request({ type: "status", request_id: "unbounded-timeout" }, "status", 180_001),
+    /between 1 and 180000ms/,
+  );
+  const disposedListeners = backend.listenerCount("disposed");
+  const duringRestart = backend.request(
+    { type: "get_workspace_changes", request_id: "restart-inspection" }, "workspace_changes", 30000);
+  const rejected = assert.rejects(duringRestart, /restarted or closed/);
   backend.dispose();
+  await rejected;
+  assert.equal(backend.listenerCount("event"), eventListeners);
+  assert.equal(backend.listenerCount("exit"), exitListeners);
+  assert.equal(backend.listenerCount("disposed"), disposedListeners);
 });
 
 test("backend prioritizes correlated decisions over queued prompts under stdin backpressure", async () => {

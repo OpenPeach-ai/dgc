@@ -183,7 +183,11 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def _slug(project_root) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "-", str(project_root)).strip("-").lower()
+    # This is a storage identity, not an execution-time filesystem grant. Match Agent.session_root
+    # so Darwin's /var -> /private/var spelling and an explicitly selected launch-root symlink use
+    # one transcript bucket. Session paths themselves remain confined to that private bucket.
+    project = Path(project_root).expanduser().resolve(strict=False)
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", str(project)).strip("-").lower()
     return (s[-70:] or "root")
 
 
@@ -371,7 +375,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          timing: dict | None = None,
          checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
+         goal_details: dict | None = None,
          subscription_sessions: dict | None = None,
+         chat_changes: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
          expected_exists: bool | None = None,
          redact_secrets: tuple[str, ...] | list[str] | None = None) -> bool:
@@ -392,9 +398,13 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["name"] = name
         if goal:
             data["goal"] = goal          # the standing /goal objective, restored on resume
-            status = (goal_status if goal_status in ("active", "completed", "blocked")
+            status = (goal_status if goal_status in ("active", "paused", "completed", "blocked")
                       else "active")
             data["goal_status"] = status
+            if goal_details is not None:
+                from .goals import clean_details
+                from .redaction import redact_value
+                data["goal_details"] = clean_details(redact_value(goal_details, redact_secrets or ()))
             try:
                 elapsed = float(goal_elapsed_seconds or 0)
             except (TypeError, ValueError, OverflowError):
@@ -419,6 +429,9 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
             data["timing"] = _timing_values(timing)
         if checkpoints is not None:
             data["checkpoints"] = checkpoints
+        if chat_changes is not None:
+            from .redaction import redact_value
+            data["chat_changes"] = redact_value(chat_changes, redact_secrets or ())
         clean_subscription_sessions = _clean_subscription_sessions(subscription_sessions)
         if clean_subscription_sessions:
             data["subscription_sessions"] = clean_subscription_sessions
@@ -686,7 +699,7 @@ def goal_status_of(path, project_root) -> str:
         if not data.get("goal"):
             return "none"
         status = str(data.get("goal_status") or "active")
-        return status if status in ("active", "completed", "blocked") else "active"
+        return status if status in ("active", "paused", "completed", "blocked") else "active"
     except (OSError, ValueError):
         return "none"
 

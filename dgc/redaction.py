@@ -146,10 +146,20 @@ def secret_values(config=None) -> tuple[str, ...]:
                 continue
             for spec in list(group.values())[:64]:
                 env = spec.get("env", {}) if isinstance(spec, dict) else {}
+                auth_env = spec.get("auth_env", "") if isinstance(spec, dict) else ""
                 if isinstance(env, dict):
                     for name, value in list(env.items())[:64]:
-                        if sensitive_name(name):
+                        if sensitive_name(name) or name == auth_env:
                             add(value)
+                if group_key == "mcp_servers" and isinstance(auth_env, str) and auth_env:
+                    # auth_env is an explicit trust label, not a naming heuristic. Ambient
+                    # variables such as MCP_BEARER must be redacted even without TOKEN/KEY in the
+                    # name because DGC will deliberately send them as Authorization credentials.
+                    add(os.environ.get(auth_env, ""))
+        for env in list(getattr(config, "_stored_mcp_env", {}).values())[:64]:
+            if isinstance(env, dict):
+                for value in list(env.values())[:64]:
+                    add(value)
         for value in getattr(config, "_session_secret_values", ()):
             add(value)
     for value in _environment_secret_values():

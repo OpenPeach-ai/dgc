@@ -141,7 +141,7 @@ class ACPServer:
             msg["result"] = result if result is not None else {}
         self._write(msg)
 
-    def request(self, method: str, params: dict, timeout: float = 3600.0, cancel=None):
+    def request(self, method: str, params: dict, timeout: float | None = 3600.0, cancel=None):
         """Server-initiated request (e.g. session/request_permission). Blocks for the reply."""
         rid = next(self._rid)
         ev = threading.Event()
@@ -150,9 +150,10 @@ class ACPServer:
         with self._pending_lock:
             self._pending[rid] = slot
         self._write({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
-        deadline = time.monotonic() + max(0.01, float(timeout))
-        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
-            if (cancel is not None and cancel.is_set()) or time.monotonic() >= deadline:
+        deadline = None if timeout is None else time.monotonic() + max(0.01, float(timeout))
+        while not ev.wait(0.1 if deadline is None else min(0.1, max(0.0, deadline - time.monotonic()))):
+            if ((cancel is not None and cancel.is_set())
+                    or (deadline is not None and time.monotonic() >= deadline)):
                 with self._pending_lock:
                     self._pending.pop(rid, None)
                 return None
@@ -173,6 +174,7 @@ class ACPServer:
     def _install_state(self, cwd: Path, agent: Agent, ui: "_ACPUi") -> _ACPState:
         sid = ui.sid
         state = _ACPState(sid, cwd, agent.config, agent, ui)
+        ui.cancelled = agent.cancelled
         ui._rule_hook = lambda text, cfg=agent.config: self._add_rule(cfg, text)
         with self._sessions_lock:
             self._sessions[sid] = state
@@ -584,6 +586,7 @@ class _ACPUi:
         self.sid = sid
         self.cwd = cwd
         self.approval_timeout_s = max(0.01, float(approval_timeout_s))
+        self.cancelled = None
         self._tc = itertools.count(1)
         self._last_tool = None
         self._announced: set[str] = set()
@@ -702,7 +705,7 @@ class _ACPUi:
                 {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
                 {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
                 {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]},
-            timeout=self.approval_timeout_s)
+            timeout=None, cancel=self.cancelled)
         outcome = (res or {}).get("outcome", {})
         if outcome.get("outcome") == "selected":
             return {"once": "once", "always": "always", "deny": "no"}.get(outcome.get("optionId"), "no")
@@ -728,7 +731,7 @@ class _ACPUi:
                 {"optionId": "default", "name": "Approve (ask for changes)", "kind": "allow_once"},
                 {"optionId": "auto", "name": "Approve (full auto)", "kind": "allow_once"},
                 {"optionId": "reject", "name": "Keep planning", "kind": "reject_once"}]},
-            timeout=self.approval_timeout_s)
+            timeout=None, cancel=self.cancelled)
         outcome = (res or {}).get("outcome", {})
         choice = outcome.get("optionId") if outcome.get("outcome") == "selected" else "reject"
         accepted = choice in ("acceptEdits", "default", "auto")
@@ -743,14 +746,16 @@ class _ACPUi:
             "sessionId": self.sid,
             "toolCall": {"toolCallId": f"opt{next(self._tc)}", "title": question},
             "options": [{"optionId": str(i), "name": o, "kind": "allow_once"}
-                        for i, o in enumerate(options)]}, timeout=self.approval_timeout_s)
+                        for i, o in enumerate(options)]}, timeout=None, cancel=self.cancelled)
         outcome = (res or {}).get("outcome", {})
         if outcome.get("outcome") == "selected":
             try:
-                return options[int(outcome.get("optionId"))]
-            except (ValueError, IndexError):
+                index = int(outcome.get("optionId"))
+                if 0 <= index < len(options):
+                    return options[index]
+            except (ValueError, TypeError):
                 pass
-        return options[0] if options else ""
+        return ""
 
     def mcp_capabilities(self) -> dict:
         # ACP's portable permission request carries binary consent, not an arbitrary form editor.

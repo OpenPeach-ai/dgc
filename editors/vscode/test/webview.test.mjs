@@ -4,16 +4,19 @@
 // the webview itself in a real DOM: load the exact HTML skeleton that panel.ts ships, eval
 // media/main.js, feed it a scripted `dgc serve` event stream, and assert the rendered interaction
 // and accessibility contract with zero JS errors.
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
+import { buildSync } from "esbuild";
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
 const panelSrc = readFileSync(dir + "../src/panel.ts", "utf8");
 const extensionSrc = readFileSync(dir + "../src/extension.ts", "utf8");
 const mainJs = readFileSync(dir + "../media/main.js", "utf8");
+const markdownJs = buildSync({ entryPoints: [dir + "../src/markdown.ts"], bundle: true,
+  format: "iife", globalName: "DgcMarkdown", platform: "browser", write: false }).outputFiles[0].text;
 const mainCss = readFileSync(dir + "../media/main.css", "utf8");
 const extensionManifest = JSON.parse(readFileSync(dir + "../package.json", "utf8"));
 const contributedSettings = extensionManifest.contributes?.configuration?.properties ?? {};
@@ -32,6 +35,15 @@ assert.match(panelSrc, /path: uri\.fsPath/,
   "file mentions must carry canonical filesystem paths separately from display labels");
 assert.match(panelSrc, /Full-auto will execute every plan write and shell command/,
   "approving a plan into auto mode must pass an explicit warning gate");
+assert.match(panelSrc,
+  /this\.routeState\.subscriptionEngine\s*\?\s*\{ command: \{ type: "set_config", values: \{ subscription_model: model \} \}/,
+  "editor model changes must explicitly target the active subscription route");
+assert.match(panelSrc, /async listModels[\s\S]*?if \(this\.routeState\.subscriptionEngine\)[\s\S]*?this\.post\(\{ type: "models"[\s\S]*?return;[\s\S]*?this\.fetchModels\(\)/,
+  "subscription composer model listing must return before native endpoint discovery");
+assert.match(panelSrc, /private async stopArtifact[\s\S]*?requestState\([\s\S]*?"artifacts"/,
+  "artifact stop must wait for the correlated backend state before settling the card");
+assert.match(panelSrc, /private async startGoal[\s\S]*?await this\.requestState[\s\S]*?type: "set_goal"[\s\S]*?type: "prompt", text: objective/,
+  "a typed goal must be persisted before its objective starts an agent turn");
 
 function relativeLuminance(hex) {
   const channels = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);
@@ -53,6 +65,15 @@ function rootHex(name) {
   return value;
 }
 
+test("webview shell pins the composer and gives scrolling exclusively to the transcript", () => {
+  assert.match(mainCss, /html, body\s*\{[^}]*height:\s*100%[^}]*overflow:\s*hidden/s,
+    "the outer webview document must not acquire a second vertical scrollbar");
+  assert.match(mainCss, /#log\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overflow-anchor:\s*none/s,
+    "the shrinking transcript must own scrolling without browser scroll-anchor jumps");
+  assert.match(mainCss, /footer\s*\{[^}]*flex:\s*0 0 auto/s,
+    "the composer footer must remain outside the transcript scrollport");
+});
+
 // Pull the real HTML template out of panel.ts's html() and neutralise the
 // `${nonce}` / `${css}` / `${csp}` interpolations so the markup stays in sync
 // with what ships — the test never hand-rolls its own DOM.
@@ -60,21 +81,510 @@ const htmlMatch = panelSrc.match(/<!doctype html>[\s\S]*?<\/body><\/html>/i);
 assert.ok(htmlMatch, "could not extract the webview HTML template from panel.ts");
 const html = htmlMatch[0].replace(/\$\{[^}]*\}/g, "");
 
-function makeDom() {
+const activeDoms = new Set();
+afterEach(() => { for (const dom of activeDoms) dom.window.close(); activeDoms.clear(); });
+
+function makeDom(options = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on("jsdomError", (e) => errors.push(e));
-  const dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
+  const markup = options.scope ? html.replace('data-draft-scope=""', `data-draft-scope="${options.scope}"`) : html;
+  const dom = new JSDOM(markup, { runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
+  activeDoms.add(dom);
   const posted = [];
+  let savedState = options.state;
+  dom.window.TextEncoder = TextEncoder;
   dom.window.acquireVsCodeApi = () => ({
     postMessage: (m) => posted.push(m),
-    getState: () => undefined,
-    setState: () => undefined,
+    getState: () => savedState,
+    setState: (value) => { savedState = JSON.parse(JSON.stringify(value)); },
   });
+  dom.window.eval(markdownJs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
   dom.window.eval(mainJs); // runs the webview IIFE against this DOM
   const send = (data) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
-  return { dom, errors, posted, send, doc: dom.window.document };
+  return { dom, errors, posted, send, doc: dom.window.document, savedState: () => savedState };
 }
+
+test("draft reload retains text, cursor, skills and MCP context only in its workspace", () => {
+  const first = makeDom({ scope: "workspace-a" });
+  first.send({ type: "session_ready", sessionId: "chat-alpha" });
+  first.doc.getElementById("input").value = "Inspect the request with selected context";
+  first.send({ type: "composer_skill", name: "verify" });
+  first.send({ type: "attach", label: "Reference", resource: { type: "mcp_context", server: "docs", uri: "docs://one", text: "Reference text" } });
+  first.doc.getElementById("input").setSelectionRange(8, 11);
+  first.dom.window.dispatchEvent(new first.dom.window.Event("pagehide"));
+  const saved = first.savedState();
+  const reopened = makeDom({ scope: "workspace-a", state: saved });
+  const input = reopened.doc.getElementById("input");
+  assert.equal(input.value, "Inspect the request with selected context");
+  assert.deepEqual([input.selectionStart, input.selectionEnd], [8, 11]);
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify.*Reference/);
+  input.dispatchEvent(new reopened.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(reopened.posted.some(message => message.type === "prompt"), false, "restore must complete before a prompt can enter a different chat");
+  reopened.send({ type: "event", event: { type: "ready", session_id: "new-backend-session" } });
+  assert.equal(input.value, "Inspect the request with selected context");
+  reopened.send({ type: "session_ready", sessionId: "chat-alpha" });
+  assert.deepEqual([input.selectionStart, input.selectionEnd], [8, 11]);
+  const elsewhere = makeDom({ scope: "workspace-b", state: saved });
+  assert.equal(elsewhere.doc.getElementById("input").value, "");
+  assert.equal(elsewhere.doc.getElementById("attachments").textContent, "");
+  assert.deepEqual([...first.errors, ...reopened.errors, ...elsewhere.errors], []);
+});
+
+test("switching chats restores their own drafts and clears the previous live transcript", () => {
+  const { dom, doc, send, errors } = makeDom({ scope: "workspace" });
+  const input = doc.getElementById("input");
+  send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Alpha draft";
+  send({ type: "composer_skill", name: "verify" });
+  send({ type: "event", event: { type: "info", message: "Alpha transcript" } });
+  send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  assert.equal(input.value, "");
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.doesNotMatch(doc.getElementById("log").textContent, /Alpha transcript/);
+  input.value = "Beta draft";
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  assert.equal(input.value, "Alpha draft");
+  assert.match(doc.getElementById("attachments").textContent, /verify/);
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "beta" } });
+  assert.equal(input.value, "Beta draft");
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  assert.deepEqual(errors, []);
+});
+
+test("reload never automatically resends a message whose delivery was unconfirmed", () => {
+  const first = makeDom({ scope: "workspace" });
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  const input = first.doc.getElementById("input"); input.value = "Check the migration";
+  first.send({ type: "composer_skill", name: "verify" });
+  input.dispatchEvent(new first.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const sent = first.posted.findLast(message => message.type === "prompt");
+  assert.equal(first.savedState().pending.length, 1);
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.querySelectorAll(".draft-delivery-notice").length, 1);
+  assert.equal(reopened.posted.some(message => message.type === "prompt"), false);
+  reopened.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(reopened.doc.getElementById("input").value, "Check the migration");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify/);
+  first.send({ type: "event", event: { type: "prompt_accepted", request_id: sent.requestId } });
+  assert.equal(first.savedState().pending.length, 0);
+  const accepted = makeDom({ scope: "workspace", state: first.savedState() });
+  accepted.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(accepted.doc.querySelectorAll(".draft-delivery-notice").length, 0);
+  assert.equal(accepted.doc.getElementById("input").value, "");
+  assert.deepEqual([...first.errors, ...reopened.errors, ...accepted.errors], []);
+});
+
+test("prompt rejection restores matching text and attachments while preserving a newer draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "attach", label: "app.ts", resource: { type: "file_mention", path: "app.ts" } });
+  input.value = "Review this file";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const first = posted.find(message => message.type === "prompt");
+  input.value = "new draft";
+  send({ type: "event", event: { type: "command_rejected", command: "prompt", request_id: first.requestId, message: "Queue full" } });
+  assert.equal(input.value, "new draft");
+  assert.ok(doc.querySelector(".msg.rejected button"));
+  input.value = ""; doc.querySelector(".msg.rejected button").click();
+  assert.equal(input.value, "Review this file");
+  assert.match(doc.getElementById("attachments").textContent, /app.ts/);
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Send message");
+  assert.deepEqual(errors, []);
+});
+
+test("rejected messages survive a newer draft and chat changes without claiming uncertain delivery", () => {
+  const first = makeDom({ scope: "workspace" }), input = first.doc.getElementById("input");
+  first.send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Rejected request";
+  first.send({ type: "composer_skill", name: "verify" });
+  input.dispatchEvent(new first.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const request = first.posted.findLast(message => message.type === "prompt");
+  input.value = "Newer draft";
+  first.send({ type: "event", event: { type: "command_rejected", command: "prompt", request_id: request.requestId } });
+  const reopened = makeDom({ scope: "workspace", state: first.savedState() });
+  reopened.send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(reopened.doc.getElementById("input").value, "Newer draft");
+  assert.match(reopened.doc.querySelector(".draft-delivery-notice").textContent, /rejected message/);
+  reopened.send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  assert.equal(reopened.doc.querySelector(".draft-delivery-notice"), null);
+  reopened.send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  reopened.doc.getElementById("input").value = "";
+  reopened.doc.querySelector(".draft-delivery-notice button").click();
+  assert.equal(reopened.doc.getElementById("input").value, "Rejected request");
+  assert.match(reopened.doc.getElementById("attachments").textContent, /verify/);
+  assert.equal(reopened.savedState().pending.length, 0);
+  assert.deepEqual([...first.errors, ...reopened.errors], []);
+});
+
+test("disconnect preserves an uncertain delivery for review and never preloads a duplicate send", () => {
+  const { dom, doc, posted, send, savedState, errors } = makeDom({ scope: "workspace" });
+  send({ type: "session_ready", sessionId: "alpha" });
+  doc.getElementById("input").value = "Run migration";
+  doc.getElementById("input").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  send({ type: "backend_exit", code: 7 });
+  assert.equal(doc.getElementById("input").value, "");
+  assert.equal(savedState().pending[0].rejected, false);
+  assert.match(doc.querySelector(".draft-delivery-notice").textContent, /not confirmed/);
+  send({ type: "session_ready", sessionId: "alpha" });
+  assert.equal(posted.filter(message => message.type === "prompt").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("an image finishing after a chat switch remains with its original draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom({ scope: "workspace" });
+  const input = doc.getElementById("input");
+  let reader;
+  dom.window.FileReader = class HoldingReader { constructor() { reader = this; } readAsDataURL() {} };
+  send({ type: "session_ready", sessionId: "alpha" });
+  input.value = "Inspect image";
+  const event = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: { items: [{ type: "image/png",
+    getAsFile: () => new dom.window.File([new Uint8Array(32)], "image.png", { type: "image/png" }) }] } });
+  input.dispatchEvent(event);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.some(message => message.type === "prompt"), false);
+  send({ type: "event", event: { type: "session", kind: "new", session_id: "beta" } });
+  reader.result = "data:image/png;base64,iVBORw0KGgo="; reader.onload();
+  assert.equal(doc.getElementById("attachments").textContent, "");
+  send({ type: "event", event: { type: "session", kind: "resumed", session_id: "alpha" } });
+  assert.equal(input.value, "Inspect image");
+  assert.match(doc.getElementById("attachments").textContent, /image/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.findLast(message => message.type === "prompt").images[0], reader.result);
+  assert.deepEqual(errors, []);
+});
+
+test("goal actions carry selected skills, templates, images and MCP snapshots with correlated draft recovery", () => {
+  for (const inline of [false, true]) {
+    const original = inline ? "Verify the release /goal" : "/goal Verify the release";
+    const context = { type: "mcp_context", server: "docs", uri: "docs://release", text: "Snapshot reference" };
+    const { dom, doc, posted, send, savedState, errors } = makeDom({ scope: "workspace", state: {
+      version: 1, scope: "workspace", active: "alpha", entries: [["alpha", { text: original,
+        attachments: [{ label: "$verify", skill: "verify" }, { label: "/check", template: "check" },
+          { label: "Reference", resource: context }, { label: "Image", img: true, bytes: 8,
+            data: "data:image/png;base64,iVBORw0KGgo=" }], start: original.length, end: original.length }]], pending: [],
+    } });
+    send({ type: "session_ready", sessionId: "alpha" });
+    const input = doc.getElementById("input");
+    if (inline) input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const command = posted.findLast(message => message.type === "startGoal");
+    assert.equal(command.text, "Verify the release");
+    assert.deepEqual(JSON.parse(JSON.stringify(command.skills)), ["verify"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(command.templates)), ["check"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(command.context)), [context]);
+    assert.equal(command.images.length, 1);
+    assert.equal(posted.some(message => message.type === "prompt"), false);
+    assert.equal(input.value, "");
+    assert.equal(doc.getElementById("attachments").textContent, "");
+    assert.equal(savedState().pending.length, 1);
+    send({ type: "event", event: { type: "command_rejected", command: "start_goal", request_id: command.requestId,
+      message: "Goal selection rejected" } });
+    assert.equal(input.value, original);
+    assert.match(doc.getElementById("attachments").textContent, /verify.*check.*Reference.*Image/);
+    assert.equal(savedState().pending.length, 0);
+    send({ type: "state", state: { goal: { text: "Verify", status: "paused", attachments: {
+      skills: ["verify"], templates: ["check"], images: 1, context: 1 } } } });
+    doc.getElementById("goal-review-button").click();
+    assert.match(doc.querySelector(".goal-attachments").textContent, /\$verify.*\/check.*1 context attachment.*1 image/);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("goal control commands preserve selected attachments and do not become model instructions", () => {
+  const { dom, doc, posted, send, errors } = makeDom();
+  send({ type: "composer_skill", name: "verify" });
+  doc.getElementById("input").value = "/goal pause";
+  doc.getElementById("input").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.findLast(message => message.type === "slashText").text, "/goal pause");
+  assert.equal(posted.some(message => message.type === "prompt" || message.type === "startGoal"), false);
+  assert.match(doc.getElementById("attachments").textContent, /verify/);
+  assert.deepEqual(errors, []);
+});
+
+test("composer rejects excess selections before they can escape saved-draft limits", () => {
+  const { dom, doc, send, savedState, errors } = makeDom({ scope: "workspace" });
+  send({ type: "session_ready", sessionId: "alpha" });
+  doc.getElementById("input").value = "Keep this request";
+  for (let i = 0; i < 9; i++) send({ type: "composer_skill", name: `skill-${i}` });
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 8);
+  for (let i = 0; i < 57; i++) send({ type: "attach", label: `file-${i}`, resource: { type: "file_mention", path: `file-${i}` } });
+  assert.equal(doc.querySelectorAll("#attachments .chip").length, 64);
+  dom.window.dispatchEvent(new dom.window.Event("pagehide"));
+  assert.equal(savedState().entries[0][1].attachments.length, 64);
+  assert.equal(savedState().entries[0][1].text, "Keep this request");
+  assert.deepEqual(errors, []);
+});
+
+test("inline slash picker exposes management and skills without consuming the draft", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "event", event: { type: "ready", capabilities: { headless_skill_catalog: true },
+    commands: [{ name: "skills", description: "Installed skills", action: "skills" },
+      { name: "mcp", description: "Connected tools", action: "mcp" },
+      { name: "model", description: "Choose a model", action: "pickModel" }],
+    skills: ["fixture"], custom_commands: ["check-api"] } });
+  assert.ok(posted.some((m) => m.type === "requestSkills"));
+  input.value = "Review /mcp after this";
+  input.selectionStart = input.selectionEnd = 9;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.match(doc.getElementById("pop").textContent, /Connected tools/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(input.value, "Review  after this");
+  assert.equal(posted.at(-1).action, "mcp");
+  assert.equal(posted.some((m) => m.type === "prompt"), false);
+  input.value = "Keep this /"; input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  for (const expected of ["/skills", "/mcp", "/model", "$fixture", "/check-api"])
+    assert.ok(doc.getElementById("pop").textContent.includes(expected));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  send({ type: "event", event: { type: "skill_catalog", items: [{ name: "fixture", description: "Fresh metadata" }] } });
+  assert.equal(doc.getElementById("pop").style.display, "none", "a late catalog cannot reopen a dismissed picker");
+  assert.equal(input.value, "Keep this /");
+  assert.deepEqual(errors, []);
+});
+
+test("workflow pickers preserve the complete draft and wait for an explicit send", () => {
+  for (const name of ["plan", "review", "init"]) {
+    const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+    send({ type: "composer_skill", name: "verify" });
+    input.value = `Check /${name} retries`;
+    input.selectionStart = input.selectionEnd = input.value.indexOf(" retries");
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    assert.equal(input.value, `/${name} Check  retries`);
+    assert.match(doc.getElementById("attachments").textContent, /verify/);
+    assert.equal(posted.some(message => message.type === "prompt"), false);
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const request = posted.findLast(message => message.type === "prompt");
+    assert.equal(request.text, `/${name} Check  retries`);
+    assert.deepEqual(JSON.parse(JSON.stringify(request.skills)), ["verify"]);
+    send({ type: "prompt_rejected", requestId: request.requestId });
+    assert.equal(input.value, `/${name} Check  retries`);
+    assert.match(doc.getElementById("attachments").textContent, /verify/);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("typed review/init use acknowledged prompts and command-menu actions retain existing text", () => {
+  for (const original of ["/review", "/init", "/plan inspect retries", "Inspect retries /review"]) {
+    const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+    input.value = original;
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const request = posted.findLast(message => message.type === "prompt");
+    assert.equal(request.text, original);
+    assert.equal(posted.some(message => message.type === "slashText"), false);
+    send({ type: "prompt_rejected", requestId: request.requestId });
+    assert.equal(input.value, original);
+    send({ type: "workflow_draft", name: "init" });
+    assert.match(input.value, /^\/init /);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("skill and template chips preserve text, travel as selections, and restore on rejection", () => {
+  const { dom, doc, posted, send, errors } = makeDom(), input = doc.getElementById("input");
+  send({ type: "event", event: { type: "ready", skills: ["fixture"], custom_commands: ["check-api"] } });
+  input.value = "Review $fixture after"; input.selectionStart = input.selectionEnd = 10;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  assert.equal(input.value, "Review  after");
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
+  input.value += " /check"; input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
+  assert.equal(posted.some((m) => m.type === "prompt"), false);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const prompt = posted.at(-1);
+  assert.equal(prompt.type, "prompt");
+  assert.equal(prompt.text, "Review  after");
+  assert.deepEqual(Array.from(prompt.skills), ["fixture"]);
+  assert.deepEqual(Array.from(prompt.templates), ["check-api"]);
+  send({ type: "prompt_rejected", requestId: prompt.requestId });
+  assert.equal(input.value, "Review  after");
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 2);
+  doc.querySelector(".invocation-chip .x").click();
+  assert.equal(doc.querySelectorAll(".invocation-chip").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("skill library applies to existing draft and toolbar does not erase selected text", () => {
+  const { dom, doc, send, errors } = makeDom(), input = doc.getElementById("input");
+  input.value = "Existing request"; input.selectionStart = 0; input.selectionEnd = 8;
+  doc.getElementById("btn-cmd").click();
+  assert.equal(input.value, "Existing / request");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  input.value = "Existing request";
+  send({ type: "surface_open", surface: "skills" });
+  send({ type: "event", event: { type: "skill_catalog", items: [{ name: "fixture", source: "project" }] } });
+  doc.querySelector("[data-skill-use]").click();
+  assert.equal(input.value, "Existing request");
+  assert.match(doc.getElementById("attachments").textContent, /\$fixture/);
+  for (const text of ["https://example.test/path", "src/path", "person@example.test"]){
+    input.value = text; input.selectionStart = input.selectionEnd = text.length;
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(doc.getElementById("pop").style.display, "none");
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("skill library honors enablement metadata and retains the draft through management", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { skill_management: true } } });
+  const input = doc.getElementById("input");
+  input.value = "Existing request";
+  send({ type: "surface_open", surface: "skills" });
+  send({ type: "event", event: { type: "skill_catalog", items: [
+    { name: "fixture", display_name: "Fixture workflow", source: "project", enabled: false,
+      allow_implicit_invocation: false, default_prompt: "Inspect with $fixture", diagnostics: ["Metadata <script>unsafe</script>"] },
+  ] } });
+  assert.equal(doc.querySelector("[data-skill-use]").disabled, true);
+  assert.match(doc.getElementById("surface").textContent, /Fixture workflow.*disabled/s);
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  doc.querySelector("[data-skill-toggle]").click();
+  assert.equal(posted.at(-1).type, "skillToggle");
+  assert.equal(posted.at(-1).enabled, true);
+  assert.equal(input.value, "Existing request");
+  doc.getElementById("surface-secondary").click();
+  assert.equal(posted.at(-1).type, "skillsManage");
+  assert.deepEqual(errors, []);
+});
+
+test("MCP context can be browsed, previewed and attached without replacing the draft", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: { mcp_context: true } } });
+  const input = doc.getElementById("input"); input.value = "Use this resource to check the API";
+  send({ type: "surface_open", surface: "mcp" });
+  send({ type: "event", event: { type: "mcp_servers", items: [{ name: "fixture", state: "connected" }] } });
+  doc.querySelector('[data-mcp-browse="resources"]').click();
+  const listing = posted.at(-1);
+  assert.equal(listing.type, "mcpContextList");
+  send({ type: "event", event: { type: "mcp_context_catalog", request_id: listing.requestId,
+    server: "fixture", kind: "resources", items: [{ name: "API spec", uri: "fixture://api" }] } });
+  doc.querySelector("[data-mcp-context]").click();
+  const get = posted.at(-1);
+  assert.equal(get.type, "mcpContextGet");
+  assert.equal(doc.getElementById("surface").hidden, true, "permission cards stay visible during retrieval");
+  send({ type: "event", event: { type: "mcp_context", request_id: get.requestId, server: "fixture",
+    kind: "resources", identifier: "fixture://api", text: "API **reference** <script>unsafe()</script>", omitted: [] } });
+  assert.equal(doc.getElementById("surface").querySelector("script"), null);
+  doc.getElementById("surface-primary").click();
+  assert.equal(input.value, "Use this resource to check the API");
+  assert.match(doc.getElementById("attachments").textContent, /fixture.*api/);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const prompt = posted.findLast((message) => message.type === "prompt");
+  assert.equal(prompt.context[0].type, "mcp_context");
+  assert.equal(prompt.context[0].server, "fixture");
+  assert.equal(prompt.context[0].uri, "fixture://api");
+  assert.deepEqual(errors, []);
+});
+
+test("MCP command errors and cancellation settle the picker while preserving the draft", () => {
+  const { dom, doc, send, posted, errors } = makeDom();
+  const input = doc.getElementById("input"); input.value = "Existing draft";
+  send({ type: "event", event: { type: "ready", capabilities: { mcp_context: true, mcp_management: true } } });
+  send({ type: "mcp_command_started", requestId: "command-1" });
+  assert.equal(doc.getElementById("surface").hidden, false);
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "command-1", output: "", error: "Disconnected fixture" } });
+  assert.match(doc.getElementById("surface").textContent, /Disconnected fixture/);
+  assert.equal(input.value, "Existing draft");
+  send({ type: "mcp_command_started", requestId: "literal-output" });
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "literal-output", output: "<img src=x onerror=unsafe()>" } });
+  assert.equal(doc.getElementById("surface").querySelector("img"), null);
+  assert.match(doc.getElementById("surface").textContent, /<img src=x onerror=unsafe\(\)>/);
+  send({ type: "mcp_command_started", requestId: "command-2" });
+  doc.getElementById("surface-primary").click();
+  assert.equal(posted.at(-1).type, "cancel");
+  send({ type: "event", event: { type: "mcp_command_result", request_id: "command-2", context: {
+    server: "fixture", kind: "resources", identifier: "fixture://late", text: "late result", omitted: [] } } });
+  assert.doesNotMatch(doc.getElementById("surface").textContent, /late result/);
+  for (const viaEscape of [true, false]) {
+    send({ type: "mcp_command_started", requestId: "close-command" });
+    if (viaEscape) doc.getElementById("surface-search").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    else doc.getElementById("surface-close").click();
+    assert.equal(posted.at(-1).type, "cancel");
+    send({ type: "event", event: { type: "mcp_command_result", request_id: "close-command", output: "late" } });
+    assert.equal(doc.getElementById("surface").hidden, true);
+  }
+  assert.equal(input.value, "Existing draft");
+  assert.deepEqual(errors, []);
+});
+
+test("restored history pages and tool disclosure preserve live content and safe output", () => {
+  const { dom, doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "text_delta", text: "Live response" } });
+  const items = Array.from({ length: 120 }, (_, i) => ({ role: "user", text: `Saved ${i}` }));
+  items.push({ role: "assistant", text: "Inspecting", tools: ["bash"], commentary: true,
+    tool_details: [{ name: "bash", arguments: "npm test", output: '<script>unsafe()</script>', status: "returned" }] });
+  send({ type: "event", event: { type: "history", items } });
+  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 50);
+  assert.match(doc.getElementById("log").lastElementChild.textContent, /Live response/);
+  const detail = doc.querySelector(".history-tools");
+  assert.equal(detail.querySelector(".out"), null);
+  detail.open = true; detail.dispatchEvent(new dom.window.Event("toggle"));
+  assert.match(detail.querySelector(".out").textContent, /<script>unsafe/);
+  assert.equal(detail.querySelector("script"), null);
+  assert.ok(doc.querySelector(".history-pages .text.commentary"));
+  doc.querySelector(".history-older").click();
+  assert.equal(doc.querySelectorAll(".history-pages .msg").length, 100);
+  assert.deepEqual(errors, []);
+});
+
+test("turn_eta shows the remaining range beside the turn timer and clears with the turn", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  assert.doesNotMatch(doc.querySelector(".thinking .meta").textContent, /left/);
+  send({ type: "event", event: { type: "turn_eta", turn_id: "t1", elapsed_seconds: 25, remaining_low_seconds: 60,
+    remaining_high_seconds: 200, confidence: 0.5, label: "~1–4 min left · 1/3 tasks" } });
+  assert.match(doc.querySelector(".thinking .meta").textContent, /~1–4 min left · 1\/3 tasks/);
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  send({ type: "event", event: { type: "turn_eta", turn_id: "t1", elapsed_seconds: 30, remaining_low_seconds: 1,
+    remaining_high_seconds: 2, confidence: 0.5, label: "stale" } });
+  assert.deepEqual(errors, []);
+});
+
+test("stream batching flushes final text and partial changes stay explicit", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  for (const text of ["Complete ", "answer ", "with **formatting**."]) send({ type: "event", event: { type: "text_delta", text } });
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  assert.equal(doc.querySelector(".text.final").textContent.trim(), "Complete answer with formatting.");
+  send({ type: "chat_changes", total: 900, files: [], notices: ["Showing 500 of 900 changed files."] });
+  assert.match(doc.getElementById("changes-count").textContent, /partial scan/);
+  doc.getElementById("changes-review-button").click();
+  assert.match(doc.getElementById("changes-review-list").textContent, /Showing 500 of 900/);
+  assert.deepEqual(errors, []);
+});
+
+test("goal review exposes saved evidence, bounded editing, and keyboard focus", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "goal_changed", goal: "Finish the task", status: "completed",
+    elapsed_seconds: 125, details: { cycles: 3, tokens_used: 520, token_budget: 2000,
+      running: false, reason: "Finished after verification", evidence: ["<script>private()</script>", "Build passed"],
+      history: [{ status: "active", reason: "Goal started" }, { status: "completed", reason: "Build passed" }] } } });
+  doc.getElementById("goal-review-button").click();
+  assert.equal(doc.getElementById("goal-review").hidden, false);
+  assert.equal(posted.at(-1).type, "reviewGoal");
+  assert.match(doc.getElementById("goal-review-body").textContent, /3 cycles/);
+  assert.match(doc.getElementById("goal-review-body").textContent, /Build passed/);
+  assert.equal(doc.getElementById("goal-review-body").querySelectorAll("script").length, 0);
+  doc.getElementById("goal-review").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(doc.activeElement.id, "goal-review-button");
+  doc.getElementById("goal-edit").click();
+  assert.equal(doc.getElementById("goal-editor-budget").value, "2000");
+  assert.equal(doc.getElementById("goal-editor-text").maxLength, 4000);
+  doc.getElementById("goal-editor-budget").value = "3000";
+  doc.getElementById("goal-editor-save").focus();
+  doc.getElementById("goal-editor-save").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  assert.equal(doc.activeElement.id, "goal-editor-close");
+  doc.getElementById("goal-editor-save").click();
+  assert.equal(posted.at(-1).tokenBudget, 3000);
+  assert.deepEqual(errors, []);
+});
 
 test("webview renders a full turn: thinking → text → progress cards → diff → permission round-trip", () => {
   const { dom, errors, posted, send, doc } = makeDom();
@@ -84,7 +594,11 @@ test("webview renders a full turn: thinking → text → progress cards → diff
   assert.equal(doc.getElementById("pmodel").textContent, "qwen3:8b");
   assert.equal(doc.getElementById("modelname").textContent, "qwen3:8b");
 
-  send({ type: "event", event: { type: "ready", commands: [] } });
+  send({ type: "event", event: { type: "ready", commands: [], session_id: "chat-12345678",
+    session_name: "Answer formatter audit" } });
+  assert.equal(doc.getElementById("thread-title").textContent, "Answer formatter audit");
+  doc.getElementById("thread-title").click();
+  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/name");
   send({ type: "event", event: { type: "turn_start" } });
 
   // subtle thinking indicator is present
@@ -171,10 +685,49 @@ test("webview renders a full turn: thinking → text → progress cards → diff
 
   send({ type: "event", event: { type: "turn_end" } });
   assert.ok(doc.querySelector(".thinking.done"), "turn footer did not settle");
-  assert.ok([...doc.querySelectorAll(".text")].at(-1).classList.contains("final"),
-    "the last assistant segment should be marked as the final answer");
+  assert.equal(doc.querySelector(".msg.dgc").lastElementChild, doc.querySelector(".thinking.done"),
+    "turn timing should remain below the completed response");
+  assert.equal(doc.querySelector(".text.final"), null,
+    "commentary before tools must not become a final answer");
 
   assert.deepEqual(errors, [], "webview raised JS errors: " + errors.map((e) => e && e.message).join("; "));
+  dom.window.close();
+});
+
+test("live activity follows the newest response content without stealing an intentional scroll", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const log = doc.getElementById("log");
+  send({ type: "event", event: { type: "turn_start" } });
+  const response = doc.querySelector(".msg.dgc");
+  const activity = response.querySelector(".thinking");
+
+  Object.defineProperties(log, {
+    clientHeight: { configurable: true, get: () => 100 },
+    scrollHeight: { configurable: true, get: () => 1000 },
+    scrollTop: { configurable: true, writable: true, value: 900 },
+  });
+  send({ type: "event", event: { type: "text_delta", text: "First streamed line.\nSecond streamed line." } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest streamed text");
+  assert.equal(log.scrollTop, 1000, "a reader at the tail should follow new streamed text");
+
+  log.scrollTop = 200;
+  send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/app.ts", call_id: "tail-1" } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest tool call");
+  assert.equal(log.scrollTop, 200, "new tool content must not steal an intentional upward scroll");
+
+  send({ type: "event", event: { type: "tool_result", name: "read_file", call_id: "tail-1",
+    is_diff: true, diff: "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new" } });
+  assert.equal(response.lastElementChild, activity,
+    "working status should sit below the latest diff");
+  assert.equal(log.scrollTop, 200, "a diff must preserve the reader's upward scroll");
+
+  send({ type: "event", event: { type: "turn_end" } });
+  assert.equal(response.lastElementChild, activity,
+    "settled turn timing should remain at the response tail");
+  assert.ok(activity.classList.contains("done"));
+  assert.deepEqual(errors, [], "turn-tail activity flow raised JS errors");
   dom.window.close();
 });
 
@@ -182,7 +735,7 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   const { dom, errors, posted, send, doc } = makeDom();
   send({ type: "event", event: { type: "turn_start" } });
   const partial = "# Result\n\n| Name | Value |\n| :--- | ---: |\n"
-    + "| **alpha** | `1|2` |\n\n```html\n"
+    + "| **alpha** | `1\\|2` |\n\n```html\n"
     + "<img src=x onerror=bad()>\n**literal stars**";
   send({ type: "event", event: { type: "text_delta", text: partial } });
 
@@ -190,10 +743,10 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   assert.ok(table, "a complete Markdown table should render before the response ends");
   assert.deepEqual([...table.querySelectorAll("th")].map((cell) => cell.textContent),
     ["Name", "Value"]);
-  assert.equal(table.querySelector("tbody td:first-child b").textContent, "alpha");
+  assert.equal(table.querySelector("tbody td:first-child strong").textContent, "alpha");
   assert.equal(table.querySelector("tbody td:last-child code").textContent, "1|2",
     "an inline-code pipe must not split a table cell");
-  assert.ok(table.querySelector("th:last-child").classList.contains("align-right"));
+  assert.equal(table.querySelector("th:last-child").style.textAlign, "right");
 
   let block = doc.querySelector("pre.code");
   assert.ok(block, "an unterminated streaming fence should already render as code");
@@ -204,13 +757,90 @@ test("streaming Markdown renders tables and keeps fenced code literal, safe, and
   assert.equal(block.querySelector("img"), null, "fenced HTML must remain inert text");
 
   send({ type: "event", event: { type: "text_delta", text: "\n```" } });
+  send({ type: "event", event: { type: "stream_end" } });
   block = doc.querySelector("pre.code");
   block.querySelector("button.copy").click();
   const copied = posted.find((message) => message.type === "copy");
-  assert.equal(copied?.text, "<img src=x onerror=bad()>\n**literal stars**",
+  assert.equal(copied?.text, "<img src=x onerror=bad()>\n**literal stars**\n",
     "copy must return the model's source, not HTML entities");
   assert.equal(doc.querySelectorAll("pre.code").length, 1);
   assert.deepEqual(errors, [], "Markdown rendering raised JS errors");
+  dom.window.close();
+});
+
+test("CommonMark preserves semantic structure and only explicit safe navigation", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const text = "## Changes\n\n1. Read the file\n   - Check **inputs**\n2. Run tests\n\n"
+    + "> Verified in a clean workspace.\n\n"
+    + "[app.ts](/project/src/app.ts:42) and [docs](https://example.com/guide_(new))\n\n"
+    + "[run](command:workbench.action.terminal.new) [bad](javascript:alert(1)) "
+    + "![diagram](https://example.com/track.png) <img src=x onerror=alert(1)>";
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "text_delta", text } });
+  assert.equal(doc.querySelector(".text h2").textContent, "Changes");
+  assert.equal(doc.querySelectorAll(".text ol > li").length, 2);
+  assert.equal(doc.querySelector(".text ol ul strong").textContent, "inputs");
+  assert.match(doc.querySelector(".text blockquote").textContent, /Verified/);
+  assert.equal(doc.querySelector(".text img, .text script, .text a[href]"), null);
+  assert.equal(posted.filter(m => ["openFile", "openExternal"].includes(m.type)).length, 0);
+  doc.querySelector('.md-link[data-link-kind="file"]').click();
+  assert.equal(posted.at(-1).path, "/project/src/app.ts");
+  assert.equal(posted.at(-1).line, 42);
+  doc.querySelector('.md-link[data-link-kind="external"]').click();
+  assert.equal(posted.at(-1).url, "https://example.com/guide_(new)");
+  send({ type: "event", event: { type: "turn_end", reason: "completed" } });
+  const final = doc.querySelector(".text.final");
+  assert.ok(final);
+  assert.equal(final.previousElementSibling, doc.querySelector(".thinking.done"));
+  doc.querySelector(".response-copy").click();
+  assert.equal(posted.at(-1).text, text, "copy response preserves Markdown source");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("cancelled and failed turns never present unfinished prose as a final answer", () => {
+  const { dom, errors, send, doc } = makeDom();
+  for (const reason of ["cancelled", "error"]) {
+    send({ type: "event", event: { type: "turn_start" } });
+    send({ type: "event", event: { type: "text_delta", text: "I will inspect the implementation." } });
+    send({ type: "event", event: { type: "turn_end", reason } });
+  }
+  assert.equal(doc.querySelector(".text.final, .response-copy"), null);
+  assert.match(doc.querySelectorAll(".thinking.done")[0].textContent, /^Stopped/);
+  assert.match(doc.querySelectorAll(".thinking.done")[1].textContent, /^Failed/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("tool correlation accepts opaque IDs and preserves denial evidence", () => {
+  const { dom, errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "tool_result", call_id: "__proto__", name: "read_file", output: "done" } });
+  send({ type: "event", event: { type: "tool_denied", call_id: "constructor", name: "bash", reason: "Denied by workspace rule" } });
+  assert.equal(doc.querySelectorAll(".tool").length, 2);
+  assert.match(doc.querySelector('.tool[data-status="denied"] .body').textContent, /Denied by workspace rule/);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("tool batches collapse without hiding failures or misclassifying preceding commentary", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const event = value => send({ type: "event", event: value });
+  event({ type: "turn_start" });
+  event({ type: "text_delta", text: "I am checking the implementation." });
+  event({ type: "stream_end" });
+  event({ type: "tool_call", call_id: "one", name: "Read", summary: "app.ts" });
+  event({ type: "tool_result", call_id: "one", name: "Read", output: "source" });
+  event({ type: "tool_call", call_id: "two", name: "Bash", summary: "npm test" });
+  const group = doc.querySelector(".tool-group");
+  assert.match(group.querySelector("summary").textContent, /Running npm test/);
+  assert.equal(group.open, false);
+  event({ type: "tool_result", call_id: "two", name: "Bash", is_error: true, output: "test failed" });
+  assert.equal(group.open, true, "errors must remain visible in collapsed batches");
+  assert.match(group.querySelector("summary").textContent, /1 issue/);
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(doc.querySelector(".text.final"), null, "stream_end before a tool is still commentary");
+  assert.deepEqual(errors, []);
   dom.window.close();
 });
 
@@ -225,10 +855,93 @@ test("composer submit posts a prompt, echoes it, and clears rejected sending sta
   assert.ok(prompt, "submit did not post a prompt");
   assert.equal(prompt.text, "explain this file");
   assert.ok(doc.querySelector(".msg.user .bubble"), "user bubble did not render");
-  assert.equal(doc.getElementById("send").title, "Stop");
+  assert.equal(doc.getElementById("send").title, "Stop generation");
   send({ type: "prompt_rejected" });
-  assert.equal(doc.getElementById("send").title, "Send");
+  assert.equal(doc.getElementById("send").title, "Send message");
   assert.deepEqual(errors, [], "webview raised JS errors on submit");
+  dom.window.close();
+});
+
+test("live composer steers with Enter, queues with Alt+Enter and retains a separate stop", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: { live_steering: true, steering_native: true } });
+  event({ type: "turn_start", turn_id: "one", prompt: "Inspect" });
+  const input = doc.getElementById("input");
+  input.value = "Use the smaller change";
+  input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Steer current run");
+  assert.equal(doc.getElementById("stop-run").hidden, false);
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  const steer = posted.find(m => m.type === "prompt");
+  assert.equal(steer.delivery, "steer");
+  event({ type: "prompt_accepted", request_id: steer.requestId, state: "steered" });
+  event({ type: "text_delta", text: "Initial approach" });
+  event({ type: "steering_update", request_id: steer.requestId, state: "applied" });
+  event({ type: "text_delta", text: "Updated approach" });
+  input.value = "Then add documentation";
+  input.dispatchEvent(new dom.window.Event("input"));
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", altKey: true, bubbles: true }));
+  assert.equal(posted.filter(m => m.type === "prompt").at(-1).delivery, "queue");
+  assert.equal(posted.some(m => m.type === "cancel"), false);
+  event({ type: "turn_end", reason: "completed" });
+  const response = doc.querySelector(".msg.dgc");
+  assert.match(response.querySelector(".text.commentary").textContent, /Initial approach/);
+  assert.match(response.querySelector(".msg.user").textContent, /Use the smaller change/);
+  assert.match(response.querySelector(".text.final").textContent, /Updated approach/);
+  assert.deepEqual(errors, []);
+});
+
+test("cancelled steering restores its draft and live mode resolves the approval card", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: { live_steering: true } });
+  event({ type: "turn_start", turn_id: "one", prompt: "Inspect" });
+  event({ type: "permission_request", id: "approval", name: "write_file", args: { path: "example.py" } });
+  event({ type: "permission_resolved", id: "approval", decision: "once", message: "Approved by the current permission mode" });
+  assert.equal(doc.querySelector('.card[data-request-id="approval"] button').disabled, true);
+  const input = doc.getElementById("input");
+  input.value = "Preserve this follow-up";
+  input.dispatchEvent(new dom.window.Event("input"));
+  doc.getElementById("send").click();
+  const prompt = posted.find(m => m.type === "prompt");
+  event({ type: "prompt_accepted", request_id: prompt.requestId, state: "steered" });
+  doc.getElementById("send").click();
+  assert.equal(posted.at(-1).type, "cancel");
+  event({ type: "steering_update", request_id: prompt.requestId, state: "returned", message: "Not applied" });
+  event({ type: "turn_end", reason: "cancelled" });
+  assert.equal(input.value, "Preserve this follow-up");
+  assert.equal(posted.filter(m => m.type === "prompt").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("delegated and older backends expose queue delivery without claiming live steering", () => {
+  for (const capabilities of [{}, { live_steering: true, steering_native: false }]) {
+    const { dom, errors, posted, send, doc } = makeDom();
+    send({ type: "event", event: { type: "ready", capabilities } });
+    send({ type: "event", event: { type: "turn_start", turn_id: "one", prompt: "Inspect" } });
+    doc.getElementById("input").value = "Next request";
+    doc.getElementById("input").dispatchEvent(new dom.window.Event("input"));
+    assert.equal(doc.getElementById("send").getAttribute("aria-label"), "Queue next turn");
+    assert.equal(doc.getElementById("queue-send").hidden, true);
+    doc.getElementById("send").click();
+    assert.equal(posted.find(m => m.type === "prompt").delivery, "queue");
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("IME confirmation does not submit and late model results cannot reopen a dismissed menu", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  const input = doc.getElementById("input"); input.value = "检查代码";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+  assert.equal(posted.filter(message => message.type === "prompt").length, 0);
+  doc.getElementById("btn-model").click();
+  const menu = doc.getElementById("modelmenu");
+  menu.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(menu.hidden, true);
+  send({ type: "models", ids: ["delayed-model"], current: "delayed-model" });
+  assert.equal(menu.hidden, true);
+  assert.deepEqual(errors, []);
   dom.window.close();
 });
 
@@ -249,6 +962,65 @@ test("concurrent pasted images reserve bytes before FileReader can cross the agg
   assert.match(doc.getElementById("log").textContent, /2 MiB prompt limit/);
   assert.equal(posted.some((message) => message.type === "prompt"), false);
   assert.deepEqual(errors, [], "oversized pasted-image rejection raised JS errors");
+  dom.window.close();
+});
+
+test("question tabs retain custom answers and submit exactly one complete response", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "options_request", id: "form",
+    question: "Where?", options: ["Local", "Cloud"], questions: [
+      { id: "storage", header: "Storage", question: "Where?", options: ["Local", "Cloud"] },
+      { id: "accent", header: "Appearance", question: "Which accent?", options: ["Purple", "Blue"] },
+    ] } });
+  const card = doc.querySelector('.card[data-request-id="form"]');
+  assert.equal(card.querySelector(".question-submit").disabled, true);
+  card.querySelector('[data-choice="0"]').click();
+  assert.equal(posted.some((m) => m.type === "options_response"), false);
+  card.querySelector('[data-tab="1"]').click();
+  card.querySelector('[data-choice="other"]').click();
+  let input = card.querySelector(".question-other");
+  assert.equal(input.hidden, false);
+  input.value = "Lavender <script>alert(1)</script>";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  card.querySelector('[data-tab="0"]').click();
+  assert.equal(card.querySelector('[data-choice="0"]').getAttribute("aria-pressed"), "true");
+  card.querySelector('[data-tab="1"]').click();
+  input = card.querySelector(".question-other");
+  assert.equal(input.value, "Lavender <script>alert(1)</script>");
+  assert.equal(card.querySelector("script"), null);
+  const submit = card.querySelector(".question-submit");
+  assert.equal(submit.disabled, false);
+  submit.click(); submit.click();
+  const responses = posted.filter((m) => m.type === "options_response");
+  assert.equal(responses.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(responses[0])), { type: "options_response", id: "form",
+    answers: { storage: "Local", accent: "Lavender <script>alert(1)</script>" } });
+  assert.match(card.querySelector(".question-summary").textContent, /Lavender <script>/);
+  assert.equal(card.querySelector("script"), null);
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("single question offers Other and cancellation never submits a default", () => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  send({ type: "event", event: { type: "turn_start" } });
+  send({ type: "event", event: { type: "options_request", id: "single",
+    question: "Which approach?", options: ["One", "Two", "Three"] } });
+  const card = doc.querySelector('.card[data-request-id="single"]');
+  assert.equal(card.querySelectorAll(".opt").length, 4);
+  card.querySelector('[data-choice="other"]').click();
+  const input = card.querySelector(".question-other");
+  input.value = " "; input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".question-submit").disabled, true);
+  input.value = "Use both approaches"; input.dispatchEvent(new dom.window.Event("input"));
+  assert.equal(card.querySelector(".question-submit").disabled, false);
+  send({ type: "event", event: { type: "request_expired", id: "single" } });
+  assert.equal(input.disabled, true);
+  card.querySelector(".question-submit").click();
+  assert.equal(posted.some((m) => m.type === "options_response"), false);
+  assert.doesNotMatch(doc.getElementById("log").textContent, /Approval request expired/);
+  assert.deepEqual(errors, []);
   dom.window.close();
 });
 
@@ -276,6 +1048,10 @@ test("decision cards expire by exact ID and cannot double-submit across cancel/e
 
   const option = live.querySelector("button");
   option.click(); option.click();
+  assert.equal(posted.filter((message) => message.type === "options_response").length, 0,
+    "selecting an option must wait for Submit");
+  const submit = live.querySelector(".question-submit");
+  submit.click(); submit.click();
   assert.equal(posted.filter((message) => message.type === "options_response").length, 1,
     "one decision card must produce at most one response");
 
@@ -418,7 +1194,7 @@ test("webview correlates failures, returns plan feedback, and clears on backend 
   send({ type: "event", event: { type: "command_rejected", message: "wait for the turn" } });
   send({ type: "event", event: { type: "request_expired" } });
   assert.match(doc.getElementById("log").textContent, /wait for the turn/);
-  assert.match(doc.getElementById("log").textContent, /expired/);
+  assert.match(doc.getElementById("log").textContent, /Input request closed/);
 
   // Clear is acknowledged only after the backend resets model state; the old implementation
   // removed DOM nodes while silently retaining every prior turn in the model context.
@@ -461,10 +1237,39 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   const input = doc.getElementById("input");
   input.value = "/goal ship the release";
   input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  const goal = posted.find((m) => m.type === "slashText");
-  assert.equal(goal.text, "/goal ship the release");
+  const goal = posted.find((m) => m.type === "startGoal");
+  assert.equal(goal.text, "ship the release");
   assert.equal(posted.some((m) => m.type === "prompt" && m.text === goal.text), false,
     "built-in slash commands must not be sent as model prompts");
+  assert.equal(doc.querySelector(".goal-prompt .role").textContent, "goal");
+  assert.equal(doc.querySelector(".goal-prompt .bubble").textContent, "ship the release");
+  assert.equal(doc.getElementById("send").title, "Stop generation",
+    "a goal objective must immediately look like a running turn while its state is persisted");
+
+  input.value = "ship the release safely /g";
+  input.selectionStart = input.selectionEnd = input.value.length;
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.match(doc.getElementById("pop").textContent, /\/goal/,
+    "the goal action must remain discoverable after an in-progress prompt");
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(input.value, "",
+    "choosing the suffix action must activate the preserved prompt without a second Enter");
+  const suffixedGoal = posted.filter((m) => m.type === "startGoal").at(-1);
+  assert.equal(suffixedGoal.text, "ship the release safely");
+  assert.equal(posted.some((m) => m.type === "prompt" && /\/goal$/.test(m.text)), false,
+    "a trailing goal tag must not leak into ordinary model prompt text");
+  assert.equal([...doc.querySelectorAll(".goal-prompt .bubble")].at(-1).textContent,
+    "ship the release safely");
+
+  input.value = "Pause /goal";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.filter((m) => m.type === "startGoal").at(-1).text, "Pause",
+    "suffix goals must preserve objectives that coincide with a goal-state command");
+
+  input.value = "Explain /goal syntax";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.equal(posted.filter((m) => m.type === "prompt").at(-1).text, "Explain /goal syntax",
+    "a slash token inside prose must remain an ordinary prompt");
 
   input.value = "/viewp";
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -494,25 +1299,55 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
     elapsed_seconds: 65 } });
   const goalBar = doc.getElementById("goalbar");
   assert.equal(goalBar.hidden, false);
-  assert.equal(doc.getElementById("goal-status").textContent, "Active goal");
+  assert.equal(doc.getElementById("goal-status").textContent, "Pursuing goal");
   assert.equal(doc.getElementById("goal-time").textContent, "1:05");
   doc.getElementById("goal-toggle").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal pause");
+  assert.equal(posted.filter((m) => m.type === "pauseGoal").length, 1);
   send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "blocked",
+    elapsed_seconds: 67 } });
+  assert.equal(doc.getElementById("goal-status").textContent, "Blocked goal");
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "paused",
     elapsed_seconds: 67 } });
   assert.equal(doc.getElementById("goal-status").textContent, "Paused goal");
   assert.equal(doc.getElementById("goal-time").textContent, "1:07");
-  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume standing goal");
+  assert.equal(doc.getElementById("goal-toggle").getAttribute("aria-label"), "Resume goal");
   doc.getElementById("goal-toggle").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal resume");
+  assert.equal(posted.filter((m) => m.type === "resumeGoal").length, 1);
   doc.getElementById("goal-edit").click();
-  assert.equal(input.value, "/goal ship the release");
+  assert.equal(doc.getElementById("goal-editor").hidden, false);
+  assert.equal(doc.getElementById("goal-editor-text").value, "ship the release");
+  doc.getElementById("goal-editor-text").value = "ship the verified release";
+  doc.getElementById("goal-editor-save").click();
+  assert.equal(posted.filter((m) => m.type === "updateGoal").at(-1).text, "ship the verified release");
+  send({ type: "goal_edit_state", state: "saved" });
+  assert.equal(doc.getElementById("goal-editor").hidden, true);
   doc.getElementById("goal-clear").click();
-  assert.equal(posted.filter((m) => m.type === "slashText").at(-1).text, "/goal clear");
+  assert.equal(posted.filter((m) => m.type === "clearGoal").length, 1);
+  send({ type: "chat_changes", total: 2, additions: 7, deletions: 3, files: [
+    { id: "opaque-change", path: "src/a.ts", additions: 5, deletions: 3 },
+    { path: "src/new.ts", additions: 0, deletions: 0, counted: false, error: "Preview limit", untracked: true },
+  ] });
+  assert.equal(doc.getElementById("changesbar").hidden, false);
+  assert.equal(doc.getElementById("changes-count").textContent, "2 files changed in this chat");
+  doc.getElementById("changes-review-button").click();
+  assert.equal(doc.getElementById("changes-review").hidden, false);
+  assert.equal(doc.querySelectorAll(".change-row").length, 2);
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.filter((m) => m.type === "reviewChange").at(-1).path, "opaque-change");
+  const limitedChange = doc.querySelectorAll(".change-row")[1];
+  assert.match(limitedChange.textContent, /—/);
+  assert.doesNotMatch(limitedChange.textContent, /\+0/);
+  assert.match(limitedChange.title, /Preview limit/);
   send({ type: "event", event: { type: "saved_plan", exists: true, plan: "# Plan\n\n1. verify" } });
   send({ type: "event", event: { type: "artifacts", items: [
     { id: "p1", name: "Plan", url: "http://127.0.0.1:45001/?a=p1" },
   ] } });
+  const artifactStop = [...doc.querySelectorAll("[data-artifact-stop]")].at(-1);
+  artifactStop.click(); artifactStop.click();
+  assert.equal(posted.filter((m) => m.type === "stopArtifact" && m.id === "p1").length, 1,
+    "one click owns the artifact stop lifecycle and a disabled button cannot submit twice");
+  assert.equal(artifactStop.disabled, true);
+  assert.equal(artifactStop.textContent, "Stopping…");
   send({ type: "surface_open", surface: "skills" });
   send({ type: "event", event: { type: "skill_catalog", request_id: "skills-1", total: 1,
     items: [{ name: "matrix-fixture", description: "Loaded <img src=x onerror=bad()>", source: "project" }] } });
@@ -537,17 +1372,94 @@ test("backend-driven slash menu routes goal/plan/artifact/skill/hook/handoff com
   send({ type: "event", event: { type: "handoff_started", request_id: "handoff-1" } });
   send({ type: "event", event: { type: "handoff", request_id: "handoff-1", status: "completed",
     markdown: "# Handoff\n\nContinue with **tests**. <script>bad()</script>", path: "HANDOFF-safe.md" } });
-  assert.match(doc.getElementById("log").textContent, /Standing goal · active/);
   assert.match(doc.getElementById("log").textContent, /Saved plan/);
   assert.match(doc.getElementById("log").textContent, /Plan · open/);
   assert.match(doc.getElementById("log").textContent, /Hook PreToolUse completed.*7ms.*hookBad/s);
   assert.match(doc.getElementById("log").textContent, /Handoff.*Continue with tests.*HANDOFF-safe\.md/s);
+  send({ type: "artifact_stop_state", id: "p1", state: "stopped" });
+  assert.equal(doc.querySelector('[data-artifact-id="p1"]'), null,
+    "the artifact row is removed only after the backend confirms it stopped");
   assert.equal(doc.getElementById("log").querySelector("img"), null,
     "hook activity and handoff metadata must remain inert text");
   assert.equal(doc.getElementById("log").querySelector("script"), null,
     "handoff markdown must not synthesize executable elements");
   assert.deepEqual(errors, [], "typed slash/state rendering raised JS errors");
   dom.window.close();
+});
+
+test("combined model/reasoning control offers Ultra while permissions stay separate", (t) => {
+  const { dom, errors, posted, send, doc } = makeDom();
+  t.after(() => dom.window.close());
+  send({ type: "state", state: {
+    model: "Codex default", mode: "default", think: "off", subscriptionEngine: "codex",
+  } });
+
+  doc.getElementById("btn-model").click();
+  assert.equal(posted.at(-1).type, "listModels");
+  send({ type: "models", ids: [], current: "", subscription: true,
+    label: "Codex (ChatGPT subscription)" });
+  const modelMenu = doc.getElementById("modelmenu");
+  assert.match(modelMenu.textContent, /CLI default/);
+  assert.match(modelMenu.textContent, /Enter another model/);
+  modelMenu.querySelector("[data-default]").click();
+  assert.equal(posted.at(-1).type, "setModel");
+  assert.equal(posted.at(-1).model, "");
+
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true, label: "Codex" });
+  modelMenu.querySelector("[data-custom]").click();
+  assert.equal(posted.at(-1).type, "pickModel");
+
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["opus", "sonnet"], current: "opus", subscription: true,
+    label: "Claude Code" });
+  assert.equal(modelMenu.querySelector('[data-i="0"]').getAttribute("aria-checked"), "true");
+  modelMenu.querySelector('[data-i="1"]').click();
+  assert.equal(posted.at(-1).type, "setModel");
+  assert.equal(posted.at(-1).model, "sonnet");
+
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: ["opus", "sonnet"], current: "sonnet", subscription: true,
+    supportsEffort: true, label: "Claude Code" });
+  const high = modelMenu.querySelector(".effort-slider");
+  assert.ok(high.dataset.profiles.split(",").includes("xhigh"));
+  assert.ok(high.dataset.profiles.split(",").includes("ultra"));
+  assert.equal(high.dataset.profiles.split(",").includes("max"), false,
+    "Codex uses xhigh; its selector must not offer an unsupported max value");
+  high.value = String(high.dataset.profiles.split(",").indexOf("high"));
+  high.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(posted.at(-1).type, "setReasoningProfile");
+  assert.equal(posted.at(-1).level, "high");
+  // A rejected vendor effort must not leave an optimistic selection behind. Only a backend
+  // state/think_changed acknowledgement is allowed to change the visible value.
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true,
+    supportsEffort: true, label: "Codex" });
+  assert.equal(modelMenu.querySelector(".effort-slider").value, "0");
+  assert.equal(modelMenu.querySelector(".effort-slider").getAttribute("aria-valuetext"), "Default");
+  assert.equal(modelMenu.querySelector(".model-options").hidden, true);
+  modelMenu.querySelector(".model-summary").click();
+  assert.equal(modelMenu.querySelector(".model-options").hidden, false);
+
+  const modeButton = doc.getElementById("btn-mode");
+  modeButton.click();
+  assert.equal(doc.getElementById("modemenu").querySelector("[data-profile], [data-think]"), null,
+    "permission control must not mix in reasoning settings");
+
+  send({ type: "state", state: {
+    model: "Codex default", mode: "default", think: "off", subscriptionEngine: "codex", ultra: true,
+  } });
+  assert.equal(doc.getElementById("effortname").textContent, "Ultra");
+  assert.ok(doc.getElementById("btn-model").classList.contains("ultra"));
+  doc.getElementById("btn-model").click();
+  send({ type: "models", ids: [], current: "", subscription: true,
+    supportsEffort: true, label: "Codex" });
+  assert.ok(modelMenu.querySelector(".reasoning-card.is-ultra"));
+  const off = modelMenu.querySelector(".effort-slider");
+  off.value = "0"; off.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(posted.at(-1).type, "setReasoningProfile");
+  assert.equal(posted.at(-1).level, "off");
+  assert.deepEqual(errors, []);
 });
 
 test("provider runtime settings and actual usage round-trip through the webview", () => {
@@ -559,22 +1471,26 @@ test("provider runtime settings and actual usage round-trip through the webview"
   ], models: [] });
   send({ type: "event", event: {
     type: "config", base_url: "https://api.openai.com/v1", model: "gpt-5.4",
-    mode: "default", think: "low", api_mode: "responses", provider_state: "server",
+    mode: "default", think: "xhigh", api_mode: "responses", provider_state: "server",
     subagent_api_mode: "ollama", fallback_api_mode: "chat_completions",
     fallback_api_key: "must-not-enter-webview",
-    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000,
-    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "high",
+    prompt_cache: false, capability_cache_ttl_s: 45, context_size: 200000, ultra_mode: true,
+    subscription_engine: "codex", subscription_model: "gpt-5.6", subscription_effort: "max",
     subscription_engines: [
       { key: "codex", label: "Codex", installed: true, logged_in: true, login_cmd: "codex login" }],
   } });
   assert.equal(doc.getElementById("s-api_mode").value, "responses");
   assert.equal(doc.getElementById("s-subscription_engine").value, "codex");
   assert.equal(doc.getElementById("s-subscription_model").value, "gpt-5.6");
-  assert.equal(doc.getElementById("s-subscription_effort").value, "high");
+  assert.equal(doc.getElementById("s-think").value, "xhigh",
+    "native xhigh must survive settings hydration while a subscription route is active");
+  assert.equal(doc.getElementById("s-subscription_effort").value, "max",
+    "subscription max must survive settings hydration");
   assert.match(doc.getElementById("s-subscription_status").textContent, /signed in/);
   assert.equal(doc.getElementById("s-provider_state").value, "server");
   assert.equal(doc.getElementById("s-prompt_cache").value, "false");
   assert.equal(doc.getElementById("s-capability_cache_ttl_s").value, "45");
+  assert.equal(doc.getElementById("s-ultra_mode").value, "true");
   assert.equal(doc.getElementById("s-fallback_api_key").value, "",
     "backend config must never populate a secret field in the webview");
   doc.getElementById("s-fallback_api_key").value = "new-fallback-secret";
@@ -587,7 +1503,9 @@ test("provider runtime settings and actual usage round-trip through the webview"
   assert.equal(saved.values.fallback_api_key, "new-fallback-secret");
   assert.equal(saved.values.subscription_engine, "codex");
   assert.equal(saved.values.subscription_model, "gpt-5.6");
-  assert.equal(saved.values.subscription_effort, "high");
+  assert.equal(saved.values.think, "xhigh");
+  assert.equal(saved.values.subscription_effort, "max");
+  assert.equal(saved.values.ultra_mode, true);
   doc.getElementById("s-provider").value = "ollama";
   doc.getElementById("s-provider").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   assert.equal(doc.getElementById("s-api_mode").value, "auto",
@@ -614,11 +1532,31 @@ test("provider runtime settings and actual usage round-trip through the webview"
     "engines without an effort flag must not accept a stale effort override");
 
   send({ type: "event", event: { type: "context", used: 1000, size: 4000,
+    compact_threshold: .75, compact_at: 3000,
     input_tokens: 3000, output_tokens: 800, cached_input_tokens: 1200,
     reasoning_tokens: 250, requests: 7 } });
   assert.equal(doc.getElementById("ctx").textContent, "25%");
   assert.match(doc.getElementById("btn-ctx").title, /1,200 cached/);
   assert.match(doc.getElementById("btn-ctx").title, /250 reasoning/);
+  doc.getElementById("btn-ctx").click();
+  assert.equal(doc.getElementById("ctxmenu").hidden, false);
+  assert.equal(doc.getElementById("ctx-used").textContent, "1,000 / 4,000");
+  assert.equal(doc.getElementById("ctx-auto").textContent, "auto at 75%");
+  assert.match(doc.getElementById("ctx-last").textContent, /near 75%/);
+  assert.match(doc.getElementById("ctx-usage").textContent, /3,000 in.*800 out.*7 requests/);
+  doc.getElementById("ctx-compact").click();
+  assert.equal(posted.at(-1).type, "compact");
+  assert.equal(doc.getElementById("ctx-compact").disabled, true);
+  assert.equal(doc.getElementById("ctx-compact").textContent, "Compacting…");
+  send({ type: "event", event: { type: "compacted", status: "compacted",
+    strategy: "mechanical", trigger: "manual", before_tokens: 1000, after_tokens: 500,
+    context_size: 4000, freed_tokens: 500,
+    fallback_reason: "the summarizer was unavailable (LLMError)" } });
+  assert.equal(doc.getElementById("ctx").textContent, "13%");
+  assert.equal(doc.getElementById("ctx-compact").disabled, false);
+  assert.match(doc.getElementById("ctx-last").textContent, /Safe local fallback.*1,000.*500/);
+  assert.match(doc.getElementById("ctx-detail").textContent, /summarizer was unavailable/);
+  assert.match(doc.getElementById("log").textContent, /Context compacted safely on-device/);
   assert.deepEqual(errors, [], "provider settings/usage rendering raised JS errors");
   dom.window.close();
 });
@@ -694,8 +1632,9 @@ test("feature browsers manage MCP, docs, permissions, memory, and settings witho
 });
 
 test("webview palette meets text contrast and forced-colors keeps state non-color-only", () => {
-  const backgrounds = ["--bg", "--surface", "--surface2", "--code", "--term"];
-  for (const foreground of ["--text", "--text-strong", "--muted", "--faint", "--accent-text", "--err"]) {
+  const backgrounds = ["--fallback-bg", "--fallback-surface", "--fallback-surface2", "--fallback-code"];
+  for (const foreground of ["--fallback-text", "--fallback-text-strong", "--fallback-muted",
+    "--fallback-faint", "--accent-text", "--err"]) {
     for (const background of backgrounds) {
       const ratio = contrastRatio(rootHex(foreground), rootHex(background));
       assert.ok(ratio >= 4.5,
@@ -704,6 +1643,14 @@ test("webview palette meets text contrast and forced-colors keeps state non-colo
   }
   assert.ok(contrastRatio("#FFFFFF", rootHex("--accent-fill")) >= 4.5,
     "white text on the primary accent fill must meet normal-text contrast");
+  assert.match(mainCss, /--bg:\s*var\(--vscode-sideBar-background/,
+    "the extension shell must inherit Cursor/VS Code's sidebar background");
+  assert.match(mainCss, /--surface:\s*var\(--vscode-editor-background/,
+    "content surfaces must inherit the active editor theme");
+  assert.match(mainCss, /--surface2:\s*var\(--vscode-input-background/,
+    "composer controls must inherit the active input theme");
+  assert.match(mainCss, /--text:\s*var\(--vscode-foreground/,
+    "extension text must inherit the active host foreground");
 
   const forcedAt = mainCss.indexOf("@media (forced-colors: active)");
   assert.notEqual(forcedAt, -1, "webview needs an explicit forced-colors contract");
@@ -814,4 +1761,32 @@ test("webview controls expose keyboard, focus, and assistive-technology semantic
 
   assert.deepEqual(errors, [], "accessible interaction flow raised JS errors");
   dom.window.close();
+});
+
+
+test("a new chat excludes pre-existing workspace changes and rejects stale chat reports", () => {
+  const { doc, send, posted, errors } = makeDom();
+  send({ type: "session_ready", sessionId: "chat-one" });
+  send({ type: "workspace_changes", total: 6, additions: 778, deletions: 2,
+    files: [{ id: "existing", path: "existing.py", additions: 778, deletions: 2 }] });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  doc.getElementById("workspace-changes").click();
+  assert.equal(doc.getElementById("changes-review-title").textContent, "Workspace changes");
+  assert.match(doc.getElementById("changes-review-summary").textContent, /6 files changed/);
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.at(-1).scope, "workspace");
+  send({ type: "chat_changes", sessionId: "chat-one", total: 1, additions: 1, deletions: 0,
+    files: [{ id: "chat-edit", path: "existing.py", additions: 1, deletions: 0 }] });
+  assert.equal(doc.getElementById("changesbar").hidden, false);
+  assert.equal(doc.getElementById("changes-add").textContent, "+1");
+  doc.getElementById("changes-main").click();
+  assert.equal(doc.getElementById("changes-review-title").textContent, "Changes in this chat");
+  doc.querySelector(".change-row").click();
+  assert.equal(posted.at(-1).scope, "chat");
+  send({ type: "event", event: { type: "session", session_id: "chat-two" } });
+  send({ type: "session_ready", sessionId: "chat-two" });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  send({ type: "chat_changes", sessionId: "chat-one", total: 10, files: [] });
+  assert.equal(doc.getElementById("changesbar").hidden, true);
+  assert.deepEqual(errors, []);
 });

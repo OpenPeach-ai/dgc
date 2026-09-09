@@ -477,15 +477,18 @@ export class DgcBackend extends EventEmitter {
   }
 
   /** Send a query/state command and settle only from the response belonging to this request.
-   * Current protocol-v4 backends echo `request_id`; callers may omit it only for a negotiated
+   * Current protocol-v6 backends echo `request_id`; callers may omit it only for a negotiated
    * legacy backend, where installing the listener before `send` still provides a post-send
    * sequence barrier. Rejections, fatal transport errors, process exit, and timeout always release
    * every listener. */
-  request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000): Promise<DgcEvent> {
+  request(cmd: DgcCommand, responseType: DgcEventType, timeoutMs = 5000, setup = false): Promise<DgcEvent> {
     const rawRequestId = (cmd as any).request_id;
     const requestId = typeof rawRequestId === "string" && rawRequestId ? rawRequestId : undefined;
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60000) {
-      return Promise.reject(new Error("DGC request timeout must be between 1 and 60000ms"));
+    // Manual compaction may use the backend's 120-second summarization deadline. Keep the
+    // transport watchdog bounded, but long enough that the UI does not report a timeout while
+    // a valid compaction request is still running.
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 180000) {
+      return Promise.reject(new Error("DGC request timeout must be between 1 and 180000ms"));
     }
     return new Promise<DgcEvent>((resolve, reject) => {
       let settled = false;
@@ -494,6 +497,7 @@ export class DgcBackend extends EventEmitter {
         if (timer) { clearTimeout(timer); }
         this.off("event", onEvent);
         this.off("exit", onExit);
+        this.off("disposed", onDisposed);
       };
       const finish = (event: DgcEvent) => {
         if (settled) { return; }
@@ -528,11 +532,13 @@ export class DgcBackend extends EventEmitter {
         }
       };
       const onExit = () => fail(`DGC backend exited while waiting for ${responseType}`);
+      const onDisposed = () => fail(`DGC backend restarted or closed while waiting for ${responseType}`);
       this.on("event", onEvent);
       this.on("exit", onExit);
+      this.on("disposed", onDisposed);
       timer = setTimeout(
         () => fail(`DGC timed out waiting for ${responseType}`), Math.trunc(timeoutMs));
-      if (!this.send(cmd)) {
+      if (!(setup ? this.sendSetup(cmd) : this.send(cmd))) {
         fail(`DGC rejected ${cmd.type} before it could run`);
       }
     });
@@ -579,6 +585,7 @@ export class DgcBackend extends EventEmitter {
     this.respondedRequests.clear();
     const p = this.proc;
     this.proc = undefined;
+    this.emit("disposed");
     if (!p) {
       return;
     }

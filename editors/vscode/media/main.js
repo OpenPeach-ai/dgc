@@ -2,13 +2,16 @@
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const log = $("log"), input = $("input"), send = $("send"), atts = $("attachments"), pop = $("pop");
-  const goalBar = $("goalbar");
+  const goalBar = $("goalbar"), changesBar = $("changesbar"), composerRail = $("composer-rail");
   const announcer = $("announcer");
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
   let pendingImageFiles = 0, pendingImageBytes = 0;
-  let queuedCount = 0, customCommands = [];
+  let queuedCount = 0, customCommands = [], skillRows = [];
+  let skillManagement = false;
+  let liveSteering = false, nativeSteering = false;
+  let mcpContextSupported = false, mcpManagement = false, mcpContextSequence = 0, mcpContextPending = "", mcpView = "servers";
   function renderQueued() { queuedEl.textContent = queuedCount > 0 ? `${queuedCount} queued` : ""; }
 
   // permission modes — codicon glyph, one-liner (matches the CLI's mode ladder)
@@ -19,9 +22,25 @@
     auto:        { icon: "zap",       desc: "approve everything" },
   };
   const MODE_ORDER = ["default", "acceptEdits", "plan", "auto"];
-  const THINK = ["off", "low", "medium", "high"];
-  let curMode = "default", curThink = "off", curModel = "";
+  const THINK = ["off", "low", "medium", "high", "xhigh"];
+  let curMode = "default", curThink = "off", curModel = "", curSubscription = "", curUltra = false;
+  let curWorkers = 4;
   let lastConfig = null, settingsProviders = [];
+  let contextState = { used: 0, size: 0, input_tokens: 0, output_tokens: 0,
+    cached_input_tokens: 0, reasoning_tokens: 0, requests: 0, compact_threshold: .85 };
+  let lastCompaction = null, compacting = false;
+
+  function setThreadTitle(name, sessionId = "", fresh = false) {
+    const safeName = String(name || "").replace(/\s+/g, " ").trim();
+    const safeId = String(sessionId || "").replace(/[^A-Za-z0-9_-]/g, "");
+    const fallback = fresh ? "New chat" : (safeId ? `Chat · ${safeId.slice(-8)}` : "Untitled chat");
+    const title = (safeName || fallback).slice(0, 200);
+    const node = $("thread-title");
+    node.textContent = title;
+    node.title = `${title} — click to rename`;
+    node.setAttribute("aria-label", `Current chat: ${title}. Click to rename`);
+    document.title = `${title} — DGC`;
+  }
 
   function applyMode(m) {
     if (!MODES[m]) return;
@@ -39,36 +58,151 @@
   function toggleModeMenu() {
     const mm = $("modemenu");
     if (!mm.hidden) { hideModeMenu(); return; }
-    hideModelMenu();
+    hideModelMenu(); hideContextMenu();
     mm.innerHTML =
       `<div role="group" aria-label="Permission mode"><div class="mhead" role="presentation"><span>Permission mode</span><kbd>⇧Tab</kbd></div>` +
       MODE_ORDER.map((m) => `<button type="button" role="menuitemradio" aria-checked="${m === curMode}" class="mrow${m === curMode ? " sel" : ""}" data-mode="${m}"><span class="mi codicon codicon-${MODES[m].icon}" aria-hidden="true"></span><span>${m}</span><span class="md">${MODES[m].desc}</span></button>`).join("") +
-      `</div><div class="mdiv" role="separator"></div><div role="group" aria-label="Thinking"><div class="mhead" role="presentation"><span>Thinking</span></div>` +
-      THINK.map((t) => `<button type="button" role="menuitemradio" aria-checked="${t === curThink}" class="mrow${t === curThink ? " sel" : ""}" data-think="${t}"><span class="mi codicon codicon-lightbulb" aria-hidden="true"></span><span>${t}</span></button>`).join("") + `</div>`;
+      `</div>`;
     mm.querySelectorAll("[data-mode]").forEach((r) => r.onclick = () => setMode(r.dataset.mode));
-    mm.querySelectorAll("[data-think]").forEach((r) => r.onclick = () => { curThink = r.dataset.think; vscode.postMessage({ type: "setThink", level: curThink }); hideModeMenu(); });
     mm.hidden = false; $("btn-mode").setAttribute("aria-expanded", "true");
     (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
   }
 
   // in-composer model menu (rendered from the `models` message the extension posts)
   function hideModelMenu() { $("modelmenu").hidden = true; $("btn-model").setAttribute("aria-expanded", "false"); }
-  function renderModelMenu(ids, current, err) {
+  function hideContextMenu() { $("ctxmenu").hidden = true; $("btn-ctx").setAttribute("aria-expanded", "false"); }
+  function fmtTokens(n) { return Number(n || 0).toLocaleString(); }
+  function compactionLabel(strategy) {
+    return ({ provider_native: "Provider-native", model_summary: "Model summary",
+      mechanical: "Safe local fallback", tool_prune: "Local tool-output prune",
+      none: "No change" })[strategy] || "Not compacted yet";
+  }
+  function renderContextMenu() {
+    const used = Math.max(0, Number(contextState.used || 0));
+    const size = Math.max(0, Number(contextState.size || 0));
+    const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
+    $("ctx-used").textContent = `${fmtTokens(used)} / ${fmtTokens(size)}`;
+    $("ctx-pct").textContent = `${pct}%`;
+    $("ctx-fill").style.width = `${pct}%`;
+    $("ctx-free").textContent = `${fmtTokens(Math.max(0, size - used))} free`;
+    const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
+    const thresholdPct = Math.round(threshold * 100);
+    $("ctx-auto").textContent = `auto at ${thresholdPct}%`;
+    $("ctx-usage").textContent = `${fmtTokens(contextState.input_tokens)} in · ` +
+      `${fmtTokens(contextState.output_tokens)} out · ${fmtTokens(contextState.requests)} requests`;
+    $("ctx-compact").disabled = compacting;
+    $("ctx-compact").textContent = compacting ? "Compacting…" : "Compact now";
+    if (lastCompaction) {
+      const before = fmtTokens(lastCompaction.before_tokens), after = fmtTokens(lastCompaction.after_tokens);
+      $("ctx-last").textContent = `${compactionLabel(lastCompaction.strategy)} · ${before} → ${after}`;
+      const detail = String(lastCompaction.fallback_reason || "");
+      $("ctx-detail").textContent = detail;
+      $("ctx-detail").hidden = !detail;
+    } else {
+      $("ctx-last").textContent = `DGC compacts automatically near ${thresholdPct}%.`;
+      $("ctx-detail").textContent = ""; $("ctx-detail").hidden = true;
+    }
+  }
+  function renderContext() {
+    const used = Math.max(0, Number(contextState.used || 0));
+    const size = Math.max(0, Number(contextState.size || 0));
+    const pct = size ? Math.min(100, Math.round((used / size) * 100)) : 0;
+    const threshold = Math.max(.01, Math.min(1, Number(contextState.compact_threshold || .85)));
+    $("ctx").textContent = pct + "%";
+    $("btn-ctx").classList.toggle("warn", pct >= Math.round(threshold * 100));
+    $("btn-ctx").classList.toggle("busy", compacting);
+    $("btn-ctx").title = `Context ${fmtTokens(used)} / ${fmtTokens(size)} estimated tokens · ` +
+      `provider ${fmtTokens(contextState.input_tokens)} in / ${fmtTokens(contextState.output_tokens)} out · ` +
+      `${fmtTokens(contextState.cached_input_tokens)} cached · ${fmtTokens(contextState.reasoning_tokens)} reasoning · ` +
+      `${fmtTokens(contextState.requests)} requests · click for details`;
+    $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; open context details`);
+    renderContextMenu();
+  }
+  function toggleContextMenu() {
+    const menu = $("ctxmenu");
+    if (!menu.hidden) { hideContextMenu(); return; }
+    hideModelMenu(); hideModeMenu(); renderContextMenu();
+    menu.hidden = false; $("btn-ctx").setAttribute("aria-expanded", "true");
+    $("ctx-compact").focus();
+  }
+  function effortLabel(value, subscription = curSubscription) {
+    return ({ off: subscription ? "Default" : "Off", low: "Low", medium: "Medium",
+      high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" })[value] || value;
+  }
+  function profileMenu(subscription, supportsEffort) {
+    const levels = subscription && supportsEffort === false ? ["off"]
+      : subscription && curSubscription !== "codex" ? [...THINK, "max"] : THINK;
+    const profiles = [...levels, "ultra"];
+    const selected = curUltra ? "ultra" : curThink;
+    const index = Math.max(0, profiles.indexOf(selected));
+    return `<section class="reasoning-card${curUltra ? " is-ultra" : ""}" aria-label="Model and reasoning"><button type="button" class="mrow model-summary" aria-expanded="false"><span class="codicon codicon-zap" aria-hidden="true"></span><span class="model-summary-label">${esc(curModel || "Select model")} <span class="muted">${effortLabel(selected, subscription)}</span></span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button><div class="effort-control" style="--effort:${index / (profiles.length - 1) * 100}%"><input class="effort-slider" type="range" min="0" max="${profiles.length - 1}" step="1" value="${index}" data-profiles="${profiles.join(",")}" aria-label="Thinking effort" aria-valuetext="${effortLabel(selected, subscription)}"/><div class="effort-labels"><span>${effortLabel(profiles[0], subscription)}</span><output>${effortLabel(selected, subscription)}</output><span>Ultra</span></div></div></section>`;
+  }
+  function bindProfiles(mm) {
+    const card = mm.querySelector(".reasoning-card"), slider = mm.querySelector(".effort-slider");
+    const options = el("div", "model-options"); options.hidden = true;
+    [...mm.children].filter(node => node !== card).forEach(node => options.appendChild(node));
+    mm.appendChild(options);
+    const toggle = card.querySelector(".model-summary");
+    toggle.onclick = () => {
+      options.hidden = !options.hidden;
+      toggle.setAttribute("aria-expanded", String(!options.hidden));
+      card.querySelector(".effort-control").hidden = !options.hidden;
+      if (!options.hidden) (options.querySelector(".sel") || options.querySelector("button"))?.focus();
+    };
+    slider.oninput = () => {
+      const profiles = slider.dataset.profiles.split(","), value = profiles[Number(slider.value)];
+      slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
+      slider.setAttribute("aria-valuetext", effortLabel(value));
+      card.querySelector("output").textContent = effortLabel(value);
+    };
+    slider.onchange = () => {
+      vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
+      hideModelMenu();
+    };
+  }
+  function renderModelMenu(ids, current, err, subscription, label, supportsEffort) {
     const mm = $("modelmenu");
+    const profile = profileMenu(subscription, supportsEffort);
+    if (subscription) {
+      mm.innerHTML = profile + `<div class="mhead"><span>${esc(label || "Subscription")} model</span></div>`
+        + `<button type="button" role="menuitemradio" aria-checked="${!current}" class="mrow${!current ? " sel" : ""}" data-default="1"><span class="mi ${!current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>CLI default</span></button>`
+        + ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("")
+        + `<button type="button" role="menuitem" class="mrow" data-custom="1"><span class="mi codicon codicon-edit" aria-hidden="true"></span><span>Enter another model…</span></button>`;
+      bindProfiles(mm);
+      mm.querySelector("[data-default]").onclick = () => { vscode.postMessage({ type: "setModel", model: "" }); hideModelMenu(); };
+      mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
+      mm.querySelector("[data-custom]").onclick = () => { vscode.postMessage({ type: "pickModel" }); hideModelMenu(); };
+      mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
+      mm.querySelector(".model-summary")?.focus(); return;
+    }
     if (err || !ids.length) {
-      mm.innerHTML = `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
+      mm.innerHTML = profile + `<button type="button" role="menuitem" class="mrow" data-connect="1"><span class="mi codicon codicon-plug" aria-hidden="true"></span><span>${err ? "Can’t reach endpoint — connect…" : "No models — connect…"}</span></button>`;
+      bindProfiles(mm);
       mm.querySelector("[data-connect]").onclick = () => { vscode.postMessage({ type: "connect" }); hideModelMenu(); };
       mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); mm.querySelector("button")?.focus(); return;
     }
-    mm.innerHTML = `<div class="mhead"><span>Model</span></div>` +
+    mm.innerHTML = profile + `<div class="mhead"><span>Model</span></div>` +
       ids.map((id, i) => `<button type="button" role="menuitemradio" aria-checked="${id === current}" class="mrow${id === current ? " sel" : ""}" data-i="${i}"><span class="mi ${id === current ? "codicon codicon-check" : ""}" aria-hidden="true"></span><span>${esc(id)}</span></button>`).join("");
+    bindProfiles(mm);
     mm.querySelectorAll("[data-i]").forEach((r) => r.onclick = () => { vscode.postMessage({ type: "setModel", model: ids[+r.dataset.i] }); hideModelMenu(); });
     mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true");
-    (mm.querySelector(".sel") || mm.querySelector("button"))?.focus();
+    mm.querySelector(".model-summary")?.focus();
+  }
+
+  function updateModelControl() {
+    const model = curModel || "dgc";
+    const effort = curUltra ? "Ultra" : (curSubscription && curThink === "off" ? "default" : curThink);
+    $("modelname").textContent = model;
+    $("effortname").textContent = effort;
+    $("btn-model").classList.toggle("ultra", curUltra);
+    $("btn-model").title = `${model} · ${effort} reasoning — click to change`;
+    $("btn-model").setAttribute("aria-label", `Change model and reasoning. Current model: ${model}. Profile: ${effort}.`);
   }
 
   function menuKeys(menu, close, trigger, e) {
-    const items = [...menu.querySelectorAll("button[role^='menuitem']")];
+    if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
+    if (e.target.matches?.("input[type=range]")) return;
+    const items = [...menu.querySelectorAll("button[role^='menuitem']")].filter(item => !item.closest("[hidden]"));
     if (!items.length) return;
     const current = Math.max(0, items.indexOf(document.activeElement));
     let next = null;
@@ -76,7 +210,6 @@
     else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = items.length - 1;
-    else if (e.key === "Escape") { e.preventDefault(); close(); trigger.focus(); return; }
     if (next !== null) { e.preventDefault(); items[next].focus(); }
   }
   $("modemenu").addEventListener("keydown", (e) => menuKeys($("modemenu"), hideModeMenu, $("btn-mode"), e));
@@ -91,22 +224,28 @@
     + '<path class="s3" d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>';
   // per-tool glyph — the CLI's set: → read · ✎ write/edit · $ shell · ✱ search · ▸ other
   const GLYPH = {
-    read_file: "→", glob: "→", repo_map: "→",
+    read_file: "→", glob: "→", repo_map: "→", git_diff: "±",
     write_file: "✎", edit_file: "✎", apply_patch: "✎", save_memory: "✎",
     bash: "$", bash_output: "$", bash_kill: "$",
     grep: "✱", web_search: "✱", web_fetch: "✱",
     present_plan: "▸", task: "▸", todo: "▸", skill: "▸",
   };
-  const glyphFor = (name) => GLYPH[name] || "▸";
+  function canonicalTool(name) {
+    const plain = String(name || "").replace(/^functions\./, "").toLowerCase();
+    return ({ read: "read_file", write: "write_file", edit: "edit_file", shell: "bash",
+      exec_command: "bash", shell_command: "bash", search: "grep" })[plain] || plain;
+  }
+  const glyphFor = (name) => GLYPH[canonicalTool(name)] || "▸";
   const TOOL_COPY = {
     read_file: ["Reading", "Read"], glob: ["Finding files", "Found files"], repo_map: ["Mapping repository", "Mapped repository"],
+    git_diff: ["Inspecting changes", "Inspected changes"],
     write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], apply_patch: ["Applying patch", "Applied patch"], save_memory: ["Saving memory", "Saved memory"],
     bash: ["Running", "Ran"], bash_output: ["Checking process", "Checked process"], bash_kill: ["Stopping process", "Stopped process"],
     grep: ["Searching", "Searched"], web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"],
     present_plan: ["Preparing plan", "Prepared plan"], task: ["Delegating", "Delegated"], todo: ["Updating plan", "Updated plan"], skill: ["Loading skill", "Loaded skill"],
   };
   function toolCopy(name) {
-    const known = TOOL_COPY[name];
+    const known = TOOL_COPY[canonicalTool(name)];
     if (known) return { present: known[0], past: known[1], target: "" };
     if (String(name).startsWith("mcp__")) {
       return { present: "Calling MCP tool", past: "Called MCP tool",
@@ -119,14 +258,187 @@
     { name: "connect", description: "provider or a custom LAN host", action: "connect" },
     { name: "mode", description: "permission mode", action: "pickMode" },
     { name: "think", description: "how hard the model reasons", action: "pickThink" },
+    { name: "ultra", description: "deep reasoning + bounded parallel agents", action: "toggleUltra" },
     { name: "goal", description: "inspect, set, pause, resume, or clear the standing objective", action: "goal", accepts_args: true },
+    { name: "plan", description: "enter read-only mode and plan a task", action: "workflow:plan", accepts_args: true },
+    { name: "review", description: "review changes for bugs and regressions", action: "workflow:review", accepts_args: true },
+    { name: "init", description: "inspect the project and prepare DGC.md", action: "workflow:init", accepts_args: true },
     { name: "view-plan", description: "reopen the saved plan", action: "viewPlan" },
   ];
 
   let streaming = false, turn = null;
   const attachments = [];
+  let promptSequence = 0;
+  const promptPrefix = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const pendingPrompts = new Map();
+  const draftScope = document.documentElement.dataset.draftScope || "";
+  const draftEntries = new Map();
+  const pendingImages = new Set();
+  let draftSession = "unbound", sessionReady = !draftScope, draftTimer = null, restoringDraft = false;
+  let draftWarning = false, unconfirmedDrafts = [];
+  const DRAFT_STORAGE_BYTES = 8 * 1024 * 1024;
+  function cleanDraft(value) {
+    if (!value || typeof value !== "object" || typeof value.text !== "string" || value.text.length > 1_000_000
+        || !Array.isArray(value.attachments) || value.attachments.length > 64) return null;
+    try {
+      if (JSON.stringify(value).length > 4 * 1024 * 1024) return null;
+      const items = [];
+      for (const source of value.attachments) {
+        if (!source || typeof source !== "object" || typeof source.label !== "string" || source.label.length > 8192) return null;
+        const item = { label: source.label };
+        if (source.skill || source.template) {
+          const key = source.skill ? "skill" : "template";
+          if (typeof source[key] !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(source[key])) return null;
+          item[key] = source[key];
+        } else if (source.img) {
+          if (typeof source.data !== "string" || !/^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/.test(source.data)) return null;
+          item.img = true; item.data = source.data; item.bytes = Math.max(0, Number(source.bytes) || 0);
+        } else if (source.resource && typeof source.resource === "object") {
+          item.resource = JSON.parse(JSON.stringify(source.resource));
+        } else return null;
+        items.push(item);
+      }
+      const text = value.text;
+      const start = Math.max(0, Math.min(text.length, Number(value.start) || 0));
+      const end = Math.max(start, Math.min(text.length, Number(value.end) || start));
+      return { text, attachments: items, start, end, updated: Number(value.updated) || Date.now() };
+    } catch { return null; }
+  }
+  function captureDraft() {
+    return { text: input.value, attachments: [...attachments], start: input.selectionStart,
+      end: input.selectionEnd, updated: Date.now() };
+  }
+  function persistDraft() {
+    if (restoringDraft) return;
+    clearTimeout(draftTimer); draftTimer = null;
+    const current = captureDraft();
+    if (current.text || current.attachments.length) draftEntries.set(draftSession, current);
+    else draftEntries.delete(draftSession);
+    const entries = [], pending = [];
+    let bytes = 0, omitted = false;
+    for (const row of unconfirmedDrafts) {
+      const draft = cleanDraft(row.draft);
+      const clean = draft && { ...row, draft };
+      const size = clean ? new TextEncoder().encode(JSON.stringify(clean)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!clean || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
+      pending.push(clean); bytes += size;
+    }
+    const ordered = [...draftEntries].sort((a, b) => (b[0] === draftSession) - (a[0] === draftSession)
+      || b[1].updated - a[1].updated);
+    for (const [session, draft] of ordered) {
+      const clean = cleanDraft(draft);
+      const size = clean ? new TextEncoder().encode(JSON.stringify(clean)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!clean || entries.length >= 32 || bytes + size > DRAFT_STORAGE_BYTES) { omitted = true; continue; }
+      entries.push([session, clean]); bytes += size;
+    }
+    for (const [id, request] of pendingPrompts) {
+      const draft = cleanDraft({ text: request.text, attachments: request.attachments, start: 0, end: request.text.length });
+      const size = draft ? new TextEncoder().encode(JSON.stringify(draft)).length : DRAFT_STORAGE_BYTES + 1;
+      if (!draft || bytes + size > DRAFT_STORAGE_BYTES || pending.length >= 17) { omitted = true; continue; }
+      pending.push({ id, session: request.session || draftSession, draft }); bytes += size;
+    }
+    try { vscode.setState({ version: 1, scope: draftScope, active: draftSession, entries, pending }); }
+    catch { omitted = true; }
+    if (omitted && !draftWarning) {
+      draftWarning = true;
+      sysLine("Some drafts exceed saved-draft storage limits and remain only in this window. Send or reduce them before reloading.", true);
+    }
+  }
+  function scheduleDraftSave() {
+    if (restoringDraft) return;
+    clearTimeout(draftTimer); draftTimer = setTimeout(persistDraft, 150);
+  }
+  function selectDraftSession(session, adoptFrom = "") {
+    if (typeof session !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(session)) return;
+    persistDraft();
+    const prior = draftSession;
+    draftSession = session;
+    const source = adoptFrom || (prior === "unbound" ? prior : "");
+    if (!draftEntries.has(session) && source && draftEntries.has(source)) {
+      draftEntries.set(session, draftEntries.get(source)); draftEntries.delete(source);
+    }
+    if (source) for (const row of unconfirmedDrafts) if (row.session === source) row.session = session;
+    if (source) for (const image of pendingImages) if (image.session === source) image.session = session;
+    const draft = cleanDraft(draftEntries.get(session)) || { text: "", attachments: [], start: 0, end: 0 };
+    restoringDraft = true;
+    input.value = draft.text; attachments.splice(0, attachments.length, ...draft.attachments);
+    input.selectionStart = draft.start; input.selectionEnd = draft.end;
+    renderAtts(); input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    hidePop(); restoringDraft = false; persistDraft();
+  }
+  function loadDraftState() {
+    try {
+      const saved = vscode.getState();
+      if (saved?.version !== 1 || saved.scope !== draftScope || !Array.isArray(saved.entries)
+          || JSON.stringify(saved).length > 12 * 1024 * 1024) return;
+      for (const entry of saved.entries.slice(0, 32)) {
+        if (!Array.isArray(entry) || entry.length !== 2) continue;
+        const [session, raw] = entry;
+        const draft = cleanDraft(raw);
+        if (typeof session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(session) && draft) draftEntries.set(session, draft);
+      }
+      if (typeof saved.active === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(saved.active)) draftSession = saved.active;
+      unconfirmedDrafts = (Array.isArray(saved.pending) ? saved.pending : []).slice(0, 17).flatMap(row => {
+        const draft = cleanDraft(row?.draft);
+        return draft && typeof row.id === "string" && row.id.length <= 128
+          && typeof row.session === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(row.session)
+          ? [{ id: row.id, session: row.session, draft, rejected: row.rejected === true }] : [];
+      });
+      const draft = draftEntries.get(draftSession);
+      if (draft) {
+        restoringDraft = true;
+        input.value = draft.text; attachments.push(...draft.attachments);
+        input.selectionStart = draft.start; input.selectionEnd = draft.end;
+        renderAtts(); input.style.height = Math.min(input.scrollHeight, 160) + "px";
+        restoringDraft = false;
+      }
+    } catch { restoringDraft = false; }
+  }
+  function renderUnconfirmedDrafts() {
+    log.querySelectorAll(".draft-delivery-notice").forEach(node => node.remove());
+    for (const row of unconfirmedDrafts.filter(row => row.session === draftSession)) {
+      const node = el("div", "sys draft-delivery-notice");
+      node.textContent = row.rejected ? "A rejected message is available to restore."
+        : "Delivery of a message from the previous connection was not confirmed. Check the chat before retrying.";
+      const button = el("button", "act", "Restore message to draft"); button.type = "button";
+      button.onclick = () => {
+        if (input.value || attachments.length) { sysLine("Send or clear the current draft first."); return; }
+        input.value = row.draft.text; attachments.push(...row.draft.attachments);
+        unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== row.id);
+        node.remove(); renderAtts(); onInput(); persistDraft();
+      };
+      node.appendChild(button); log.appendChild(node);
+    }
+  }
+  function rejectPrompt(id, confirmed = true) {
+    const pending = pendingPrompts.get(id);
+    if (!pending) return;
+    pendingPrompts.delete(id);
+    pending.node.classList.add(confirmed ? "rejected" : "unconfirmed");
+    const restore = () => {
+      if (pending.session && pending.session !== draftSession) {
+        sysLine("Reopen this message's original chat to restore its draft."); return;
+      }
+      if (input.value || attachments.length) {
+        sysLine("Send or clear the current draft before restoring this message."); return;
+      }
+      input.value = pending.text; attachments.push(...pending.attachments);
+      unconfirmedDrafts = unconfirmedDrafts.filter(item => item.id !== id);
+      renderAtts(); onInput(); persistDraft(); input.focus();
+    };
+    const retry = el("button", "act", confirmed ? "Restore unsent message" : "Review delivery before restoring"); retry.type = "button";
+    retry.onclick = restore; pending.node.appendChild(retry);
+    if (confirmed && (!pending.session || pending.session === draftSession) && !input.value && !attachments.length) restore();
+    else {
+      unconfirmedDrafts.push({ id, session: pending.session || draftSession, rejected: confirmed,
+        draft: { text: pending.text, attachments: pending.attachments, start: 0,
+          end: pending.text.length, updated: Date.now() } });
+      persistDraft();
+    }
+    if (!turn && !queuedCount && !pendingPrompts.size) setSending(false);
+  }
   let files = [];              // workspace files for @-mentions
-  let popMode = null, popItems = [], popIdx = 0, popStart = 0;
+  let popMode = null, popItems = [], popIdx = 0, popStart = 0, popEnd = 0;
   let disclosureId = 0;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
@@ -134,123 +446,35 @@
   }[c]));
   function speak(message) { announcer.textContent = String(message || ""); }
 
-  // Small dependency-free Markdown renderer. Every model byte is escaped before becoming markup;
-  // fenced/inline code is parsed as an opaque block so Markdown-looking source code cannot be
-  // reinterpreted. An unterminated final fence is rendered immediately while it is still streaming.
-  function inlineMd(source) {
-    return String(source).split(/(`[^`\n]*`)/g).map((part) => {
-      if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
-        return `<code>${esc(part.slice(1, -1))}</code>`;
-      }
-      let safe = esc(part);
-      // Links remain inert inside the webview: show their label but never synthesize navigation.
-      safe = safe.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
-      safe = safe.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-      safe = safe.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>");
-      return safe;
-    }).join("");
-  }
-
-  function tableCells(line) {
-    let source = String(line).trim();
-    if (source.startsWith("|")) source = source.slice(1);
-    if (source.endsWith("|") && !source.endsWith("\\|")) source = source.slice(0, -1);
-    const cells = [];
-    let cell = "", inCode = false;
-    for (let i = 0; i < source.length; i++) {
-      const ch = source[i];
-      if (ch === "\\" && source[i + 1] === "|") { cell += "|"; i++; continue; }
-      if (ch === "`") { inCode = !inCode; cell += ch; continue; }
-      if (ch === "|" && !inCode) { cells.push(cell.trim()); cell = ""; continue; }
-      cell += ch;
-    }
-    cells.push(cell.trim());
-    return cells;
-  }
-
-  function tableAlignment(cell) {
-    const marker = String(cell).replace(/\s/g, "");
-    if (!/^:?-{3,}:?$/.test(marker)) return null;
-    if (marker.startsWith(":") && marker.endsWith(":")) return "center";
-    return marker.endsWith(":") ? "right" : "left";
-  }
-
-  function textMd(source) {
-    const lines = String(source).split("\n"), rendered = [];
-    for (let i = 0; i < lines.length;) {
-      const headers = lines[i].includes("|") ? tableCells(lines[i]) : [];
-      const dividers = i + 1 < lines.length && lines[i + 1].includes("|")
-        ? tableCells(lines[i + 1]) : [];
-      const alignment = dividers.map(tableAlignment);
-      if (headers.length && headers.length === dividers.length
-          && alignment.every((value) => value !== null)) {
-        const rows = [];
-        i += 2;
-        while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
-          const cells = tableCells(lines[i]);
-          if (cells.length !== headers.length) break;
-          rows.push(cells); i++;
-        }
-        const head = headers.map((cell, index) =>
-          `<th class="align-${alignment[index]}">${inlineMd(cell)}</th>`).join("");
-        const body = rows.map((row) => `<tr>${row.map((cell, index) =>
-          `<td class="align-${alignment[index]}">${inlineMd(cell)}</td>`).join("")}</tr>`).join("");
-        rendered.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
-        continue;
-      }
-      const heading = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
-      const bullet = /^(\s*)[-*]\s+(.*)$/.exec(lines[i]);
-      if (heading) rendered.push(`<b class="md-heading md-h${heading[1].length}">${inlineMd(heading[2])}</b>`);
-      else if (bullet) rendered.push(`${bullet[1]}• ${inlineMd(bullet[2])}`);
-      else rendered.push(inlineMd(lines[i]));
-      i++;
-    }
-    return rendered.join("\n");
-  }
-
-  function codeBlock(code, language) {
-    const lang = language ? ` data-language="${language}"` : "";
-    return `<pre class="code"${lang}><button type="button" class="copy" data-c="${encodeURIComponent(code)}" aria-label="Copy code">copy</button><code>${esc(code)}</code></pre>`;
-  }
-
-  function md(source) {
-    const lines = String(source).replace(/\r\n?/g, "\n").split("\n");
-    const rendered = [], text = [];
-    const flushText = () => {
-      if (text.length) { rendered.push(textMd(text.join("\n"))); text.length = 0; }
-    };
-    for (let i = 0; i < lines.length;) {
-      const opening = /^\s*```([A-Za-z0-9_+.-]*)\s*$/.exec(lines[i]);
-      if (!opening) { text.push(lines[i]); i++; continue; }
-      flushText(); i++;
-      const code = [];
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
-      if (i < lines.length) i++; // closing fence; absence means this is the live partial block
-      rendered.push(codeBlock(code.join("\n"), opening[1]));
-    }
-    flushText();
-    return rendered.join("\n");
-  }
+  // One CommonMark renderer for live answers, history, skills, and documentation.
+  const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; }
 
   // ---- turn lifecycle ----
   function startTurn() {
-    if (turn) endTurn();
+    if (turn) endTurn("cancelled");
     speak("DGC is working");
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
-    const t0 = Date.now(), meta = act.querySelector(".meta");
-    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "" };
-    turn.timer = setInterval(() => {
-      meta.textContent = `(${Math.floor((Date.now() - t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok)`;
-    }, 200);
+    const t0 = Date.now();
+    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "" };
+    turn.timer = setInterval(renderTurnMeta, 200);
+    renderTurnMeta();
     scroll();
   }
-  function endTurn() {
+  function renderTurnMeta() {
+    const meta = turn?.act?.querySelector(".meta");
+    if (!turn || !meta) return;
+    const eta = turn.eta ? ` · ${turn.eta}` : "";
+    meta.textContent = `(${Math.floor((Date.now() - turn.t0) / 1000)}s${eta} · ↓ ${Math.round(turn.chars / 4)} tok)`;
+  }
+  function endTurn(reason = "completed") {
     if (!turn) return;
+    flushText();
+    finishReasoning();
     turn.block.querySelectorAll(".card:not(.resolved)").forEach(resolveCard);
     turn.block.querySelectorAll('.tool[data-status="running"]').forEach((card) => {
       setToolStatus(card, "stopped");
@@ -259,22 +483,101 @@
     });
     clearInterval(turn.timer);
     const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
-    if (lastText) { lastText.classList.remove("commentary"); lastText.classList.add("final"); }
+    if (lastText && !lastText.classList.contains("commentary") && reason === "completed") {
+      lastText.classList.add("final");
+      const actions = el("div", "response-actions");
+      const copy = el("button", "response-copy codicon codicon-copy");
+      copy.type = "button"; copy.title = "Copy response"; copy.setAttribute("aria-label", "Copy response");
+      copy.onclick = () => vscode.postMessage({ type: "copy", text: lastText._markdown || lastText.textContent });
+      actions.appendChild(copy); lastText.after(actions);
+      // The work summary separates the collapsed activity from the final response.
+      turn.block.insertBefore(turn.act, lastText);
+    }
     turn.act.classList.add("done");
-    turn.act.innerHTML = `▸ worked for ${Math.floor((Date.now() - turn.t0) / 1000)}s · ↓ ${Math.round(turn.chars / 4)} tok`;
+    turn.act.textContent = `${reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked"} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
     turn = null;
   }
   function discardTurn() {
     if (turn) {
       clearInterval(turn.timer);
+      clearTimeout(turn.renderTimer);
       turn.block.querySelectorAll(".tool").forEach((card) => clearInterval(card._timer));
     }
     expireOpenRequests();
     turn = null;
   }
   function ensureTurn() { if (!turn) startTurn(); }
-  function textBlock() { if (!turn.textEl) { turn.textEl = el("div", "text"); turn.block.appendChild(turn.textEl); } return turn.textEl; }
-  function breakText() { if (turn) { turn.textEl = null; turn._buf = ""; } }
+  // Keep the live activity row at the visual edge of the active turn. New response text,
+  // tool cards, diffs and decisions are inserted immediately before it, so a user following
+  // the stream always sees that DGC is still running beneath the newest content.
+  function appendTurnContent(node) { turn.block.insertBefore(node, turn.act); return node; }
+  function appendConversationContent(node) {
+    if (turn) return appendTurnContent(node);
+    log.appendChild(node); return node;
+  }
+  function textBlock() { if (!turn.textEl) { turn.textEl = appendTurnContent(el("div", "text")); } return turn.textEl; }
+  function flushText() {
+    if (!turn) return;
+    clearTimeout(turn.renderTimer); turn.renderTimer = null;
+    if (turn.textEl && turn._buf) {
+      turn.textEl._markdown = turn._buf;
+      turn.textEl.innerHTML = md(turn._buf); turn.renderedAt = Date.now();
+    }
+  }
+  function appendText(value) {
+    turn._buf = (turn._buf || "") + value;
+    const node = textBlock(); node._markdown = turn._buf;
+    if (!turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
+    else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
+      const stick = atBottom(); flushText(); if (stick) scroll();
+    }, 48);
+  }
+  function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
+
+  function finishReasoning() {
+    if (!turn?.reasonEl) return;
+    const button = turn.reasonEl.previousElementSibling;
+    const seconds = Math.max(0, Math.round((Date.now() - turn.reasonStarted) / 1000));
+    button.dataset.label = `Thought for ${seconds}s`;
+    button.textContent = `${turn.reasonEl.classList.contains("show") ? "▾" : "▸"} ${button.dataset.label}`;
+    turn.reasonEl = null;
+  }
+
+  function refreshToolGroup(group) {
+    if (!group) return;
+    const cards = [...group.querySelectorAll(".tool")];
+    const running = cards.filter(card => card.dataset.status === "running");
+    const failures = cards.filter(card => ["failed", "denied", "stopped"].includes(card.dataset.status));
+    const summary = group.querySelector(".tool-group-label");
+    group.classList.toggle("running", running.length > 0);
+    if (running.length) {
+      const card = running.at(-1);
+      summary.textContent = `${toolCopy(card.dataset.toolName).present} ${card.dataset.summary || ""}`.trim();
+    } else {
+      const counts = { read: 0, edit: 0, command: 0, other: 0 };
+      for (const card of cards) {
+        const name = canonicalTool(card.dataset.toolName);
+        const key = ["read_file", "glob", "repo_map", "grep"].includes(name) ? "read"
+          : ["write_file", "edit_file", "apply_patch"].includes(name) ? "edit"
+            : name === "bash" ? "command" : "other";
+        counts[key]++;
+      }
+      summary.textContent = [counts.read && "Explored files",
+        counts.edit && `Applied ${counts.edit} ${counts.edit === 1 ? "edit" : "edits"}`,
+        counts.command && `Ran ${counts.command} ${counts.command === 1 ? "command" : "commands"}`,
+        counts.other && `Used ${counts.other} ${counts.other === 1 ? "tool" : "tools"}`].filter(Boolean).join(" · ");
+      if (failures.length) summary.textContent += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
+    }
+    if (failures.length) group.open = true;
+  }
+  function appendTool(card) {
+    if (!turn.toolGroup) {
+      turn.toolGroup = appendTurnContent(el("details", "tool-group"));
+      turn.toolGroup.innerHTML = '<summary><span class="codicon codicon-tools" aria-hidden="true"></span><span class="tool-group-label">Working</span></summary>';
+    }
+    turn.toolGroup.appendChild(card);
+    refreshToolGroup(turn.toolGroup);
+  }
 
   function openFileBtn(path, line) {
     const b = el("button", "link", "⤢ open"); b.type = "button";
@@ -302,11 +605,13 @@
       const elapsed = card.querySelector(".tool-time");
       if (elapsed && card._startedAt) elapsed.textContent = `${((Date.now() - card._startedAt) / 1000).toFixed(1)}s`;
     }
+    refreshToolGroup(card.closest(".tool-group"));
   }
 
   function toolCard(ev) {
     const c = el("div", "tool");
     c.dataset.toolName = String(ev.name || "");
+    c.dataset.summary = String(ev.summary || "");
     c._startedAt = Date.now();
     const copy = toolCopy(ev.name);
     const detail = [copy.target, ev.summary || ""].filter(Boolean).join(" · ");
@@ -318,7 +623,7 @@
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
-    if (turn.textEl) turn.textEl.classList.add("commentary");
+    [...turn.block.querySelectorAll(".text")].at(-1)?.classList.add("commentary");
     if (["read_file", "write_file", "edit_file", "apply_patch"].includes(ev.name) && ev.summary) head.appendChild(openFileBtn(ev.summary));
     const status = el("span", "sr-only tool-status", "running");
     toggle.appendChild(status);
@@ -328,7 +633,7 @@
     const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
     c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
     setToolStatus(c, "running");
-    turn.block.appendChild(c); breakText(); scroll(); return c;
+    appendTool(c); breakText(); return c;
   }
   function renderDiff(diff) {
     const wrap = el("div", "diff open");
@@ -359,24 +664,188 @@
     if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     return wrap;
   }
-  function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; (turn ? turn.block : log).appendChild(c); breakText(); scroll(); return c; }
-  function requestCard(c, id) { c.dataset.requestId = String(id); return c; }
+  function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; appendConversationContent(c); breakText(); return c; }
+  function requestArtifactStop(id, container, button) {
+    if (!id || button.disabled) return;
+    container.dataset.artifactId = String(id);
+    container.classList.add("stopping");
+    button.disabled = true;
+    button.textContent = "Stopping…";
+    vscode.postMessage({ type: "stopArtifact", id });
+  }
+  function settleArtifactStop(message) {
+    const id = String(message.id || "");
+    const targets = [...document.querySelectorAll("[data-artifact-id]")]
+      .filter((node) => node.dataset.artifactId === id);
+    targets.forEach((node) => {
+      const stop = node.querySelector("[data-artifact-stop]");
+      node.classList.remove("stopping");
+      if (message.state === "stopped") {
+        if (node.classList.contains("artifact-list-row")) { node.remove(); return; }
+        node.classList.add("stopped");
+        node.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+        const label = node.querySelector(".anm"); if (label) label.textContent = "Artifact stopped";
+        if (stop) stop.textContent = "Stopped";
+      } else if (message.state === "error" && stop) {
+        stop.disabled = false;
+        stop.textContent = "Retry stop";
+      }
+    });
+    if (message.state === "error") {
+      sysLine(String(message.error || "DGC could not stop the artifact preview."), true);
+    }
+  }
+  function updateInputActivity() {
+    if (!turn?.act) return;
+    const waiting = !!turn.block.querySelector(".card[data-request-id]:not(.resolved)");
+    turn.act.classList.toggle("waiting-input", waiting);
+    turn.act.querySelector(".verb").textContent = waiting ? "waiting for your input" : "working…";
+  }
+  function requestCard(c, id) { c.dataset.requestId = String(id); updateInputActivity(); return c; }
+  function showQuestionForm(ev) {
+    const grouped = Array.isArray(ev.questions);
+    const questions = grouped ? ev.questions : [{ id: "q1", header: "Question", question: ev.question, options: ev.options }];
+    if (!questions.length || questions.length > 6 || questions.some((q) => !q || typeof q.id !== "string"
+      || typeof q.question !== "string" || !Array.isArray(q.options) || q.options.length > 8
+      || q.options.some((o) => typeof o !== "string"))
+      || new Set(questions.map((q) => q.id)).size !== questions.length) {
+      sysLine("DGC received an invalid question form. Stop the turn and retry.", true); return;
+    }
+    speak(questions.length > 1 ? `${questions.length} questions need your input` : questions[0].question);
+    const c = requestCard(decisionCard('<div class="question-form"></div><div class="question-summary"></div>', "Questions for you"), ev.id);
+    const form = c.querySelector(".question-form"), states = questions.map(() => ({ selected: null, text: "" }));
+    let tab = 0;
+    const answer = (i) => states[i].selected === "other" ? states[i].text.trim()
+      : Number.isInteger(states[i].selected) ? questions[i].options[states[i].selected] : "";
+    function render() {
+      const q = questions[tab], state = states[tab];
+      form.innerHTML = (questions.length > 1 ? `<div class="question-tabs" role="tablist" aria-label="Questions">${questions.map((item, i) =>
+        `<button type="button" class="question-tab${i === tab ? " active" : ""}" role="tab" aria-selected="${i === tab}" tabindex="${i === tab ? 0 : -1}" data-tab="${i}">${esc(item.header || `Question ${i + 1}`)}${answer(i) ? ' ✓' : ''}</button>`).join("")}</div>` : "")
+        + `<div class="question-panel" role="group" aria-label="${esc(q.question)}"><div class="q">${esc(q.question)}</div><div class="opts">${q.options.map((o, i) =>
+          `<button type="button" class="opt${i === 0 ? " rec" : ""}${state.selected === i ? " selected" : ""}" aria-pressed="${state.selected === i}" data-choice="${i}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("")}
+          <button type="button" class="opt${state.selected === "other" ? " selected" : ""}" aria-pressed="${state.selected === "other"}" data-choice="other"><span class="n">${q.options.length + 1}</span><span class="ol">Other<span class="question-hint">Type your own answer</span></span></button></div>
+          <textarea class="question-other feedback" rows="3" maxlength="4096" aria-label="Your answer" placeholder="Describe what you want…"${state.selected === "other" ? "" : " hidden"}></textarea></div>
+          <div class="btns"><span class="question-progress"></span>${questions.length > 1 ? '<button type="button" class="act question-next">Next</button>' : ''}<button type="button" class="act primary question-submit">Submit</button></div>`;
+      const input = form.querySelector(".question-other"), submit = form.querySelector(".question-submit");
+      input.value = state.text;
+      const refresh = () => {
+        const count = questions.filter((_, i) => !!answer(i)).length;
+        submit.disabled = count !== questions.length;
+        form.querySelector(".question-progress").textContent = `${count} of ${questions.length} answered`;
+      };
+      input.oninput = () => { state.text = input.value; refresh(); };
+      form.querySelectorAll("[data-tab]").forEach((b) => {
+        b.onclick = () => { tab = Number(b.dataset.tab); render(); form.querySelector(`[data-tab="${tab}"]`).focus(); };
+        b.onkeydown = (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          tab = event.key === "Home" ? 0 : event.key === "End" ? questions.length - 1
+            : (tab + (event.key === "ArrowRight" ? 1 : -1) + questions.length) % questions.length;
+          render(); form.querySelector(`[data-tab="${tab}"]`).focus();
+        };
+      });
+      form.querySelectorAll("[data-choice]").forEach((b) => b.onclick = () => {
+        if (c.classList.contains("resolved")) return;
+        state.selected = b.dataset.choice === "other" ? "other" : Number(b.dataset.choice);
+        render();
+        form.querySelector(state.selected === "other" ? ".question-other" : `[data-choice="${state.selected}"]`).focus();
+      });
+      const next = form.querySelector(".question-next");
+      if (next) next.onclick = () => { tab = (tab + 1) % questions.length; render(); form.querySelector(`[data-tab="${tab}"]`).focus(); };
+      submit.onclick = () => {
+        if (questions.some((_, i) => !answer(i)) || !resolveCard(c)) return;
+        const answers = Object.fromEntries(questions.map((q, i) => [q.id, answer(i)]));
+        c.querySelector(".question-summary").textContent = questions.map((q, i) => `${q.question}\n${answer(i)}`).join("\n\n");
+        form.hidden = true;
+        vscode.postMessage({ type: "options_response", id: ev.id,
+          ...(grouped ? { answers } : { choice: answer(0) }) });
+      };
+      refresh();
+    }
+    render();
+  }
   function resolveCard(c) {
     if (!c || c.classList.contains("resolved")) return false;
     c.classList.add("resolved"); c.setAttribute("aria-disabled", "true");
-    c.querySelectorAll(".btns button, .opts button, .feedback, .mcp-form input, .mcp-form select, .mcp-form textarea, .mcp-form button")
+    c.querySelectorAll("button, input, select, textarea")
       .forEach((control) => { control.disabled = true; });
+    updateInputActivity();
     return true;
   }
   function expireOpenRequests() {
     document.querySelectorAll(".card[data-request-id]:not(.resolved)").forEach(resolveCard);
   }
-  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); (turn ? turn.block : log).appendChild(line); scroll(); }
+  function sysLine(msg, isErr) { const line = el("div", "sys" + (isErr ? " err" : ""), esc(msg)); if (isErr) line.setAttribute("role", "alert"); appendConversationContent(line); }
 
-  // ---- standing goal — durable state above the composer, with an active-work clock ----
-  let goalState = { text: "", status: "none", elapsed: 0 }, goalObservedAt = Date.now();
+  // ---- Codex-style composer rail: durable workspace changes and standing goal ----
+  let changeState = { total: 0, additions: 0, deletions: 0, files: [] };
+  let workspaceChangeState = { ...changeState }, reviewScope = "chat";
+  function syncComposerRail() {
+    composerRail.hidden = goalBar.hidden && changesBar.hidden;
+    composerRail.classList.toggle("has-changes", !changesBar.hidden);
+    composerRail.classList.toggle("has-goal", !goalBar.hidden);
+  }
+  function setChatChanges(next) {
+    const files = Array.isArray(next?.files) ? next.files.filter((item) => item
+      && typeof item.path === "string").slice(0, 500) : [];
+    changeState = {
+      total: Math.max(0, Number(next?.total) || files.length),
+      additions: Math.max(0, Number(next?.additions) || 0),
+      deletions: Math.max(0, Number(next?.deletions) || 0), files,
+      notices: Array.isArray(next?.notices) ? next.notices.map(String).slice(0, 34) : [],
+    };
+    changesBar.hidden = changeState.total === 0 && !changeState.notices.length;
+    $("changes-count").textContent = changeState.notices.length
+      ? (changeState.total ? `${changeState.total} changed in this chat · partial scan` : "Changes unavailable")
+      : `${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed in this chat`;
+    changesBar.title = ["Changes recorded during runs in this chat; existing workspace changes are excluded", ...changeState.notices].join("\n");
+    $("changes-add").hidden = $("changes-del").hidden = changeState.total === 0;
+    $("changes-add").textContent = `+${changeState.additions}`;
+    $("changes-del").textContent = `−${changeState.deletions}`;
+    syncComposerRail();
+    if (!$("changes-review").hidden) renderChangesReview();
+  }
+  function renderChangesReview() {
+    const changeState = reviewScope === "chat" ? currentChatChanges() : workspaceChangeState;
+    $("changes-review-title").textContent = reviewScope === "chat" ? "Changes in this chat" : "Workspace changes";
+    $("changes-review-description").textContent = reviewScope === "chat"
+      ? "Saved before/after snapshots from this chat’s runs in the primary project folder. Existing changes and edits between runs are excluded. Concurrent edits during a run may be included."
+      : "All pending changes since the last Git commit, including edits made before this chat or by other tools.";
+    const summary = $("changes-review-summary"), list = $("changes-review-list");
+    summary.innerHTML = `<span>${changeState.total} ${changeState.total === 1 ? "file" : "files"} changed</span><span class="change-add">+${changeState.additions}</span><span class="change-del">−${changeState.deletions}</span>`;
+    list.innerHTML = changeState.files.length ? changeState.files.map((item, index) =>
+      `<button type="button" class="change-row" data-change="${index}" title="${esc(item.error || (item.staged ? "Includes staged changes" : "Review change"))}"><span class="change-kind codicon codicon-${item.deleted ? "trash" : item.untracked ? "new-file" : "diff-modified"}" aria-hidden="true"></span><span class="change-path">${esc(item.path)}</span><span class="change-add">${item.counted === false || item.binary ? "—" : "+" + Math.max(0, Number(item.additions) || 0)}</span><span class="change-del">${item.counted === false || item.binary ? "—" : "−" + Math.max(0, Number(item.deletions) || 0)}</span><span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")
+      : '<div class="surface-empty">No workspace changes remain.</div>';
+    if (changeState.notices?.length) {
+      const note = el("div", "surface-notice"); note.textContent = changeState.notices.join(" ");
+      list.prepend(note);
+      if (!changeState.files.length) list.querySelector(".surface-empty")?.remove();
+    }
+    list.querySelectorAll("[data-change]").forEach((button) => button.onclick = () => {
+      const item = changeState.files[Number(button.dataset.change)];
+      if (item) vscode.postMessage({ type: "reviewChange", path: item.id || item.path, scope: reviewScope });
+    });
+  }
+  function currentChatChanges() { return changeState; }
+  function setWorkspaceChanges(next) {
+    workspaceChangeState = { total: 0, additions: 0, deletions: 0, files: [], ...next };
+    if (!$("changes-review").hidden && reviewScope === "workspace") renderChangesReview();
+  }
+  function openChangesReview(scope = "chat") {
+    reviewScope = scope === "workspace" ? "workspace" : "chat";
+    renderChangesReview();
+    $("changes-review").hidden = false;
+    $("changes-review-close").focus();
+  }
+  function closeChangesReview() {
+    $("changes-review").hidden = true;
+    (reviewScope === "workspace" || changesBar.hidden ? $("workspace-changes") : $("changes-main")).focus();
+  }
+
+  // Standing goal — the objective and clock stay attached immediately above the composer.
+  let goalState = { text: "", status: "none", elapsed: 0, running: false }, goalObservedAt = Date.now();
   function currentGoalElapsed() {
-    return goalState.elapsed + (goalState.status === "active"
+    return goalState.elapsed + (goalState.status === "active" && goalState.running
       ? Math.max(0, (Date.now() - goalObservedAt) / 1000) : 0);
   }
   function formatDuration(seconds) {
@@ -391,23 +860,96 @@
     const status = text ? String(next?.status || "active") : "none";
     const priorElapsed = currentGoalElapsed();
     const explicit = Number(next?.elapsed_seconds);
-    goalState = { text, status,
+    goalState = { ...next, text, status, running: next?.running === true,
       elapsed: Number.isFinite(explicit) && explicit >= 0 ? explicit
         : (text === goalState.text ? priorElapsed : 0) };
     goalObservedAt = Date.now();
     goalBar.hidden = !text;
-    if (!text) return;
+    syncComposerRail();
+    if (!text) { closeGoalEditor(false); closeGoalReview(false); return; }
     $("goal-text").textContent = text;
-    const paused = status === "blocked", completed = status === "completed";
-    $("goal-status").textContent = paused ? "Paused goal" : completed ? "Completed goal" : "Active goal";
+    const paused = status === "paused", blocked = status === "blocked", completed = status === "completed";
+    $("goal-status").textContent = paused ? "Paused goal" : blocked ? "Blocked goal" : completed ? "Completed goal" : "Pursuing goal";
     goalBar.dataset.status = status;
     const toggle = $("goal-toggle"), icon = toggle.querySelector(".codicon");
     toggle.hidden = false;
-    const resume = paused || completed;
+    const resume = paused || blocked || completed;
     icon.className = `codicon codicon-${resume ? "debug-continue" : "debug-pause"}`;
     toggle.title = resume ? "Resume goal" : "Pause goal";
-    toggle.setAttribute("aria-label", resume ? "Resume standing goal" : "Pause standing goal");
+    toggle.setAttribute("aria-label", resume ? "Resume goal" : "Pause goal");
+    $("goal-main").title = text;
+    $("goal-main").setAttribute("aria-label", `Expand and edit goal: ${text.slice(0, 180)}`);
     paintGoalClock();
+    if (!$("goal-review").hidden) renderGoalReview();
+  }
+  function openGoalEditor() {
+    if (!goalState.text) return;
+    const editor = $("goal-editor-text");
+    editor.value = goalState.text;
+    $("goal-editor-budget").value = goalState.token_budget || "";
+    $("goal-editor-save").disabled = false;
+    $("goal-editor").hidden = false;
+    editor.focus(); editor.selectionStart = editor.selectionEnd = editor.value.length;
+  }
+  function closeGoalEditor(restoreFocus = true) {
+    $("goal-editor").hidden = true;
+    if (restoreFocus && !goalBar.hidden) $("goal-main").focus();
+  }
+  function saveGoalEditor() {
+    const text = $("goal-editor-text").value.trim();
+    if (!text) return;
+    const budget = Number($("goal-editor-budget").value || 0);
+    if (!Number.isSafeInteger(budget) || budget < 0 || budget > 1e12) {
+      $("goal-editor-budget").reportValidity(); return;
+    }
+    $("goal-editor-save").disabled = true;
+    vscode.postMessage({ type: "updateGoal", text, tokenBudget: budget });
+  }
+  function renderGoalReview() {
+    const body = $("goal-review-body");
+    body.replaceChildren();
+    body.appendChild(el("div", "text", md(goalState.text)));
+    const status = el("p");
+    status.textContent = `${goalState.status} · ${formatDuration(currentGoalElapsed())} worked · ${Number(goalState.cycles || 0)} cycles`;
+    body.appendChild(status);
+    const attached = goalState.attachments || {};
+    const labels = [...(Array.isArray(attached.skills) ? attached.skills.map(name => "$" + name) : []),
+      ...(Array.isArray(attached.templates) ? attached.templates.map(name => "/" + name) : [])];
+    if (attached.context) labels.push(`${Number(attached.context)} context attachment${Number(attached.context) === 1 ? "" : "s"}`);
+    if (attached.images) labels.push(`${Number(attached.images)} image${Number(attached.images) === 1 ? "" : "s"}`);
+    if (labels.length || attached.invalid) {
+      const summary = el("p", "goal-attachments");
+      summary.textContent = attached.invalid ? "Saved attachments could not be restored. Replace this goal before resuming."
+        : "Attached to this goal: " + labels.join(" · ");
+      body.appendChild(summary);
+    }
+    if (goalState.reason) { const reason = el("p"); reason.textContent = goalState.reason; body.appendChild(reason); }
+    if (Array.isArray(goalState.evidence) && goalState.evidence.length) {
+      body.appendChild(el("h3", "", "Evidence"));
+      const list = el("ul");
+      goalState.evidence.forEach(item => { const li = el("li"); li.textContent = String(item); list.appendChild(li); });
+      body.appendChild(list);
+    }
+    const usage = el("p");
+    usage.textContent = goalState.usage_known === false ? "Token usage unavailable for this route"
+      : `${Number(goalState.tokens_used || 0).toLocaleString()} reported tokens${goalState.token_budget ? ` / ${Number(goalState.token_budget).toLocaleString()} budget` : ""}`;
+    body.appendChild(usage);
+    if (Array.isArray(goalState.history) && goalState.history.length) {
+      const history = el("details"), list = el("ul");
+      history.appendChild(el("summary", "", "Goal history"));
+      goalState.history.forEach(item => { const li = el("li");
+        li.textContent = `${String(item.status)} · ${String(item.reason || "")}`; list.appendChild(li); });
+      history.appendChild(list); body.appendChild(history);
+    }
+  }
+  function openGoalReview() {
+    if (!goalState.text) return;
+    renderGoalReview(); $("goal-review").hidden = false; $("goal-review-close").focus();
+    vscode.postMessage({ type: "reviewGoal" });
+  }
+  function closeGoalReview(restoreFocus = true) {
+    $("goal-review").hidden = true;
+    if (restoreFocus) $("goal-review-button").focus();
   }
   const goalClockTimer = setInterval(paintGoalClock, 500);
   if (goalClockTimer && typeof goalClockTimer.unref === "function") goalClockTimer.unref();
@@ -437,8 +979,13 @@
       ? surfaceReturnFocus : input;
     surfaceReturnFocus = null; target.focus();
   }
+  function dismissSurface() {
+    if (mcpContextPending) { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; }
+    closeSurface();
+  }
   function surfaceButtons(primary, primaryAction, secondary, secondaryAction) {
     const p = $("surface-primary"), s = $("surface-secondary");
+    for (const button of [p, s]) { delete button.dataset.skillMutation; button.disabled = false; }
     p.hidden = !primary; p.textContent = primary || ""; p.onclick = primaryAction || null;
     s.hidden = !secondary; s.textContent = secondary || ""; s.onclick = secondaryAction || null;
   }
@@ -449,18 +996,53 @@
     });
   }
   function useSkill(name) {
-    input.value = `$${name} `; input.selectionStart = input.selectionEnd = input.value.length;
-    closeSurface(); input.focus(); input.dispatchEvent(new Event("input", { bubbles: true }));
+    const skill = skillRows.find((row) => row.name === name);
+    if (skill?.enabled === false) return;
+    if (!attachInvocation("skill", name)) return;
+    if (!input.value.trim() && skill?.default_prompt) {
+      input.value = String(skill.default_prompt).slice(0, 4096);
+      input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    }
+    closeSurface(); input.focus();
+  }
+  function attachInvocation(kind, name) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return false;
+    if (!attachments.some((a) => a[kind] === name)) {
+      if (attachments.filter(item => item.skill || item.template).length >= 8) {
+        sysLine("Select at most eight skills and prompt templates per message."); return false;
+      }
+      if (!canAttach()) return false;
+      attachments.push({ label: `${kind === "skill" ? "$" : "/"}${name}`, [kind]: name });
+    }
+    renderAtts();
+    return true;
+  }
+  function canAttach() {
+    const waiting = [...pendingImages].filter(owner => owner.session === draftSession).length;
+    if (attachments.length + waiting >= 64) { sysLine("Select at most 64 attachments per message."); return false; }
+    return true;
   }
   function renderSkills(items) {
+    const query = surfaceKind === "skills" ? surfaceSearch.value : "";
     surfaceRows = Array.isArray(items) ? items : [];
     openSurface("skills");
+    surfaceSearch.value = query;
     surfaceBody.innerHTML = surfaceRows.length ? surfaceRows.map((skill, i) =>
-      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">$${esc(skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}</span></div><p>${esc(skill.description || "Reusable agent instructions")}</p><div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}">Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button></div></article>`).join("")
+      `<article class="surface-card" data-filter="${esc(`${skill.name} ${skill.display_name || ""} ${skill.source} ${skill.description}`.toLowerCase())}"><div class="surface-card-head"><button type="button" class="surface-name" data-skill-view="${i}">${esc(skill.display_name || "$" + skill.name)}</button><span class="surface-badge">${esc(skill.source || "unknown")}${skill.enabled === false ? " · disabled" : skill.allow_implicit_invocation === false ? " · explicit only" : ""}</span></div><p>${esc(skill.short_description || skill.description || "Reusable agent instructions")}</p>${(Array.isArray(skill.diagnostics) ? skill.diagnostics : []).map((line) => `<p class="muted">${esc(line)}</p>`).join("")}<div class="surface-actions"><button type="button" class="act primary" data-skill-use="${i}"${skill.enabled === false ? " disabled" : ""}>Use skill</button><button type="button" class="act" data-skill-view="${i}">View instructions</button>${skillManagement ? `<button type="button" class="act" data-skill-toggle="${i}" aria-pressed="${skill.enabled !== false}">${skill.enabled === false ? "Enable" : "Disable"}</button>` : ""}</div></article>`).join("")
       : '<div class="surface-empty">No skills are installed. Add a project skill at <code>.dgc/skills/&lt;name&gt;/SKILL.md</code>.</div>';
     surfaceBody.querySelectorAll("[data-skill-use]").forEach((button) => button.onclick = () => useSkill(surfaceRows[+button.dataset.skillUse].name));
     surfaceBody.querySelectorAll("[data-skill-view]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "getSkill", name: surfaceRows[+button.dataset.skillView].name }));
-    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }));
+    surfaceBody.querySelectorAll("[data-skill-toggle]").forEach((button) => button.onclick = () => {
+      const skill = surfaceRows[+button.dataset.skillToggle]; button.disabled = true;
+      vscode.postMessage({ type: "skillToggle", name: skill.name, enabled: skill.enabled === false });
+    });
+    surfaceButtons("Reload", () => vscode.postMessage({ type: "skillsReload" }),
+      skillManagement ? "Create / install" : "", () => vscode.postMessage({ type: "skillsManage" }));
+    for (const button of [$("surface-primary"), $("surface-secondary"), ...surfaceBody.querySelectorAll("[data-skill-toggle]")]) {
+      button.dataset.skillMutation = "true";
+      button.disabled = streaming;
+      button.title = streaming ? "Available after this turn finishes" : "";
+    }
     filterSurface();
   }
   function renderSkillDetail(ev) {
@@ -468,7 +1050,8 @@
     if (!ev.found) { surfaceBody.innerHTML = '<div class="surface-empty">That skill is no longer installed.</div>'; return; }
     surfaceBody.innerHTML = `<button type="button" class="surface-back">← All skills</button><div class="surface-detail-head"><h2>$${esc(ev.name)}</h2><span class="surface-badge">${esc(ev.source)}</span></div><p class="muted">${esc(ev.description || "")}</p><div class="surface-markdown">${md(ev.markdown || "")}</div>`;
     surfaceBody.querySelector(".surface-back").onclick = () => renderSkills(surfaceRows);
-    surfaceButtons("Use skill", () => useSkill(ev.name));
+    const enabled = skillRows.find((skill) => skill.name === ev.name)?.enabled !== false;
+    surfaceButtons(enabled ? "Use skill" : "", () => useSkill(ev.name));
   }
   function mcpStateClass(value) { return ["connected", "configured"].includes(value) ? "ok" : value === "failed" ? "err" : ""; }
   function showMcpForm(item) {
@@ -496,21 +1079,107 @@
         clear_secrets: $("mcp-clear-secrets").checked,
         log_level: $("mcp-log").value,
       } });
-      surfaceBody.innerHTML = '<div class="surface-empty">Saving and connecting…</div>';
+      closeSurface(); // Keep browser sign-in and permission cards visible while the host connects.
     };
     surfaceButtons(); $("mcp-name").focus();
   }
   function renderMcp() {
+    mcpView = "servers";
     openSurface("mcp");
     const servers = mcpRows.length ? mcpRows.map((item, i) =>
       `<article class="surface-card" data-filter="${esc(`${item.name} ${item.state} ${item.command} ${item.url}`.toLowerCase())}"><div class="surface-card-head"><strong>${esc(item.name)}</strong><span class="surface-state ${mcpStateClass(item.state)}">${esc(item.state || "configured")}</span></div><div class="surface-meta">${esc(item.transport === "remote" ? item.url : [item.command, ...(item.args || [])].join(" "))}</div><p>${Number(item.tool_count || 0)} tool(s)${item.protocol_era ? ` · ${esc(item.protocol_era)}` : ""}</p>${item.error ? `<div class="err">${esc(item.error)}</div>` : ""}<div class="surface-actions"><button type="button" class="act" data-mcp-edit="${i}">Edit</button><button type="button" class="act danger" data-mcp-remove="${i}">Remove</button></div></article>`).join("")
       : '<div class="surface-empty">No MCP servers configured.</div>';
     const tools = mcpTools.length ? `<h2 class="surface-subtitle">Available tools · ${mcpTools.length}</h2>${mcpTools.map((tool) => `<article class="surface-card compact" data-filter="${esc(`${tool.name} ${tool.description}`.toLowerCase())}"><strong>${esc(tool.name)}</strong><p>${esc(tool.description || "")}</p></article>`).join("")}` : "";
     surfaceBody.innerHTML = servers + tools;
+    if (mcpManagement) {
+      surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => {
+        const item = mcpRows[+button.dataset.mcpEdit];
+        const toggle = el("button", "act", item.enabled === false ? "Enable" : "Disable"); toggle.type = "button";
+        toggle.dataset.mcpToggle = item.name;
+        toggle.onclick = () => { toggle.disabled = true;
+          vscode.postMessage({ type: "mcpToggle", name: item.name, enabled: item.enabled === false }); };
+        const reconnect = el("button", "act", "Reconnect"); reconnect.type = "button";
+        reconnect.disabled = item.enabled === false;
+        reconnect.onclick = () => { reconnect.disabled = true;
+          vscode.postMessage({ type: "mcpReconnect", name: item.name }); };
+        button.parentElement.append(toggle, reconnect);
+      });
+    }
+    if (mcpContextSupported) {
+      surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => {
+        const item = mcpRows[+button.dataset.mcpEdit];
+        if (item.state !== "connected") return;
+        for (const [kind, label] of [["resources", "Resources"], ["templates", "Resource templates"], ["prompts", "Prompts"]]) {
+          const browse = el("button", "act", label); browse.type = "button";
+          browse.dataset.mcpBrowse = kind;
+          browse.onclick = () => browseMcpContext(item.name, kind);
+          button.parentElement.appendChild(browse);
+        }
+      });
+    }
     surfaceBody.querySelectorAll("[data-mcp-edit]").forEach((button) => button.onclick = () => showMcpForm(mcpRows[+button.dataset.mcpEdit]));
     surfaceBody.querySelectorAll("[data-mcp-remove]").forEach((button) => button.onclick = () => vscode.postMessage({ type: "mcpRemove", name: mcpRows[+button.dataset.mcpRemove].name }));
     surfaceButtons("Add server", () => showMcpForm(), "Reload", () => vscode.postMessage({ type: "mcpReload" }));
     filterSurface();
+  }
+  function browseMcpContext(server, kind) {
+    mcpView = "context"; openSurface("mcp");
+    mcpContextPending = `mcp-context-${Date.now()}-${++mcpContextSequence}`;
+    vscode.postMessage({ type: "mcpContextList", requestId: mcpContextPending, server, kind });
+    surfaceButtons("Cancel", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
+  }
+  function requestMcpContext(server, kind, identifier, args = {}) {
+    mcpContextPending = `mcp-context-${Date.now()}-${++mcpContextSequence}`;
+    closeSurface();
+    vscode.postMessage({ type: "mcpContextGet", requestId: mcpContextPending, server, kind, identifier, arguments: args });
+  }
+  function renderMcpContextCatalog(ev) {
+    if (ev.request_id !== mcpContextPending) return;
+    mcpContextPending = ""; mcpView = "context"; openSurface("mcp");
+    const rows = Array.isArray(ev.items) ? ev.items : [];
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><h2>${esc(ev.server)} · ${esc(ev.kind)}</h2>`
+      + (ev.error ? `<div class="err">${esc(ev.error)}</div>` : rows.length ? rows.map((row, i) =>
+        `<button type="button" class="surface-card surface-list-button" data-mcp-context="${i}" data-filter="${esc(`${row.name} ${row.description}`.toLowerCase())}"><strong>${esc(row.title || row.name)}</strong><span>${esc(row.description || row.uri || row.uriTemplate || "Preview prompt")}</span></button>`).join("") : '<p class="muted">This server returned no entries for this category.</p>');
+    surfaceBody.querySelector(".surface-back").onclick = renderMcp;
+    surfaceBody.querySelectorAll("[data-mcp-context]").forEach((button) => button.onclick = () => {
+      const row = rows[+button.dataset.mcpContext];
+      if (ev.kind === "resources") requestMcpContext(ev.server, "resources", row.uri);
+      else renderMcpContextForm(ev.server, ev.kind, row);
+    });
+    surfaceButtons("Refresh", () => browseMcpContext(ev.server, ev.kind)); filterSurface();
+  }
+  function renderMcpContextForm(server, kind, row) {
+    const args = Array.isArray(row.arguments) ? row.arguments : [];
+    const fields = kind === "templates" ? [{ name: "uri", required: true, description: "Fill in a concrete URI using the server's template." }] : args;
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← ${esc(kind)}</button><h2>${esc(row.title || row.name)}</h2><form id="mcp-context-form" class="surface-form">`
+      + fields.map((arg, i) => `<label>${esc(arg.name)}${arg.required ? " *" : ""}<span class="set-hint">${esc(arg.description || "")}</span><input data-context-argument="${i}"${arg.required ? " required" : ""} maxlength="8000" value="${kind === "templates" ? esc(row.uriTemplate) : ""}"></label>`).join("")
+      + '<button type="submit" class="act primary">Preview context</button></form>';
+    surfaceBody.querySelector(".surface-back").onclick = () => browseMcpContext(server, kind);
+    $("mcp-context-form").onsubmit = (event) => {
+      event.preventDefault(); if (!event.target.reportValidity()) return;
+      const values = Object.create(null);
+      fields.forEach((arg, i) => { const value = surfaceBody.querySelector(`[data-context-argument="${i}"]`).value;
+        if (value || arg.required) values[arg.name] = value; });
+      requestMcpContext(server, kind === "templates" ? "resources" : kind,
+        kind === "templates" ? values.uri : row.name, kind === "templates" ? {} : values);
+    };
+    surfaceButtons();
+  }
+  function renderMcpContext(ev) {
+    if (ev.request_id !== mcpContextPending) return;
+    mcpContextPending = ""; mcpView = "context"; openSurface("mcp");
+    surfaceBody.innerHTML = `<button type="button" class="surface-back">← MCP servers</button><h2>${esc(ev.server)}</h2><p class="muted">${esc(ev.identifier)}</p>`
+      + (ev.error ? `<div class="err">${esc(ev.error)}</div>` : `<div class="surface-markdown">${md(ev.text || "")}</div>`)
+      + (Array.isArray(ev.omitted) ? ev.omitted.map((line) => `<p class="muted">${esc(line)}</p>`).join("") : "");
+    surfaceBody.querySelector(".surface-back").onclick = renderMcp;
+    surfaceButtons(!ev.error && ev.text ? "Attach to draft" : "", () => {
+      const resource = { type: "mcp_context", server: ev.server, uri: ev.identifier, text: ev.text };
+      const previous = attachments.findIndex((item) => item.resource?.type === "mcp_context" && item.resource.server === ev.server && item.resource.uri === ev.identifier);
+      const selected = { label: `${ev.server} · ${ev.identifier}`, resource };
+      if (previous >= 0) attachments[previous] = selected;
+      else { if (!canAttach()) return; attachments.push(selected); }
+      renderAtts(); closeSurface(); input.focus();
+    });
   }
   function renderDocs(items) {
     surfaceRows = Array.isArray(items) ? items : []; openSurface("docs");
@@ -550,9 +1219,9 @@
     surfaceButtons("Reload", () => vscode.postMessage({ type: "slash", action: "hooks" })); filterSurface();
   }
   surfaceSearch.addEventListener("input", filterSurface);
-  $("surface-close").onclick = closeSurface;
+  $("surface-close").onclick = dismissSurface;
   $("surface").addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); closeSurface(); return; }
+    if (event.key === "Escape") { event.preventDefault(); dismissSurface(); return; }
     if (event.key !== "Tab") return;
     const focusable = [...$("surface").querySelectorAll("button, input, select, textarea, [tabindex]")]
       .filter((node) => !node.disabled && !node.hidden && !node.closest("[hidden]")
@@ -564,6 +1233,10 @@
   });
 
   function onEvent(ev) {
+    if (ev.type === "session" || ev.type === "ready") {
+      setChatChanges({ files: [], total: 0 });
+      $("changes-review").hidden = true;
+    }
     const stick = atBottom();
     switch (ev.type) {
       case "ready": {
@@ -573,18 +1246,21 @@
         }
         customCommands = Array.isArray(ev.custom_commands) ? ev.custom_commands
           : (Array.isArray(ev.commands) ? ev.commands.filter((c) => typeof c === "string") : []);
+        skillRows = (Array.isArray(ev.skills) ? ev.skills : []).map((skill) =>
+          typeof skill === "string" ? { name: skill, description: "", source: "" } : skill);
+        skillManagement = ev.capabilities?.skill_management === true;
+        liveSteering = ev.capabilities?.live_steering === true;
+        nativeSteering = liveSteering && ev.capabilities?.steering_native !== false;
+        mcpContextSupported = ev.capabilities?.mcp_context === true;
+        mcpManagement = ev.capabilities?.mcp_management === true;
+        if (ev.capabilities?.headless_skill_catalog) vscode.postMessage({ type: "requestSkills" });
+        setThreadTitle(ev.session_name, ev.session_id, !ev.session_name);
+        if (!draftScope && ev.session_id) selectDraftSession(ev.session_id);
         break;
       }
       case "context": {
-        const pct = ev.size ? Math.min(100, Math.round((ev.used / ev.size) * 100)) : 0;
-        $("ctx").textContent = pct + "%";
-        $("btn-ctx").classList.toggle("warn", pct >= 85);
-        const fmt = (n) => Number(n || 0).toLocaleString();
-        $("btn-ctx").title = `Context ${fmt(ev.used)} / ${fmt(ev.size)} estimated tokens · ` +
-          `provider ${fmt(ev.input_tokens)} in / ${fmt(ev.output_tokens)} out · ` +
-          `${fmt(ev.cached_input_tokens)} cached · ${fmt(ev.reasoning_tokens)} reasoning · ` +
-          `${fmt(ev.requests)} requests · click to compact`;
-        $("btn-ctx").setAttribute("aria-label", `Context used: ${pct} percent; compact context`);
+        contextState = { ...contextState, ...ev };
+        renderContext();
         break;
       }
       case "history": renderHistory(ev.items || []); break;
@@ -594,37 +1270,78 @@
         }
         break;
       case "session":
-        if (ev.kind === "cleared" || ev.kind === "new") {
+        if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
+        setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
+        if (ev.session_id) selectDraftSession(ev.session_id);
+        renderUnconfirmedDrafts();
         break;
+      case "session_named": setThreadTitle(ev.name); break;
       case "config":
         lastConfig = ev;
+        nativeSteering = liveSteering && !ev.subscription_engine;
+        renderComposerControls();
+        curUltra = ev.ultra_mode === true;
+        curWorkers = Math.max(1, Math.min(8, Number(ev.max_parallel_tasks || 4)));
+        updateModelControl();
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
       case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
         if (turn?.act?.querySelector(".verb")) turn.act.querySelector(".verb").textContent = "generating handoff…";
         break;
       case "queued": queuedCount = ev.count; renderQueued(); break;
-      case "text_delta": ensureTurn(); turn.chars += ev.text.length; turn._buf = (turn._buf || "") + ev.text; textBlock().innerHTML = md(turn._buf); break;
+      case "prompt_accepted": {
+        const pending = pendingPrompts.get(ev.request_id);
+        if (ev.state === "steered") {
+          if (pending?.node) pending.node.querySelector(".role").textContent = "you · steering pending";
+        } else {
+          if (ev.state === "queued" && pending?.node) pending.node.querySelector(".role").textContent = "you · queued";
+          pendingPrompts.delete(ev.request_id);
+        }
+        if (ev.message) sysLine(ev.message);
+        persistDraft(); break;
+      }
+      case "steering_update": {
+        const pending = pendingPrompts.get(ev.request_id);
+        if (ev.state === "returned") {
+          rejectPrompt(ev.request_id);
+          if (ev.message) sysLine(ev.message);
+        } else {
+          if (pending?.node) {
+            pending.node.querySelector(".role").textContent = ev.state === "applied" ? "you · steering" : "you · queued";
+            if (ev.state === "applied" && turn) {
+              flushText(); finishReasoning();
+              if (turn.textEl) turn.textEl.classList.add("commentary");
+              turn.textEl = null; turn._buf = ""; turn.toolGroup = null;
+              appendTurnContent(pending.node);
+            }
+          }
+          pendingPrompts.delete(ev.request_id); persistDraft();
+        }
+        break;
+      }
+      case "text_delta": ensureTurn(); finishReasoning(); turn.toolGroup = null; turn.chars += ev.text.length; appendText(ev.text); break;
       case "thinking_delta":
         ensureTurn(); turn.chars += ev.text.length;
         if (!turn.reasonEl) {
           const d = el("button", "disclosure", "▸ thinking"), r = el("div", "reasoning");
           const reasonId = `reasoning-${++disclosureId}`;
           d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
-          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " thinking"; d.setAttribute("aria-expanded", String(open)); };
-          turn.block.appendChild(d); turn.block.appendChild(r); turn.reasonEl = r;
+          d.dataset.label = "Thinking"; turn.reasonStarted = Date.now();
+          d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " " + d.dataset.label; d.setAttribute("aria-expanded", String(open)); };
+          appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
         }
         turn.reasonEl.textContent += ev.text; break;
-      case "stream_end": breakText(); break;
-      case "tool_call": ensureTurn(); turn._tools = turn._tools || {}; turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
+      case "stream_end": finishReasoning(); breakText(); break;
+      case "tool_call": ensureTurn(); finishReasoning(); turn._tools = turn._tools || Object.create(null); turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
       case "tool_progress": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         const numeric = Number.isFinite(ev.progress);
@@ -637,7 +1354,7 @@
       }
       case "tool_result": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
@@ -645,17 +1362,18 @@
         if (ev.is_error) {
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
-        if (ev.is_diff && ev.diff) turn.block.appendChild(renderDiff(ev.diff));
+        if (ev.is_diff && ev.diff) { c.querySelector(".body pre").textContent = ev.diff; c.after(renderDiff(ev.diff)); }
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
       }
       case "tool_denied": {
         ensureTurn();
-        turn._tools = turn._tools || {};
+        turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name, summary: ev.reason }));
         c.querySelector(".dot").className = "dot deny";
         setToolStatus(c, "denied");
+        c.querySelector(".body pre").textContent = String(ev.reason || "Permission denied");
         c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         break;
       }
@@ -683,20 +1401,11 @@
       }
       case "options_request": {
         ensureTurn();
-        speak(ev.question);
-        // Stacked, numbered, wrapping rows — long options stay fully visible (never overflow
-        // the card), and the recommended one is marked with an accent bar, not an unreadable
-        // solid-purple fill.
-        const opts = ev.options.map((o, i) =>
-          `<button type="button" class="opt${i === 0 ? " rec" : ""}" data-i="${i + 1}"><span class="n">${i + 1}</span><span class="ol">${esc(o)}</span></button>`).join("");
-        const c = requestCard(decisionCard(`<div class="q">${esc(ev.question)}</div><div class="opts">${opts}</div>`, "Choose an option"), ev.id);
-        c.querySelectorAll("button").forEach((b) => b.onclick = () => {
-          if (!resolveCard(c)) return;
-          vscode.postMessage({ type: "options_response", id: ev.id, choice: Number(b.dataset.i) });
-        });
+        showQuestionForm(ev);
         break;
       }
       case "mcp_input_request": {
+        closeSurface();
         ensureTurn();
         const p = ev.payload || {};
         const title = `MCP server ${ev.server} requests input`;
@@ -798,7 +1507,7 @@
       }
       case "todos": {
         ensureTurn();
-        if (!turn._todo) { turn._todo = el("div", "todos"); turn.block.appendChild(turn._todo); }
+        if (!turn._todo) { turn._todo = appendTurnContent(el("div", "todos")); }
         const TG = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
         const dn = ev.todos.filter((t) => t.status === "done").length;
         turn._todo.innerHTML = `<div class="thead">Tasks <span>${dn}/${ev.todos.length}</span></div>` +
@@ -808,29 +1517,34 @@
       }
       case "artifact_ready": {
         ensureTurn();
-        const c = el("div", "artifact");
+        const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
         c.innerHTML = `<div class="ahead"><span class="aico" aria-hidden="true">▶</span><span class="anm">Artifact ready</span><span class="alabel">${esc(ev.name)}</span></div><button type="button" class="aurl">${esc(ev.url)}</button>`;
         const row = el("div", "abtns");
         const open = el("button", "abtn primary", "Open in browser"); open.type = "button";
         open.onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        const stop = el("button", "abtn", "Stop"); stop.type = "button";
-        stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: ev.id }); c.classList.add("stopped"); };
+        const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
+        stop.onclick = () => requestArtifactStop(ev.id, c, stop);
         row.appendChild(open); row.appendChild(stop); c.appendChild(row);
         c.querySelector(".aurl").onclick = () => vscode.postMessage({ type: "openExternal", url: ev.url });
-        turn.block.appendChild(c); breakText(); scroll();
+        appendTurnContent(c); breakText();
         break;
       }
       case "artifacts": {
         const items = ev.items || [];
-        if (!items.length) { sysLine("No artifact previews are running."); break; }
+        if (!items.length) {
+          if (!String(ev.request_id || "").startsWith("artifact-stop-")) {
+            sysLine("No artifact previews are running.");
+          }
+          break;
+        }
         const c = decisionCard(`<div class="q"><span class="codicon codicon-preview"></span> Artifacts</div><div class="artifact-list"></div>`);
         const list = c.querySelector(".artifact-list");
         items.forEach((a) => {
-          const row = el("div", "abtns");
+          const row = el("div", "abtns artifact-list-row"); row.dataset.artifactId = String(a.id || "");
           const open = el("button", "abtn primary", `${a.name} · open`); open.type = "button";
           open.onclick = () => vscode.postMessage({ type: "openExternal", url: a.url });
-          const stop = el("button", "abtn", "Stop"); stop.type = "button";
-          stop.onclick = () => { vscode.postMessage({ type: "stopArtifact", id: a.id }); row.remove(); };
+          const stop = el("button", "abtn", "Stop"); stop.type = "button"; stop.dataset.artifactStop = "1";
+          stop.onclick = () => requestArtifactStop(a.id, row, stop);
           row.appendChild(open); row.appendChild(stop); list.appendChild(row);
         });
         break;
@@ -840,7 +1554,9 @@
         else sysLine("No saved plan yet — switch to plan mode and ask DGC to propose one.");
         break;
       case "skill_catalog": {
+        skillRows = Array.isArray(ev.items) ? ev.items : [];
         if (surfaceKind === "skills") renderSkills(ev.items);
+        if (popMode === "/" || popMode === "$") onInput();
         break;
       }
       case "skill_detail": if (surfaceKind === "skills") renderSkillDetail(ev); break;
@@ -848,7 +1564,7 @@
       case "doc": if (surfaceKind === "docs") renderDoc(ev); break;
       case "mcp_servers":
         mcpRows = Array.isArray(ev.items) ? ev.items : [];
-        if (surfaceKind === "mcp") renderMcp();
+        if (surfaceKind === "mcp" && mcpView === "servers") renderMcp();
         if (ev.error && surfaceKind === "mcp") {
           const warning = el("div", "err surface-notice", esc(ev.error));
           surfaceBody.insertBefore(warning, surfaceBody.firstChild);
@@ -856,8 +1572,24 @@
         break;
       case "mcp_tools":
         mcpTools = Array.isArray(ev.tools) ? ev.tools : [];
-        if (surfaceKind === "mcp") renderMcp();
+        if (surfaceKind === "mcp" && mcpView === "servers") renderMcp();
         break;
+      case "mcp_context_catalog": renderMcpContextCatalog(ev); break;
+      case "mcp_context": renderMcpContext(ev); break;
+      case "mcp_command_result": {
+        if (ev.request_id !== mcpContextPending) break;
+        if (ev.context) renderMcpContext({ ...ev.context, request_id: ev.request_id });
+        else if (ev.catalog) renderMcpContextCatalog({ ...ev.catalog, request_id: ev.request_id });
+        else {
+          mcpContextPending = ""; renderMcp();
+          if (ev.error || ev.output) {
+            const result = el("pre", ev.error ? "err" : "surface-meta");
+            result.textContent = ev.error || ev.output;
+            surfaceBody.prepend(result);
+          }
+        }
+        break;
+      }
       case "permissions": if (surfaceKind === "permissions") renderPermissions(ev.items); break;
       case "memory": if (surfaceKind === "memory") renderMemory(ev); break;
       case "hook_catalog": {
@@ -874,78 +1606,197 @@
         ensureTurn();
         const markdown = String(ev.markdown || "");
         turn.chars += markdown.length;
-        textBlock().innerHTML = md(markdown);
+        textBlock()._markdown = markdown; textBlock().innerHTML = md(markdown);
         if (ev.path) sysLine(`Handoff saved to ${ev.path}`);
         if (ev.status !== "completed") sysLine(String(ev.error || `Handoff ${ev.status}`), true);
         speak(ev.status === "completed" ? "Handoff ready" : `Handoff ${ev.status}`);
-        endTurn(); setSending(false);
+        endTurn(ev.status === "completed" ? "completed" : "error"); setSending(false);
         break;
       }
       case "goal_changed": {
         const text = String(ev.goal || "");
-        setGoalState({ text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
-        sysLine(text ? `Standing goal · ${ev.status}: ${text}` : "Standing goal cleared");
+        setGoalState({ ...ev.details, text, status: ev.status, elapsed_seconds: ev.elapsed_seconds });
         break;
       }
       case "status":
         sysLine(`${ev.model} · ${ev.mode} · thinking ${ev.think} · context ${ev.context_used}/${ev.context_size}`
+          + (ev.ultra_mode ? " · Ultra" : "")
           + (ev.goal && ev.goal.text ? ` · goal ${ev.goal.status}` : ""));
         break;
       case "rule_added": sysLine("＋ rule: " + ev.rule); break;
       case "info": sysLine(ev.message); break;
-      case "command_rejected": sysLine(ev.message || "Command unavailable while a turn is running", true); break;
+      case "mode_changed": if (ev.message) sysLine(ev.message); break;
+      case "permission_resolved":
+        document.querySelectorAll(".card[data-request-id]").forEach((card) => {
+          if (card.dataset.requestId === String(ev.id)) resolveCard(card);
+        });
+        sysLine(ev.message, ev.decision === "no"); break;
+      case "command_rejected":
+        if (ev.command === "prompt" || ev.command === "start_goal") rejectPrompt(ev.request_id);
+        sysLine(ev.message || "Command unavailable while a turn is running", true); break;
       case "request_expired":
         document.querySelectorAll(".card[data-request-id]").forEach((card) => {
           if (card.dataset.requestId === String(ev.id)) resolveCard(card);
         });
-        sysLine("Approval request expired; the action was denied.", true); break;
-      case "compacted": sysLine("context compacted"); break;
-      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn(); setSending(false); } break;
-      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(); setSending(false); break;
+        sysLine("Input request closed. No unanswered choice was selected."); break;
+      case "compacted": {
+        compacting = false; lastCompaction = ev;
+        contextState = { ...contextState, used: ev.after_tokens, size: ev.context_size };
+        renderContext();
+        const before = fmtTokens(ev.before_tokens), after = fmtTokens(ev.after_tokens);
+        const lead = ev.status === "unchanged" ? "Context unchanged"
+          : ev.strategy === "tool_prune" ? "Context pruned"
+            : ev.strategy === "provider_native" ? "Context compacted natively"
+              : ev.strategy === "mechanical" ? "Context compacted safely on-device"
+                : "Context compacted";
+        sysLine(`${lead} · ${before} → ${after} estimated tokens`);
+        break;
+      }
+      case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
+      case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(ev.reason); setSending(false); break;
     }
     if (stick) scroll();
   }
 
   // ---- composer ----
-  function setSending(on) { streaming = on; send.innerHTML = `<span class="codicon codicon-${on ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`; send.title = on ? "Stop" : "Send"; send.setAttribute("aria-label", on ? "Stop generation" : "Send message"); }
+  function hasComposerInput() { return Boolean(input.value.trim() || attachments.length); }
+  function renderComposerControls() {
+    const hasDraft = hasComposerInput(), stop = streaming && !hasDraft;
+    const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
+    send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
+    send.title = label; send.setAttribute("aria-label", label);
+    $("queue-send").hidden = !streaming || !nativeSteering;
+    $("queue-send").disabled = !hasDraft;
+    $("stop-run").hidden = !streaming || !hasDraft;
+    $("followup-hint").hidden = !streaming;
+    $("followup-hint").textContent = nativeSteering ? "Enter to steer · Alt+Enter to queue" : "Follow-ups queue for the next turn";
+  }
+  function setSending(on) {
+    streaming = on; renderComposerControls();
+    document.querySelectorAll("[data-skill-mutation]").forEach(button => {
+      button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
+    });
+  }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
-    type: "slashText", text: goalState.status === "active" ? "/goal pause" : "/goal resume",
+    type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
-  $("goal-clear").onclick = () => vscode.postMessage({ type: "slashText", text: "/goal clear" });
-  $("goal-edit").onclick = () => {
-    input.value = `/goal ${goalState.text}`; input.selectionStart = input.selectionEnd = input.value.length;
-    input.focus(); onInput();
-  };
-  function submit() {
+  $("goal-clear").onclick = () => vscode.postMessage({ type: "clearGoal" });
+  $("goal-main").onclick = openGoalEditor;
+  $("goal-edit").onclick = openGoalEditor;
+  $("goal-review-button").onclick = openGoalReview;
+  $("goal-review-close").onclick = () => closeGoalReview();
+  $("goal-review").addEventListener("click", event => { if (event.target === $("goal-review")) closeGoalReview(); });
+  $("goal-review").addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); closeGoalReview(); } });
+  for (const dialog of [$("goal-editor"), $("goal-review")]) {
+    dialog.addEventListener("keydown", event => {
+      if (event.key !== "Tab") return;
+      const nodes = [...dialog.querySelectorAll('button, input, textarea, summary, [tabindex="0"]')]
+        .filter(node => !node.disabled && !node.closest("[hidden]"));
+      const first = nodes[0], last = nodes.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+  }
+  $("goal-editor-close").onclick = () => closeGoalEditor();
+  $("goal-editor-cancel").onclick = () => closeGoalEditor();
+  $("goal-editor-save").onclick = saveGoalEditor;
+  $("goal-editor-text").addEventListener("input", () => {
+    $("goal-editor-save").disabled = !$("goal-editor-text").value.trim();
+  });
+  $("goal-editor").addEventListener("click", (event) => {
+    if (event.target === $("goal-editor")) closeGoalEditor();
+  });
+  $("workspace-changes").onclick = () => openChangesReview("workspace");
+  $("changes-main").onclick = () => openChangesReview("chat");
+  $("changes-review-button").onclick = () => openChangesReview("chat");
+  $("changes-review-close").onclick = closeChangesReview;
+  $("goal-editor").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeGoalEditor(); }
+    else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault(); saveGoalEditor();
+    }
+  });
+  $("changes-review").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeChangesReview(); }
+  });
+  function appendGoalPrompt(objective) {
+    const m = el("div", "msg user goal-prompt");
+    m.appendChild(el("div", "role", "goal"));
+    m.appendChild(el("div", "bubble", esc(objective)));
+    log.appendChild(m); setSending(true);
+    return m;
+  }
+  function submitGoal(objective, restoreText = input.value) {
+    if (!sessionReady || pendingImageFiles || pendingPrompts.size >= 17) {
+      sysLine("Wait for DGC and pending attachments before starting the goal."); persistDraft(); return;
+    }
+    const selected = [...attachments];
+    const node = appendGoalPrompt(objective + selected.map(item => `\n[${item.label}]`).join(""));
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    pendingPrompts.set(requestId, { text: restoreText, attachments: selected, node, session: draftSession });
+    const values = key => selected.filter(item => item[key]).map(item => item[key]);
+    vscode.postMessage({ type: "startGoal", text: objective, requestId,
+      skills: values("skill"), templates: values("template"), context: values("resource"),
+      images: selected.filter(item => item.img).map(item => item.data) });
+    input.value = ""; input.style.height = "auto"; attachments.length = 0;
+    renderAtts(); persistDraft(); scroll();
+  }
+  function submit(delivery = nativeSteering ? "steer" : "queue") {
+    if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
+    if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
     const text = input.value.trim();
     if (!text && !attachments.length) return;
+    if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
     const resources = attachments.filter((a) => a.resource).map((a) => a.resource);
-    if (text.startsWith("/") && !attachments.length) {
+    const skills = attachments.filter((a) => a.skill).map((a) => a.skill);
+    const templates = attachments.filter((a) => a.template).map((a) => a.template);
+    const goalPrefix = /^\/goal\s+([\s\S]+)$/i.exec(text)?.[1].trim();
+    const goalStateCommand = ["clear", "off", "none", "remove", "complete", "completed",
+      "done", "blocked", "block", "pause", "paused", "resume", "active", "reactivate", "review", "status", "delete"];
+    if (goalPrefix && !goalStateCommand.includes(goalPrefix.toLowerCase())) {
+      submitGoal(goalPrefix); return;
+    }
+    if (goalPrefix || text.toLowerCase() === "/goal") {
+      vscode.postMessage({ type: "slashText", text });
+      input.value = ""; input.style.height = "auto"; persistDraft(); return;
+    }
+    const trailingGoal = /^([\s\S]*\S)\s+\/goal$/i.exec(text)?.[1].trim();
+    if (trailingGoal) { submitGoal(trailingGoal); return; }
+    const workflowPrompt = (/^\/(plan|review|init)(?:\s|$)/i.test(text)
+      || /\s+\/(plan|review|init)$/i.test(text)) && !(text.toLowerCase() === "/plan" && !attachments.length);
+    if (text.startsWith("/") && !attachments.length && !workflowPrompt) {
       const name = (text.slice(1).split(/\s+/, 1)[0] || "").toLowerCase();
       const custom = customCommands.includes(name);
       if (custom) {
-        const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
-        m.appendChild(el("div", "bubble", esc(text))); log.appendChild(m); setSending(true);
+          const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+          m.appendChild(el("div", "bubble", esc(text)));
+          log.appendChild(m); setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
-      input.value = ""; input.style.height = "auto"; scroll(); return;
+      input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
     m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
-    vscode.postMessage({ type: "prompt", text, images: imgs.length ? imgs : undefined,
-      context: resources.length ? resources : undefined });   // backend queues it if a turn is running
-    input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); setSending(true); scroll();
+    const requestId = `${promptPrefix}-${++promptSequence}`;
+    pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
+    vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
+      delivery,
+      skills: skills.length ? skills : undefined, templates: templates.length ? templates : undefined,
+      context: resources.length ? resources : undefined });
+    input.value = ""; input.style.height = "auto"; attachments.length = 0; renderAtts(); persistDraft(); setSending(true); scroll();
   }
   function renderAtts() {
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
-      const chip = el("span", "chip"), label = el("span", "chip-label"), remove = el("button", "x", "×");
-      label.textContent = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
+      const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}`), label = el("span", "chip-label"), remove = el("button", "x", "×");
+      label.textContent = a.label; label.title = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
     });
+    scheduleDraftSave();
+    renderComposerControls();
   }
 
   // ---- @file / slash popover ----
@@ -953,53 +1804,118 @@
   function showPop(items) {
     popItems = items; popIdx = 0;
     if (!items.length) return hidePop();
-    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}">${esc(it.label)}${it.detail ? ` <span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
+    pop.innerHTML = items.map((it, i) => `<div id="pop-option-${i}" role="option" aria-selected="${i === 0}" class="pi${i === 0 ? " sel" : ""}" data-i="${i}"><span class="pi-label">${esc(it.label)}</span>${it.kind ? `<span class="pi-kind">${esc(it.kind)}</span>` : ""}${it.detail ? `<span class="pd">${esc(it.detail)}</span>` : ""}</div>`).join("");
     pop.querySelectorAll(".pi").forEach((e) => e.onclick = () => choosePop(Number(e.dataset.i)));
     pop.style.display = "block"; input.setAttribute("aria-expanded", "true"); input.setAttribute("aria-activedescendant", "pop-option-0");
   }
-  function movePop(d) { if (popMode) { popIdx = (popIdx + d + popItems.length) % popItems.length; [...pop.children].forEach((c, i) => { const selected = i === popIdx; c.className = "pi" + (selected ? " sel" : ""); c.setAttribute("aria-selected", String(selected)); }); input.setAttribute("aria-activedescendant", `pop-option-${popIdx}`); } }
+  function movePop(d) {
+    if (!popMode) return;
+    popIdx = (popIdx + d + popItems.length) % popItems.length;
+    [...pop.children].forEach((c, i) => { const selected = i === popIdx; c.className = "pi" + (selected ? " sel" : ""); c.setAttribute("aria-selected", String(selected)); });
+    input.setAttribute("aria-activedescendant", `pop-option-${popIdx}`);
+    pop.children[popIdx]?.scrollIntoView?.({ block: "nearest" });
+  }
+  function replacePopToken(value = "") {
+    input.value = input.value.slice(0, popStart) + value + input.value.slice(popEnd);
+    input.selectionStart = input.selectionEnd = popStart + value.length;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    scheduleDraftSave();
+  }
   function choosePop(i) {
     const it = popItems[i]; if (!it) return;
+    if (it.skill || it.template) {
+      if (!attachInvocation(it.skill ? "skill" : "template", it.skill || it.template)) return;
+      replacePopToken();
+      hidePop(); input.focus(); return;
+    }
     if (popMode === "@") {
+      if (!canAttach()) return;
       attachments.push({ label: it.label, resource: {
         type: "file_mention", uri: it.uri, path: it.path,
         relative_path: it.relative_path, workspace: it.workspace,
       } });
       renderAtts();
-      input.value = input.value.slice(0, popStart) + input.value.slice(input.selectionStart);
+      replacePopToken();
     } else if (popMode === "/") {
-      if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
-        input.value = it.label + " ";       // custom command — let the user add args, then Enter
+      if (it.action?.startsWith("workflow:")) {
+        replacePopToken();
+        prepareWorkflowDraft(it.action.slice("workflow:".length));
         hidePop(); input.focus(); return;
       }
-      input.value = "";
+      if (input.value.slice(0, popStart).trim() || input.value.slice(popEnd).trim()) {
+        replacePopToken(); hidePop(); input.focus();
+        if (it.action === "goal" && input.value.trim()) {
+          const objective = input.value.trim();
+          submitGoal(objective, `${objective} /goal`);
+        } else {
+          // Management actions operate independently of the draft. Opening a model, skills,
+          // MCP, or settings picker must not submit or replace the user's unfinished request.
+          vscode.postMessage({ type: "slash", action: it.action });
+        }
+        return;
+      }
+      if (it.acceptsArgs || (it.action && it.action.indexOf("custom:") === 0)) {
+        replacePopToken(it.label + " ");
+        hidePop(); input.focus(); return;
+      }
+      replacePopToken();
       vscode.postMessage({ type: "slash", action: it.action });
     }
     hidePop(); input.focus();
   }
+  function prepareWorkflowDraft(name) {
+    if (!["plan", "review", "init"].includes(name)) return;
+    const prefix = `/${name} `;
+    const current = /^\/(plan|review|init)(?:\s+|$)/i.exec(input.value);
+    const removed = current ? current[0].length : 0;
+    const caret = Math.max(0, input.selectionStart - removed) + prefix.length;
+    input.value = prefix + input.value.slice(removed);
+    input.selectionStart = input.selectionEnd = caret;
+    input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    persistDraft(); input.focus();
+  }
   function onInput() {
+    scheduleDraftSave();
+    renderComposerControls();
     input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px";
     const v = input.value, caret = input.selectionStart;
     const upto = v.slice(0, caret);
-    const at = upto.lastIndexOf("@"), sl = upto.startsWith("/") ? 0 : -1;
-    if (sl === 0 && !/\s/.test(v)) {
-      popMode = "/"; popStart = 0;
-      const all = builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
+    const token = /(^|\s)([/$@][^\s]*)$/.exec(upto);
+    if (!token || input.selectionStart !== input.selectionEnd || input.matches(":disabled")) return hidePop();
+    popStart = caret - token[2].length;
+    popEnd = caret + (v.slice(caret).match(/^[^\s]*/)?.[0].length || 0);
+    popMode = token[2][0];
+    const query = token[2].slice(1).toLowerCase();
+    if (popMode === "/" || popMode === "$") {
+      const skillItems = skillRows.filter((s) => s && s.enabled !== false).map((s) => ({
+        label: "$" + s.name, detail: s.description || "Reusable agent instructions",
+        skill: s.name, kind: s.source ? `${s.source} skill` : "skill", aliases: [],
+      }));
+      const all = popMode === "$" ? skillItems : builtinCommands.map((c) => ({ label: "/" + c.name, detail: c.description,
         action: c.action, acceptsArgs: c.accepts_args === true,
+        kind: "command",
         aliases: Array.isArray(c.aliases) ? c.aliases : [] }))
-        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "custom command", action: "custom:" + c, acceptsArgs: true })));
-      const query = v.toLowerCase();
-      showPop(all.filter((c) => c.label.toLowerCase().startsWith(query)
-        || (c.aliases || []).some((alias) => ("/" + alias).toLowerCase().startsWith(query))));
+        .concat(customCommands.map((c) => ({ label: "/" + c, detail: "Apply this prompt template to your request", template: c, kind: "prompt" })), skillItems);
+      const matches = all.filter((c) => c.label.slice(1).toLowerCase().includes(query)
+        || (c.detail || "").toLowerCase().includes(query)
+        || (c.aliases || []).some((alias) => alias.toLowerCase().includes(query)));
+      if (query) matches.sort((a, b) => Number(!a.label.slice(1).toLowerCase().startsWith(query))
+        - Number(!b.label.slice(1).toLowerCase().startsWith(query)));
+      showPop(matches);
     }
-    else if (at !== -1 && !/\s/.test(upto.slice(at))) {
-      popMode = "@"; popStart = at; const q = upto.slice(at + 1).toLowerCase();
-      showPop(files.filter((f) => f.label.toLowerCase().includes(q)).slice(0, 8));
+    else if (popMode === "@") {
+      showPop(files.filter((f) => f.label.toLowerCase().includes(query)).slice(0, 30));
       if (files.length === 0) vscode.postMessage({ type: "reqFiles" });
     } else hidePop();
   }
   input.addEventListener("input", onInput);
+  input.addEventListener("click", onInput);
   input.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Escape" && mcpContextPending) {
+      e.preventDefault(); doStop(); mcpContextPending = ""; return;
+    }
     if (popMode) {
       if (e.key === "ArrowDown") { e.preventDefault(); movePop(1); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); movePop(-1); return; }
@@ -1007,7 +1923,7 @@
       if (e.key === "Escape") { e.preventDefault(); hidePop(); return; }
     }
     if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); cycleMode(); return; }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.altKey ? "queue" : undefined); }
     else if (e.key === "Escape" && streaming) doStop();
   });
   input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
@@ -1015,6 +1931,7 @@
     for (const it of items) {
       if (it.type && it.type.indexOf("image/") === 0) {
         const file = it.getAsFile(); if (!file) continue;
+        if (!canAttach()) continue;
         if (!SUPPORTED_IMAGE_TYPES.has(String(file.type || "").toLowerCase())) {
           sysLine(`Unsupported pasted image type: ${file.type || "unknown"}.`, true); continue;
         }
@@ -1028,10 +1945,12 @@
           sysLine("Pasted images exceed the 2 MiB prompt limit.", true); continue;
         }
         pendingImageFiles += 1; pendingImageBytes += file.size;
+        const owner = { session: draftSession }; pendingImages.add(owner);
         const r = new FileReader();
         let settled = false;
         const release = () => {
           if (settled) return; settled = true;
+          pendingImages.delete(owner);
           pendingImageFiles -= 1; pendingImageBytes -= file.size;
         };
         r.onload = () => {
@@ -1039,8 +1958,16 @@
           if (typeof r.result !== "string" || !r.result.startsWith("data:image/")) {
             sysLine("The pasted image could not be encoded safely.", true); return;
           }
-          attachments.push({ label: "📷 image", img: true, data: r.result,
-            bytes: file.size, text: "" }); renderAtts();
+          const image = { label: "📷 image", img: true, data: r.result, bytes: file.size };
+          if (owner.session === draftSession) {
+            attachments.push(image); renderAtts();
+          } else {
+            const draft = draftEntries.get(owner.session)
+              || { text: "", attachments: [], start: 0, end: 0, updated: Date.now() };
+            draft.attachments.push(image); draft.updated = Date.now();
+            draftEntries.set(owner.session, draft); persistDraft();
+            sysLine("The pasted image was added to its original chat's draft.");
+          }
         };
         r.onerror = () => { release(); sysLine("The pasted image could not be read.", true); };
         r.onabort = release;
@@ -1050,8 +1977,18 @@
       }
     }
   });
-  send.onclick = () => { if (streaming) doStop(); else submit(); };
-  $("btn-ctx").onclick = () => vscode.postMessage({ type: "compact" });
+  send.onclick = () => { if (streaming && !hasComposerInput()) doStop(); else submit(); };
+  $("stop-run").onclick = doStop;
+  $("queue-send").onclick = () => submit("queue");
+  $("btn-ctx").onclick = (e) => { e.stopPropagation(); toggleContextMenu(); };
+  $("ctx-compact").onclick = () => {
+    if (compacting) return;
+    compacting = true; renderContext();
+    vscode.postMessage({ type: "compact" });
+  };
+  $("ctxmenu").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); $("btn-ctx").focus(); }
+  });
   $("btn-mode").onclick = (e) => { e.stopPropagation(); toggleModeMenu(); };
   $("btn-add").onclick = () => {                       // insert @ at the caret → file popover
     input.focus();
@@ -1060,19 +1997,27 @@
     input.selectionStart = input.selectionEnd = p + 1;
     onInput();
   };
-  $("btn-cmd").onclick = () => { input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput(); };
+  function openCommandMenu() {
+    const caret = input.selectionEnd;
+    const prefix = caret && !/\s/.test(input.value[caret - 1]) ? " /" : "/";
+    input.value = input.value.slice(0, caret) + prefix + input.value.slice(caret);
+    input.selectionStart = input.selectionEnd = caret + prefix.length; input.focus(); onInput();
+  }
+  $("btn-cmd").onclick = openCommandMenu;
   $("btn-model").onclick = (e) => {
     e.stopPropagation();
     const mm = $("modelmenu");
     if (!mm.hidden) { hideModelMenu(); return; }
     mm.innerHTML = `<div class="mhead"><span>Loading…</span></div>`;
-    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu();
+    mm.hidden = false; $("btn-model").setAttribute("aria-expanded", "true"); hideModeMenu(); hideContextMenu();
     vscode.postMessage({ type: "listModels" });
   };
   const pmodel = $("pmodel"); if (pmodel) pmodel.onclick = () => vscode.postMessage({ type: "pickModel" });
+  $("thread-title").onclick = () => vscode.postMessage({ type: "slashText", text: "/name" });
   document.addEventListener("click", (e) => {          // dismiss the picker menus on outside click
     if (!$("modemenu").hidden && !$("btn-mode").contains(e.target) && !$("modemenu").contains(e.target)) hideModeMenu();
     if (!$("modelmenu").hidden && !$("btn-model").contains(e.target) && !$("modelmenu").contains(e.target)) hideModelMenu();
+    if (!$("ctxmenu").hidden && !$("btn-ctx").contains(e.target) && !$("ctxmenu").contains(e.target)) hideContextMenu();
   });
 
   // ---- settings page ----
@@ -1080,11 +2025,11 @@
     "subagent_api_mode", "subagent_api_key", "fallback_model", "fallback_base_url",
     "fallback_api_mode", "fallback_api_key", "api_mode", "provider_state", "prompt_cache",
     "capability_cache_ttl_s", "mode", "think", "context_size", "sandbox",
-    "sandbox_network", "show_reasoning", "suggest", "plan_artifact", "artifact_autostart",
+    "sandbox_network", "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart",
     "artifact_in_plan", "tool_profile", "max_parallel_tasks",
     "subscription_engine", "subscription_model", "subscription_effort"];
   const SET_BOOLEAN_FIELDS = new Set(["prompt_cache", "sandbox", "sandbox_network",
-    "show_reasoning", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
+    "show_reasoning", "ultra_mode", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan"]);
   let settingsReturnFocus = null;
   function fillSettings(cfg) {
     const map = {
@@ -1099,6 +2044,7 @@
       capability_cache_ttl_s: cfg.capability_cache_ttl_s,
       sandbox: String(cfg.sandbox === true), sandbox_network: String(cfg.sandbox_network === true),
       show_reasoning: String(cfg.show_reasoning !== false), suggest: String(cfg.suggest !== false),
+      ultra_mode: String(cfg.ultra_mode === true),
       plan_artifact: String(cfg.plan_artifact !== false),
       artifact_autostart: String(cfg.artifact_autostart !== false),
       artifact_in_plan: String(cfg.artifact_in_plan === true),
@@ -1215,50 +2161,143 @@
     // already sent a prompt (slow session load) — clearing the whole log here used
     // to wipe that just-sent prompt while the turn kept streaming.
     log.querySelectorAll(".hist").forEach((e) => e.remove());
-    const frag = document.createDocumentFragment();
-    items.forEach((it) => {
+    const history = el("div", "hist history-pages");
+    const older = el("button", "act history-older", "Show earlier messages");
+    history.appendChild(older);
+    let cursor = items.length;
+    function page() {
+      const frag = document.createDocumentFragment(), start = Math.max(0, cursor - 50);
+      items.slice(start, cursor).forEach((it) => {
       if (it.role === "user") {
         const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
+      } else if (it.role === "notice") {
+        frag.appendChild(el("div", "sys hist", esc(it.text)));
       } else {
         const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
-        if (it.text) m.appendChild(el("div", "text final", md(it.text)));
-        if (it.tools && it.tools.length) m.appendChild(el("div", "sys", "▸ " + it.tools.join(", ")));
+        if (it.text) {
+          const text = el("div", it.commentary || it.tools?.length ? "text commentary" : "text final", md(it.text));
+          text._markdown = it.text; m.appendChild(text);
+        }
+        if (it.tools?.length) {
+          const group = el("details", "tool-group history-tools");
+          const summary = el("summary"); summary.textContent = `Used ${it.tools.length} ${it.tools.length === 1 ? "tool" : "tools"} · ${it.tools.join(", ")}`;
+          group.appendChild(summary);
+          // Output is constructed only on expansion, keeping long restored threads responsive.
+          group.addEventListener("toggle", () => {
+            if (!group.open || group.dataset.loaded) return;
+            group.dataset.loaded = "true";
+            (it.tool_details || []).forEach(detail => {
+              const row = el("div", "tool history-tool"), label = el("div", "nm"), pre = el("pre", "out");
+              label.textContent = `${detail.name} · ${detail.status === "returned" ? "saved result" : "result unavailable"}`;
+              pre.textContent = [detail.arguments, detail.output].filter(Boolean).join("\n\n");
+              row.append(label, pre); group.appendChild(row);
+            });
+          });
+          m.appendChild(group);
+        }
         frag.appendChild(m);
       }
-    });
-    log.insertBefore(frag, log.firstChild);   // history above any live user prompt / streaming turn
+      });
+      const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
+      older.after(frag); cursor = start; older.hidden = cursor === 0;
+      log.scrollTop = oldTop + log.scrollHeight - oldHeight;
+    }
+    older.type = "button"; older.onclick = page;
+    log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
+    page();
     scroll();
   }
-  // copy-code (delegated)
-  log.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".copy"); if (b) vscode.postMessage({ type: "copy", text: decodeURIComponent(b.dataset.c) }); });
+  // User clicks are the only route out of model-generated content. Never navigate a webview.
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest?.(".md-link");
+    if (link) {
+      event.preventDefault();
+      const target = DgcMarkdown.linkTarget(link.dataset.target + (link.dataset.line ? `:${link.dataset.line}` : ""));
+      if (target?.kind === "external") vscode.postMessage({ type: "openExternal", url: target.target });
+      else if (target?.kind === "file") vscode.postMessage({ type: "openFile", path: target.target, line: target.line });
+      return;
+    }
+    const copy = event.target.closest?.(".copy");
+    if (copy) {
+      vscode.postMessage({ type: "copy", text: decodeURIComponent(copy.dataset.c) });
+      copy.textContent = "Copied";
+      setTimeout(() => { if (copy.isConnected) copy.textContent = "Copy"; }, 1600);
+    }
+  });
 
   window.addEventListener("message", (e) => {
     const msg = e.data;
     if (msg.type === "event") onEvent(msg.event);
+    else if (msg.type === "session_ready") {
+      selectDraftSession(msg.sessionId, msg.adoptDraftFrom || ""); sessionReady = true;
+      renderUnconfirmedDrafts();
+    }
     else if (msg.type === "state") {
       curModel = msg.state.model || ""; curThink = msg.state.think || "off";
-      $("modelname").textContent = curModel || "dgc";
-      $("btn-model").title = "Model: " + (curModel || "dgc") + " — click to change";
-      $("btn-model").setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc"));
+      curSubscription = msg.state.subscriptionEngine || "";
+      curUltra = msg.state.ultra === true;
+      updateModelControl();
       if (pmodel) { pmodel.textContent = curModel || "dgc"; pmodel.title = "Model: " + (curModel || "dgc") + " — click to change"; pmodel.setAttribute("aria-label", "Change model. Current model: " + (curModel || "dgc")); }
       applyMode(msg.state.mode || "default");
       setGoalState(msg.state.goal || { text: "", status: "none", elapsed_seconds: 0 });
     }
-    else if (msg.type === "models") { renderModelMenu(msg.ids || [], msg.current, msg.err); }
+    else if (msg.type === "models" && !$("modelmenu").hidden) { renderModelMenu(msg.ids || [], msg.current, msg.err, msg.subscription, msg.label, msg.supportsEffort); }
+    else if (msg.type === "chat_changes") {
+      if (!msg.sessionId || msg.sessionId === draftSession) setChatChanges(msg);
+    }
+    else if (msg.type === "workspace_changes") { setWorkspaceChanges(msg); }
     else if (msg.type === "settings_open") { openSettings(msg.providers, msg.models, msg.section); }
-    else if (msg.type === "surface_open") { openSurface(msg.surface); }
+    else if (msg.type === "mcp_command_started") {
+      mcpContextPending = msg.requestId; mcpView = "context"; openSurface("mcp");
+      surfaceBody.innerHTML = '<div class="surface-empty">Working with MCP…</div>';
+      surfaceButtons("Cancel", () => { vscode.postMessage({ type: "cancel" }); mcpContextPending = ""; renderMcp(); });
+    }
+    else if (msg.type === "surface_open") {
+      if (msg.surface === "mcp") mcpView = "servers";
+      openSurface(msg.surface);
+    }
     else if (msg.type === "command_menu") {
-      input.value = "/"; input.selectionStart = input.selectionEnd = 1; input.focus(); onInput();
+      openCommandMenu();
     }
     else if (msg.type === "composer_text") {
       input.value = String(msg.text || ""); input.selectionStart = input.selectionEnd = input.value.length;
       input.focus(); onInput();
     }
+    else if (msg.type === "composer_skill") {
+      if (!attachInvocation("skill", String(msg.name || ""))) return;
+      if (msg.text) {
+        input.value += (input.value && !/\s$/.test(input.value) ? " " : "") + String(msg.text);
+        input.selectionStart = input.selectionEnd = input.value.length;
+      }
+      input.focus(); onInput();
+    }
     else if (msg.type === "cleared") { discardTurn(); log.innerHTML = ""; setSending(false); }
-    else if (msg.type === "prompt_rejected") { setSending(false); }
+    else if (msg.type === "prompt_rejected") { rejectPrompt(msg.requestId); if (!turn) setSending(false); }
+    else if (msg.type === "goal_start_state") {
+      if (msg.state === "error") {
+        setSending(false);
+        sysLine(String(msg.error || "DGC could not start the goal."), true);
+      }
+    }
+    else if (msg.type === "goal_edit_state") {
+      if (msg.state === "saved") closeGoalEditor();
+      else if (msg.state === "error") {
+        $("goal-editor-save").disabled = false;
+        sysLine(String(msg.error || "DGC could not update the goal."), true);
+      }
+    }
+    else if (msg.type === "goal_control_state" && msg.state === "error") {
+      sysLine(String(msg.error || "DGC could not change the goal state."), true);
+    }
+    else if (msg.type === "compact_state") {
+      compacting = msg.state === "working";
+      renderContext();
+      if (msg.error) sysLine(String(msg.error), true);
+    }
+    else if (msg.type === "artifact_stop_state") settleArtifactStop(msg);
     else if (msg.type === "attach" && msg.resource && typeof msg.resource === "object") {
-      attachments.push({ label: msg.label, resource: msg.resource }); renderAtts();
+      if (canAttach()) { attachments.push({ label: msg.label, resource: msg.resource }); renderAtts(); }
     }
     else if (msg.type === "files") {
       files = Array.isArray(msg.files) ? msg.files.filter((file) => file
@@ -1267,7 +2306,12 @@
         && typeof file.workspace === "string").slice(0, 600) : [];
       if (popMode === "@") onInput();
     }
-    else if (msg.type === "backend_exit") { endTurn(); expireOpenRequests(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "open_goal_review") openGoalReview();
+    else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
+    else if (msg.type === "backend_exit") { sessionReady = !draftScope; endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false); renderUnconfirmedDrafts(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
   });
+  loadDraftState();
+  window.addEventListener("pagehide", persistDraft);
+  input.addEventListener("select", scheduleDraftSave);
   vscode.postMessage({ type: "webviewReady" });
 })();

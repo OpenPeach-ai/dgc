@@ -24,6 +24,7 @@ const testToken = randomUUID();
 
 mkdirSync(workspacePath);
 mkdirSync(secondaryWorkspace);
+writeFileSync(join(workspacePath, "host-change.ts"), "export const changed = true;\n");
 writeFileSync(workspaceFile, JSON.stringify({ folders: [
   { path: workspacePath },
   { path: secondaryWorkspace },
@@ -43,20 +44,69 @@ const fs = require("node:fs");
 const readline = require("node:readline");
 let seq = 0;
 let rootsAcknowledged = false;
+let subscriptionModel = "";
+let subscriptionEffort = "";
+let standingGoal = "";
+let standingGoalStatus = "none";
+let activeGoalTurn = false;
+let goalPromptCount = 0;
+let currentSession = "host-" + process.pid;
+let workspaceFolders = [process.cwd()];
 const send = (value) => process.stdout.write(JSON.stringify({ seq: seq++, ...value }) + "\\n");
-send({ type: "ready", version: "fixture", protocol_version: 4,
-  capabilities: { correlated_state_requests: true },
+const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
+  model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
+  project_root: process.cwd(), goal: { text: "", status: "none" },
+  subscription_engine: "codex", subscription_model: subscriptionModel,
+  subscription_effort: subscriptionEffort,
+  subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
+    model_hints: [], supports_effort: true }] });
+send({ type: "ready", version: "fixture", protocol_version: 6,
+  capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true, question_forms: true,
+    workflows: true, composer_selections: true, workspace_inspection: true, chat_inspection: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",
   workspace_trusted: true, commands: [], custom_commands: [],
   goal: { text: "", status: "none" }, context_size: 32768 });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   fs.appendFileSync(process.env.DGC_EXTENSION_TEST_BACKEND_LOG, line + "\\n");
   const cmd = JSON.parse(line);
+  if (cmd.type === "get_chat_changes") {
+    send({ type: "chat_changes", request_id: cmd.request_id, session_id: currentSession,
+      roots: workspaceFolders.map(root => ({ root, total: 0, complete: true, notices: [], files: [] })) });
+    return;
+  }
+  if (cmd.type === "get_workspace_changes") {
+    send({ type: "workspace_changes", request_id: cmd.request_id, roots: workspaceFolders.map(root => ({
+      root, total: root === process.cwd() ? 1 : 0, complete: true, notices: [],
+      files: root === process.cwd() ? [{ path: "host-change.ts", additions: 1, deletions: 0,
+        binary: false, counted: true, untracked: true, deleted: false, staged: false, error: "" }] : [],
+    })) });
+    return;
+  }
+  if (cmd.type === "get_workspace_change") {
+    send({ type: "workspace_change", request_id: cmd.request_id, root: cmd.root, path: cmd.path,
+      before: "", after: "export const changed = true;\\n", kind: "file" });
+    return;
+  }
+  if (cmd.type === "prompt" && cmd.workflow) {
+    send({ type: "mode_changed", mode: "plan", workspace_trusted: true });
+    send({ type: "prompt_accepted", request_id: cmd.request_id, state: "started" });
+    send({ type: "turn_start", turn_id: "workflow-turn", prompt: cmd.text });
+    setTimeout(() => send({ type: "turn_end", turn_id: "workflow-turn", reason: "completed",
+      token_estimate: 1 }), 30);
+    return;
+  }
+  if (cmd.type === "resume_session") {
+    currentSession = cmd.path.replace(/\\.json$/, "");
+    send({ type: "session", kind: "resumed", message_count: 0, session_id: currentSession, request_id: cmd.request_id });
+    send({ type: "history", items: [] });
+  }
+  if (cmd.type === "get_history") send({ type: "history", items: [], request_id: cmd.request_id });
   if (cmd.type === "set_workspace_roots") {
     rootsAcknowledged = false;
     send({ type: "workspace_roots", request_id: "stale-workspace-request", roots: [] });
     setTimeout(() => {
       rootsAcknowledged = true;
+      workspaceFolders = cmd.roots;
       send({ type: "workspace_roots", request_id: cmd.request_id, roots: cmd.roots });
     }, 1000);
   }
@@ -64,8 +114,45 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     mode: cmd.mode, workspace_trusted: true });
   if (cmd.type === "set_think") send({ type: "think_changed", request_id: cmd.request_id,
     think: cmd.level });
-  if (cmd.type === "set_goal") send({ type: "goal_changed", request_id: cmd.request_id,
-    goal: cmd.text || "installed-host goal", status: cmd.status || "active" });
+  if (cmd.type === "get_config") sendConfig(cmd.request_id);
+  if (cmd.type === "list_models") send({ type: "models", request_id: cmd.request_id,
+    ids: ["native-fixture"], base_url: "http://127.0.0.1:1/v1", api_mode: "auto" });
+  if (cmd.type === "set_config") {
+    if (Object.prototype.hasOwnProperty.call(cmd.values || {}, "subscription_model")) {
+      subscriptionModel = String(cmd.values.subscription_model || "");
+    }
+    if (Object.prototype.hasOwnProperty.call(cmd.values || {}, "subscription_effort")) {
+      subscriptionEffort = String(cmd.values.subscription_effort || "");
+    }
+    sendConfig(cmd.request_id);
+  }
+  if (cmd.type === "set_goal" || cmd.type === "start_goal") {
+    if (activeGoalTurn) {
+      send({ type: "command_rejected", request_id: cmd.request_id, command: cmd.type,
+        reason: "turn_in_progress", message: "'set_goal' is unavailable while a turn is running; cancel or wait" });
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(cmd, "text")) standingGoal = String(cmd.text || "");
+    standingGoalStatus = standingGoal ? (cmd.type === "start_goal" ? "active" : cmd.status || standingGoalStatus || "active") : "none";
+    send({ type: "goal_changed", request_id: cmd.request_id,
+      goal: standingGoal, status: standingGoalStatus });
+  }
+  if ((cmd.type === "prompt" || cmd.type === "start_goal") && cmd.text.startsWith("host matrix")) {
+    if (cmd.request_id) send({ type: "prompt_accepted", request_id: cmd.request_id, state: "started" });
+    goalPromptCount += 1;
+    activeGoalTurn = true;
+    send({ type: "turn_start", turn_id: "goal-turn", prompt: cmd.text });
+    send({ type: "text_delta", text: "Goal started." });
+    send({ type: "stream_end" });
+    if (goalPromptCount > 1) setTimeout(() => {
+      activeGoalTurn = false;
+      send({ type: "turn_end", turn_id: "goal-turn", reason: "completed", token_estimate: 2 });
+    }, 100);
+  }
+  if (cmd.type === "cancel" && activeGoalTurn) {
+    activeGoalTurn = false;
+    send({ type: "turn_end", turn_id: "goal-turn", reason: "cancelled", token_estimate: 2 });
+  }
   if (cmd.type === "get_plan") send({ type: "saved_plan", request_id: cmd.request_id,
     plan: "1. Inspect\\n2. Verify", exists: true });
   if (cmd.type === "status") send({ type: "status", request_id: cmd.request_id,
@@ -92,6 +179,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (cmd.type === "plan_response" && cmd.id === "host-plan") {
     send({ type: "request_expired", id: "host-plan" });
+    send({ type: "options_request", id: "host-questions", question: "Storage?", options: ["Local", "Cloud"],
+      questions: [
+        { id: "storage", header: "Storage", question: "Storage?", options: ["Local", "Cloud"] },
+        { id: "accent", header: "Accent", question: "Accent?", options: ["Purple", "Blue"] }
+      ] });
+  }
+  if (cmd.type === "options_response" && cmd.id === "host-questions") {
     send({ type: "turn_end", turn_id: "decision-turn", reason: "completed", token_estimate: 17 });
   }
   if (cmd.type === "shutdown") process.exit(0);
@@ -132,6 +226,9 @@ if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND
 args.push(workspaceFile);
 
 try {
+  if (configured && !existsSync(configured)) {
+    throw new Error(`DGC_VSCODE_EXECUTABLE does not exist: ${configured}`);
+  }
   const env = { ...process.env };
   // A shell launched from VS Code/Cursor inherits extension-host and remote-CLI bootstrap state.
   // The test must create an isolated desktop instance instead of reusing that process or running
@@ -169,10 +266,17 @@ try {
       || evidence.multiRootLifecycle !== true
       || evidence.secretStorageLifecycle !== true
       || evidence.decisionLifecycle !== true
-      || !Number.isInteger(evidence.commands) || evidence.commands < 1) {
+      || !Number.isInteger(evidence.commands) || evidence.commands < 1
+      || typeof evidence.vscodeVersion !== "string"
+      || !/^\d+\.\d+\.\d+(?:[-+].+)?$/.test(evidence.vscodeVersion)
+      || typeof evidence.appName !== "string" || !evidence.appName.trim()) {
     throw new Error("VS Code extension-host test evidence was incomplete");
   }
-  process.stdout.write(`DGC extension-host smoke passed (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
+  const expectedVersion = process.env.DGC_EXPECT_VSCODE_VERSION;
+  if (expectedVersion && evidence.vscodeVersion !== expectedVersion) {
+    throw new Error(`expected VS Code ${expectedVersion}, host reported ${evidence.vscodeVersion}`);
+  }
+  process.stdout.write(`DGC extension-host smoke passed in ${evidence.appName} ${evidence.vscodeVersion} (${evidence.commands} commands + handshake + live multi-root + SecretStorage + permission/plan lifecycles)\n`);
 } finally {
   if (process.env.DGC_KEEP_EXTENSION_TEST === "true") {
     process.stderr.write(`DGC extension-host scratch retained at ${scratch}\n`);

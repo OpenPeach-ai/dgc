@@ -31,7 +31,7 @@ MODE_DESCRIPTIONS = {
 # internal tool name -> display name used in rules
 DISPLAY = {
     "read_file": "Read", "write_file": "Write", "edit_file": "Edit", "multi_edit": "MultiEdit",
-    "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel",
+    "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
     "todo": "Todo", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
@@ -45,15 +45,15 @@ DISPLAY_TO_TOOL = {v.lower(): k for k, v in DISPLAY.items()}
 RULE_ARG = {
     "bash": "command", "python": "code", "read_file": "path", "write_file": "path",
     "edit_file": "path", "multi_edit": "path", "apply_patch": "path",
-    "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path",
+    "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path", "git_diff": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
     "mcp_search": "query", "mcp_call": "name",
     "save_memory": "scope", "artifact": "path", "task": "description",
     "external_directory": "path",
 }
 
-READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "web_fetch", "web_search", "todo", "skill",
-                   "bash_output", "propose_options", "mcp_search"}
+READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "skill",
+                   "bash_output", "propose_options", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 
 # A shell string is not a trustworthy read/write boundary. Redirections, substitutions, interpreters,
@@ -169,7 +169,7 @@ def rule_for(tool: str, args: dict) -> str:
 
 
 _PATH_TOOLS = {"read_file", "write_file", "edit_file", "multi_edit", "apply_patch", "artifact",
-               "code_intel"}
+               "code_intel", "git_diff"}
 _SEARCH_PATH_TOOLS = {"glob", "grep", "repo_map"}
 
 

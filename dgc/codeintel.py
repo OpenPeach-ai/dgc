@@ -27,6 +27,7 @@ from urllib.request import url2pathname
 from . import __version__
 from .workspace import (
     WorkspaceBoundaryError,
+    canonicalize_trusted_os_alias,
     read_regular_bytes,
     scan_directory_entries,
     stat_entry,
@@ -75,7 +76,11 @@ _SYMBOL_KINDS = {
 
 
 def _frozen_absolute(path: Path) -> Path:
-    return Path(os.path.normpath(os.path.abspath(str(path))))
+    # Workspace descriptor operations canonicalize protected Darwin roots such as
+    # /var -> /private/var. Keep comparison/display paths in that same spelling without resolving
+    # any repository-controlled descendant symlink.
+    normalized = Path(os.path.normpath(os.path.abspath(str(path))))
+    return canonicalize_trusted_os_alias(normalized)
 
 
 def _source_files(target: Path, *, cancel=None, deadline: float = float("inf")) -> list[Path]:

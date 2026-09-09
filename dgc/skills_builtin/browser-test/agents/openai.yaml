@@ -1,0 +1,3 @@
+interface:
+  display_name: "Browser testing"
+  short_description: "Exercise real browser flows and recovery states"

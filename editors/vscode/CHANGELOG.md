@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.17.1 — 2026-09-09
+
+- Update the packaging toolchain for a js-yaml advisory (GHSA-2883-xcg3-v3hh). It is a development-only dependency of the packager, so no shipped extension code changed.
+- Recommend CLI 0.30.2, which stops the `/files` explorer from trashing the project root; protocol v6 compatibility is retained.
+- No change to the panel, the turn ETA chip, or **DGC: Notify On Turn End**. This release exists so the published package and the reviewed source agree byte for byte.
+
+## 0.17.0 — 2026-09-09
+
+- Show the turn ETA beside the elapsed timer while a native turn runs: a calibrated range such as `~2–4 min left · 3/5 tasks`, sent by CLI 0.30.0 as the additive `turn_eta` protocol-v6 event and hidden on older CLIs.
+- Add **DGC: Notify On Turn End** — a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.
+- Recommend CLI 0.30.0; protocol v6 compatibility is retained.
+
+## 0.16.2 — 2026-09-08
+
+- Keep native plan, permission and question cards pending until you respond or stop. Dismissing a question no longer silently selects its first option.
+- Add an Other text answer to every question, plus separate question tabs, retained answers and one Submit action for grouped decisions.
+- Browse and select skills while a turn runs. Skill installation, enablement and reload wait until it finishes.
+- Send follow-ups into an active native-model turn with Enter or Send; use Alt+Enter or Queue for a later turn. Keep Stop available while drafting. Subscription CLI follow-ups queue for the next turn.
+- Acknowledge steering delivery and restore unapplied inputs after cancellation or failure, including images and selected context.
+- Change permission mode during a run and recheck pending approvals without bypassing explicit ask/deny rules or workspace trust. Delegated CLI permissions change on the next turn.
+- Match the Settings Save button to the standard action-button style. Use CLI 0.29.2 for live controls; retain protocol v6 compatibility.
+
+## 0.16.1 — 2026-09-07
+
+- Fix new chats showing pre-existing Git changes as chat work. The composer card now shows changes recorded during this chat's runs; **Workspace changes** opens the separate repository review.
+- Compare edits against actual pre-run file contents, including already modified files. Preserve saved previews across reloads, exclude edits made between runs, and clear the card on a new chat.
+- Support live inspection, native and subscription runs, cancelled/error turns, and rewind. Chat snapshots remain private and are never supplied to the model.
+- Recommend CLI 0.29.1; retain protocol v6 and gate chat inspection by capability. Older sessions have no retroactive chat baseline. Concurrent external edits during a run may be included; tracking covers the primary project folder.
+
+## 0.16.0 — 2026-09-06
+
+- Use `/` and `$` anywhere at a word boundary to choose commands, skills and prompt templates while preserving the draft. Add shared plan, review and project-guide workflows.
+- Attach exact skill instructions and MCP resource/prompt snapshots to native, subscription and goal requests. Include 22 bundled skills, portable package discovery, create/install, and enable/disable controls.
+- Preserve per-chat drafts, attachments and selected context across panel reloads and backend restarts, with recovery for rejected or uncertain delivery.
+- Add per-server MCP reconnect/enablement, bounded context browsing and cancellable OAuth sign-in with desktop remote callback forwarding.
+- Inspect workspace changes through the CLI without running repository filters; handle sparse checkouts, staged-only changes, duplicate folder labels and partial results.
+- Fix subscription startup hanging on the editor input pipe, early native success after tests, interrupted-turn success and completed command pipe retention.
+- Recommend CLI 0.29.0 for every feature; keep protocol v6 with additive capability checks. See the upgrade guide for editor auto-update and VSIX pinning.
+
+## 0.15.0 — 2026-09-06
+
+- Render complete CommonMark with syntax-highlighted code, exact-source copy and safe file/source links. Group tool activity and separate successful final responses from commentary, failures and cancellation.
+- Run durable goals across native and subscription routes with pause, resume, edit, delete, evidence review and optional token budgets. Preserve work time and restore saved active goals as paused.
+- Refine the model menu and reasoning slider with DGC purple accents and host theme colors.
+- Review initial staged files and workspace diffs safely; disclose large or failed change scans.
+- Preserve rejected prompts and attachments, page saved history, restore tool details and batch streaming renders.
+- Require CLI 0.28.0 / editor protocol v6. Harden file navigation, worker acknowledgements, subscription output and legacy effort settings.
+
+## 0.14.1 — 2026-09-06
+
+- Added the Codex-style `objective /goal` composer action: selecting or submitting the suffix now preserves the full objective, tags it as a goal, persists it, and starts the turn with one Enter.
+- Kept `/goal <objective>` and goal-state commands intact while ensuring an inline `/goal` mentioned inside ordinary prose is never misclassified.
+- Replaced the extension's fixed black shell with Cursor/VS Code theme tokens for the sidebar, transcript, composer, controls, text, and overlays, with DGC color retained for focused product accents.
+- Verified the goal and pinned-composer flow in a real VS Code host at wide and narrow widths across both dark and light host themes.
+
+## 0.14.0 — 2026-09-06
+
+- Added a composer-attached changed-files rail backed by live Git state, with addition/deletion totals and one-click native VS Code side-by-side review.
+- Rebuilt the standing-goal surface as a timed composer rail with direct pause/resume, edit, and clear controls; `/goal <objective>` remains a tagged action that starts that exact objective.
+- Matched the current Codex editor hierarchy for compact tools, readable diffs, transcript cadence, and the model/reasoning composer while keeping DGC purple to restrained identity and focus accents.
+- Made active-turn goal pause/clear cancellation-safe, bounded change review for binary, oversized, and symlinked files, and verified the complete UI at wide and narrow Cursor/VS Code panel widths.
+
+## 0.13.0 — 2026-09-06
+
+- Added DGC Ultra, the combined model/reasoning control, and a Codex-inspired live activity row that follows the newest response instead of floating above a scrolled transcript.
+- Made `/goal <objective>` persist a visible timed goal and immediately run that exact objective; pause, resume, edit, and clear remain available above the composer.
+- Added the current thread title to the header with automatic first-prompt naming and click-to-rename behavior across new and resumed sessions.
+- Made Artifact Stop a single acknowledgement-driven action with an explicit stopping/error state, eliminating white disabled controls and double-click shutdowns.
+- Bounded hidden-reasoning exhaustion so every turn ends with a visible answer or an explicit saved-progress error instead of appearing to stop silently.
+
+## 0.12.1 — 2026-09-04
+
+- Rebuilt the protocol-v5 editor against the corrected DGC 0.26.2 cross-platform baseline.
+- Kept settings and MCP changes acknowledgement-driven, rollback-safe, and identity-bound.
+- Retained the polished goal controls, streaming status, tool cards, diffs, and long-running chat behavior.
+
+## 0.12.0 — 2026-09-04
+
+- Moved the CLI/editor contract to protocol v5 with explicit route state and complete reasoning-effort support.
+- Made settings and MCP changes acknowledgement-driven, rollback-safe, and honest about partial failures.
+- Bound remote MCP credentials to an exact server identity and tightened persisted command and URL validation.
+- Polished goal controls, streaming status, tool cards, diffs, and long-running chat behavior.
+
+## 0.11.0 — 2026-09-02
+
+- Added standing-goal controls and plan feedback above the editor transcript.
+- Refined structured tool cards, readable diffs, and correlated lifecycle status.
+- Moved the CLI/editor contract to protocol v4 with stricter decision and cancellation handling.
+
 ## 0.10.0 — 2026-08-31
 
 - **Subscription delegation in the editor.** Selecting a subscription (Claude Code / Codex / Qwen / Kimi /

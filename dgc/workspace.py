@@ -41,12 +41,85 @@ def _version(info: os.stat_result) -> FileVersion:
     )
 
 
+def canonicalize_trusted_os_alias(path: Path | str) -> Path:
+    """Rewrite one immutable, OS-owned alias directly below the filesystem anchor.
+
+    Darwin deliberately exposes roots such as ``/var`` and ``/tmp`` as root-owned links into
+    ``/private``.  Treating those stable aliases like repository-controlled links makes otherwise
+    canonical tempfile workspaces unusable on macOS.  Only the first component below a
+    protected filesystem anchor is eligible; links anywhere below it remain untouched and are
+    rejected by the descriptor walk or fallback validation.
+    """
+    value = Path(path)
+    if not value.is_absolute() or "\x00" in str(value):
+        raise WorkspaceBoundaryError("a canonical absolute path is required")
+    path = Path(os.path.normpath(str(value)))
+    if os.name != "posix" or not path.anchor or len(path.parts) < 2:
+        return path
+    anchor = Path(path.anchor)
+    alias = anchor / path.parts[1]
+    try:
+        anchor_info = anchor.stat()
+        before = alias.lstat()
+    except OSError:
+        return path
+    # A process running the repository must not be able to replace the alias.  POSIX filesystem
+    # roots and their compatibility aliases are owned by uid 0, and the root itself is not writable
+    # by group/other.  Anything less trusted stays spelled as-is so the normal no-follow walk fails.
+    if (not stat.S_ISDIR(anchor_info.st_mode)
+            or int(getattr(anchor_info, "st_uid", -1)) != 0
+            or stat.S_IMODE(anchor_info.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
+            or not stat.S_ISLNK(before.st_mode)
+            or int(getattr(before, "st_uid", -1)) != 0):
+        return path
+    try:
+        link_value = os.readlink(alias)
+        after = alias.lstat()
+    except OSError:
+        return path
+    if _version(before) != _version(after):
+        raise WorkspaceBoundaryError(f"operating-system path alias changed: {alias}")
+    target = Path(link_value)
+    if not target.is_absolute():
+        target = alias.parent / target
+    target = Path(os.path.normpath(str(target)))
+    if not target.is_absolute() or not target.parts[1:]:
+        return path
+    # Do not use resolve() here: a nested target link could be controlled independently of the
+    # protected anchor alias.  Walk the literal target and require every intermediate directory to
+    # be OS-owned and non-writable by group/other.  The final directory may itself be writable
+    # (Darwin's /private/tmp is 01777), because its protected parent prevents replacement of the
+    # directory entry; repository-controlled descendants are still checked normally.
+    canonical_target = Path(target.anchor)
+    for index, part in enumerate(target.parts[1:]):
+        candidate = canonical_target / part
+        try:
+            target_info = candidate.lstat()
+        except OSError:
+            return path
+        if (stat.S_ISLNK(target_info.st_mode) or not stat.S_ISDIR(target_info.st_mode)
+                or int(getattr(target_info, "st_uid", -1)) != 0):
+            return path
+        if (index < len(target.parts[1:]) - 1
+                and stat.S_IMODE(target_info.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)):
+            return path
+        canonical_target = candidate
+    suffix = path.parts[2:]
+    return canonical_target.joinpath(*suffix)
+
+
+# Internal compatibility for callers/tests developed while the helper was private.  New consumers
+# should use the deliberately narrow public name, which makes clear that this is not a general
+# symlink resolver.
+_canonicalize_os_alias = canonicalize_trusted_os_alias
+
+
 def _absolute_frozen(path: Path | str) -> Path:
     """Normalize spelling without following a component that may have changed since approval."""
     value = Path(path)
     if not value.is_absolute() or "\x00" in str(value) or ".." in value.parts:
         raise WorkspaceBoundaryError("a canonical absolute path is required")
-    return Path(os.path.normpath(str(value)))
+    return canonicalize_trusted_os_alias(value)
 
 
 def _dirfd_supported() -> bool:
@@ -296,6 +369,73 @@ def list_directory(path: Path | str, *, limit: int = 200) -> list[str]:
     limit = max(0, int(limit))
     rows, _truncated, _scanned = scan_directory_entries(path, maximum=limit)
     return [name for name, _info in rows]
+
+
+def create_file_tree(path: Path | str, files: dict[str, bytes], *, marker: str) -> None:
+    """Create an exclusive package directory, publishing its discovery marker last.
+
+    The caller bounds and validates the package before this function. Held directory descriptors
+    prevent late parent symlinks from redirecting writes. Existing directories are never merged.
+    An I/O failure can leave an incomplete directory without its marker; it is never a live package.
+    """
+    target = _absolute_frozen(path)
+    if marker not in files or not files:
+        raise ValueError("package requires its discovery marker")
+    for name, payload in files.items():
+        parts = name.split("/")
+        if (not isinstance(payload, bytes) or any(part in ("", ".", "..") for part in parts)
+                or "\\" in name or "\x00" in name):
+            raise ValueError("invalid package resource")
+    ordered = [name for name in files if name != marker] + [marker]
+    if not _dirfd_supported():
+        _fallback_parent(target, create=True)
+        target.mkdir(mode=0o700, exist_ok=False)
+        for name in ordered:
+            atomic_write_bytes(target / name, files[name], mode=0o600, expected=None)
+        return
+    parent_fd = _open_parent_fd(target, create=True)
+    root_fd = -1
+    try:
+        os.mkdir(target.name, mode=0o700, dir_fd=parent_fd)
+        info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        root_fd = os.open(target.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        if _version(os.fstat(root_fd)) != _version(info):
+            raise WorkspaceBoundaryError("package directory changed before writing")
+        for name in ordered:
+            current = os.dup(root_fd)
+            try:
+                parts = name.split("/")
+                for part in parts[:-1]:
+                    try:
+                        os.mkdir(part, mode=0o700, dir_fd=current)
+                    except FileExistsError:
+                        pass
+                    child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                    os.close(current)
+                    current = child
+                write_name = (".package-marker-" + secrets.token_hex(16)) if name == marker else parts[-1]
+                fd = os.open(write_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=current)
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(files[name])
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                if name == marker:
+                    # Link is an atomic, exclusive publication of the fully written marker.
+                    os.link(write_name, parts[-1], src_dir_fd=current, dst_dir_fd=current,
+                            follow_symlinks=False)
+                    os.unlink(write_name, dir_fd=current)
+                os.fsync(current)
+            finally:
+                os.close(current)
+        current_info = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (current_info.st_dev, current_info.st_ino) != (info.st_dev, info.st_ino):
+            raise WorkspaceBoundaryError("package directory moved during installation")
+        os.fsync(parent_fd)
+    finally:
+        if root_fd >= 0:
+            os.close(root_fd)
+        os.close(parent_fd)
 
 
 def atomic_write_bytes(path: Path | str, data: bytes, *,

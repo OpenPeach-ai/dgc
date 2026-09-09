@@ -6,6 +6,10 @@ build/
 dist/
 .DS_Store
 dgc.tar.gz
+!site/dgc.tar.gz
+.env
+.env.*
+!.env.example
 
 # Maintainer/release scripts are source-controlled build inputs. Private notes remain local.
 HANDOFF.md
@@ -14,8 +18,18 @@ DGC_HARNESS_IMPROVEMENT_PLAN.md
 bench/PLAN.md
 node_modules/
 *.vsix
+!site/vscode/*.vsix
 editors/vscode/dist/
-site/dgc.tar.gz
-site/dgc.tar.gz.sha256
-site/vscode/*.vsix
 HARNESS_SYNTHESIS.md
+
+# internal-only, never publish
+docs/FRONTIER_AUDIT_AND_ROADMAP.md
+docs/NON_CODING_SURFACE_TESTS.md
+docs/fixtures/*
+!docs/fixtures/noncoding-surface-commands.ndjson
+PI_VS_DGC_COMPARISON.md
+PI_VS_DGC_COMPARISON_raw.json
+bench/sync_vast_results.sh
+output/
+.playwright-cli/
+.wrangler/

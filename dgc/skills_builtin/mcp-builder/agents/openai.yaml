@@ -1,0 +1,3 @@
+interface:
+  display_name: "Build MCP servers"
+  short_description: "Implement and test bounded MCP capabilities"

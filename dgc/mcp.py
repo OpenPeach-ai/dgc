@@ -13,12 +13,14 @@ import threading
 import time
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from .config import valid_remote_mcp_url
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
+MCP_REMOTE_PACKAGE = "mcp-remote@0.8.3"
 _MAX_DIAGNOSTIC = 32_000
 _MAX_CONTENT = 120_000
 _MAX_FRAME = 4 * 1024 * 1024
@@ -33,6 +35,7 @@ _MAX_TOOLS = 512
 _MAX_TOOL_SCHEMA_BYTES = 128 * 1024
 _MAX_TOOL_CATALOG_BYTES = 8 * 1024 * 1024
 _MAX_CURSOR_BYTES = 4096
+_MAX_CONFIG_SERVERS = 64
 _MAX_CACHE_TTL_MS = 60 * 60 * 1000
 _MAX_SAFE_INTEGER = (1 << 53) - 1
 _CATALOG_RETRY_SECONDS = 5.0
@@ -365,6 +368,23 @@ def validate_elicitation_response(params: dict, response) -> dict:
     return result
 
 
+def bridge_callback_url(authorize_url: str) -> str:
+    """Identify only the pinned bridge's exact loopback callback, never arbitrary elicitation data."""
+    try:
+        redirects = parse_qs(urlsplit(authorize_url).query, max_num_fields=32).get("redirect_uri", [])
+        if len(redirects) != 1:
+            raise ValueError("missing or duplicate redirect")
+        value = redirects[0]
+        parsed = urlsplit(value)
+        if (parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1")
+                or not parsed.port or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path != "/oauth/callback" or any(ord(ch) < 32 for ch in value)):
+            raise ValueError("unexpected callback")
+        return value
+    except ValueError:
+        raise MCPInputError("Remote MCP sign-in did not provide a valid loopback callback.") from None
+
+
 def sanitize_input_request(method: str, params) -> dict:
     """Return the small MCP input subset DGC can safely show and fulfill."""
     if not isinstance(params, dict) or _json_bytes(params) > _MAX_INPUT_BYTES:
@@ -441,6 +461,36 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value)).strip("_") or "unnamed"
 
 
+def _runtime_server_args(spec: dict) -> list[str]:
+    """Materialize safe remote auth indirection without persisting a header value."""
+    args = list(spec.get("args") or []) if isinstance(spec.get("args"), list) else []
+    env_names = spec.get("env_names")
+    auth_env = spec.get("auth_env")
+    url = spec.get("url")
+    has_authorization = any(
+        args[index] == "--header" and index + 1 < len(args)
+        and isinstance(args[index + 1], str)
+        and args[index + 1].lower().startswith("authorization:")
+        for index in range(len(args))
+    )
+    if (spec.get("transport") == "remote" and isinstance(env_names, list)
+            and isinstance(auth_env, str) and auth_env in env_names
+            and len(args) >= 3 and args[:2] == ["-y", "mcp-remote"]
+            and isinstance(url, str) and args[2] == url and valid_remote_mcp_url(url)
+            and not has_authorization):
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", auth_env):
+            args.extend(["--header", f"Authorization: Bearer ${{{auth_env}}}"])
+    if (spec.get("transport") == "remote" and args[:2] == ["-y", "mcp-remote"]
+            and len(args) >= 3 and args[2] == url and valid_remote_mcp_url(url)):
+        # Persist the logical bridge identity for older editors; execute the reviewed version.
+        args[1] = MCP_REMOTE_PACKAGE
+        if "--auth-timeout" not in args:
+            args.extend(["--auth-timeout", "120"])
+        if urlsplit(url).hostname == "::1" and "--allow-http" not in args:
+            args.append("--allow-http")
+    return args
+
+
 def _bounded_lines(stream, limit: int = _MAX_FRAME):
     """Yield `(line, oversized)` without ever buffering an unbounded stdio frame."""
     cap = max(1, int(limit))
@@ -459,7 +509,8 @@ def _bounded_lines(stream, limit: int = _MAX_FRAME):
 
 class MCPServer:
     def __init__(self, name: str, command: str, args=None, env=None, root: Path | None = None,
-                 log_level: str = "warning", client_capabilities: dict | None = None):
+                 log_level: str = "warning", client_capabilities: dict | None = None,
+                 *, remote_bridge: bool = False, auth_handler=None):
         self.name = str(name)
         self.command = str(command)
         self.args = [str(a) for a in (args or [])]
@@ -494,10 +545,25 @@ class MCPServer:
         self._subscription_id: int | None = None
         self._subscription_generation = 0
         self._subscription_honored = False
+        self.remote_bridge = remote_bridge
+        self._auth_handler = auth_handler
+        self._connection_done = threading.Event()
+        self._connection_cancel = None
 
     # lifecycle ----------------------------------------------------------------
-    def start(self, timeout: float = 10.0) -> bool:
+    def start(self, timeout: float = 10.0, cancel: threading.Event | None = None) -> bool:
+        self._connection_done.clear()
+        self._connection_cancel = _AnyCancel(cancel, self._connection_done)
+        try:
+            return self._start(timeout, self._connection_cancel)
+        finally:
+            self._connection_done.set()
+
+    def _start(self, timeout: float, cancel: threading.Event | None) -> bool:
         self.error = None
+        if cancel is not None and cancel.is_set():
+            self.error = "connection cancelled"
+            return False
         if not self._launch():
             return False
 
@@ -505,8 +571,15 @@ class MCPServer:
         # official SDKs do: a handshake-era server may reject or corrupt its state on an unknown
         # first request, so legacy fallback always receives a fresh process.
         probe_timeout = min(max(0.25, float(timeout)), 3.0)
-        discovered, discover_error = self._request(
-            "server/discover", {}, probe_timeout, modern=True)
+        # mcp-remote 0.8.3 exposes a known initialize-era stdio interface. It starts that interface
+        # only after connecting/authenticating remotely. Probing and killing it after three seconds
+        # interrupts npm installation and OAuth, then duplicates the login on the fallback process.
+        discovered, discover_error = (None, None) if self.remote_bridge else self._request(
+            "server/discover", {}, probe_timeout, cancel, modern=True)
+        if cancel is not None and cancel.is_set():
+            self.error = "connection cancelled"
+            self.stop()
+            return False
         supported = (discovered or {}).get("supportedVersions")
         claims_modern = (isinstance(supported, list) and MCP_PROTOCOL_VERSION in supported)
         modern = (isinstance(discovered, dict)
@@ -534,16 +607,19 @@ class MCPServer:
             info = meta.get("io.modelcontextprotocol/serverInfo")
             self.server_info = dict(info) if isinstance(info, dict) else {}
         else:
-            note = discover_error or "invalid server/discover response"
-            self.negotiation_note = f"modern probe unavailable; used legacy handshake ({note[:240]})"
-            self._stop_process(self.proc, self._generation)
-            if not self._launch():
-                return False
+            if self.remote_bridge:
+                self.negotiation_note = f"{MCP_REMOTE_PACKAGE} uses the initialize handshake"
+            else:
+                note = discover_error or "invalid server/discover response"
+                self.negotiation_note = f"modern probe unavailable; used legacy handshake ({note[:240]})"
+                self._stop_process(self.proc, self._generation)
+                if not self._launch():
+                    return False
             init, err = self._request("initialize", {
                 "protocolVersion": MCP_LEGACY_PROTOCOL_VERSION,
                 "capabilities": self._legacy_client_capabilities(),
                 "clientInfo": _CLIENT_INFO,
-            }, timeout, modern=False)
+            }, timeout, cancel, modern=False)
             if init is None:
                 self.error = f"initialize failed: {err or self._diagnostic_tail() or 'no response'}"
                 self.stop()
@@ -564,15 +640,19 @@ class MCPServer:
             self._notify("notifications/initialized", {})
             if self.log_level != "off" and "logging" in self.server_capabilities:
                 _, log_error = self._request(
-                    "logging/setLevel", {"level": self.log_level}, timeout, modern=False)
+                    "logging/setLevel", {"level": self.log_level}, timeout, cancel, modern=False)
                 if log_error:
                     self._append_diagnostic(f"logging/setLevel failed: {log_error}")
 
+        if cancel is not None and cancel.is_set():
+            self.error = "connection cancelled"
+            self.stop()
+            return False
         if "tools" not in self.server_capabilities:
             self.tools = []
             return True
 
-        if not self._load_tools(timeout):
+        if not self._load_tools(timeout, cancel=cancel):
             self.stop()
             return False
         if self.protocol_era == "modern" and self._tools_list_changed_capability():
@@ -606,7 +686,8 @@ class MCPServer:
         stderr_thread.start()
         return True
 
-    def _load_tools(self, timeout: float) -> bool:
+    def _load_tools(self, timeout: float, cancel: threading.Event | None = None) -> bool:
+        deadline = time.monotonic() + timeout
         self._tools_invalidated.clear()
         cursor = None
         tools: list[dict] = []
@@ -624,7 +705,12 @@ class MCPServer:
 
         for _ in range(_MAX_TOOL_PAGES):
             params = {"cursor": cursor} if cursor else {}
-            page, err = self._request("tools/list", params, timeout)
+            if cancel is not None and cancel.is_set():
+                return fail("tools/list cancelled")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return fail("tools/list timed out")
+            page, err = self._request("tools/list", params, remaining, cancel)
             if page is None:
                 return fail(f"tools/list failed: {err or self._diagnostic_tail() or 'no response'}")
             if self.protocol_era == "modern" and page.get("resultType") != "complete":
@@ -862,8 +948,36 @@ class MCPServer:
     def _stderr_reader(self, proc: subprocess.Popen) -> None:
         if not proc.stderr:
             return
+        awaiting_auth_url = False
+        auth_count = 0
         try:
             for line, oversized in _bounded_lines(proc.stderr, 8192):
+                if self.remote_bridge and not oversized:
+                    if "Please authorize this client by visiting:" in line:
+                        awaiting_auth_url = True
+                        self._append_diagnostic("Remote MCP browser sign-in requested")
+                        continue
+                    if awaiting_auth_url and line.strip():
+                        awaiting_auth_url = False
+                        auth_count += 1
+                        # This is a transient browser link, never catalog metadata or model context.
+                        try:
+                            params = sanitize_input_request("elicitation/create", {
+                                "mode": "url", "url": line.strip(),
+                                "message": "Sign in to this MCP server in your browser, then continue."
+                            })
+                            # Generic server input sanitization strips this private marker. Only
+                            # the local pinned bridge may ask the editor to forward its callback.
+                            params["_dgc_bridge_callback"] = bridge_callback_url(params["url"])
+                            if auth_count <= 2 and callable(self._auth_handler):
+                                response = self._auth_handler(self.name, "elicitation/create", params,
+                                                              self._connection_cancel)
+                                if response.get("action") != "accept":
+                                    self._connection_done.set()
+                        except Exception:
+                            self._append_diagnostic("Remote MCP sign-in could not be completed")
+                            self._connection_done.set()
+                        continue
                 self._append_diagnostic(
                     "oversized stderr frame discarded" if oversized else line)
         except Exception:
@@ -1337,70 +1451,13 @@ class MCPServer:
     def call_tool(self, tool: str, arguments: dict, timeout: float = 120.0,
                   cancel: threading.Event | None = None, *, on_progress=None, on_log=None,
                   input_handler=None) -> str:
-        params = {"name": tool, "arguments": arguments}
-        res = None
-        input_total = 0
-        for _round in range(_MAX_MRTR_ROUNDS):
-            res, err = self._request("tools/call", params, timeout, cancel,
-                                     on_progress=on_progress, on_log=on_log,
-                                     input_handler=input_handler)
-            if res is None:
-                tail = self._diagnostic_tail()
-                detail = f" · {tail}" if tail and tail != err else ""
-                return f"ERROR: MCP tool '{tool}' failed: {err or 'no response'}{detail}"
-            if self.protocol_era != "modern" or res.get("resultType") == "complete":
-                break
-            if res.get("resultType") != "input_required":
-                return f"ERROR: MCP tool '{tool}' returned an invalid modern resultType"
-            requests = res.get("inputRequests") or {}
-            if not isinstance(requests, dict) or len(requests) > _MAX_INPUT_REQUESTS:
-                return f"ERROR: MCP tool '{tool}' returned malformed inputRequests"
-            input_total += len(requests)
-            if input_total > _MAX_INPUT_REQUESTS:
-                return f"ERROR: MCP tool '{tool}' exceeded {_MAX_INPUT_REQUESTS} input requests"
-            responses = {}
-            unsupported = []
-            for key, request in requests.items():
-                if len(str(key)) > 128:
-                    unsupported.append("input request identifier exceeded 128 characters")
-                    continue
-                method = request.get("method") if isinstance(request, dict) else None
-                if method == "roots/list":
-                    responses[str(key)] = {"roots": [{
-                        "uri": self.root.as_uri(), "name": self.root.name or str(self.root)}]}
-                else:
-                    try:
-                        clean = self._prepare_input(str(method or ""),
-                                                    request.get("params") if isinstance(request, dict) else None)
-                        if not callable(input_handler):
-                            raise MCPInputError(f"client method not supported: {method}")
-                        response = input_handler(self.name, str(method), clean, cancel)
-                        if method == "elicitation/create":
-                            response = validate_elicitation_response(clean, response)
-                        if not isinstance(response, dict):
-                            raise MCPInputError("client input handler returned an invalid response")
-                        responses[str(key)] = response
-                    except MCPInputError as exc:
-                        unsupported.append(str(exc))
-                    except Exception:
-                        unsupported.append("client input handler failed")
-            if unsupported:
-                return (f"ERROR: MCP tool '{tool}' requires unsupported client input: "
-                        + ", ".join(unsupported[:8]))
-            request_state = res.get("requestState")
-            if isinstance(request_state, str) and len(request_state.encode("utf-8")) > _MAX_INPUT_BYTES:
-                return f"ERROR: MCP tool '{tool}' returned oversized requestState"
-            if not requests and not isinstance(request_state, str):
-                return f"ERROR: MCP tool '{tool}' returned an empty input_required result"
-            params = {"name": tool, "arguments": arguments}
-            if responses:
-                params["inputResponses"] = responses
-            if isinstance(request_state, str):
-                params["requestState"] = request_state
-        else:
-            return f"ERROR: MCP tool '{tool}' exceeded {_MAX_MRTR_ROUNDS} input rounds"
-        if self.protocol_era == "modern" and res.get("resultType") != "complete":
-            return f"ERROR: MCP tool '{tool}' did not complete"
+        from .mcp_context import request_complete
+        try:
+            res = request_complete(self, "tools/call", {"name": tool, "arguments": arguments},
+                                   timeout=timeout, cancel=cancel, on_progress=on_progress,
+                                   on_log=on_log, input_handler=input_handler)
+        except MCPInputError as exc:
+            return f"ERROR: MCP tool '{tool}' failed: {exc}"
         parts = [self._render_content(c) for c in (res.get("content") or []) if isinstance(c, dict)]
         if res.get("structuredContent") is not None:
             parts.append("[structured content]\n" + json.dumps(res["structuredContent"], ensure_ascii=False))
@@ -1411,11 +1468,16 @@ class MCPServer:
 
 
 class MCPManager:
-    def __init__(self, root: Path | None = None, *, client_capabilities: dict | None = None):
+    def __init__(self, root: Path | None = None, *, client_capabilities: dict | None = None,
+                 disabled_names=()):
         self.root = Path(root).resolve(strict=False) if root else Path.cwd().resolve()
         self.servers: dict[str, MCPServer] = {}
         self.failures: dict[str, str] = {}
         self._routes: dict[str, tuple[str, str]] = {}
+        self._context_routes: dict[str, tuple[str, str]] = {}
+        self.disabled_names = ({name for name in disabled_names if isinstance(name, str)}
+                               if isinstance(disabled_names, (list, tuple, set)) else set())
+        self._runtime_specs: dict[str, dict] = {}
         self._tool_schema_cache: tuple[dict, ...] = ()
         self._tool_search_cache: tuple[tuple, ...] = ()
         self._catalog_state_lock = threading.RLock()
@@ -1423,12 +1485,24 @@ class MCPManager:
                                      if isinstance(client_capabilities, dict) else {})
         atexit.register(self.stop_all)
 
-    def connect_all(self, config_servers: dict | None, *, startup: bool = False) -> None:
+    def connect_all(self, config_servers: dict | None, *, startup: bool = False,
+                    cancel: threading.Event | None = None, input_handler=None) -> None:
         """Connect configured servers, deferring editor-secret entries during cold startup."""
         if not isinstance(config_servers, dict):
             return
-        for raw_name, raw_spec in config_servers.items():
+        for server_index, (raw_name, raw_spec) in enumerate(config_servers.items()):
+            if cancel is not None and cancel.is_set():
+                break
+            # Keep startup work and child-process fan-out bounded even when config.json was
+            # hand-edited.  The editor/headless mutation APIs enforce the same public limit, but
+            # this is the final runtime boundary and must not trust their provenance.
+            if server_index >= _MAX_CONFIG_SERVERS:
+                break
             if not isinstance(raw_spec, dict):
+                continue
+            name = str(raw_name)
+            if name in self.disabled_names:
+                self.disconnect(name)
                 continue
             if startup and raw_spec.get("defer_until_setup") is True:
                 continue
@@ -1436,10 +1510,22 @@ class MCPManager:
             if not isinstance(cmd, str) or not cmd.strip():
                 continue
             name = str(raw_name)
+            self._runtime_specs[name] = dict(raw_spec)
             self.failures.pop(name, None)
             old = self.servers.pop(name, None)
             if old is not None:
                 old.stop()
+            if raw_spec.get("transport") == "remote":
+                raw_args = raw_spec.get("args")
+                url = raw_spec.get("url")
+                exact_bridge = (cmd == "npx" and isinstance(raw_args, list)
+                                and len(raw_args) >= 3
+                                and raw_args[:2] == ["-y", "mcp-remote"]
+                                and isinstance(url, str) and raw_args[2] == url
+                                and valid_remote_mcp_url(url))
+                if not exact_bridge:
+                    self.failures[name] = "invalid remote MCP bridge identity"
+                    continue
             configured_env = raw_spec.get("env")
             configured_env = dict(configured_env) if isinstance(configured_env, dict) else {}
             # Editor-managed credentials are persisted only as environment-variable names. A CLI
@@ -1450,16 +1536,41 @@ class MCPManager:
                 for env_name in env_names[:64]:
                     if isinstance(env_name, str) and env_name in os.environ:
                         configured_env.setdefault(env_name, os.environ[env_name])
-            server = MCPServer(name, cmd, raw_spec.get("args"), configured_env, self.root,
+            args = _runtime_server_args(raw_spec)
+            server = MCPServer(name, cmd, args, configured_env, self.root,
                                str(raw_spec.get("log_level") or "warning"), self._client_capabilities)
-            if server.start():
+            server.remote_bridge = raw_spec.get("transport") == "remote"
+            server._auth_handler = input_handler
+            try:
+                if server.remote_bridge and callable(input_handler) and not startup:
+                    started = server.start(timeout=150, cancel=cancel)
+                else:
+                    started = server.start(cancel=cancel) if cancel is not None else server.start()
+            except BaseException:
+                server.stop()
+                raise
+            if started:
                 self.servers[name] = server
             else:
                 self.failures[name] = server.error or "connection failed"
         self._rebuild_routes()
 
+    def disconnect(self, name: str) -> None:
+        server = self.servers.pop(name, None)
+        self.failures.pop(name, None)
+        if server is not None:
+            server.stop()
+        self._rebuild_routes()
+
+    def reconnect(self, name: str, fallback: dict | None = None, *, cancel=None, input_handler=None) -> None:
+        spec = self._runtime_specs.get(name) or fallback
+        if spec is None:
+            raise MCPInputError("This MCP server has no saved configuration")
+        self.connect_all({name: spec}, cancel=cancel, input_handler=input_handler)
+
     def _rebuild_routes(self) -> None:
         routes: dict[str, tuple[str, str]] = {}
+        context_routes: dict[str, tuple[str, str]] = {}
         schemas: list[dict] = []
         for server_name, server in list(self.servers.items()):
             for tool in server.tools:
@@ -1478,6 +1589,31 @@ class MCPManager:
                     "description": (f"[MCP:{server_name}] {tool.get('description', '')}")[:1000],
                     "parameters": parameters,
                 }})
+        # Host-owned resource operations use collision-free routes and the same permissions,
+        # hooks, workspace lease and input-consent path as every other MCP call. Prompts remain
+        # explicitly user-selected in the CLI/editor and are not offered to the model as tools.
+        for server_name, server in list(self.servers.items()):
+            capabilities = getattr(server, "server_capabilities", {})
+            operations = []
+            if "resources" in capabilities:
+                operations.extend((
+                ("list_resources", "List resources or URI templates from this MCP server", {"type": "object", "properties": {
+                    "kind": {"type": "string", "enum": ["resources", "templates"], "default": "resources"}}}),
+                ("read_resource", "Read a resource URI owned by this MCP server; use its listed resources or templates", {
+                    "type": "object", "properties": {"uri": {"type": "string"}}, "required": ["uri"]}),
+                ))
+            if "prompts" in capabilities:
+                operations.append(("get_prompt", "", {}))
+            for operation, description, parameters in operations:
+                base = f"mcp__{_safe_name(server_name)}__dgc_{operation}"
+                exposed, suffix = base, 2
+                while exposed in routes:
+                    exposed, suffix = f"{base}_{suffix}", suffix + 1
+                routes[exposed] = (server_name, operation)
+                context_routes[exposed] = (server_name, operation)
+                if operation != "get_prompt":
+                    schemas.append({"type": "function", "function": {
+                        "name": exposed, "description": f"[MCP:{server_name}] {description}", "parameters": parameters}})
         schema_cache = tuple(schemas)
         search_cache = tuple(self._schema_search_entry(schema) for schema in schemas)
         lock = getattr(self, "_catalog_state_lock", None)
@@ -1485,6 +1621,7 @@ class MCPManager:
             lock = self._catalog_state_lock = threading.RLock()
         with lock:
             self._routes = routes
+            self._context_routes = context_routes
             self._tool_schema_cache = schema_cache
             self._tool_search_cache = search_cache
 
@@ -1671,9 +1808,33 @@ class MCPManager:
         server_name, tool = route
         if not server:
             return f"ERROR: MCP server '{server_name}' is not connected"
+        if full_name in getattr(self, "_context_routes", {}):
+            from .mcp_context import get_context, list_catalog
+            try:
+                if tool == "list_resources":
+                    kind = arguments.get("kind", "resources")
+                    if kind not in ("resources", "templates"):
+                        raise MCPInputError("Choose resources or templates")
+                    result = {kind: list_catalog(server, kind, cancel=cancel)}
+                else:
+                    kind = "prompts" if tool == "get_prompt" else "resources"
+                    result = get_context(server, kind, arguments.get("name" if kind == "prompts" else "uri"),
+                                         arguments.get("arguments"), cancel=cancel,
+                                         on_progress=on_progress, on_log=on_log, input_handler=input_handler)
+                return json.dumps(result, ensure_ascii=False)
+            except MCPInputError as exc:
+                return f"ERROR: MCP resource operation failed: {exc}"
         return server.call_tool(tool, arguments, cancel=cancel,
                                 on_progress=on_progress, on_log=on_log,
                                 input_handler=input_handler)
+
+    def context_route(self, server_name: str, kind: str) -> str:
+        operation = {"resources": "read_resource", "prompts": "get_prompt"}.get(kind)
+        with self._catalog_state_lock:
+            for route, value in self._context_routes.items():
+                if value == (server_name, operation):
+                    return route
+        raise MCPInputError("This server is disconnected or does not offer the selected context type")
 
     def has_route(self, full_name: str) -> bool:
         """Check one exposed route without broadening it or refreshing the catalog."""
@@ -1732,6 +1893,8 @@ class MCPManager:
         with self._catalog_state_lock:
             self.servers.clear()
             self._routes.clear()
+            self._context_routes.clear()
+            self._runtime_specs.clear()
             self._tool_schema_cache = ()
             self._tool_search_cache = ()
         self.failures.clear()

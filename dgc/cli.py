@@ -63,6 +63,7 @@ MODE_CYCLE = ["default", "acceptEdits", "plan", "auto"]
 # mono + purple: muted / accent / lavender / red (auto stays red as a danger signal)
 MODE_COLOR = {"default": "#9A9A9E", "acceptEdits": "#7C5CFF", "plan": "#A78BFA", "auto": "#DC5A64"}
 THINK_LEVELS = ["off", "low", "medium", "high", "xhigh"]
+DELEGATED_THINK_LEVELS = [*THINK_LEVELS, "max"]
 
 
 class UI:
@@ -289,17 +290,39 @@ class UI:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
         self._yield_stdin()
         idx = menu_select(terminal_safe_text(question or "Choose one"),
-                          [terminal_safe_text(option) for option in options] + ["something else…"],
+                          [terminal_safe_text(option) for option in options] + ["Other"],
                           [""] * len(options) + ["type your own answer"])
         if idx is None:
-            return options[0]
+            return ""
         if idx == len(options):                          # the "something else…" row
             try:
                 raw = input("  › ").strip()
             except EOFError:
-                return options[0]
-            return raw or options[0]
+                return ""
+            return raw if len(raw) <= 4096 else ""
         return options[idx]
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        """Review/edit separate decisions and explicitly submit the complete batch."""
+        from .questions import valid_answers
+        self._yield_stdin()
+        answers = {}
+        while True:
+            idx = menu_select("Questions — review each answer, then Submit",
+                              [terminal_safe_text(q["header"]) for q in questions] + ["Submit"],
+                              [terminal_safe_text(answers.get(q["id"], "Not answered")) for q in questions]
+                              + [f"{len(answers)}/{len(questions)} answered"])
+            if idx is None:
+                return None
+            if idx == len(questions):
+                if valid_answers(questions, answers):
+                    return answers
+                self.info("Answer every question before submitting.")
+                continue
+            q = questions[idx]
+            answer = self.propose_options(q["question"], q["options"])
+            if answer:
+                answers[q["id"]] = answer
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -523,24 +546,28 @@ def render_help(console, project_root: Path | None = None) -> None:
 class ClassicSlashCompleter(Completer):
     """Live classic-REPL completion derived from the shared command registry."""
 
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, config=None):
         self.project_root = project_root
+        self.config = config
 
     def get_completions(self, document, complete_event):
         del complete_event
-        before = document.text_before_cursor
-        if not before.startswith("/") or any(ch.isspace() for ch in before):
+        from .composer import composer_token, completion_rows
+        token = composer_token(document.text, document.cursor_position)
+        if token is None or token[0] not in ("/", "$"):
             return
-        query = before[1:].casefold()
-        for name, description in command_pairs_with_custom("classic", self.project_root):
-            if name.casefold().startswith(query):
-                yield Completion("/" + name, start_position=-len(before),
-                                 display="/" + name, display_meta=description)
+        trigger, query, start, _end = token
+        from .skills import discover_skills
+        skills = discover_skills(self.project_root, disabled_names=self.config.get("disabled_skills", []) if self.config else [])
+        for row in completion_rows("classic", self.project_root, skills=skills, trigger=trigger, query=query):
+            yield Completion(row["label"], start_position=start - document.cursor_position,
+                             display=row["label"], display_meta=row["desc"])
 
 
 class CLI:
     def __init__(self, config: Config):
         self.config = config
+        self._classic_native_route = False
         style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
         self.ui = UI()
         self.ui._rule_hook = self._add_rule
@@ -576,20 +603,29 @@ class CLI:
     def banner(self) -> None:
         c = self.console
         cfg = self.config
-        mode, think = cfg.data.get("mode", "default"), cfg.data.get("thinking", "off")
+        mode = cfg.data.get("mode", "default")
+        engine = ("" if self._classic_native_route else
+                  str(cfg.get("subscription_engine", "") or "").strip().lower())
+        think = (str(cfg.get("subscription_effort", "") or "").strip()
+                 or "off") if engine else cfg.data.get("thinking", "off")
+        active_model = (str(cfg.get("subscription_model", "") or "").strip()
+                        or f"{engine} default") if engine else cfg.model
         self._logo()
         if (c.size.width or 80) < 34:                        # minimal: skip the config block
             return
         def row(label, value):                               # dim padded label + value (peachd statusLine)
             safe_label = _markup_literal(label)
             c.print(f"  [{DIM}]{safe_label:<8}[/]  {_markup_literal(value)}", highlight=False)
-        row("endpoint", cfg.base_url)
-        row("model", cfg.model)
+        row("endpoint", f"{engine} CLI subscription" if engine else cfg.base_url)
+        row("model", active_model)
         c.print(f"  [{DIM}]{'mode':<8}[/]  "
                 f"[{MODE_COLOR.get(mode, 'white')}]{_markup_literal(mode)}[/]  "
                 f"[{DIM}]· {_markup_literal(MODE_DESCRIPTIONS.get(mode, ''))}[/]",
                 highlight=False)
         row("thinking", think)
+        if cfg.get("ultra_mode", False):
+            from .ultra import worker_limit
+            row("profile", f"Ultra · up to {worker_limit(cfg)} parallel agents · permissions unchanged")
         row("project", cfg.project_root)
         if self.agent.skills:
             row("skills", ", ".join(self.agent.skills))
@@ -643,6 +679,9 @@ class CLI:
                              [PROVIDERS[k]["base_url"] for k in pk])
                 if idx is not None:
                     prov = PROVIDERS[pk[idx]]
+                    cfg.set("subscription_engine", "")
+                    cfg.set("subscription_model", "")
+                    cfg.set("subscription_effort", "")
                     cfg.set("base_url", prov["base_url"])
                     cfg.set("api_mode", "auto")
                     if prov["needs_key"]:
@@ -655,6 +694,16 @@ class CLI:
                     self.ui.info(f"endpoint set to {cfg.base_url}  ·  model {cfg.model}")
             else:
                 target = args[0]
+                from . import subscriptions as subs
+                engine = subs.get_engine(target)
+                if engine is not None:
+                    self.ui.error(
+                        f"{engine.short_label} subscription delegation is unavailable in --classic; "
+                        "exit and run dgc, or use dgc -p --engine " + engine.key)
+                    return True
+                cfg.set("subscription_engine", "")
+                cfg.set("subscription_model", "")
+                cfg.set("subscription_effort", "")
                 if target in PROVIDERS:
                     prov = PROVIDERS[target]
                     cfg.set("base_url", prov["base_url"])
@@ -696,7 +745,17 @@ class CLI:
                 rest = MODE_CYCLE[(i + 1) % len(MODE_CYCLE)]
             if rest not in MODES:
                 self.ui.error(f"unknown mode {rest!r} — choose from {', '.join(MODES)}")
-            elif rest == "auto" and self.agent.mode != "auto":
+                return True
+            # Mode is durable and shared with the full-screen route.  Preserve the configured
+            # subscription invariant even though --classic itself executes the native fallback.
+            from . import subscriptions as subs
+            active_engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
+            try:
+                subs.validate_engine_mode(active_engine, rest)
+            except subs.EngineModeUnsupported as exc:
+                self.ui.error(str(exc))
+                return True
+            if rest == "auto" and self.agent.mode != "auto":
                 auto_warning(self.console)
                 if input("  enable full-auto? [y/N] › ").strip().lower() in ("y", "yes"):
                     self.agent.set_mode("auto")
@@ -706,10 +765,18 @@ class CLI:
             else:
                 self.agent.set_mode(rest)
                 self.ui.info(f"mode → {rest} ({MODE_DESCRIPTIONS[rest]})")
-        elif cmd == "plan":
-            target = "default" if self.agent.mode == "plan" else "plan"
-            self.agent.set_mode(target)
-            self.ui.info(f"mode → {target} ({MODE_DESCRIPTIONS[target]})")
+        elif cmd in ("plan", "review", "init"):
+            from .workflows import activate_workflow, expand_workflow_prompt, prepare_workflow
+            try:
+                workflow = prepare_workflow(cmd, rest, self.agent)
+                text = expand_workflow_prompt(workflow.prompt, self.expand_mentions) if workflow.prompt else ""
+                activate_workflow(workflow, self.agent)
+            except ValueError as exc:
+                self.ui.error(str(exc))
+                return True
+            self.ui.info(f"mode → {self.agent.mode} ({MODE_DESCRIPTIONS[self.agent.mode]})")
+            if text:
+                self._run_turn_live(text, getattr(self, "_followup_queue", []))
         elif cmd in ("view-plan", "plan-view", "viewplan"):
             plan = (sessions_mod.load_plan(self.agent.session_file, cfg.project_root)
                     if self.agent.session_file else None)
@@ -720,7 +787,7 @@ class CLI:
         elif cmd == "goal":
             action = rest.strip()
             low = action.lower()
-            if low in ("clear", "off", "none", "remove"):
+            if low in ("clear", "off", "none", "remove", "delete"):
                 if self.agent.set_goal(""):
                     self.ui.info("standing goal cleared")
                 else:
@@ -732,7 +799,7 @@ class CLI:
                     else:
                         self.ui.info("no standing goal to complete")
             elif low in ("blocked", "block", "pause", "paused"):
-                if not self.agent.update_goal("blocked"):
+                if not self.agent.update_goal("blocked" if low in ("blocked", "block") else "paused"):
                     if self.agent._last_persist_error:
                         self.ui.error(self.agent._last_persist_error)
                     else:
@@ -743,16 +810,25 @@ class CLI:
                         self.ui.error(self.agent._last_persist_error)
                     else:
                         self.ui.info("no standing goal to resume")
-            elif action:
-                if self.agent.set_goal(action):
-                    self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
                 else:
-                    self.ui.error(self.agent._last_persist_error or "goal update was not saved")
-            elif self.agent.goal:
-                self.console.print(render.render_markdown(terminal_safe_text(
-                    f"# Standing goal\n\n**Status:** {self.agent.goal_status}\n\n{self.agent.goal}")))
-            else:
-                self.ui.info("no standing goal — /goal <objective> to set one")
+                    self.agent._pending_images = None
+                    self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
+            elif low in ("", "review", "status"):
+                if self.agent.goal:
+                    from .goals import review_markdown
+                    self.console.print(render.render_markdown(terminal_safe_text(review_markdown(self.agent.goal_snapshot()))))
+                else:
+                    self.ui.info("no standing goal — /goal <objective> to start one")
+            elif action:
+                from .goal_inputs import start_terminal_goal
+                try:
+                    notices = start_terminal_goal(action, self.agent)
+                except ValueError as exc:
+                    self.ui.error(str(exc)); return True
+                for notice in notices:
+                    self.ui.info(notice)
+                self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
+                self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
         elif cmd == "think":
             if not rest:
                 i = THINK_LEVELS.index(cfg.get("thinking", "off"))
@@ -766,6 +842,23 @@ class CLI:
                 if rest == "off" and is_reasoning_model(cfg.get("model", "")):
                     self.ui.info("  tip: this looks like a reasoning model — /think high often does "
                                  "better on hard tasks")
+        elif cmd == "ultra":
+            val = rest.strip().lower()
+            if val in ("on", "true", "1", "yes", "enable", "enabled"):
+                cfg.set("ultra_mode", True)
+                self.agent._refresh_system()
+                from .ultra import summary
+                self.ui.info(f"{summary(cfg)} → on (permission mode remains {self.agent.mode})")
+            elif val in ("off", "false", "0", "no", "disable", "disabled"):
+                cfg.set("ultra_mode", False)
+                self.agent._refresh_system()
+                self.ui.info("DGC Ultra → off")
+            elif val in ("", "status"):
+                state = "on" if cfg.get("ultra_mode", False) else "off"
+                from .ultra import summary
+                self.ui.info(f"{summary(cfg)} → {state}; /ultra on|off")
+            else:
+                self.ui.error("usage: /ultra [on|off]")
         elif cmd == "preserve-thinking":
             val = rest.strip().lower()
             if val in ("on", "true", "1", "show", "yes"):
@@ -820,17 +913,25 @@ class CLI:
         elif cmd == "memory":
             self._memory_cmd(rest)
         elif cmd == "skills":
-            if not self.agent.skills:
-                self.ui.info("no skills found — add dirs with SKILL.md under .dgc/skills/ or ~/.dgc/skills/")
-            table = Table("skill", "description", "location")
-            for s in self.agent.skills.values():
-                table.add_row(_literal_cell(s.name), _literal_cell(s.description),
-                              _literal_cell(s.path))
-            self.console.print(table)
+            from .skills import manage_skills
+            try:
+                output = manage_skills(cfg, rest)
+                self.agent.reload_skills()
+                self.console.print(terminal_safe_text(redact_text(output, secret_values(cfg))), markup=False, highlight=False)
+            except (OSError, ValueError) as exc:
+                self.ui.error(str(exc))
         elif cmd == "mcp":
-            self.console.print("[bold]MCP servers[/bold] [dim](configure in ~/.dgc/config.json → mcp_servers)[/dim]")
-            self.console.print(terminal_safe_text(self.agent.mcp.summary()), markup=False,
-                               highlight=False)
+            from .mcp_management import manage_mcp
+            from .mcp_context import stage_context
+            try:
+                self.agent.cancelled.clear()
+                result = manage_mcp(cfg, self.agent.mcp, rest, agent=self.agent)
+                if isinstance(result, dict):
+                    stage_context(self.agent, result)
+                    result = f"Attached {result['server']} · {result['identifier']} to the next prompt. /mcp context lists snapshots; /mcp clear-context removes them."
+                self.console.print(terminal_safe_text(redact_text(result, secret_values(cfg))), markup=False, highlight=False)
+            except (OSError, ValueError) as exc:
+                self.ui.error(redact_text(str(exc), secret_values(cfg)))
         elif cmd == "hooks":
             from .hooks import hook_catalog
             catalog = hook_catalog(cfg)
@@ -844,20 +945,27 @@ class CLI:
                 self.ui.error(f"hook configuration has {catalog['invalid']} invalid or unsupported entry(s)")
         elif cmd == "skill":
             args = rest.split(None, 1)
+            self.agent.reload_skills()
             sk = self.agent.skills.get(args[0]) if args else None
             if not sk:
                 self.ui.error(f"unknown skill — try /skills")
+            elif not sk.enabled:
+                self.ui.error(f"Skill ${sk.name} is disabled. Use /skills enable {sk.name} first.")
             else:
-                self.agent.run_turn(sk.render(args[1] if len(args) > 1 else ""))
-        elif cmd == "init":
-            memory_mod.init_project_memory(cfg.project_root)
-            self.agent.run_turn(
-                "Analyze this project (read key files, manifests, existing docs) and rewrite "
-                "DGC.md at the project root as a concise, accurate guide for a coding agent: "
-                "what the project is, stack, layout, build/test/lint commands, conventions. "
-                "Use write_file to save it.")
+                self.agent.run_turn(f"${sk.name}\n\n" + (args[1] if len(args) > 1 else "Apply this skill to the current task."))
         elif cmd == "status":
             self.banner()
+        elif cmd == "eta":
+            from .eta import format_stats
+            snapshot_fn = getattr(self.agent, "eta_snapshot", None)
+            snapshot = snapshot_fn() if callable(snapshot_fn) else None
+            if rest.strip().lower() in ("stats", "stat", "calibration") or snapshot is None:
+                self.console.print(render.render_markdown(format_stats(self.agent.eta_stats_summary())))
+                if snapshot is None and not rest.strip():
+                    self.ui.info("no turn is running; the range appears in the status line 20 s into a turn")
+            else:
+                self.ui.info(f"{snapshot.label} · basis {snapshot.basis} · confidence {snapshot.confidence:.0%}"
+                             if snapshot.visible else f"estimating… {snapshot.elapsed:.0f}s in")
         elif cmd == "context":
             used, size = self.agent.estimate_tokens(), self._context_window_size()
             self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)
@@ -870,9 +978,7 @@ class CLI:
             else:
                 self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")
         elif cmd == "compact":
-            if self.agent.maybe_compact(force=True):
-                self.ui.info(f"~{self.agent.estimate_tokens()} tokens in context")
-            else:
+            if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self.ui.error(self.agent._last_persist_error or "context compaction failed")
         elif cmd in ("clear", "new"):
             self.agent.reset()
@@ -1217,15 +1323,17 @@ class CLI:
         USER_HOME.mkdir(parents=True, exist_ok=True)
         session: PromptSession = PromptSession(
             history=FileHistory(str(USER_HOME / "history")),
-            completer=ClassicSlashCompleter(self.config.project_root),
+            completer=ClassicSlashCompleter(self.config.project_root, self.config),
             complete_while_typing=True)
         from prompt_toolkit.formatted_text import ANSI
         queue: list[str] = []
+        draft = ""
+        self._followup_queue = queue
         while True:
             mode = self.agent.mode
             th = style_mod.theme()
             acc, dim, rst = style_mod.ansi_fg(th.accent), style_mod.ansi_fg(th.faint), style_mod.ANSI_RESET
-            if queue:                                   # run a follow-up queued during the last turn
+            if queue and not getattr(self, "_queue_paused", False):
                 line = queue.pop(0)
                 self.console.print(
                     f"  [{DIM}]{glyphs.ARROW} {_markup_literal(line)}[/]", highlight=False)
@@ -1233,7 +1341,8 @@ class CLI:
                 try:                                    # ❯ prefix + right-aligned `model · mode`
                     rp = ANSI(f"{dim}{terminal_safe_text(self.config.model)}  {glyphs.MIDDOT}  "
                               f"{terminal_safe_text(mode)}{rst}")
-                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp).strip()
+                    line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp, default=draft).strip()
+                    draft = ""
                 except KeyboardInterrupt:
                     continue
                 except EOFError:
@@ -1241,6 +1350,24 @@ class CLI:
             if not line:
                 continue
             try:
+                from .composer import composer_token, compose_prompt
+                token = composer_token(line, len(line))
+                if token and token[0] == "/" and token[2] > 0:
+                    name, prefix = token[1], line[:token[2]].rstrip()
+                    from .commands import resolve_command, discover_commands
+                    if resolve_command(name, "classic"):
+                        if name in ("goal", "plan", "review", "init"):
+                            self.handle_slash("/" + name + " " + prefix)
+                        else:
+                            draft = prefix
+                            self.handle_slash("/" + name)
+                        continue
+                    if name in discover_commands(self.config.project_root):
+                        if re.match(r"(?i)^/goal(?:\s|$)", prefix):
+                            self.handle_slash(line)
+                            continue
+                        line = compose_prompt(prefix, templates=[name], catalog=self.agent.skills,
+                                              project_root=self.config.project_root)
                 if line.startswith("/"):
                     self.handle_slash(line)
                 elif line.startswith("#"):
@@ -1262,8 +1389,10 @@ class CLI:
 
     def _run_turn_live(self, text: str, queue: list[str]) -> None:
         """Run a turn on a worker thread while the main thread watches the keyboard:
-        Esc / Ctrl-C interrupts the turn; a line typed + Enter is queued to run next.
+        Esc / Ctrl-C interrupts the turn; Enter steers native turns, Tab queues the next turn.
         The reader cleanly hands stdin back when a tool needs an approval prompt."""
+        self._followup_queue = queue
+        self._queue_paused = False
         self.agent.cancelled.clear()
         self.ui._tool_count = 0
         t0 = time.time()
@@ -1280,6 +1409,12 @@ class CLI:
                 outcome["failed"] = True
                 self.ui.error(f"{type(e).__name__}: {e}")
             finally:
+                take = getattr(self.agent, "take_deferred_steers", None)
+                deferred = take() if callable(take) else []
+                queue[:0] = deferred
+                self._queue_paused = bool(queue) and (outcome["failed"] or self.agent.cancelled.is_set())
+                if self._queue_paused:
+                    self.ui.info("Follow-ups retained. Send a new prompt to continue the queue.")
                 self.ui.stop_working()
                 done.set()
 
@@ -1300,6 +1435,8 @@ class CLI:
         self.ui._live = live
         old = termios.tcgetattr(fd)
         buf = ""
+        import codecs
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             tty.setcbreak(fd)  # char-at-a-time, ECHO off, but keep \n->\r\n and signals
             while not done.is_set():
@@ -1312,19 +1449,39 @@ class CLI:
                 if not r:
                     continue
                 try:
-                    ch = os.read(fd, 1).decode("utf-8", "replace")
+                    ch = decoder.decode(os.read(fd, 1))
                 except OSError:
                     break
                 if ch in ("\x1b", "\x03"):       # Esc / Ctrl-C — interrupt this turn
                     self.agent.cancelled.set()
                     self.console.print("\n[dim]⎋ interrupting…[/dim]", highlight=False)
                     buf = ""
-                elif ch in ("\r", "\n"):         # Enter — queue what was typed so far
+                elif ch in ("\r", "\n", "\t"):
                     if buf.strip():
-                        queue.append(buf.strip())
-                        self.console.print(
-                            f"[dim]↵ queued: {_markup_literal(buf.strip()[:70])}[/dim]",
-                            highlight=False)
+                        entry = buf.strip()
+                        action = entry.lower()
+                        from .commands import resolve_command
+                        name, _, arguments = entry[1:].partition(" ") if entry.startswith("/") else ("", "", "")
+                        spec = resolve_command(name, "classic")
+                        if spec and spec.name == "skills":
+                            from .skills import manage_skills
+                            try:
+                                output = manage_skills(self.config, arguments, catalog=self.agent.skills, read_only=True)
+                                self.console.print(terminal_safe_text(redact_text(output, secret_values(self.config))), markup=False)
+                            except (OSError, ValueError) as exc:
+                                self.ui.error(str(exc))
+                        elif spec and spec.name == "mode":
+                            self.handle_slash(entry)
+                        elif action in ("/goal pause", "/goal clear", "/goal delete"):
+                            self.agent.request_goal_control("pause" if action.endswith("pause") else "clear")
+                        elif action in ("/goal", "/goal review", "/goal status"):
+                            from .goals import review_markdown
+                            self.console.print(render.render_markdown(terminal_safe_text(review_markdown(self.agent.goal_snapshot()))))
+                        elif ch != "\t" and not entry.startswith("/") and self.agent.steer(entry):
+                            self.console.print("↳ applying follow-up", style="dim")
+                        else:
+                            queue.append(entry)
+                            self.console.print(f"[dim]↵ queued: {_markup_literal(entry[:70])}[/dim]", highlight=False)
                     buf = ""
                 elif ch == "\x7f":               # backspace
                     buf = buf[:-1]
@@ -1548,7 +1705,20 @@ def run_setup(config: Config) -> None:
     n_sub = len(subs_status)
     if idx < n_sub:
         s = subs_status[idx]
+        try:
+            _subs.validate_engine_mode(s["key"], str(config.get("mode", "default")))
+        except _subs.EngineModeUnsupported:
+            auto_warning(c)
+            accepted = input(
+                f"  {s['label'].split(' (')[0]} requires full-auto; enable it? [y/N] › "
+            ).strip().lower() in ("y", "yes")
+            if not accepted:
+                c.print("  [dim]cancelled — provider and permission mode were not changed[/dim]\n")
+                return
+            config.set("mode", "auto")
         config.set("subscription_engine", s["key"])
+        config.set("subscription_model", "")
+        config.set("subscription_effort", "")
         c.print(f"\n  [bold green]selected[/bold green] {terminal_safe_text(s['label'])} — "
                 f"DGC will run each turn through your subscription via the official CLI.")
         if s["auth_state"] == "signed_in":
@@ -1648,6 +1818,8 @@ def run_help() -> None:
     c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe  inspect the installed headless/editor contract as JSON")
+    c.print("  dgc skills             list, create, install and manage skill packages")
+    c.print("  dgc mcp                manage servers, resources, prompts and connections")
     c.print("  dgc --model N --base-url URL --api-key-env NAME   configure without exposing a key\n")
     render_help(c)
 
@@ -1656,7 +1828,45 @@ def main(argv: list[str] | None = None) -> int | None:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] in (
             "setup", "doctor", "help", "update", "serve", "acp", "protocol", "bug",
-            "export-training"):
+            "export-training", "skills", "mcp"):
+        if raw_argv[0] == "mcp":
+            from .mcp_management import manage_mcp, USAGE
+            if any(value in ("--help", "-h") for value in raw_argv[1:]):
+                print("dgc " + USAGE.lstrip("/")); return 0
+            cfg = Config()
+            from .mcp import MCPManager
+            ui = UI()
+            manager = MCPManager(cfg.project_root, disabled_names=cfg.get("disabled_mcp_servers", []),
+                                 client_capabilities=Agent._mcp_client_capabilities(ui))
+            agent = Agent(cfg, ui, mcp=manager)
+            try:
+                if len(raw_argv) >= 3 and raw_argv[1] in ("resources", "templates", "prompts", "read", "prompt"):
+                    runtime = cfg.mcp_runtime_servers()
+                    name = raw_argv[2]
+                    if name not in runtime:
+                        raise ValueError("Unknown MCP server")
+                    manager.connect_all({name: runtime[name]}, cancel=agent.cancelled, input_handler=agent._handle_mcp_input)
+                result = manage_mcp(cfg, agent.mcp, shlex.join(raw_argv[1:]), agent=agent)
+                output = json.dumps(result, ensure_ascii=False, indent=2) if isinstance(result, dict) else result
+                print(terminal_safe_text(redact_text(output, secret_values(cfg))))
+                return 0
+            except (OSError, ValueError) as exc:
+                print(terminal_safe_text(redact_text(str(exc), secret_values(cfg))), file=sys.stderr)
+                return 1
+            finally:
+                agent.mcp.stop_all()
+        if raw_argv[0] == "skills":
+            from .skills import manage_skills
+            if any(value in ("--help", "-h") for value in raw_argv[1:]):
+                print("dgc skills [list|reload|show NAME|enable NAME|disable NAME|create NAME [--user]|install DIR [--user] [--allow-external]]")
+                return 0
+            cfg = Config()
+            try:
+                print(terminal_safe_text(redact_text(manage_skills(cfg, shlex.join(raw_argv[1:])), secret_values(cfg))))
+                return 0
+            except (OSError, ValueError) as exc:
+                print(terminal_safe_text(redact_text(str(exc), secret_values(cfg))), file=sys.stderr)
+                return 1
         if raw_argv[0] == "help":
             run_help(); return
         if raw_argv[0] == "export-training":
@@ -1682,6 +1892,8 @@ def main(argv: list[str] | None = None) -> int | None:
             from .protocol_cli import main as protocol_main
             return protocol_main(raw_argv[1:])
         cfg = Config()
+        for warning in cfg.credential_warnings:
+            print(f"warning: {warning}", file=sys.stderr)
         (run_setup if raw_argv[0] == "setup" else run_doctor)(cfg)
         return
 
@@ -1691,23 +1903,30 @@ def main(argv: list[str] | None = None) -> int | None:
         epilog="commands: dgc setup · dgc doctor · dgc help · dgc (interactive) · dgc -p '<task>' (one-shot)")
     parser.add_argument("-p", "--prompt", help="run a single prompt non-interactively and exit")
     parser.add_argument("--mode", choices=MODES, help="permission mode for this session")
-    parser.add_argument("--think", choices=THINK_LEVELS, help="thinking level for this session")
-    parser.add_argument("--model", help="model name (persisted)")
+    parser.add_argument("--think", choices=DELEGATED_THINK_LEVELS,
+                        help="thinking level for this session (with -p --engine, that delegated turn only)")
+    ultra_group = parser.add_mutually_exclusive_group()
+    ultra_group.add_argument("--ultra", dest="ultra", action="store_true", default=None,
+                             help="use extended reasoning and proactive bounded sub-agents for this session")
+    ultra_group.add_argument("--no-ultra", dest="ultra", action="store_false",
+                             help="disable the Ultra execution profile for this session")
+    parser.add_argument("--model",
+                        help="model name (persisted natively; with -p --engine, that delegated turn only)")
     parser.add_argument("--engine", metavar="NAME", default=None,
-                        help="run this one turn through a subscription CLI "
+                        help="with -p, run the one-shot turn through a subscription CLI "
                              "(claude|codex|qwen|kimi|copilot) via your own login, without changing config")
     parser.add_argument("--base-url", help="OpenAI-compatible endpoint URL (persisted)")
     parser.add_argument("--api-key-env", metavar="NAME",
                         help="read the endpoint API key from environment variable NAME without persisting it")
     parser.add_argument("--trust", action="store_true",
-                        help="trust this workspace for a non-interactive acceptEdits/auto run")
+                        help="persist this workspace as trusted, then run non-interactive acceptEdits/auto")
     parser.add_argument("-c", "--continue", dest="cont", action="store_true",
                         help="resume the most recent session in this directory")
     parser.add_argument("--resume", nargs="?", const="", default=None, metavar="ID",
                         help="resume a past session by id (dgc --resume <id>), or pick one (dgc --resume)")
     parser.add_argument("--autonomous-gate", metavar="CMD", default=None,
-                        help="a check command that must exit 0 before the agent may stop a turn; "
-                             "a nonzero exit feeds its output back and continues (e.g. \"npm run check\")")
+                        help="a check command native local/API turns must pass before stopping; "
+                             "delegated subscription turns bypass it")
     parser.add_argument("--autonomous-max-turns", type=int, default=None, metavar="N",
                         help="bound on failed --autonomous-gate retries before the turn stops (default 30)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
@@ -1717,19 +1936,55 @@ def main(argv: list[str] | None = None) -> int | None:
         refresh_update_async()
 
     config = Config()
+    for warning in config.credential_warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    if args.engine is not None and args.prompt is None:
+        parser.error("--engine is available only with -p/--prompt")
+    # Work out the one-shot route before applying native model/thinking overrides.  When a
+    # subscription engine owns this turn, --model/--think are vendor-CLI pass-throughs for this
+    # invocation only; they must not silently rewrite the fallback native route in config.json.
+    _oneshot_engine = (str(args.engine if args.engine is not None
+                           else config.get("subscription_engine", "")).strip().lower()
+                       if args.prompt is not None else "")
+    _interactive_engine = (
+        str(config.get("subscription_engine", "") or "").strip().lower()
+        if args.prompt is None and not args.classic and sys.stdout.isatty() else ""
+    )
+    _override_engine = _oneshot_engine or _interactive_engine
+    if args.think == "max" and not _override_engine:
+        parser.error("--think max is available only when a subscription route is active")
+    if _override_engine:
+        from . import subscriptions as _subscriptions
+        _override_spec = _subscriptions.get_engine(_override_engine)
+        if args.think and _override_spec is not None and not _override_spec.supports_effort():
+            parser.error(f"{_override_spec.short_label} does not expose a reasoning-effort flag; "
+                         "select its reasoning model with --model instead")
+        if args.mode is not None or args.prompt is not None:
+            try:
+                _subscriptions.validate_engine_mode(
+                    _override_engine, args.mode or str(config.get("mode", "default")))
+            except _subscriptions.EngineModeUnsupported as exc:
+                parser.error(str(exc))
     if args.base_url:
         config.set("base_url", args.base_url)
     if args.api_key_env:
         if args.api_key_env not in os.environ:
             parser.error(f"environment variable {args.api_key_env!r} is not set")
-        config.data["api_key"] = os.environ[args.api_key_env]
-        config._env_secret_keys.add("api_key")
-    if args.model:
-        config.set("model", args.model)
+        config.set_runtime_secret("api_key", os.environ[args.api_key_env])
+    if args.model and not _oneshot_engine:
+        if _interactive_engine:
+            config.data["subscription_model"] = args.model
+        else:
+            config.set("model", args.model)
     if args.mode:
         config.data["mode"] = args.mode
-    if args.think:
-        config.data["thinking"] = args.think
+    if args.think and not _oneshot_engine:
+        if _interactive_engine:
+            config.data["subscription_effort"] = "" if args.think == "off" else args.think
+        else:
+            config.data["thinking"] = args.think
+    if args.ultra is not None:
+        config.data["ultra_mode"] = args.ultra
     if args.autonomous_gate is not None:
         config.data["autonomous_gate"] = args.autonomous_gate
     if args.autonomous_max_turns is not None:
@@ -1750,6 +2005,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+            cli.agent.compact_resumed_session()
         else:
             cli.ui.info("no previous session here — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -1758,6 +2014,7 @@ def main(argv: list[str] | None = None) -> int | None:
         if p:
             n = cli.agent.load_session(p)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
+            cli.agent.compact_resumed_session()
         else:
             cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
             cli.agent.session_file = sessions_mod.new_path(config.project_root)
@@ -1771,6 +2028,7 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
+                cli.agent.compact_resumed_session()
             else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)
         else:
@@ -1779,12 +2037,11 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
-        _sub_engine = str(args.engine if args.engine is not None
-                          else config.get("subscription_engine", "")).strip().lower()
-        if _sub_engine:
+        if _oneshot_engine:
             return _run_subscription_oneshot(
-                config, cli.agent, _sub_engine, cli.expand_mentions(args.prompt),
-                bool(args.cont or args.resume is not None))
+                config, cli.agent, _oneshot_engine, cli.expand_mentions(args.prompt),
+                bool(args.cont or args.resume is not None),
+                model_override=args.model, effort_override=args.think)
         if config.data.get("mode") == "auto":
             print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
         outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
@@ -1812,6 +2069,7 @@ def main(argv: list[str] | None = None) -> int | None:
                     pass
             _se = str(config.get("subscription_engine", "")).strip().lower()
             if args.classic or not sys.stdout.isatty():
+                cli._classic_native_route = True
                 if _se:
                     from . import subscriptions as _subs
                     _eng = _subs.get_engine(_se)
@@ -1829,7 +2087,9 @@ def main(argv: list[str] | None = None) -> int | None:
             _print_resume_hint(cli.agent, config)   # after the alt-screen is restored — no blank lines
 
 
-def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool) -> int:
+def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont: bool,
+                              *, model_override: str | None = None,
+                              effort_override: str | None = None) -> int:
     """One-shot turn delegated to the user's own logged-in first-party CLI (their
     subscription). DGC streams the vendor CLI's output; the vendor owns auth, the
     model call, its tools, and its ToS. Returns a process exit code."""
@@ -1852,7 +2112,7 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
         return 1
     c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} "
             f"(your subscription) —[/dim]")
-    last = {"text": ""}
+    last = {"text": "", "shown": False}
 
     def on_event(ev: dict) -> None:
         kind = ev.get("kind")
@@ -1861,39 +2121,58 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
             args = ev.get("args") or {}
             summ = terminal_safe_text(str(args.get("command") or args.get("file_path")
                                           or args.get("path") or ""))[:120]
-            c.print(f"[dim]· {name}{(' ' + summ) if summ else ''}[/dim]", highlight=False)
+            c.print(f"· {name}{(' ' + summ) if summ else ''}", style="dim", markup=False, highlight=False)
         elif kind == "thinking" and ev.get("text"):
-            c.print(f"[dim]  {terminal_safe_text(ev['text'][:200])}[/dim]", highlight=False)
+            c.print(f"  {terminal_safe_text(ev['text'][:200])}", style="dim", markup=False, highlight=False)
         elif kind == "status" and ev.get("text"):
-            c.print(f"[dim]· {terminal_safe_text(ev['text'])}[/dim]", highlight=False)
+            c.print(f"· {terminal_safe_text(ev['text'])}", style="dim", markup=False, highlight=False)
         elif kind == "error" and ev.get("text"):
             # Render once after process exit, where it can be paired with the exit status.
             return
         elif kind == "text" and ev.get("text"):
+            last["shown"] = True
             last["text"] = ev["text"]
-            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+            sys.stdout.write(terminal_safe_text(ev["text"]))
             sys.stdout.flush()
-        elif kind == "result" and ev.get("text", "").strip() \
-                and ev["text"].strip() != last["text"].strip():
-            sys.stdout.write(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
+        elif kind == "result" and ev.get("text", "").strip() and not last["shown"]:
+            last["shown"] = True
+            sys.stdout.write(terminal_safe_text(ev["text"]))
             sys.stdout.flush()
 
     budget = int(config.get("turn_budget_s") or 0) or 1800
     mode = str(config.data.get("mode", "default"))
     configured_engine = str(config.get("subscription_engine", "")).strip().lower()
-    model = (str(config.get("subscription_model", "")).strip()
+    model = (str(model_override).strip() if model_override is not None else
+             str(config.get("subscription_model", "")).strip()
              if configured_engine == engine.key else "")
-    effort = (str(config.get("subscription_effort", "")).strip()
+    effort = (str(effort_override).strip() if effort_override is not None else
+              str(config.get("subscription_effort", "")).strip()
               if configured_engine == engine.key else "")
+    # Subscription configuration uses an empty value for the vendor's default effort.  Keep
+    # --think off useful without sending a value that first-party CLIs do not accept.
+    if effort == "off":
+        effort = ""
+    if effort and not engine.supports_effort():
+        c.print(f"  [yellow]{terminal_safe_text(engine.short_label)} does not expose a "
+                "reasoning-effort flag; omit --think or choose its reasoning model with --model[/yellow]")
+        return 1
+    from .ultra import delegated_effort, delegated_prompt
+    effort = delegated_effort(config, engine.key, effort, engine.supports_effort())
     session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
 
     def delegate(safe_prompt: str) -> dict:
-        result = subs.run_turn(engine, safe_prompt, config.project_root,
-                               cont=bool(cont and session_id), session_id=session_id, mode=mode,
-                               timeout=budget, on_event=on_event, model=model, effort=effort)
+        nonlocal session_id
+        last["text"] = ""
+        last["shown"] = False
+        result = subs.run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
+                               cont=bool(session_id), session_id=session_id, mode=mode,
+                               timeout=budget, on_event=on_event, model=model, effort=effort,
+                               cancel=agent.cancelled.is_set, goal_request=agent._active_goal_request,
+                               redact_secrets=agent._secret_values())
         if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
             agent.remember_subscription_session(
                 engine.key, result["session_id"], mode, model, effort)
+            session_id = result["session_id"]
         return result
 
     try:

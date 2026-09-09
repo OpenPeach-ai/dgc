@@ -7,24 +7,28 @@ substrate the ACP adapter will reframe (Phase 4).
 """
 from __future__ import annotations
 
+import copy
 import json
+import math
 import re
 import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit
 
 from . import __version__
 from . import sessions as sessions_mod
 from .agent import Agent
 from .attachments import MAX_EDITOR_IMAGE_TOTAL_BYTES, validate_image_data_uris
+from .editor_context import _editor_context_json, _format_editor_context, _strip_editor_context
 from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
-from .config import Config
-from .editor_protocol import MAX_COMMAND_BYTES, PROTOCOL_VERSION, command_error, event_error
+from .config import Config, mcp_url_has_credentials
+from .editor_protocol import (MAX_COMMAND_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
+                              command_error, event_error)
 from .permissions import Rule, rule_for
+from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
 from .protocol import Emitter, PendingRequests, strict_json_loads
 from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
@@ -41,39 +45,117 @@ _MAX_MCP_LIST_BYTES = 1024 * 1024
 _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
-_MCP_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
-_MCP_LOG_LEVELS = frozenset({
-    "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency", "off",
-})
-_MCP_SENSITIVE_QUERY_NAMES = frozenset({
-    "token", "accesstoken", "apikey", "key", "secret", "password", "credential",
-    "authorization", "auth",
-})
-# Value-bearing CLI flags whose argument (or `--flag=value` tail) is a secret.
-# A persisted MCP spec must route these through env_names, never inline args.
-_MCP_SECRET_FLAGS = frozenset({
-    "--header", "--api-key", "--apikey", "--api_key", "--token", "--access-token",
-    "--auth", "--authorization", "--password", "--passwd", "--secret", "--bearer",
-    "--key", "--credential", "--credentials",
-})
 _BUSY_MUTATIONS = {
-    "set_mode", "set_model", "set_think", "new_session", "clear_session", "resume_session",
-    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal",
-    "resolve_retained_task", "list_skills", "reload_skills", "generate_handoff", "name_session",
-    "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "set_model", "set_think", "new_session", "clear_session", "resume_session",
+    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal", "start_goal",
+    "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
+    "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
 }
 _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
+    "prompt", "start_goal",
+    "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
     "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
-    "get_config", "status", "name_session", "reload_skills", "get_skill", "list_docs", "get_doc",
+    "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
+    "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
     "list_permissions", "add_permission_rule", "remove_permission_rule",
     "get_memory", "add_memory",
 })
 _EDITOR_CONTEXT_LIMIT = 64_000
+_CONFIG_BOOLEAN_KEYS = frozenset({
+    "prompt_cache", "sandbox", "sandbox_network", "show_reasoning", "preserve_thinking",
+    "code_action", "suggest", "plan_artifact", "artifact_autostart", "artifact_in_plan",
+    "ultra_mode",
+})
+_CONFIG_STRING_LIMITS = {
+    "subagent_model": 512,
+    "subagent_base_url": 4096,
+    "subagent_api_key": 16_384,
+    "prompt_cache_key": 64,
+    "fallback_model": 512,
+    "fallback_base_url": 4096,
+    "fallback_api_key": 16_384,
+    "autonomous_gate": 512,
+    "subscription_model": 256,
+}
+_CONFIG_ENUMS = {
+    "api_mode": frozenset({"auto", "ollama", "anthropic", "chat_completions", "responses"}),
+    "subagent_api_mode": frozenset({"", "auto", "ollama", "anthropic",
+                                     "chat_completions", "responses"}),
+    "fallback_api_mode": frozenset({"", "auto", "ollama", "anthropic",
+                                     "chat_completions", "responses"}),
+    "provider_state": frozenset({"stateless", "server"}),
+    "search_provider": frozenset({"duckduckgo", "brave", "tavily", "searxng"}),
+    "tool_profile": frozenset({"adaptive", "full"}),
+    "thinking": frozenset({"off", "low", "medium", "high", "xhigh"}),
+    "subscription_effort": frozenset({"", "low", "medium", "high", "xhigh", "max"}),
+}
+_CONFIG_INTEGER_RANGES = {
+    "capability_cache_ttl_s": (1, MAX_SAFE_INTEGER),
+    "context_size": (2_048, MAX_SAFE_INTEGER),
+    "max_parallel_tasks": (1, 8),
+    "autonomous_max_turns": (1, 1_000),
+}
+
+
+def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None, str | None]:
+    """Validate the generic set_config object completely before any state is changed."""
+    if not isinstance(raw_values, dict):
+        return None, "settings values must be an object"
+    allowed = {*_CONFIG_BOOLEAN_KEYS, *_CONFIG_STRING_LIMITS, *_CONFIG_ENUMS,
+               *_CONFIG_INTEGER_RANGES, "provider_capabilities", "subscription_engine"}
+    unknown = [key for key in raw_values if key not in allowed]
+    if unknown:
+        return None, f"unsupported settings key: {str(unknown[0])[:80]}"
+    values = dict(raw_values)
+    for key in _CONFIG_BOOLEAN_KEYS:
+        if key in values and not isinstance(values[key], bool):
+            return None, f"{key} must be true or false"
+    for key, limit in _CONFIG_STRING_LIMITS.items():
+        if key not in values:
+            continue
+        value = values[key]
+        if (not isinstance(value, str) or len(value) > limit
+                or any(ord(char) < 32 and not (key == "autonomous_gate" and char == "\t")
+                       for char in value)):
+            return None, f"{key} must be a bounded plain string"
+    for key in ("subagent_base_url", "fallback_base_url"):
+        value = values.get(key)
+        if value and (any(char.isspace() for char in value) or mcp_url_has_credentials(value)):
+            return None, f"{key} cannot contain whitespace or URL credentials"
+    # Tabs are useful in a shell gate and were accepted by the prior contract; other controls are
+    # neither executable text nor safe durable configuration.
+    gate = values.get("autonomous_gate")
+    if isinstance(gate, str) and any(ord(char) < 32 and char != "\t" for char in gate):
+        return None, "autonomous_gate must be a single-line command string (\u2264512 chars)"
+    for key, choices in _CONFIG_ENUMS.items():
+        if key in values and (not isinstance(values[key], str) or values[key] not in choices):
+            return None, f"{key} has an unsupported value"
+    if "subscription_engine" in values:
+        engine = values["subscription_engine"]
+        if (not isinstance(engine, str) or (engine and engine not in subscription_keys)):
+            return None, ("subscription_engine must be empty or one of: "
+                          + ", ".join(subscription_keys))
+    for key, (minimum, maximum) in _CONFIG_INTEGER_RANGES.items():
+        if key not in values:
+            continue
+        value = values[key]
+        if (isinstance(value, bool) or not isinstance(value, int)
+                or not minimum <= value <= maximum):
+            return None, f"{key} must be an integer from {minimum} to {maximum}"
+    if "provider_capabilities" in values:
+        capabilities = values["provider_capabilities"]
+        from .llm import ProviderCapabilities
+        known = frozenset(ProviderCapabilities.__dataclass_fields__)
+        if (not isinstance(capabilities, dict) or len(capabilities) > len(known)
+                or set(capabilities) - known
+                or any(not isinstance(value, bool) for value in capabilities.values())):
+            return None, "provider_capabilities must contain only known boolean feature overrides"
+    return values, None
 
 
 def _turn_payload_bytes(text, images, context) -> int:
@@ -94,104 +176,7 @@ def _json_payload_bytes(value) -> int:
 
 
 def _mcp_url_has_credentials(value: str) -> bool:
-    try:
-        parsed = urlsplit(value)
-        return bool(parsed.username or parsed.password) or any(
-            re.sub(r"[^a-z0-9]", "", key.lower()) in _MCP_SENSITIVE_QUERY_NAMES
-            for key, _item in parse_qsl(parsed.query, keep_blank_values=True))
-    except ValueError:
-        return True
-
-
-def _mcp_spec(value, *, persisted: bool) -> tuple[dict | None, str | None]:
-    """Validate one bounded editor MCP spec; persisted specs can never carry secret values."""
-    if not isinstance(value, dict):
-        return None, "server specification must be an object"
-    allowed = {"transport", "command", "args", "env", "env_names", "url", "log_level",
-               "defer_until_setup"}
-    if set(value) - allowed:
-        return None, "server specification contains unsupported fields"
-    command = value.get("command")
-    if not isinstance(command, str) or not command.strip() or len(command) > 4096 or "\x00" in command:
-        return None, "server command must contain 1-4096 safe characters"
-    args = value.get("args", [])
-    if (not isinstance(args, list) or len(args) > 128
-            or any(not isinstance(arg, str) or len(arg) > 8192 or "\x00" in arg for arg in args)):
-        return None, "server arguments must be an array of at most 128 bounded strings"
-    transport = str(value.get("transport") or "stdio")
-    if transport not in ("stdio", "remote"):
-        return None, "server transport must be stdio or remote"
-    url = str(value.get("url") or "")
-    if transport == "remote":
-        try:
-            parsed = urlsplit(url)
-            loopback = parsed.hostname in ("localhost", "127.0.0.1", "::1")
-            valid_remote = (parsed.scheme == "https" or (parsed.scheme == "http" and loopback))
-            valid_remote = (valid_remote and bool(parsed.netloc)
-                            and not parsed.username and not parsed.password)
-            valid_remote = valid_remote and not _mcp_url_has_credentials(url)
-        except ValueError:
-            valid_remote = False
-        if not valid_remote or len(url) > 4096 or any(char.isspace() for char in url):
-            return None, "remote MCP servers require HTTPS (or loopback HTTP) without URL credentials"
-    log_level = str(value.get("log_level") or "warning").lower()
-    if log_level not in _MCP_LOG_LEVELS:
-        return None, "server log level is unsupported"
-    env_names = value.get("env_names", [])
-    if (not isinstance(env_names, list) or len(env_names) > 64
-            or any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
-                   for name in env_names)):
-        return None, "env_names must contain at most 64 environment variable names"
-    env = value.get("env", {})
-    if not isinstance(env, dict) or len(env) > 64:
-        return None, "server env must be an object with at most 64 entries"
-    if persisted and env:
-        return None, "persisted MCP specifications cannot contain environment values"
-    if persisted:
-        for index, arg in enumerate(args):
-            raw = arg.strip()
-            lowered = raw.lower()
-            prior_raw = args[index - 1].strip() if index else ""
-            prior = prior_raw.lower()
-            has_url_credentials = False
-            if lowered.startswith(("http://", "https://")):
-                try:
-                    parsed_arg = urlsplit(arg)
-                    has_url_credentials = bool(parsed_arg.username or parsed_arg.password)
-                except ValueError:
-                    has_url_credentials = True
-            # A secret can ride in as a value-bearing flag (`--api-key sk-...`,
-            # `--token=...`) or a header, not only as env/URL creds. Reject the
-            # whole persisted spec if any recognized secret flag is present, in
-            # either its own arg or the value that follows it. `-H` stays
-            # case-sensitive so it never collides with `-h`/help.
-            head = lowered.split("=", 1)[0]
-            prior_head = prior.split("=", 1)[0]
-            is_header_short = raw == "-H" or prior_raw == "-H"
-            if (lowered.startswith("authorization:") or lowered == "--header"
-                    or prior == "--header" or is_header_short
-                    or head in _MCP_SECRET_FLAGS or prior_head in _MCP_SECRET_FLAGS
-                    or has_url_credentials):
-                return None, ("persisted MCP specifications cannot contain inline secrets; "
-                              "declare tokens, headers, or credentials via env_names")
-    if any(not isinstance(name, str) or not _MCP_ENV_RE.fullmatch(name)
-           or not isinstance(item, str) or len(item) > 16_384 or "\x00" in item
-           for name, item in env.items()):
-        return None, "server env contains an invalid name or value"
-    if set(env) - set(env_names):
-        return None, "runtime env keys must be declared in env_names"
-    defer_until_setup = value.get("defer_until_setup", False)
-    if not isinstance(defer_until_setup, bool):
-        return None, "defer_until_setup must be true or false"
-    clean = {"transport": transport, "command": command.strip(), "args": list(args),
-             "env_names": list(dict.fromkeys(env_names)), "log_level": log_level}
-    if defer_until_setup:
-        clean["defer_until_setup"] = True
-    if url:
-        clean["url"] = url
-    if env:
-        clean["env"] = dict(env)
-    return clean, None
+    return mcp_url_has_credentials(value)
 
 
 def _request_fields(request_id: str | None) -> dict[str, str]:
@@ -199,66 +184,15 @@ def _request_fields(request_id: str | None) -> dict[str, str]:
     return {"request_id": request_id} if request_id else {}
 
 
-def _editor_context_json(value) -> str:
-    """Encode JSON without allowing source text to synthesize our framing delimiter."""
-    return (json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-            .replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e"))
-
-
-def _format_editor_context(resources) -> str:
-    """Bound and frame typed editor resources as untrusted reference data for the model."""
-    if not isinstance(resources, list):
+def _prompt_thread_title(text: str) -> str:
+    """Create an immediate, stable editor thread label without another model request."""
+    clean = re.sub(r"\s+", " ", _strip_editor_context(str(text or ""))).strip()
+    clean = re.sub(r"^[#>*`\-\s]+", "", clean).strip()
+    if not clean:
         return ""
-    allowed = {"type", "uri", "path", "relative_path", "workspace", "language", "range",
-               "text", "diagnostics"}
-    encoded_items: list[str] = []
-    def bounded(value, depth=0):
-        if depth > 4:
-            return None
-        if isinstance(value, str):
-            return value[:2_000]
-        if isinstance(value, (int, float, bool)) or value is None:
-            return value
-        if isinstance(value, list):
-            return [bounded(part, depth + 1) for part in value[:50]]
-        if isinstance(value, dict):
-            return {str(k)[:80]: bounded(v, depth + 1) for k, v in list(value.items())[:50]}
-        return None
-    for item in resources[:64]:
-        if not isinstance(item, dict):
-            continue
-        resource = {}
-        for key in allowed:
-            value = item.get(key)
-            if value is None:
-                continue
-            if key == "diagnostics" and isinstance(value, list):
-                value = bounded(value)
-            elif isinstance(value, str):
-                value = value[:16_000]
-            elif isinstance(value, (dict, list, int, float, bool)):
-                value = bounded(value)
-            else:
-                continue
-            resource[key] = value
-        encoded = _editor_context_json(resource)
-        # Include the list brackets and separators in the actual wire-size bound.
-        candidate_size = 2 + sum(len(part.encode("utf-8")) for part in encoded_items) \
-            + len(encoded_items) + len(encoded.encode("utf-8"))
-        if candidate_size > _EDITOR_CONTEXT_LIMIT:
-            break
-        encoded_items.append(encoded)
-    if not encoded_items:
-        return ""
-    payload = "[" + ",".join(encoded_items) + "]"
-    return ("<editor-context-json trust=\"untrusted-reference-data\">\n" + payload
-            + "\n</editor-context-json>\n\n")
-
-
-def _strip_editor_context(text: str) -> str:
-    if text.startswith("<editor-context-json ") and "</editor-context-json>\n\n" in text:
-        return text.split("</editor-context-json>\n\n", 1)[1]
-    return text
+    if len(clean) <= 60:
+        return clean
+    return clean[:57].rstrip(" ,.;:-") + "…"
 
 
 class _Shutdown(Exception):
@@ -298,6 +232,8 @@ class HeadlessUI:
         self.em = emitter
         self.pending = pending
         self.approval_timeout_s = max(0.01, float(approval_timeout_s))
+        self.question_forms = False  # opted in by the editor handshake; strict older v6 clients remain valid
+        self.cancelled = None
         self._rule_hook = None          # set by Backend to persist an allow rule
         self._rule_override: dict = {}   # tool -> explicit rule string the IDE dictated
         self.plan_feedback = ""         # one-shot feedback consumed by Agent after rejection
@@ -311,6 +247,11 @@ class HeadlessUI:
 
     def end_stream(self) -> None:
         self.em.emit("stream_end")
+
+    def steering_applied(self, request_id: str) -> None:
+        hook = getattr(self, "_steering_hook", None)
+        if hook:
+            hook(request_id)
 
     # tools --------------------------------------------------------------------
     def tool_call(self, name: str, args: dict, call_id: str | None = None) -> None:
@@ -350,36 +291,57 @@ class HeadlessUI:
         self.em.emit("artifact_ready", id=art.id, name=art.name, url=art.url, rel=art.rel)
 
     def goal_changed(self, goal: str, status: str) -> None:
-        self.em.emit("goal_changed", goal=goal, status=status)
+        hook = getattr(self, "_goal_hook", None)
+        if callable(hook):
+            hook()
+        else:
+            self.em.emit("goal_changed", goal=goal, status=status)
 
     # notices ------------------------------------------------------------------
     def info(self, message: str) -> None:
         self.em.emit("info", message=message)
 
+    def context_compacted(self, result: dict) -> None:
+        """Carry the exact post-save compaction outcome instead of parsing a status sentence."""
+        self.em.emit("compacted", **result)
+
     def error(self, message: str) -> None:
         self.em.emit("error", message=message)
 
     # blocking decisions -------------------------------------------------------
-    def _await(self, rid: str, ev: threading.Event, cancel=None):
-        deadline = time.monotonic() + self.approval_timeout_s
-        while not ev.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+    def _await(self, rid: str, ev: threading.Event, cancel=None, recheck=None, *, human=False):
+        # Reviewing a plan or deciding between options is not an abandoned network request.
+        # Only an explicit reply, Stop, or disconnection ends a native human decision.
+        deadline = None if human else time.monotonic() + self.approval_timeout_s
+        cancel = cancel if cancel is not None else self.cancelled
+        while not ev.wait(0.1 if deadline is None else min(0.1, max(0.0, deadline - time.monotonic()))):
             if cancel is not None and cancel.is_set():
                 self.pending.value(rid)
                 self.em.emit("request_expired", id=rid)
                 return None
-            if time.monotonic() >= deadline:
+            if recheck is not None:
+                decision = recheck()
+                if decision in ("once", "no") and self.pending.resolve(rid, {"decision": decision}):
+                    self.em.emit("permission_resolved", id=rid, decision=decision,
+                                 message="Approved by the current permission mode" if decision == "once"
+                                 else "Blocked by the current permission mode")
+                    continue
+            if deadline is not None and time.monotonic() >= deadline:
                 self.pending.value(rid)  # discard it so a late response cannot affect another request
                 self.em.emit("request_expired", id=rid)
                 return None
         return self.pending.value(rid)
 
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
+        return self.approve_live(name, args, call_id)
+
+    def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
         self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
                      command=(args.get("command") if name == "bash" else None),
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, recheck=recheck, human=True) or {}
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
         return {"once": "once", "always": "always",
@@ -395,7 +357,7 @@ class HeadlessUI:
         rid, ev = self.pending.register()
         self.em.emit("plan_proposal", id=rid, plan=plan,
                      choices=["auto", "acceptEdits", "default", "reject"])
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, human=True) or {}
         self.plan_feedback = str(payload.get("feedback") or "").strip()
         decision = payload.get("decision")
         if decision in _PLAN_MODES:
@@ -403,15 +365,37 @@ class HeadlessUI:
         return decision if decision in _PLAN_MODES else None
 
     def propose_options(self, question: str, options: list) -> str:
-        rid, ev = self.pending.register()
+        def valid(payload):
+            choice = payload.get("choice") if isinstance(payload, dict) else None
+            return ((type(choice) is int and 1 <= choice <= len(options))
+                    or (isinstance(choice, str) and bool(choice.strip()) and len(choice) <= 4096))
+        rid, ev = self.pending.register(validator=valid)
         self.em.emit("options_request", id=rid, question=question, options=options)
-        payload = self._await(rid, ev) or {}
+        payload = self._await(rid, ev, human=True) or {}
         choice = payload.get("choice")
-        if isinstance(choice, int) and 1 <= choice <= len(options):
+        if type(choice) is int and 1 <= choice <= len(options):
             return options[choice - 1]
-        if isinstance(choice, str) and choice:
-            return choice
-        return options[0] if options else ""
+        if isinstance(choice, str) and choice.strip() and len(choice) <= 4096:
+            return choice.strip()
+        return ""
+
+    def propose_questions(self, questions: list[dict]) -> dict | None:
+        from .questions import valid_answers
+        if not self.question_forms:
+            answers = {}
+            for q in questions:
+                answer = self.propose_options(q["question"], q["options"])
+                if not answer:
+                    return None
+                answers[q["id"]] = answer
+            return answers
+        rid, ev = self.pending.register(validator=lambda p: isinstance(p, dict)
+                                         and valid_answers(questions, p.get("answers")))
+        self.em.emit("options_request", id=rid, question=questions[0]["question"],
+                     options=questions[0]["options"], questions=questions)
+        payload = self._await(rid, ev, human=True) or {}
+        answers = payload.get("answers")
+        return answers if valid_answers(questions, answers) else None
 
     def mcp_capabilities(self) -> dict:
         return {"sampling": {}, "elicitation": {"form": {}, "url": {}}}
@@ -442,13 +426,17 @@ class Backend:
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
         self.agent = Agent(config, self.ui)
+        self.ui.cancelled = self.agent.cancelled
+        self.ui._goal_hook = self._emit_goal
         self.ui._rule_hook = self._add_rule
+        self.ui._steering_hook = self._steering_applied
         self.agent.session_file = sessions_mod.new_path(config.project_root)
         self._worker: threading.Thread | None = None
         self._foreground_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
         self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
+        self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
 
     def _add_rule(self, rule_text: str) -> None:
@@ -463,14 +451,20 @@ class Backend:
         self.em.emit(
             "ready", version=__version__, protocol_version=PROTOCOL_VERSION,
             capabilities={"typed_editor_context": True, "multi_root": True, "usage": True,
-                          "goal_state": True, "saved_plan": True, "command_registry": True,
+                          "goal_state": True, "goal_runner": True, "saved_plan": True, "command_registry": True,
                           "provider_model_discovery": True, "headless_mcp_catalog": True,
                           "headless_mcp_call": True, "headless_skill_catalog": True,
                           "headless_feature_management": True,
                           "headless_handoff": True, "headless_hook_catalog": True,
-                          "hook_activity": True, "correlated_state_requests": True},
+                          "hook_activity": True, "correlated_state_requests": True,
+                          "ultra_profile": True, "composer_selections": True, "skill_management": True,
+                          "mcp_context": True, "mcp_management": True, "history_snapshot": True,
+                          "goal_inputs": True, "workflows": True, "workspace_inspection": True, "chat_inspection": True,
+                          "live_steering": True, "live_modes": True, "question_forms": True,
+                          "steering_native": not bool(self.config.get("subscription_engine", ""))},
             model=self.config.model, mode=self.agent.mode,
             think=self.config.get("thinking", "off"), base_url=self.config.base_url,
+            ultra_mode=bool(self.config.get("ultra_mode", False)),
             subagent_base_url=self.config.get("subagent_base_url", ""),
             fallback_base_url=self.config.get("fallback_base_url", ""),
             project_root=str(self.config.project_root),
@@ -483,16 +477,24 @@ class Backend:
             skills=[s.name for s in self.agent.skills.values()],
             commands=editor_command_metadata(),
             custom_commands=custom_command_names(self.config.project_root),
-            goal={"text": self.agent.goal, "status": self.agent.goal_status,
-                  "elapsed_seconds": self._goal_elapsed_seconds()},
+            goal=self._goal_snapshot(),
+            session_name=str(self.agent.session_name or ""),
             context_size=self._context_window_size())
+        for warning in getattr(self.config, "credential_warnings", ()):
+            self.em.emit("info", message=str(warning)[:1000])
         self._emit_context()
+        # Publish the complete route state immediately after the ready handshake. ``config``
+        # carries both native and delegated settings so editors render the route that will run.
+        self._emit_config()
 
     def _context_window_size(self) -> int:
         effective = getattr(self.agent, "context_size", None)
         if callable(effective):
             return int(effective())
-        return int(self.config.get("context_size", 32768))
+        config_get = getattr(self.config, "get", None)
+        if callable(config_get):
+            return int(config_get("context_size", 32768))
+        return int(getattr(self.config, "data", {}).get("context_size", 32768))
 
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
@@ -511,18 +513,35 @@ class Backend:
             lock = self._turn_lock = threading.RLock()
         return lock
 
-    def _start_turn(self, text: str, images=None, context=None) -> tuple[str, int]:
+    def _start_turn(self, text: str, images=None, context=None, *, delivery="queue", request_id="") -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         lock = self._turn_state_lock()
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
                 return "busy", 0
             if getattr(self, "_worker", None) is not None:
-                pending_bytes = sum(_turn_payload_bytes(*item) for item in self._queue)
-                if (len(self._queue) >= _MAX_QUEUED_TURNS
+                steers = getattr(self, "_steer_payloads", {})
+                pending_bytes = sum(_turn_payload_bytes(*item) for item in [*self._queue, *steers.values()])
+                if (len(self._queue) + len(steers) >= _MAX_QUEUED_TURNS
                         or pending_bytes + _turn_payload_bytes(text, images, context)
                         > _MAX_QUEUED_TURN_BYTES):
                     return "full", len(self._queue)
+                config = getattr(self, "config", getattr(self.agent, "config", None))
+                config_get = getattr(config, "get", None)
+                engine = config_get("subscription_engine", "") if callable(config_get) else ""
+                if delivery == "steer" and not engine and not self.agent.cancelled.is_set():
+                    import uuid
+                    identity = request_id or str(uuid.uuid4())
+                    if identity in steers:
+                        return "duplicate", len(self._queue)
+                    model_text = _format_editor_context(redact_value(context, secret_values(config))) + text
+                    steers[identity] = (text, images, context)
+                    self._steer_payloads = steers
+                    if self.agent.steer(model_text, images=images, request_id=identity):
+                        # Publish acceptance before the worker can acknowledge consumption.
+                        self.em.emit("prompt_accepted", request_id=identity, state="steered")
+                        return "steered", len(self._queue)
+                    steers.pop(identity, None)
                 self._queue.append((text, images, context))
                 return "queued", len(self._queue)
             self._queue.append((text, images, context))
@@ -531,6 +550,32 @@ class Backend:
             self._worker = worker
             worker.start()
             return "started", 0
+
+    def _steering_applied(self, request_id: str) -> None:
+        with self._turn_state_lock():
+            if getattr(self, "_steer_payloads", {}).pop(request_id, None) is not None:
+                self.em.emit("steering_update", request_id=request_id, state="applied")
+
+    def _finish_steering(self, cancelled: bool, failed: bool) -> None:
+        take = getattr(self.agent, "take_deferred_inputs", None)
+        if callable(take):
+            take()
+        retained = []
+        with self._turn_state_lock():
+            # The consumption acknowledgement removes applied inputs synchronously. Everything
+            # left here is owned but unconsumed, including a failed context/skill preparation.
+            pending = getattr(self, "_steer_payloads", {})
+            for identity, payload in list(pending.items()):
+                pending.pop(identity, None)
+                if cancelled or failed:
+                    self.em.emit("steering_update", request_id=identity, state="returned",
+                                 message="This follow-up was not applied. Your message has been preserved.")
+                else:
+                    retained.append(payload)
+                    self.em.emit("steering_update", request_id=identity, state="queued")
+            self._queue[:0] = retained
+            if retained:
+                self.em.emit("queued", count=len(self._queue), text="")
 
     def _run_subscription_turn(self, engine_key: str, prompt: str) -> bool:
         """Delegate one editor turn while preserving the native headless event contract."""
@@ -541,7 +586,10 @@ class Backend:
             return False
         mode = str(self.config.data.get("mode", "default"))
         model = str(self.config.get("subscription_model", "")).strip()
-        effort = str(self.config.get("subscription_effort", "")).strip()
+        configured_effort = str(self.config.get("subscription_effort", "")).strip()
+        from .ultra import delegated_effort, delegated_prompt
+        effort = delegated_effort(
+            self.config, engine.key, configured_effort, engine.supports_effort())
         session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
         names: dict[str, str] = {}
         diffs: dict[str, str] = {}
@@ -567,6 +615,8 @@ class Backend:
             elif kind == "tool_result":
                 call_id = str(event.get("id") or "") or None
                 output = diffs.get(call_id or "") or str(event.get("output") or "")
+                if event.get("error"):
+                    output = "error: " + str(event.get("output") or "tool failed")
                 self.ui.tool_result(names.get(call_id or "", ""), output, call_id)
             elif kind == "status" and event.get("text"):
                 self.ui.info(str(event["text"]))
@@ -577,11 +627,14 @@ class Backend:
         budget = int(self.config.get("turn_budget_s") or 0) or 1800
 
         def delegate(safe_prompt: str) -> dict:
+            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
+            shown["text"] = False
             result = subs.run_turn(
-                engine, safe_prompt, self.config.project_root,
+                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
                 cont=bool(session_id), session_id=session_id, mode=mode,
                 timeout=budget, on_event=on_event, cancel=self.agent.cancelled.is_set,
-                model=model, effort=effort)
+                model=model, effort=effort, goal_request=self.agent._active_goal_request,
+                redact_secrets=self.agent._secret_values())
             if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
                 self.agent.remember_subscription_session(
                     engine.key, result["session_id"], mode, model, effort)
@@ -625,7 +678,15 @@ class Backend:
                     self, "config", getattr(getattr(self, "agent", None), "config", None))
                 safe_context = redact_value(context, secret_values(active_config))
                 model_text = _format_editor_context(safe_context) + text
-                self.em.emit("turn_start", turn_id=tid, prompt=text)
+                from .workflows import display_prompt
+                shown_prompt = display_prompt(text)
+                name_session = getattr(self.agent, "name_session", None)
+                if not getattr(self.agent, "session_name", None) and callable(name_session):
+                    title = _prompt_thread_title(shown_prompt)
+                    if title and name_session(title):
+                        self.em.emit("session_named", name=title)
+                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt)
+                eta_stop = self._start_eta_ticker(tid)
                 failed = False
                 try:
                     config_get = getattr(active_config, "get", None)
@@ -654,14 +715,26 @@ class Backend:
                         {"traceback": traceback.format_exc()},
                         secret_values(active_config))["traceback"])
                 cancelled = self.agent.cancelled.is_set()
+                eta_stop.set()
+                self._finish_steering(cancelled, failed)
                 try:
                     est = self.agent.estimate_tokens()
                 except Exception:
                     est = 0
-                self.em.emit("turn_end", turn_id=tid,
-                             reason="cancelled" if cancelled else ("error" if failed else "completed"),
-                             token_estimate=est)
-                self._emit_context()
+                with self._turn_state_lock():
+                    idle = not self._queue
+                    if idle and self._worker is current:
+                        self._worker = None
+                    # Release an idle worker before publishing its terminal event. Goal pause,
+                    # delete, model changes and workspace updates may arrive immediately on that
+                    # acknowledgement. Serialize publication with enqueue so a newer turn_start
+                    # cannot overtake this turn_end or be consumed by the retiring worker.
+                    self.em.emit("turn_end", turn_id=tid,
+                                 reason="cancelled" if cancelled else ("error" if failed else "completed"),
+                                 token_estimate=est)
+                    self._emit_context()
+                if idle:
+                    return
         finally:
             # A broken output stream or unexpected fixture/runtime exception must not leave the
             # backend permanently busy.  Retain any unstarted FIFO entries for the next submission.
@@ -755,15 +828,38 @@ class Backend:
             "mcp_call_complete", request_id=request_id, call_id=call_id,
             name=name, status=status, output=str(output))
 
+    def _mcp_context_operation(self, command: dict):
+        from .mcp_context import list_catalog
+        server_name, kind = command["server"], command["kind"]
+        fields = {"request_id": command["request_id"], "server": server_name, "kind": kind}
+        listing = command["type"] == "list_mcp_context"
+        event = "mcp_context_catalog" if listing else "mcp_context"
+        fields.update({"items": []} if listing else {"identifier": command["identifier"], "text": "", "omitted": []})
+        try:
+            server = self.agent.mcp.servers.get(server_name)
+            if server is None:
+                raise ValueError("This MCP server is disconnected. Reconnect it before selecting context.")
+            if listing:
+                fields["items"] = list_catalog(server, kind, cancel=self.agent.cancelled)
+            else:
+                fields.update(self.agent.execute_mcp_context(server_name, kind, command["identifier"],
+                    command.get("arguments", {}), "context-" + command["request_id"]))
+        except (OSError, ValueError) as exc:
+            fields["error"] = str(exc)
+        except Exception as exc:
+            fields["error"] = f"MCP context operation failed ({type(exc).__name__})"
+        return lambda: self.em.emit(event, **fields)
+
     def _emit_skill_catalog(self, request_id: str) -> None:
-        rows = skill_catalog(self.agent.skills, self.config.project_root)
+        rows = skill_catalog(dict(self.agent.skills), self.config.project_root)
         self.em.emit("skill_catalog", request_id=request_id, items=rows, total=len(rows))
 
     def _emit_skill_detail(self, request_id: str, name: str) -> None:
         normalized = normalize_skill_name(name)
-        skill = self.agent.skills.get(normalized)
+        skills = dict(self.agent.skills)
+        skill = skills.get(normalized)
         metadata = {row["name"]: row
-                    for row in skill_catalog(self.agent.skills, self.config.project_root)}
+                    for row in skill_catalog(skills, self.config.project_root)}
         row = metadata.get(normalized, {})
         self.em.emit(
             "skill_detail", request_id=request_id, found=skill is not None,
@@ -786,42 +882,8 @@ class Backend:
             markdown=entry[2][:120_000] if entry else "")
 
     @staticmethod
-    def _public_mcp_spec(raw) -> dict:
-        spec = raw if isinstance(raw, dict) else {}
-        raw_args = spec.get("args") if isinstance(spec.get("args"), list) else []
-        args, skip = [], False
-        for arg in raw_args[:128]:
-            text = str(arg)[:8192]
-            if skip:
-                skip = False
-                continue
-            if text == "--header":
-                skip = True
-                continue
-            if text.lower().startswith("authorization:"):
-                continue
-            if text.lower().startswith(("http://", "https://")) and _mcp_url_has_credentials(text):
-                text = "<credential-bearing URL hidden>"
-            args.append(text)
-        env = spec.get("env") if isinstance(spec.get("env"), dict) else {}
-        declared = spec.get("env_names") if isinstance(spec.get("env_names"), list) else []
-        env_names = [name for name in [*declared, *env]
-                     if isinstance(name, str) and _MCP_ENV_RE.fullmatch(name)][:64]
-        transport = str(spec.get("transport") or "")
-        url = str(spec.get("url") or "")
-        if not transport:
-            transport = ("remote" if len(raw_args) >= 3 and raw_args[:2] == ["-y", "mcp-remote"]
-                         else "stdio")
-        if transport == "remote" and not url and len(raw_args) >= 3:
-            url = str(raw_args[2])[:4096]
-        if url and _mcp_url_has_credentials(url):
-            url = ""
-        return {
-            "transport": transport if transport in ("stdio", "remote") else "stdio",
-            "command": str(spec.get("command") or "")[:4096], "args": args,
-            "env_names": list(dict.fromkeys(env_names)), "url": url[:4096],
-            "log_level": str(spec.get("log_level") or "warning")[:16],
-        }
+    def _public_mcp_spec(spec) -> dict:
+        return public_mcp_spec(spec)
 
     def _emit_mcp_servers(self, request_id: str, error: str | None = None) -> None:
         configured = self.config.get("mcp_servers", {}) or {}
@@ -829,13 +891,16 @@ class Backend:
         statuses = {str(row.get("name")): row for row in self.agent.mcp.status()
                     if isinstance(row, dict)}
         items = []
+        disabled = self.config.get("disabled_mcp_servers", [])
+        disabled = disabled if isinstance(disabled, list) else []
         for index, (raw_name, raw_spec) in enumerate(configured.items()):
             if index >= _MAX_MCP_SERVERS:
                 break
             name = str(raw_name)[:128]
             status = statuses.pop(name, {})
             items.append({"name": name, **self._public_mcp_spec(raw_spec),
-                          "state": str(status.get("state") or "configured")[:32],
+                          "enabled": name not in disabled,
+                          "state": "disabled" if name in disabled else str(status.get("state") or "configured")[:32],
                           "tool_count": int(status.get("tool_count") or 0),
                           "protocol_version": str(status.get("protocol_version") or "")[:64],
                           "protocol_era": str(status.get("protocol_era") or "")[:32],
@@ -851,17 +916,65 @@ class Backend:
         self.em.emit("mcp_servers", request_id=request_id, items=items,
                      total=len(items), **fields)
 
+    def _mcp_control(self, command: dict):
+        from .mcp_management import set_server_enabled
+        error = None
+        try:
+            name = command["name"]
+            if not _MCP_NAME_RE.fullmatch(name) or name not in self.config.get("mcp_servers", {}):
+                raise ValueError("Choose an existing MCP server")
+            if command["type"] == "set_mcp_enabled":
+                set_server_enabled(self.config, self.agent.mcp, name, command["enabled"], cancel=self.agent.cancelled,
+                                   input_handler=self.agent._handle_mcp_input)
+            else:
+                runtime = self.config.mcp_runtime_servers()
+                self.agent.mcp.reconnect(name, runtime[name], cancel=self.agent.cancelled,
+                                         input_handler=self.agent._handle_mcp_input)
+        except (OSError, ValueError) as exc:
+            error = str(exc)
+        except Exception as exc:
+            error = f"MCP connection operation failed ({type(exc).__name__})"
+        return lambda: self._emit_mcp_servers(command["request_id"], error)
+
+    def _mcp_command(self, command: dict):
+        import shlex
+        from .mcp_management import manage_mcp
+        fields = {"request_id": command["request_id"], "output": ""}
+        try:
+            arguments = command["arguments"]
+            if len(arguments) > 32_000:
+                raise ValueError("MCP command exceeds 32,000 characters")
+            parts = shlex.split(arguments)
+            result = manage_mcp(self.config, self.agent.mcp, arguments, agent=self.agent)
+            if isinstance(result, dict):
+                fields["context"] = result
+            elif parts and parts[0] in ("resources", "templates", "prompts"):
+                fields["catalog"] = {"server": parts[1], "kind": parts[0], "items": json.loads(result)}
+            else:
+                fields["output"] = result
+        except (OSError, ValueError) as exc:
+            fields["error"] = str(exc)
+        except Exception as exc:
+            fields["error"] = f"MCP command failed ({type(exc).__name__})"
+        def terminal():
+            self._emit_mcp_servers(command["request_id"])
+            self.em.emit("mcp_command_result", **fields)
+        return terminal
+
     def _upsert_mcp_server(self, request_id: str, name: str,
-                           runtime_value, persisted_value) -> None:
+                           runtime_value, persisted_value, *, interactive: bool = False):
+        def finish(error=None):
+            terminal = lambda: self._emit_mcp_servers(request_id, error)
+            return terminal if interactive else terminal()
+
         if not _MCP_NAME_RE.fullmatch(name):
-            self._emit_mcp_servers(request_id, "server name must use 1-64 letters, digits, ., _, or -")
-            return
+            return finish("server name must use 1-64 letters, digits, ., _, or -")
         runtime, runtime_error = _mcp_spec(runtime_value, persisted=False)
         persisted, persisted_error = _mcp_spec(persisted_value, persisted=True)
         problem = runtime_error or persisted_error
         if not problem and runtime and persisted:
             if (any(runtime.get(key) != persisted.get(key)
-                    for key in ("transport", "command", "env_names", "url", "log_level"))
+                    for key in ("transport", "command", "env_names", "auth_env", "url", "log_level"))
                     or bool(runtime.get("defer_until_setup"))
                     != bool(persisted.get("defer_until_setup"))):
                 problem = "runtime and persisted server identity do not match"
@@ -874,24 +987,32 @@ class Backend:
                 if (persisted.get("transport") != "remote" or len(extra) != 2
                         or extra[0] != "--header" or header_env is None
                         or header_env.group(1) not in runtime.get("env", {})
-                        or header_env.group(1) not in persisted.get("env_names", [])):
+                        or header_env.group(1) not in persisted.get("env_names", [])
+                        or header_env.group(1) != persisted.get("auth_env")):
                     problem = "runtime arguments may only add one bounded remote Authorization header"
             elif extra is None:
                 problem = "runtime arguments must preserve the persisted argument prefix"
         if problem or runtime is None or persisted is None:
-            self._emit_mcp_servers(request_id, problem or "invalid MCP server specification")
-            return
+            return finish(problem or "invalid MCP server specification")
         servers = dict(self.config.get("mcp_servers", {}) or {})
         if name not in servers and len(servers) >= _MAX_MCP_SERVERS:
-            self._emit_mcp_servers(request_id, f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
-            return
+            return finish(f"at most {_MAX_MCP_SERVERS} MCP servers are supported")
+        if hasattr(self.config, "drop_mcp_secrets"):
+            # An editor upsert may replace a SecretStorage value without changing the public
+            # server identity.  Never let an older CLI-migrated value win on the next launch.
+            self.config.drop_mcp_secrets(name)
         servers[name] = persisted
         self.config.set("mcp_servers", servers)
         secret_candidates = list(runtime.get("env", {}).values())
         existing = list(getattr(self.config, "_session_secret_values", ()))
         self.config._session_secret_values = tuple((existing + secret_candidates)[-256:])
-        self.agent.mcp.connect_all({name: runtime})
-        self._emit_mcp_servers(request_id)
+        try:
+            self.agent.mcp.connect_all({name: runtime},
+                                      cancel=self.agent.cancelled if interactive else None,
+                                      input_handler=self.agent._handle_mcp_input if interactive else None)
+        except Exception as exc:
+            return finish(f"MCP connection failed ({type(exc).__name__})")
+        return finish()
 
     def _emit_permissions(self, request_id: str) -> None:
         items = [{"action": action, "rule": str(rule)[:1000]}
@@ -945,6 +1066,9 @@ class Backend:
 
     def close(self) -> None:
         """Cancel foreground work and release pending controller decisions on backend exit."""
+        inspection = getattr(self, "_editor_inspection", None)
+        if inspection is not None:
+            inspection.close()
         with self._turn_state_lock():
             self.agent.cancelled.set()
             self._queue.clear()
@@ -958,13 +1082,52 @@ class Backend:
         if manager is not None:
             manager.stop_all()
 
+    def _start_eta_ticker(self, turn_id: str) -> threading.Event:
+        """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
+        stop = threading.Event()
+        agent = self.agent
+
+        def tick() -> None:
+            last_label, last_emit = "", 0.0
+            while not stop.wait(1.5):
+                try:
+                    snapshot = agent.eta_snapshot()
+                except Exception:
+                    snapshot = None
+                if snapshot is None or not snapshot.visible:
+                    continue
+                now = time.monotonic()
+                if snapshot.label == last_label and now - last_emit < 15.0:
+                    continue
+                last_label, last_emit = snapshot.label, now
+                try:
+                    self.em.emit("turn_eta", turn_id=turn_id,
+                                 elapsed_seconds=round(float(snapshot.elapsed), 1),
+                                 remaining_low_seconds=round(float(snapshot.low), 1),
+                                 remaining_high_seconds=round(float(snapshot.high), 1),
+                                 confidence=round(float(snapshot.confidence), 3),
+                                 label=snapshot.label, tasks_done=int(snapshot.tasks_done),
+                                 tasks_total=int(snapshot.tasks_total))
+                except Exception:
+                    return
+        threading.Thread(target=tick, name="dgc-eta", daemon=True).start()
+        return stop
+
     def _emit_context(self, request_id: str | None = None) -> None:
         try:
             used = self.agent.estimate_tokens()
         except Exception:
             used = 0
         totals = getattr(self.agent, "usage_totals", {})
-        self.em.emit("context", used=used, size=self._context_window_size(),
+        size = self._context_window_size()
+        try:
+            threshold = float(self.config.get("compact_threshold", 0.85))
+        except (AttributeError, TypeError, ValueError):
+            threshold = 0.85
+        if not math.isfinite(threshold) or threshold <= 0:
+            threshold = 0.85
+        self.em.emit("context", used=used, size=size,
+                     compact_threshold=threshold, compact_at=max(0, int(size * threshold)),
                      input_tokens=int(totals.get("input_tokens", 0)),
                      output_tokens=int(totals.get("output_tokens", 0)),
                      cached_input_tokens=int(totals.get("cached_input_tokens", 0)),
@@ -1013,6 +1176,7 @@ class Backend:
                      sandbox_network=bool(c.get("sandbox_network", False)),
                      show_reasoning=bool(c.get("show_reasoning", True)),
                      preserve_thinking=bool(c.get("preserve_thinking", False)),
+                     ultra_mode=bool(c.get("ultra_mode", False)),
                      code_action=bool(c.get("code_action", False)),
                      suggest=bool(c.get("suggest", True)),
                      plan_artifact=bool(c.get("plan_artifact", True)),
@@ -1020,9 +1184,7 @@ class Backend:
                      artifact_in_plan=bool(c.get("artifact_in_plan", False)),
                      tool_profile=str(c.get("tool_profile", "adaptive")),
                      max_parallel_tasks=int(c.get("max_parallel_tasks", 4)),
-                     goal={"text": getattr(self.agent, "goal", ""),
-                           "status": getattr(self.agent, "goal_status", "none"),
-                           "elapsed_seconds": self._goal_elapsed_seconds()},
+                     goal=self._goal_snapshot(),
                      **_request_fields(request_id))
 
     def _goal_elapsed_seconds(self) -> int:
@@ -1038,29 +1200,73 @@ class Backend:
         self.em.emit("goal_changed", goal=getattr(self.agent, "goal", ""),
                      status=getattr(self.agent, "goal_status", "none"),
                      elapsed_seconds=self._goal_elapsed_seconds(),
+                     details=self._goal_snapshot(),
                      **_request_fields(request_id))
+
+    def _goal_snapshot(self) -> dict:
+        snapshot = getattr(self.agent, "goal_snapshot", None)
+        return snapshot() if callable(snapshot) else {
+            "text": getattr(self.agent, "goal", ""), "status": getattr(self.agent, "goal_status", "none"),
+            "elapsed_seconds": self._goal_elapsed_seconds()}
 
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
         items = []
+        calls = {}
         for m in self.agent.messages:
             role = m.get("role")
             content = m.get("content")
             if role == "system":
                 continue
             if role == "user":
+                from .workflows import display_prompt
                 if isinstance(content, list):
-                    text = " ".join(p.get("text", "") for p in content
-                                    if isinstance(p, dict) and p.get("type") == "text") + " 📷"
+                    text = display_prompt(_strip_editor_context(" ".join(p.get("text", "") for p in content
+                                    if isinstance(p, dict) and p.get("type") == "text"))) + " 📷"
                 else:
-                    text = _strip_editor_context(str(content))
+                    text = display_prompt(_strip_editor_context(str(content)))
                 if text.startswith("<tool_results>"):
                     continue
                 items.append({"role": "user", "text": text})
             elif role == "assistant":
-                tools = [(tc.get("function") or {}).get("name", "") for tc in (m.get("tool_calls") or [])]
-                items.append({"role": "assistant", "text": str(content or ""), "tools": tools})
-        return items
+                tools = [str((tc.get("function") or {}).get("name", ""))[:128] for tc in (m.get("tool_calls") or [])[:16]]
+                details = []
+                for tc in (m.get("tool_calls") or [])[:16]:
+                    function = tc.get("function") or {}
+                    arguments = function.get("arguments") or ""
+                    detail = {"name": str(function.get("name") or "tool")[:128],
+                              "arguments": (arguments if isinstance(arguments, str) else
+                                            json.dumps(arguments, ensure_ascii=False))[:1000],
+                              "output": "", "status": "unknown"}
+                    if tc.get("id"):
+                        calls[str(tc["id"])] = detail
+                    details.append(detail)
+                items.append({"role": "assistant", "text": str(content or ""), "tools": tools,
+                              "tool_details": details, "commentary": bool(tools)})
+            elif role == "tool":
+                detail = calls.pop(str(m.get("tool_call_id") or ""), None)
+                if detail is not None:
+                    output = str(content or "")
+                    detail["output"] = output[:4000] + ("\n[Earlier tool output truncated]" if len(output) > 4000 else "")
+                    # The saved protocol lacks a reliable success flag. Preserve the result without
+                    # inventing a green success state for failed commands or denials.
+                    detail["status"] = "returned"
+        # A display projection must not break the editor's bounded NDJSON transport. Session/model
+        # history remains intact; this limit applies only to the restored webview payload.
+        retained, size = [], 0
+        for item in reversed(items):
+            text = str(item.get("text") or "")
+            if len(text) > 50000:
+                item["text"] = text[:50000] + "\n[Long saved message truncated for display]"
+            cost = len(json.dumps(item, ensure_ascii=True))
+            if retained and size + cost > 1_000_000:
+                break
+            retained.append(item)
+            size += cost
+        retained.reverse()
+        if len(retained) < len(items):
+            retained.insert(0, {"role": "notice", "text": "Showing the most recent saved context. Earlier messages remain in the session file."})
+        return retained
 
     def dispatch(self, cmd: dict) -> None:
         problem = command_error(cmd)
@@ -1085,37 +1291,148 @@ class Backend:
                          **_request_fields(request_id))
             return
 
-        if t == "prompt":
+        if t == "start_goal":
+            # Validate and persist the whole prepared request while no other foreground work can
+            # take the turn slot. A rejected selection must not replace the standing goal.
+            with self._turn_state_lock():
+                if self._busy():
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="Finish or stop the current turn before starting a goal.",
+                                 **_request_fields(request_id))
+                    return
+                text = cmd["text"].strip()
+                inputs = {key: cmd[key] for key in ("skills", "templates", "images", "context") if key in cmd}
+                if not text or not self.agent.set_goal(text, replace=True, token_budget=cmd.get("token_budget"), inputs=inputs):
+                    self.em.emit("command_rejected", command=t, reason="invalid_goal",
+                                 message=self.agent._last_persist_error or "Enter a goal objective.",
+                                 **_request_fields(request_id))
+                    return
+                state, _ = self._start_turn(text)
+                if state != "started":
+                    self.agent.update_goal("paused", reason="The first turn could not start")
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="The goal was saved as paused because its first turn could not start.",
+                                 **_request_fields(request_id))
+                    return
+                self.em.emit("prompt_accepted", request_id=request_id, state=state)
+
+        elif t in ("get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change"):
+            from .editor_changes import EditorChanges
+            if getattr(self, "_editor_inspection", None) is None:
+                self._editor_inspection = EditorChanges(self.config.project_root, self.em.emit)
+                if hasattr(self, "_editor_inspection_roots"):
+                    self._editor_inspection.set_roots(self._editor_inspection_roots)
+            if t in ("get_chat_changes", "get_chat_change"):
+                self._editor_inspection.request(dict(cmd), journal=self.agent.chat_changes,
+                    session_id=self.agent.session_file.stem if self.agent.session_file else "")
+            else:
+                self._editor_inspection.request(dict(cmd))
+
+        elif t == "prompt":
             text = str(cmd.get("text", ""))
             if len(text) > _MAX_PROMPT_CHARS:
                 self.em.emit("command_rejected", command=t, reason="prompt_too_large",
-                             message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit")
+                             message=f"prompt exceeds the {_MAX_PROMPT_CHARS}-character limit",
+                             **_request_fields(request_id))
                 return
+            workflow = None
+            if "workflow" in cmd:
+                from .workflows import prepare_workflow
+                try:
+                    workflow = prepare_workflow(cmd["workflow"], text, self.agent)
+                    if not workflow.prompt:
+                        raise ValueError("Enter a task to plan, or use /plan to enter plan mode without sending a prompt.")
+                    text = workflow.prompt
+                    if len(text) > _MAX_PROMPT_CHARS:
+                        raise ValueError("The prepared workflow exceeds the prompt size limit; shorten the request.")
+                except ValueError as exc:
+                    self.em.emit("command_rejected", command=t, reason="invalid_workflow",
+                                 message=str(exc), **_request_fields(request_id))
+                    return
+            if "skills" in cmd or "templates" in cmd:
+                from .composer import compose_prompt
+                from .skills import discover_skills, explicit_skill_instructions, format_skill_instructions
+                try:
+                    # Discovery is a separate snapshot: do not mutate the active turn's catalog
+                    # while preflighting a queued prompt. A deleted/disabled selection must be
+                    # rejected before acknowledging the draft or changing workflow permissions.
+                    catalog = discover_skills(self.config.project_root,
+                                              disabled_names=self.config.get("disabled_skills", []))
+                    text = compose_prompt(text, skills=cmd.get("skills"),
+                                          templates=cmd.get("templates"), catalog=catalog,
+                                          project_root=self.config.project_root)
+                    context_size = getattr(self.agent, "context_size", None)
+                    allowance = min(96_000, max(4_000, context_size() * 2)) if callable(context_size) else 96_000
+                    format_skill_instructions(explicit_skill_instructions(catalog, text), allowance)
+                except ValueError as exc:
+                    self.em.emit("command_rejected", command=t, reason="invalid_selection",
+                                 message=str(exc), **_request_fields(request_id))
+                    return
             try:
                 images = validate_image_data_uris(
                     cmd.get("images"), maximum_file_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES,
                     maximum_total_bytes=MAX_EDITOR_IMAGE_TOTAL_BYTES)
             except ValueError as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_images",
-                             message=f"prompt images rejected: {exc}")
+                             message=f"prompt images rejected: {exc}", **_request_fields(request_id))
+                return
+            if images and self.config.get("subscription_engine", ""):
+                self.em.emit("command_rejected", command=t, reason="unsupported_images",
+                             message="Subscription CLI delegation does not support DGC image attachments. Use a native vision model.",
+                             **_request_fields(request_id))
                 return
             context = cmd.get("context")            # typed editor resources; bounded in _start_turn
+            if isinstance(context, list) and any(isinstance(item, dict) and item.get("type") == "mcp_context" for item in context):
+                safe = redact_value(context, secret_values(self.config))
+                formatted = _format_editor_context(safe)
+                retained = json.loads(formatted.split("\n", 2)[1]) if formatted else []
+                if any(not any(row.get("type") == "mcp_context" and row.get("server") == item.get("server")
+                               and row.get("uri") == item.get("uri") and row.get("text") == item.get("text")
+                               for row in retained) for item in safe
+                       if isinstance(item, dict) and item.get("type") == "mcp_context"):
+                    self.em.emit("command_rejected", command=t, reason="invalid_selection",
+                                 message="The selected MCP context exceeds the attachment limit. Remove an attachment or choose a smaller resource.",
+                                 **_request_fields(request_id))
+                    return
             if text.startswith("/"):               # render a custom slash-command template
                 parts = text[1:].split(None, 1)
                 custom = discover_commands(self.config.project_root)
                 if parts and parts[0] in custom:
                     text = render_command(custom[parts[0]], parts[1] if len(parts) > 1 else "",
                                           self.config.project_root) or text
-            state, count = self._start_turn(text, images, context)
+            if workflow:
+                from .workflows import activate_workflow
+                with self._turn_state_lock():
+                    if getattr(self, "_worker", None) or getattr(self, "_foreground_worker", None):
+                        self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                     message="Wait for the current turn to finish before starting a plan, review, or project guide.",
+                                     **_request_fields(request_id))
+                        return
+                    activate_workflow(workflow, self.agent)
+                    self.em.emit("mode_changed", mode=self.agent.mode,
+                                 workspace_trusted=self.workspace_trusted)
+                    state, count = self._start_turn(text, images, context)
+            else:
+                state, count = self._start_turn(text, images, context,
+                    **({"delivery": cmd["delivery"], "request_id": request_id} if "delivery" in cmd else {}))
+            if request_id and state in ("started", "queued"):
+                self.em.emit("prompt_accepted", request_id=request_id, state=state,
+                             **({"message": "Queued for the next turn; this operation cannot accept live steering."}
+                                if state == "queued" and cmd.get("delivery") == "steer" else {}))
             if state == "queued":
                 self.em.emit("queued", count=count, text=text)
             elif state == "full":
                 self.em.emit("command_rejected", command=t, reason="queue_full", count=count,
                              message=("follow-up queue reached its count or aggregate byte limit "
-                                      f"({count} queued); cancel it or wait for a turn to finish"))
+                                      f"({count} queued); cancel it or wait for a turn to finish"),
+                             **_request_fields(request_id))
             elif state == "busy":
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
-                             message="a foreground operation is running; cancel or wait for it to finish")
+                             message="a foreground operation is running; cancel or wait for it to finish",
+                             **_request_fields(request_id))
+            elif state == "duplicate":
+                self.em.emit("command_rejected", command=t, reason="duplicate_request",
+                             message="This follow-up is already awaiting delivery.", **_request_fields(request_id))
 
         elif t == "slash_command":
             text = str(cmd.get("text") or "").strip()
@@ -1192,6 +1509,17 @@ class Backend:
                 self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                              message="a prompt or MCP operation is already running; cancel or wait")
 
+        elif t in ("list_mcp_context", "get_mcp_context"):
+            if (len(cmd["server"]) > 128 or len(cmd["kind"]) > 32
+                    or len(str(cmd.get("identifier", ""))) > 4096
+                    or len(json.dumps(cmd.get("arguments", {}))) > 32_000):
+                self.em.emit("command_rejected", command=t, reason="invalid_mcp_context",
+                             message="MCP context selection exceeds its input limit", request_id=cmd["request_id"])
+                return
+            if not self._start_foreground_worker(lambda: self._mcp_context_operation(cmd), label="mcp-context"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="A turn or MCP operation is already running; cancel or wait", request_id=cmd["request_id"])
+
         elif t == "list_skills":
             request_id = str(cmd.get("request_id") or "")
             if not request_id or len(request_id) > 128:
@@ -1206,10 +1534,41 @@ class Backend:
 
         elif t == "reload_skills":
             request_id = str(cmd.get("request_id") or "")
-            self.agent.skills = discover_skills(self.config.project_root)
+            self.agent.skills = discover_skills(self.config.project_root,
+                                                disabled_names=self.config.get("disabled_skills", []))
             if hasattr(getattr(self.agent, "ctx", None), "skills"):
                 self.agent.ctx.skills = self.agent.skills
             self._emit_skill_catalog(request_id)
+
+        elif t in ("create_skill", "install_skill"):
+            from .skill_packages import create_skill, install_skill
+            request_id = str(cmd.get("request_id") or "")
+            try:
+                scope = cmd.get("scope", "project")
+                if t == "create_skill":
+                    result = create_skill(self.config, cmd["name"], cmd.get("description", ""), scope)
+                else:
+                    result = install_skill(self.config, cmd["source"], scope,
+                                           allow_external=cmd.get("allow_external", False))
+                self.agent.reload_skills()
+                self._emit_skill_catalog(request_id)
+                self.em.emit("skill_package", request_id=request_id, name=result["name"],
+                             path=result["path"], operation=t, files=result["files"])
+            except (OSError, ValueError) as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
+                             message=str(exc))
+
+        elif t == "set_skill_enabled":
+            from .skills import set_skill_enabled
+            request_id = str(cmd.get("request_id") or "")
+            try:
+                updated = set_skill_enabled(self.config, str(cmd.get("name") or ""), cmd.get("enabled"))
+                self.agent.skills.clear()
+                self.agent.skills.update(updated)
+                self._emit_skill_catalog(request_id)
+            except ValueError as exc:
+                self.em.emit("command_rejected", command=t, reason="invalid_skill", request_id=request_id,
+                             message=str(exc))
 
         elif t == "list_docs":
             self._emit_docs(str(cmd.get("request_id") or ""))
@@ -1220,10 +1579,27 @@ class Backend:
         elif t == "list_mcp_servers":
             self._emit_mcp_servers(str(cmd.get("request_id") or ""))
 
+        elif t == "mcp_command":
+            if not self._start_foreground_worker(lambda: self._mcp_command(cmd), label="mcp-command"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd["request_id"],
+                             message="A turn or MCP operation is already running; cancel or wait")
+
+        elif t in ("set_mcp_enabled", "reconnect_mcp_server"):
+            if not self._start_foreground_worker(lambda: self._mcp_control(cmd), label="mcp-connection"):
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress", request_id=cmd["request_id"],
+                             message="A turn or MCP operation is already running; cancel or wait")
+
         elif t == "upsert_mcp_server":
-            self._upsert_mcp_server(
-                str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
-                cmd.get("runtime"), cmd.get("persisted"))
+            if cmd.get("interactive"):
+                if not self._start_foreground_worker(lambda: self._upsert_mcp_server(
+                        cmd["request_id"], cmd["name"], cmd["runtime"], cmd["persisted"],
+                        interactive=True), label="mcp-connection"):
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 request_id=cmd["request_id"], message="A turn or MCP operation is already running")
+            else:
+                self._upsert_mcp_server(
+                    str(cmd.get("request_id") or ""), str(cmd.get("name") or ""),
+                    cmd.get("runtime"), cmd.get("persisted"))
 
         elif t == "remove_mcp_server":
             request_id = str(cmd.get("request_id") or "")
@@ -1235,17 +1611,27 @@ class Backend:
             servers = dict(self.config.get("mcp_servers", {}) or {})
             servers.pop(name, None)
             self.config.set("mcp_servers", servers)
+            if hasattr(self.config, "drop_mcp_secrets"):
+                self.config.drop_mcp_secrets(name)
             live = self.agent.mcp.servers.pop(name, None)
             self.agent.mcp.failures.pop(name, None)
             if live is not None:
                 live.stop()
             self.agent.mcp._rebuild_routes()
+            getattr(self.agent.mcp, "_runtime_specs", {}).pop(name, None)
+            disabled = self.config.get("disabled_mcp_servers", [])
+            if isinstance(disabled, list) and name in disabled:
+                self.config.set("disabled_mcp_servers", [value for value in disabled if value != name])
+            getattr(self.agent.mcp, "disabled_names", set()).discard(name)
             self._emit_mcp_servers(request_id)
 
         elif t == "reload_mcp_servers":
             request_id = str(cmd.get("request_id") or "")
             self.agent.mcp.stop_all()
-            self.agent.mcp.connect_all(self.config.get("mcp_servers", {}), startup=True)
+            servers = (self.config.mcp_runtime_servers()
+                       if hasattr(self.config, "mcp_runtime_servers")
+                       else self.config.get("mcp_servers", {}))
+            self.agent.mcp.connect_all(servers, startup=True)
             self._emit_mcp_servers(request_id)
 
         elif t == "list_permissions":
@@ -1306,16 +1692,24 @@ class Backend:
 
         elif t == "set_workspace_roots":
             from .workspace import is_within
-            roots = []
+            if "question_forms" in cmd:
+                self.ui.question_forms = cmd["question_forms"]
+            roots, visible = [], []
             for raw in cmd.get("roots", []) if isinstance(cmd.get("roots"), list) else []:
                 try:
                     path = Path(str(raw)).resolve(strict=True)
                 except (OSError, RuntimeError):
                     continue
-                if path.is_dir() and not is_within(path, self.config.project_root) and path not in roots:
-                    roots.append(path)
+                if path.is_dir():
+                    if path not in visible:
+                        visible.append(path)
+                    if not is_within(path, self.config.project_root) and path not in roots:
+                        roots.append(path)
             self.config.session_permissions = {
                 "allow": [f"ExternalDirectory({path})" for path in roots[:32]], "ask": [], "deny": []}
+            self._editor_inspection_roots = visible[:16]
+            if getattr(self, "_editor_inspection", None) is not None:
+                self._editor_inspection.set_roots(self._editor_inspection_roots)
             self.em.emit("workspace_roots", roots=[str(self.config.project_root), *map(str, roots[:32])],
                          **_request_fields(request_id))
 
@@ -1324,7 +1718,7 @@ class Backend:
         elif t == "plan_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "feedback": cmd.get("feedback")})
         elif t == "options_response":
-            self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice")})
+            self.pending.resolve(cmd.get("id"), {"choice": cmd.get("choice"), "answers": cmd.get("answers")})
         elif t == "mcp_input_response":
             self.pending.resolve(cmd.get("id"), {"action": cmd.get("action"),
                                                   "content": cmd.get("content")})
@@ -1339,7 +1733,25 @@ class Backend:
                 self.em.emit("request_expired", id=rid)
 
         elif t == "set_mode":
+            if self._busy() and cmd.get("live") is not True:
+                self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                             message="Update the extension to change modes during a turn.",
+                             **_request_fields(request_id))
+                return
             mode = cmd.get("mode", "default")
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            from . import subscriptions as _subscriptions
+            try:
+                _subscriptions.validate_engine_mode(active_engine, mode)
+            except _subscriptions.EngineModeUnsupported as exc:
+                self.em.emit("command_rejected", command=t, reason="unsupported_subscription_mode",
+                             message=str(exc),
+                             **_request_fields(request_id))
+                return
             if mode in ("acceptEdits", "auto") and not self.workspace_trusted:
                 if cmd.get("acknowledge_workspace_trust") is not True:
                     self.em.emit("command_rejected", command=t, reason="workspace_untrusted",
@@ -1352,8 +1764,50 @@ class Backend:
             self.agent.set_mode(mode)
             self.em.emit("mode_changed", mode=self.agent.mode,
                          workspace_trusted=self.workspace_trusted,
+                         **({"message": "The new mode applies when the next subscription turn starts; the running external CLI keeps its launch permissions."}
+                            if active_engine and self._busy() else {}),
                          **_request_fields(request_id))
         elif t == "set_model":
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            route = str(cmd.get("route") or "").strip().lower()
+            if route not in ("", "native", "subscription"):
+                self.em.emit("command_rejected", command=t, reason="invalid_route",
+                             message="model route must be native or subscription",
+                             **_request_fields(request_id))
+                return
+            # A model-only command means "the active chat route".  Meaningful connection fields
+            # are an unambiguous native-provider operation (settings hydration and /connect).
+            # Ignore old protocol clients' serialized no-op defaults (`base_url: ""` and
+            # `clear_stored_api_key: false`) so they cannot silently retarget a delegated model.
+            # Merely supplying api_key remains deliberate, including the empty string used to
+            # clear a process-local editor credential.
+            native_connection = (route == "native" or bool(cmd.get("base_url"))
+                                 or "api_key" in cmd or cmd.get("clear_stored_api_key") is True)
+            if route == "subscription" and not active_engine:
+                self.em.emit("command_rejected", command=t, reason="route_unavailable",
+                             message="no subscription engine is active",
+                             **_request_fields(request_id))
+                return
+            if route == "subscription" and native_connection:
+                self.em.emit("command_rejected", command=t, reason="route_conflict",
+                             message="subscription model changes cannot include native connection fields",
+                             **_request_fields(request_id))
+                return
+            if active_engine and "model" in cmd and not native_connection:
+                model = str(cmd.get("model") or "").strip()
+                if len(model) > 256 or any(ord(char) < 32 for char in model):
+                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                 message="subscription model must be a bounded plain string",
+                                 **_request_fields(request_id))
+                    return
+                self.config.set("subscription_model", model)
+                self.em.emit("model_changed", model=model, base_url=self.config.base_url,
+                             **_request_fields(request_id))
+                return
             if cmd.get("clear_stored_api_key"):
                 # The editor owns its active credential in SecretStorage. When it explicitly
                 # switches provider, erase any older CLI secret so a later CLI launch cannot
@@ -1361,15 +1815,25 @@ class Backend:
                 self.config.data["api_key"] = ""
                 if hasattr(self.config, "_stored_secrets"):
                     self.config._stored_secrets["api_key"] = ""
-                self.config._env_secret_keys.add("api_key")
+                if hasattr(self.config, "_stored_provider_identity"):
+                    self.config._stored_provider_identity.pop("api_key", None)
+                runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                if callable(runtime_secret):
+                    runtime_secret("api_key", "")
+                else:
+                    self.config._env_secret_keys.add("api_key")
             if cmd.get("base_url"):
                 self.config.set("base_url", cmd["base_url"])
             if "api_key" in cmd:
                 # Editor credentials are owned by VS Code SecretStorage. Keep this process-local;
                 # a later non-secret config save preserves any existing CLI secret instead of
                 # duplicating the editor key into ~/.dgc/secrets.json.
-                self.config.data["api_key"] = str(cmd.get("api_key") or "")
-                self.config._env_secret_keys.add("api_key")
+                runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                if callable(runtime_secret):
+                    runtime_secret("api_key", str(cmd.get("api_key") or ""))
+                else:
+                    self.config.data["api_key"] = str(cmd.get("api_key") or "")
+                    self.config._env_secret_keys.add("api_key")
             if cmd.get("model"):
                 self.config.set("model", cmd["model"])
             self.agent.refresh_client()
@@ -1379,10 +1843,16 @@ class Backend:
             if ctx and ctx != int(self.config.get("context_size", 32768)):
                 self.config.set("context_size", ctx)
                 context_changed = True
-            self.em.emit("model_changed", model=self.config.model, base_url=self.config.base_url,
+            # While delegation is active, keep the public model control aligned with the route a
+            # prompt will use even when a settings operation updates the native fallback.
+            shown_model = (str(config_get("subscription_model", "")).strip()
+                           if active_engine and callable(config_get) else self.config.model)
+            self.em.emit("model_changed", model=shown_model, base_url=self.config.base_url,
                          **_request_fields(request_id))
-            if context_changed:
-                self._emit_context()
+            # A model refresh can change the provider-advertised effective limit even when the
+            # configured recommendation happens to be identical. Never leave the editor meter on
+            # the prior model's window.
+            self._emit_context(request_id if context_changed else None)
         elif t == "list_models":
             request_id = redact_value(
                 str(cmd.get("request_id") or ""), secret_values(self.config))[:128]
@@ -1412,9 +1882,41 @@ class Backend:
                     lock.release()
             threading.Thread(target=discover_models, daemon=True).start()
         elif t == "set_think":
-            self.config.set("thinking", cmd.get("level", "off"))   # persisted
-            self.em.emit("think_changed", think=self.config.get("thinking", "off"),
-                         **_request_fields(request_id))
+            level = str(cmd.get("level", "off"))
+            config_get = getattr(self.config, "get", None)
+            active_engine = str(
+                config_get("subscription_engine", "") if callable(config_get)
+                else getattr(self.config, "data", {}).get("subscription_engine", "")
+            ).strip().lower()
+            if active_engine:
+                from . import subscriptions as _subs
+                engine = _subs.get_engine(active_engine)
+                effort = "" if level == "off" else level
+                if engine is None:
+                    self.em.emit("command_rejected", command=t, reason="invalid_config_value",
+                                 message=f"unknown subscription engine '{active_engine}'",
+                                 **_request_fields(request_id))
+                    return
+                if effort and not engine.supports_effort():
+                    self.em.emit(
+                        "command_rejected", command=t, reason="invalid_config_value",
+                        message=f"{engine.short_label} does not expose a reasoning-effort flag; "
+                                "choose its reasoning model with /model instead",
+                        **_request_fields(request_id))
+                    return
+                self.config.set("subscription_effort", effort)
+                self.em.emit("think_changed", think=effort or "off",
+                             **_request_fields(request_id))
+            else:
+                if level == "max":
+                    self.em.emit(
+                        "command_rejected", command=t, reason="invalid_config_value",
+                        message="max reasoning effort is available only on a supported subscription route",
+                        **_request_fields(request_id))
+                    return
+                self.config.set("thinking", level)   # persisted native route
+                self.em.emit("think_changed", think=self.config.get("thinking", "off"),
+                             **_request_fields(request_id))
         elif t == "set_goal":
             status = str(cmd.get("status") or "active")
             text = str(cmd.get("text") or "")
@@ -1422,7 +1924,7 @@ class Backend:
                 ok = self.agent.set_goal("")
             elif text:
                 ok = self.agent.set_goal(
-                    text, status if status in ("active", "completed", "blocked") else "active")
+                    text, status, token_budget=cmd.get("token_budget"), replace=bool(cmd.get("replace")))
             else:
                 ok = self.agent.update_goal(status)
             if not ok:
@@ -1443,7 +1945,9 @@ class Backend:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
-                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
+                         session_id=self.agent.session_file.stem, name="",
+                         **_request_fields(request_id))
+            self._emit_context(request_id)
             self._emit_goal()
         elif t == "name_session":
             name = str(cmd.get("name") or "").strip()[:200]
@@ -1462,7 +1966,8 @@ class Backend:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="cleared", message_count=0,
-                         session_id=self.agent.session_file.stem, **_request_fields(request_id))
+                         session_id=self.agent.session_file.stem, name="",
+                         **_request_fields(request_id))
             self.em.emit("history", items=[])
             self._emit_context()
             self._emit_goal()
@@ -1472,8 +1977,16 @@ class Backend:
                 p = sessions_mod.latest(self.config.project_root)
                 path = str(p) if p else None
             if path:
-                n = self.agent.load_session(path)
+                try:
+                    n = self.agent.load_session(path)
+                except (OSError, ValueError) as exc:
+                    self.em.emit("command_rejected", command=t, reason="session_unavailable",
+                                 message=redact_value(str(exc), secret_values(self.config)),
+                                 **_request_fields(request_id))
+                    return
                 self.em.emit("session", kind="resumed", message_count=n, path=str(path),
+                             session_id=Path(path).stem,
+                             name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
                 self.em.emit("history", items=self._history())
                 self._emit_context()
@@ -1481,6 +1994,9 @@ class Backend:
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
+        elif t == "get_history":
+            self.em.emit("history", items=self._history(), request_id=cmd["request_id"])
+
         elif t == "list_sessions":
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,
                       "name": nm}
@@ -1533,10 +2049,13 @@ class Backend:
                              f"{result.error or result.status}.{conflicts}")
             self._emit_retained_tasks(request_id)
         elif t == "compact":
-            if not self.agent.maybe_compact(force=True):
-                self.em.emit("error", message=self.agent._last_persist_error
+            if not self.agent.maybe_compact(force=True, trigger="manual", notify=False):
+                self.em.emit("command_rejected", command=t, reason="compaction_failed",
+                             message=self.agent._last_persist_error
                              or "context compaction failed", **_request_fields(request_id))
                 return
+            self.em.emit("compacted", **self.agent.compaction_status(),
+                         **_request_fields(request_id))
             self._emit_context(request_id)
         elif t == "list_artifacts":
             self._emit_artifacts(request_id)
@@ -1545,72 +2064,27 @@ class Backend:
             artifacts.stop(str(cmd.get("id", "")))
             self._emit_artifacts(request_id)
         elif t == "set_config":
-            allowed = ("subagent_model", "subagent_base_url", "subagent_api_key",
-                       "subagent_api_mode", "api_mode",
-                       "provider_state", "prompt_cache", "prompt_cache_key",
-                       "provider_capabilities", "capability_cache_ttl_s",
-                       "fallback_model", "fallback_base_url", "fallback_api_key",
-                       "fallback_api_mode",
-                       "context_size", "search_provider", "sandbox", "sandbox_network",
-                       "show_reasoning", "preserve_thinking", "code_action", "suggest",
-                       "plan_artifact", "artifact_autostart",
-                       "artifact_in_plan", "tool_profile", "max_parallel_tasks",
-                       "autonomous_gate", "autonomous_max_turns",
-                       "subscription_engine", "subscription_model", "subscription_effort")
-            refresh = False
-            raw_values = cmd.get("values") or {}
-            if not isinstance(raw_values, dict):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="settings values must be an object",
-                             **_request_fields(request_id))
-                return
-            values = {k: v for k, v in raw_values.items() if k in allowed}
-            boolean_keys = {"prompt_cache", "sandbox", "sandbox_network", "show_reasoning",
-                            "preserve_thinking", "code_action", "suggest", "plan_artifact",
-                            "artifact_autostart", "artifact_in_plan"}
-            if any(key in values and not isinstance(values[key], bool) for key in boolean_keys):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="boolean settings require true or false",
-                             **_request_fields(request_id))
-                return
-            if ("tool_profile" in values
-                    and values["tool_profile"] not in ("adaptive", "full")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="tool_profile must be adaptive or full",
-                             **_request_fields(request_id))
-                return
             from .subscriptions import ENGINE_KEYS as _sub_keys
-            if ("subscription_engine" in values
-                    and (not isinstance(values["subscription_engine"], str)
-                         or (values["subscription_engine"]
-                             and values["subscription_engine"] not in _sub_keys))):
+            values, problem = _validated_config_values(cmd.get("values"), _sub_keys)
+            if problem or values is None:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription_engine must be empty or one of: "
-                                     + ", ".join(_sub_keys),
-                             **_request_fields(request_id))
-                return
-            if any(key in values and (not isinstance(values[key], str)
-                                      or len(values[key]) > (256 if key == "subscription_model" else 64)
-                                      or any(ord(char) < 32 for char in values[key]))
-                   for key in ("subscription_model", "subscription_effort")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription model/effort must be bounded plain strings",
-                             **_request_fields(request_id))
-                return
-            if ("subscription_effort" in values
-                    and values["subscription_effort"] not in
-                    ("", "low", "medium", "high", "xhigh", "max")):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="subscription_effort must be empty, low, medium, high, xhigh, or max",
+                             message=problem or "invalid settings values",
                              **_request_fields(request_id))
                 return
             config_get = getattr(self.config, "get", None)
             current_engine = (config_get("subscription_engine", "") if callable(config_get) else
                               getattr(self.config, "data", {}).get("subscription_engine", ""))
             selected_engine = str(values.get("subscription_engine", current_engine))
-            if selected_engine == "kimi" and self.agent.mode != "auto":
+            from . import subscriptions as _subscriptions
+            try:
+                _subscriptions.validate_engine_mode(
+                    selected_engine,
+                    str(getattr(self.agent, "mode", None)
+                        or (config_get("mode", "default") if callable(config_get) else "default")),
+                )
+            except _subscriptions.EngineModeUnsupported as exc:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="Kimi prompt mode requires DGC auto mode",
+                             message=str(exc),
                              **_request_fields(request_id))
                 return
             if selected_engine in ("qwen", "kimi") and values.get("subscription_effort"):
@@ -1625,31 +2099,6 @@ class Backend:
             if "subscription_engine" in values and not selected_engine:
                 values["subscription_model"] = ""
                 values["subscription_effort"] = ""
-            if ("max_parallel_tasks" in values
-                    and (isinstance(values["max_parallel_tasks"], bool)
-                         or not isinstance(values["max_parallel_tasks"], int)
-                         or not 1 <= values["max_parallel_tasks"] <= 8)):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="max_parallel_tasks must be an integer from 1 to 8",
-                             **_request_fields(request_id))
-                return
-            if ("autonomous_gate" in values
-                    and (not isinstance(values["autonomous_gate"], str)
-                         or len(values["autonomous_gate"]) > 512
-                         or any(ord(char) < 32 and char not in "\t"
-                                for char in values["autonomous_gate"]))):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="autonomous_gate must be a single-line command string (≤512 chars)",
-                             **_request_fields(request_id))
-                return
-            if ("autonomous_max_turns" in values
-                    and (isinstance(values["autonomous_max_turns"], bool)
-                         or not isinstance(values["autonomous_max_turns"], int)
-                         or not 1 <= values["autonomous_max_turns"] <= 1000)):
-                self.em.emit("command_rejected", command=t, reason="invalid_config_value",
-                             message="autonomous_max_turns must be an integer from 1 to 1000",
-                             **_request_fields(request_id))
-                return
             if values.get("sandbox") is True:
                 from . import sandbox
                 if not sandbox.available():
@@ -1659,34 +2108,99 @@ class Backend:
                         **_request_fields(request_id))
                     return
             secret_keys = ("subagent_api_key", "fallback_api_key")
-            # Apply endpoints first: Config.set invalidates the old endpoint-bound secret. Then
-            # install any replacement credential process-locally, regardless of JSON key order.
-            for k, v in values.items():
-                if k not in secret_keys:
-                    self.config.set(k, v)
-                refresh = refresh or k in {"api_mode", "provider_state", "prompt_cache",
-                                           "prompt_cache_key", "provider_capabilities",
-                                           "capability_cache_ttl_s"}
-            for k in secret_keys:
-                if k in values:
-                    self.config.data[k] = str(values[k] or "")
-                    self.config._env_secret_keys.add(k)
-            # autonomous-gate settings are cached on the agent at construction — re-sync live.
-            if "autonomous_gate" in values:
-                self.agent.autonomous_gate = str(self.config.get("autonomous_gate", "") or "")
-            if "autonomous_max_turns" in values:
-                self.agent.autonomous_max_turns = int(self.config.get("autonomous_max_turns", 30) or 30)
-            if refresh:
-                self.agent.refresh_client()
+            refresh = bool(set(values) & {
+                "api_mode", "provider_state", "prompt_cache", "prompt_cache_key",
+                "provider_capabilities", "capability_cache_ttl_s", "context_size",
+            })
+            # Config.set normally persists each key. Suspend that behavior while staging so another
+            # process cannot observe half of a route change, then commit the complete validated
+            # snapshot once. Endpoint invalidation still runs before process-local replacement keys.
+            data_before = copy.deepcopy(self.config.data)
+            attr_before = {
+                attr: copy.deepcopy(getattr(self.config, attr))
+                for attr in ("_stored_secrets", "_stored_provider_identity",
+                             "_provider_secret_identity", "_env_secret_keys", "_explicit_keys")
+                if hasattr(self.config, attr)
+            }
+            missing = object()
+            client_before = getattr(self.agent, "client", missing)
+            gate_before = getattr(self.agent, "autonomous_gate", missing)
+            gate_max_before = getattr(self.agent, "autonomous_max_turns", missing)
+            has_persist_flag = hasattr(self.config, "_persist")
+            persist_before = getattr(self.config, "_persist", None)
+            try:
+                if has_persist_flag:
+                    self.config._persist = False
+                for key, value in values.items():
+                    if key not in secret_keys:
+                        self.config.set(key, value)
+                if has_persist_flag:
+                    self.config._persist = persist_before
+                for key in secret_keys:
+                    if key in values:
+                        runtime_secret = getattr(self.config, "set_runtime_secret", None)
+                        if callable(runtime_secret):
+                            runtime_secret(key, values[key])
+                        else:
+                            self.config.data[key] = values[key]
+                            self.config._env_secret_keys.add(key)
+                save = getattr(self.config, "save", None)
+                if callable(save):
+                    save()
+                if refresh:
+                    self.agent.refresh_client()
+                elif "ultra_mode" in values:
+                    # Ultra changes the trusted system policy/tool exposure immediately without
+                    # rebuilding the provider transport.
+                    self.agent._refresh_system()
+                # These settings are cached on the agent at construction; publish them only after
+                # both the durable commit and any client rebuild have succeeded.
+                if "autonomous_gate" in values:
+                    self.agent.autonomous_gate = values["autonomous_gate"]
+                if "autonomous_max_turns" in values:
+                    self.agent.autonomous_max_turns = values["autonomous_max_turns"]
+            except Exception as exc:
+                if has_persist_flag:
+                    self.config._persist = persist_before
+                self.config.data = data_before
+                for attr, snapshot in attr_before.items():
+                    setattr(self.config, attr, snapshot)
+                if client_before is not missing:
+                    self.agent.client = client_before
+                if gate_before is not missing:
+                    self.agent.autonomous_gate = gate_before
+                if gate_max_before is not missing:
+                    self.agent.autonomous_max_turns = gate_max_before
+                try:
+                    save = getattr(self.config, "save", None)
+                    if callable(save):
+                        save()
+                except Exception:
+                    pass
+                self.em.emit(
+                    "command_rejected", command=t, reason="config_apply_failed",
+                    message=f"settings were not applied ({type(exc).__name__})",
+                    **_request_fields(request_id))
+                return
+            finally:
+                if has_persist_flag:
+                    self.config._persist = persist_before
             self._emit_config(request_id)
+            if "context_size" in values:
+                self._emit_context(request_id)
         elif t == "get_config":
             self._emit_config(request_id)
         elif t == "status":
-            self.em.emit("status", model=self.config.model, mode=self.agent.mode,
-                         think=self.config.get("thinking", "off"), base_url=self.config.base_url,
-                         goal={"text": getattr(self.agent, "goal", ""),
-                               "status": getattr(self.agent, "goal_status", "none"),
-                               "elapsed_seconds": self._goal_elapsed_seconds()},
+            active_engine = str(self.config.get("subscription_engine", "") or "").strip()
+            active_model = (str(self.config.get("subscription_model", "") or "").strip()
+                            or f"{active_engine} default") if active_engine else self.config.model
+            active_think = (str(self.config.get("subscription_effort", "") or "").strip()
+                            or "off") if active_engine else self.config.get("thinking", "off")
+            self.em.emit("status", model=active_model, mode=self.agent.mode,
+                         think=active_think, base_url=self.config.base_url,
+                         subscription_engine=active_engine,
+                         ultra_mode=bool(self.config.get("ultra_mode", False)),
+                         goal=self._goal_snapshot(),
                          context_used=self.agent.estimate_tokens(),
                          context_size=self._context_window_size(), **_request_fields(request_id))
         elif t == "shutdown":
