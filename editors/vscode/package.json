@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -247,19 +247,21 @@
     "keybindings": [
       {
         "command": "dgc.focus",
-        "key": "ctrl+escape",
-        "mac": "cmd+escape"
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d",
+        "when": "!terminalFocus"
       },
       {
         "command": "dgc.addSelection",
-        "key": "ctrl+i",
-        "mac": "cmd+i",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
         "when": "editorTextFocus"
       },
       {
         "command": "dgc.cycleMode",
-        "key": "ctrl+shift+m",
-        "mac": "cmd+shift+m"
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "!terminalFocus"
       }
     ],
     "configuration": {
@@ -278,6 +280,7 @@
         },
         "dgc.baseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "Main model host — a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
@@ -293,6 +296,7 @@
         },
         "dgc.subagentBaseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "Host for `task` sub-agents — run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
         },
@@ -316,6 +320,7 @@
         },
         "dgc.fallbackBaseUrl": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "Optional host for the fallback model. Blank = same host as the main model."
         },
@@ -339,6 +344,7 @@
         },
         "dgc.autonomousGate": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "description": "A check command the agent must pass (exit 0) before it may stop a turn; a nonzero exit feeds its output back and continues (e.g. \"npm run check\"). Blank = off."
         },
@@ -372,7 +378,7 @@
           {
             "id": "open",
             "title": "Open the DGC panel",
-            "description": "Click the DGC icon in the activity bar, or press Ctrl/Cmd+Escape.",
+            "description": "Click the DGC icon in the activity bar, or press Ctrl/Cmd+Alt+D.",
             "media": {
               "markdown": "media/walkthrough.md"
             },
