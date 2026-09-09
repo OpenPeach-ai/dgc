@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.1 — 2026-09-09
+
+- Update the packaging toolchain for a js-yaml advisory (GHSA-2883-xcg3-v3hh). It is a development-only dependency of the packager, so no shipped extension code changed.
+- Recommend CLI 0.30.2, which stops the `/files` explorer from trashing the project root; protocol v6 compatibility is retained.
+- No change to the panel, the turn ETA chip, or **DGC: Notify On Turn End**. This release exists so the published package and the reviewed source agree byte for byte.
+
 ## 0.17.0 — 2026-09-09
 
 - Show the turn ETA beside the elapsed timer while a native turn runs: a calibrated range such as `~2–4 min left · 3/5 tasks`, sent by CLI 0.30.0 as the additive `turn_eta` protocol-v6 event and hidden on older CLIs.
