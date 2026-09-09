@@ -4,16 +4,27 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.30.3",
+      "date": "2026-09-09",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.3",
+      "status": "current",
+      "notes": [
+        "Stop a redraw costing the whole session. Every stored transcript entry was re-parsed into display fragments on every frame, so one keystroke paid for the entire scrollback and the terminal grew slower the longer you worked. Entries are now reused until something they are derived from changes, the cursor marker splits only the entry on its line, and lines are counted once while the frame is assembled. On a 200-turn session a frame fell from about 130 ms to under 5 ms.",
+        "Show command and skill tokens as commands while you type. A trailing /goal, /plan, /review or /init is applied as a verb to the text before it, so “Set this as your /goal” ran the goal command instead of sending that sentence, which read as the prompt being silently truncated. Only names that actually resolve are marked, so paths and ordinary words stay plain.",
+        "Keep an active standing goal on a row above the composer with its objective, state and work time, the same view the editor already had. Document /copy, which hands the mouse back to your terminal so you can select and copy transcript text, and Shift+drag, which does it without leaving scroll mode."
+      ],
+      "headline": "faster terminal redraw"
+    },
+    {
       "version": "0.30.2",
       "date": "2026-09-09",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.2",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Fix a /files explorer case where the project itself could be thrown away: from the parent listing the cursor sits on the project folder, and one d sent the whole project to the trash without asking. The explorer now refuses to trash, delete, rename, or move the project root or any folder above it, in every permission mode.",
         "Keep focus-pane frames exactly as tall as the pane when a file name, breadcrumb, or status carries a control or line-separator character. Such characters are neutralised wherever the renderer places pane text, so a strangely named file can no longer push a row out of the frame.",
         "Wait for a killed tool's whole process group to exit, bounded, before reporting the kill complete, so a grandchild process that ignored the polite signal cannot outlive the tool that spawned it."
-      ],
-      "headline": "/files safety fix"
+      ]
     },
     {
       "version": "0.30.1",
