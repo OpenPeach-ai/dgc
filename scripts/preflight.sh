@@ -24,6 +24,14 @@ if git grep -nEI '(BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-[A-
 fi
 
 "$PYTHON" -m compileall -q dgc tests/run_tests.py
+# The venv is one interpreter; CI runs several. A 3.12-only f-string (a backslash inside the
+# expression) once shipped as tag v0.31.0 and failed to import on 3.10 and 3.11, so every CPython
+# on PATH that CI also runs must compile the package before anything is tagged or pushed.
+for other in python3.10 python3.11 python3.12 python3.13; do
+  command -v "$other" >/dev/null 2>&1 || continue
+  "$other" -m compileall -q dgc tests/run_tests.py >/dev/null || {
+    echo "dgc does not compile under $other ($(command -v "$other"))" >&2; exit 1; }
+done
 "$PYTHON" -m py_compile bench/*.py scripts/generate-sbom.py scripts/release_bundle.py
 "$PYTHON" tests/run_tests.py
 "$PYTHON" -m pip check
