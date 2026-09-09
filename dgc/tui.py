@@ -2522,11 +2522,13 @@ class TUI:
             clock = "0s"
         rail = f"[{th.border_strong}]{glyphs.RAIL}[/]"
         text = " ".join(str(getattr(agent, "goal", "")).split())
-        room = max(8, self._width - _cell_len(f"  Goal {status} {clock} ") - 2)
+        room = max(8, self._width - _cell_len(f"  Goal {status} {clock} {glyphs.MIDDOT} ") - 2)
         if _cell_len(text) > room:
             text = text[:max(1, room - 1)] + "\u2026"
+        # A middot before the objective: without it "12m Make the retry test…" reads as one phrase.
         return ANSI(self._rich(f"{rail} [bold {th.muted}]Goal[/] [{tone}]{status}[/] "
-                               f"[{th.faint}]{clock}[/] [{th.text}]{_esc(text)}[/]"))
+                               f"[{th.faint}]{clock}[/] [{th.faint}]{glyphs.MIDDOT}[/] "
+                               f"[{th.text}]{_esc(text)}[/]"))
 
     def _todo_panel_visible(self) -> bool:
         """The focus pane borrows the task pane's rows; task state itself continues updating."""
