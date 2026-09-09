@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.30.3">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · faster terminal redraw <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · clipboard, export and trust-gated rules <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -117,6 +117,7 @@
 <li><strong>/history</strong> (Ctrl+R) — search and recall any past prompt.</li>
 <li><strong>/jump</strong> — scroll the transcript straight to a past turn.</li>
 <li><strong>/recall</strong> — read the earlier conversation a compaction summarised away (see below).</li>
+<li><strong>/export</strong> (<code>dgc export [ID] [FILE]</code>) — save a session as Markdown, archived turns included. Nothing the full-screen app shows survives in your terminal&#x27;s scrollback; this does, and so does <code>dgc --classic</code>, the inline mode.</li>
 <li><strong>dgc export-training</strong> / <strong>/export-training</strong> — export your sessions as scrubbed fine-tuning JSONL (see *Training export*); read-only, never modifies a session. The slash command runs the same export for the current project; the VS Code palette exposes it as *DGC: Export Training Data*.</li>
 <li><strong>/handoff</strong> — create a bounded, redacted continuation document from one stable session generation. DGC saves it as a new private <code>HANDOFF-*.md</code> through the workspace lease; an overlapping turn is rejected instead of mixed into the file.</li>
 </ul>

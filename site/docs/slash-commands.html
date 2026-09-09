@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.30.3">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · faster terminal redraw <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.30.3 is out · clipboard, export and trust-gated rules <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -138,7 +138,10 @@
 <li><strong>/files [PATH]</strong> — browse, pick, and manage files in the focus pane while the agent works.</li>
 <li><strong>/eta [stats]</strong> — how long the running turn still needs · /eta stats shows calibration.</li>
 <li><strong>/notify [on|off]</strong> — ping when this turn finishes · /notify on|off keeps it on.</li>
-<li><strong>/copy</strong> — select &amp; copy text — releases the mouse to your terminal. Aliases: <code>/select</code>, <code>/selection</code>.</li>
+<li><strong>/copy [all|code|N]</strong> — copy the last reply to your clipboard (all · code · N).</li>
+<li><strong>/select</strong> — drag-select mode — releases the mouse to your terminal. Aliases: <code>/selection</code>.</li>
+<li><strong>/mouse [on|off]</strong> — remember whether DGC captures the mouse (on · off).</li>
+<li><strong>/export [FILE]</strong> — save this conversation as Markdown.</li>
 <li><strong>/worktree [NAME]</strong> — list or switch to a named git worktree.</li>
 <li><strong>/tasks [ACTION…]</strong> — list, show, apply, or drop retained sub-agent work.</li>
 <li><strong>/sandbox</strong> — confine bash with the supported host OS boundary.</li>
