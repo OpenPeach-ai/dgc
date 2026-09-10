@@ -675,7 +675,15 @@
     const finished = turn.block;
     turn = null;
     // After every mutation this turn will make, so the height that gets pinned is the final one.
-    requestAnimationFrame(() => settleBlock(finished));
+    // The end of a finished turn is its result — the summary of what it changed and what you can
+    // do about it — so unless you have scrolled away to read something else, show it. Once now
+    // and once on the next frame, because the rails and the composer settle a frame later and
+    // each of them takes height from the transcript.
+    requestAnimationFrame(() => {
+      settleBlock(finished);
+      if (following) scroll();
+    });
+    if (following) scroll();
   }
   // ---- what the turn changed, and what you can do about it ----
   function turnSummaryCard(edits, prompt) {
