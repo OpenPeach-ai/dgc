@@ -254,15 +254,17 @@ class GoalLifecycle:
     def goal_max_chars(self) -> int:
         """How long a standing objective may be, measured against the window it must live in.
 
-        It is stated in full once per context (and again after a compaction), so the ceiling is a
-        share of that window rather than a fixed number: an eighth of the context in tokens, with
-        a floor for tiny windows and a ceiling so no goal can dominate a very large one.
+        It is stated in full once per context (and again after a compaction), so the limit is a
+        share of that window rather than a number: a quarter of the context, which leaves three
+        quarters for the work itself. A fixed ceiling on top of that only punished people who
+        paid for a large window, so there isn't one — just a floor, because a tiny window still
+        has to allow a usable objective.
         """
         try:
             window = int(self.context_size())
         except Exception:
             window = 32_768
-        return max(4_000, min(32_000, window // 2))     # tokens//8, expressed in characters
+        return max(4_000, window)       # window//4 tokens, at ~4 characters per token
 
     def request_goal_control(self, action: str) -> bool:
         """A UI thread can stop/delete an active goal; its owner commits after tool cleanup."""

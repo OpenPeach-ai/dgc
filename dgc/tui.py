@@ -418,6 +418,10 @@ class TUI:
                          "reader": reader, "composer_draft": draft}
         self._invalidate()
 
+    #: Commands whose argument is the point of running them, so the palette attaches them to the
+    #: composer instead of firing them. `/goal` is the reason this exists.
+    _COMPOSED_COMMANDS = ("goal", "plan", "review", "init")
+
     def _open_command_palette(self) -> None:
         """The `/` menu as an overlay (same engine as the pickers): the composer holds `/query`,
         rows filter live, ↑/↓ select, Enter runs. Replaces the flaky completion-menu Enter path."""
@@ -445,12 +449,15 @@ class TUI:
                                                          len(row["value"]) + 2 + len(draft)))
                     return
                 self.input_buf.set_document(Document(draft, len(before)))
-                if row["value"] in ("plan", "review", "init"):
+                # Picking a command whose argument IS the command attaches it to the composer
+                # and leaves the cursor after it, so the next thing you type is that argument and
+                # Enter sends — the way picking a $skill already worked. Selecting /goal used to
+                # fire immediately, which left nowhere to type the objective.
+                # Everything else still runs on selection: /files, /copy and /notes are nearly
+                # always used bare, and charging them a second Enter to type nothing is worse.
+                if row["value"] in self._COMPOSED_COMMANDS:
                     prefix = "/" + row["value"] + " "
                     self.input_buf.set_document(Document(prefix + draft, len(prefix) + len(before)))
-                elif row["value"] == "goal" and draft.strip():
-                    self.input_buf.reset()
-                    self._run_command("/goal " + draft.strip())
                 else:
                     self._run_command("/" + row["value"])
                 return

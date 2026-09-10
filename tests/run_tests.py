@@ -13186,14 +13186,17 @@ def test_goal_refusal_keeps_the_text():
     _C.USER_CONFIG.write_text('{"model": "m"}')
     try:
         agent = _Agent(_C.Config(project), _UI())
-        agent.config.data["context_size"] = 32_768          # cap: 16,384 characters
-        objective = "Refactor the retry layer so a lease is never dropped. " * 400   # ~21k chars
+        agent.config.data["context_size"] = 32_768
+        # Built from the session's own allowance, so raising the ratio cannot quietly turn this
+        # into a test of nothing.
+        sentence = "Refactor the retry layer so a lease is never dropped. "
+        objective = sentence * (agent.goal_max_chars() // len(sentence) + 2)
         check("a short objective is accepted", agent.set_goal("Ship the bounds fix") is True)
         check("an over-long objective is refused without truncating it",
               agent.set_goal(objective) is False and agent.goal == "Ship the bounds fix")
         message = agent._last_persist_error
         check("the refusal states the actual size, this session's cap, and where the detail goes",
-              f"{len(objective.strip()):,}" in message and "16,384" in message
+              f"{len(objective.strip()):,}" in message and f"{agent.goal_max_chars():,}" in message
               and "32,768 tokens" in message and "ordinary prompt" in message, message)
 
         ui = object.__new__(_TUI)
@@ -13211,14 +13214,17 @@ def test_goal_refusal_keeps_the_text():
         check("the refused objective is returned to the composer, not destroyed",
               ui.input_buf.text.strip() == objective.strip())
         check("the reason is written where it can still be read, and no turn starts",
-              errors and "16,384" in errors[0] and "SUBMITTED" not in errors
+              errors and f"{agent.goal_max_chars():,}" in errors[0] and "SUBMITTED" not in errors
               and any("your text is back" in f for f in flashes), (errors[:1], flashes))
         check("the standing goal is unchanged by the refusal", agent.goal == "Ship the bounds fix")
 
         # --- the cap follows the window the objective has to live in
-        check("the cap scales with the context and stays bounded at both ends",
-              [_goal_cap(agent, ctx) for ctx in (8_192, 32_768, 131_072, 1_000_000)]
-              == [4_096, 16_384, 32_000, 32_000])
+        check("the allowance is a quarter of the window at any size, with only a floor",
+              [_goal_cap(agent, ctx) for ctx in (2_000, 8_192, 32_768, 65_536, 131_072)]
+              == [4_000, 8_192, 32_768, 65_536, 131_072])
+        agent.config.data["context_size"] = 131_072
+        check("a bigger context really does allow a bigger objective — no fixed ceiling on top",
+              agent.set_goal("x" * 33_460) is True and agent.set_goal("x" * 131_073) is False)
         agent.config.data["context_size"] = 32_768
         roomy = "Refactor the retry layer so a lease is never dropped. " * 150      # 7,950 chars
         check("an objective the old fixed cap refused now fits a 32k window",
@@ -13249,6 +13255,40 @@ def test_goal_refusal_keeps_the_text():
               and all(f"bg:{theme.accent_dim}" in f[0] and f"fg:{theme.bg}" in f[0] for f in chips))
         check("the chip never changes the text, so the cursor cannot drift from it",
               "".join(f[1] for f in fragments) == "ship the fix /goal and $debug")
+        # --- picking from the / menu attaches the commands whose argument is the point
+        check("the goal composes; the bare-use commands still run on selection",
+              set(_TUI._COMPOSED_COMMANDS) == {"goal", "plan", "review", "init"}
+              and not {"files", "copy", "notes", "help", "clear"} & set(_TUI._COMPOSED_COMMANDS))
+        # Drive the palette itself: a source grep would have missed that the class attribute was
+        # read as a bare name inside the nested handler, which raised at runtime.
+        from prompt_toolkit.buffer import Buffer as _PickBuffer
+        picked = []
+        pick_ui = object.__new__(_TUI)
+        pick_ui.config = agent.config; pick_ui.agent = agent
+        pick_ui.input_buf = _PickBuffer(multiline=True)
+        pick_ui._run_command = lambda text: picked.append(text)
+        pick_ui._overlay = None
+        pick_ui.app = None                      # a bare TUI has no application to invalidate
+        pick_ui._invalidate = lambda: None
+        pick_ui._flash = lambda *a, **k: None
+        pick_ui.input_buf.insert_text("/goal")
+        _TUI._open_command_palette(pick_ui)
+        overlay_submit = pick_ui._overlay["on_submit"] if isinstance(pick_ui._overlay, dict) else None
+        check("the palette is open with the handler that selection uses", callable(overlay_submit))
+        overlay_submit({"kind": "command", "value": "goal"}, "/goal")
+        check("picking /goal attaches it to the composer and runs nothing",
+              pick_ui.input_buf.text == "/goal " and picked == [], (pick_ui.input_buf.text, picked))
+        pick_ui.input_buf.reset(); pick_ui.input_buf.insert_text("/files")
+        _TUI._open_command_palette(pick_ui)
+        pick_ui._overlay["on_submit"]({"kind": "command", "value": "files"}, "/files")
+        check("picking a bare-use command still runs it on selection", picked == ["/files"], picked)
+        pick_ui.input_buf.reset(); pick_ui.input_buf.insert_text("Ship the fix /goal")
+        _TUI._open_command_palette(pick_ui)
+        pick_ui._overlay["on_submit"]({"kind": "command", "value": "goal"}, "Ship the fix /goal")
+        check("a draft already typed becomes the objective behind the attached command",
+              pick_ui.input_buf.text == "/goal Ship the fix " and picked == ["/files"],
+              pick_ui.input_buf.text)
+
         check("an unresolved token stays plain prose",
               all("bg:" not in f[0] for f in lexer.lex_document(_Document("no /nonsense here"))(0)))
 
