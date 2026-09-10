@@ -378,6 +378,22 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .csend[data-mode="auto"] { background: var(--err); }
 .csend .codicon { font-size: var(--t-lg); }
 
+/* One hover label for the whole panel: the panel's own surface and type, not the operating
+   system's, and quick enough to feel like part of the interface rather than a delayed hint. */
+.tip { position: fixed; z-index: 60; max-width: min(280px, calc(100vw - 16px)); pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface2); color: var(--text-strong); box-shadow: var(--shadow-2);
+  font: var(--w-med) var(--t-xs)/1.45 var(--sans); text-align: left; }
+.tip .tip-detail { color: var(--muted); font-weight: var(--w-reg); }
+.tip::after { content: ""; position: absolute; left: var(--tip-arrow, 50%); width: 6px; height: 6px;
+  margin-left: -3px; background: var(--surface2);
+  border: 1px solid var(--border-strong); border-width: 0 1px 1px 0; }
+.tip.above::after { bottom: -4px; transform: rotate(45deg); }
+.tip.below::after { top: -4px; transform: rotate(-135deg); }
+@media (prefers-reduced-motion: no-preference) { .tip { animation: tip-in .1s ease-out; } }
+@keyframes tip-in { from { opacity: 0; transform: translateY(2px); } }
+
 /* mode / model picker menus (open upward) */
 .picker { position: relative; }
 .cmenu { position: absolute; bottom: 100%; right: 0; margin-bottom: var(--sp-2);

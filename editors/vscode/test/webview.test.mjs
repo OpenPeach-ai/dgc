@@ -1990,3 +1990,57 @@ test("transcript blocks cannot shrink inside the column that holds them", () => 
   assert.deepEqual(skippers, [".msg.settled"],
     "only a block whose real height has been pinned may be skipped");
 });
+
+test("every control says what it is, in the panel's own label rather than the operating system's", async () => {
+  const { dom, errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  const hover = (node) => node.dispatchEvent(new dom.window.Event("pointerover", { bubbles: true }));
+  const settle = (ms) => new Promise((done) => dom.window.setTimeout(done, ms));
+
+  const attach = doc.getElementById("btn-add");
+  assert.equal(attach.title, "Attach a file (@-mention)");
+  hover(attach);
+  await settle(450);
+  const tip = doc.getElementById("hover-tip");
+  assert.equal(tip.hidden, false, "hovering a control shows its label");
+  assert.equal(tip.textContent, "Attach a file (@-mention)");
+  assert.equal(attach.hasAttribute("title"), false,
+    "the operating system's tooltip is lifted off, so a control never explains itself twice");
+
+  // Moving to a neighbour swaps the label and hands the first control its title back.
+  const commands = doc.getElementById("btn-cmd");
+  hover(commands);
+  await settle(20);
+  assert.equal(attach.title, "Attach a file (@-mention)", "the title returns when the pointer leaves");
+  assert.equal(tip.textContent, "Commands (/)", "a neighbouring control does not make you wait again");
+
+  doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(tip.hidden, true, "Escape dismisses the label");
+  assert.equal(commands.title, "Commands (/)");
+
+  // A control inside a hidden panel must not label itself; the composer rail is closed here.
+  hover(doc.getElementById("changes-main"));
+  await settle(450);
+  assert.equal(tip.hidden, true, "a control nobody can see has nothing to explain");
+
+  // A multi-line title keeps its first line as the label and the rest as quieter detail.
+  const changes = doc.getElementById("btn-ctx");
+  changes.title = "Every file this chat has changed\nPartial scan: one folder was unreadable";
+  hover(changes);
+  await settle(450);
+  assert.equal(tip.firstChild.textContent, "Every file this chat has changed");
+  assert.equal(tip.querySelector(".tip-detail").textContent, "Partial scan: one folder was unreadable");
+  assert.deepEqual(errors, []);
+});
+
+test("no control in the panel is left without a hover label", () => {
+  // Icon-only buttons are the ones that need this most, but a word like "Undo" or "Models" also
+  // needs to say what it will do before you press it.
+  const skeleton = /<div id="settings"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.exec(panelSrc)?.[0] ?? "";
+  const unlabelled = [...panelSrc.matchAll(/<button\b[^<]*?>/g)].map((m) => m[0])
+    .filter((tag) => !/\btitle="/.test(tag))
+    .filter((tag) => !/\bhidden\b/.test(tag))              // its label is set when it is shown
+    .map((tag) => (/id="([^"]+)"/.exec(tag) ?? /class="([^"]+)"/.exec(tag))?.[1] ?? tag);
+  assert.deepEqual(unlabelled, [], `these buttons say nothing on hover: ${unlabelled.join(", ")}`);
+  void skeleton;
+});

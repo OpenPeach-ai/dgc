@@ -63,6 +63,16 @@ if (process.argv.includes("--settings")) {
 }
 await page.waitForTimeout(400);
 const out = process.argv[2] || "/tmp/panel.png";
+const tipArg = process.argv.find(a => a.startsWith("--tip"));
+if (tipArg) {
+  const sel = tipArg.includes("=") ? tipArg.slice(6) : "#btn-model";
+  await page.hover(sel);
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out);
+  await browser.close();
+  process.exit(0);
+}
 await page.screenshot({ path: out, fullPage: false });
 
 // Typed composer: proves the send button's ready state and the footer at its widest.
