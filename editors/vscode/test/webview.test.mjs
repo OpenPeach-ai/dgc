@@ -715,7 +715,9 @@ test("live activity follows the newest response content without stealing an inte
     "working status should sit below the latest streamed text");
   assert.equal(log.scrollTop, 1000, "a reader at the tail should follow new streamed text");
 
+  log.dispatchEvent(new dom.window.Event("wheel"));
   log.scrollTop = 200;
+  log.dispatchEvent(new dom.window.Event("scroll"));
   send({ type: "event", event: { type: "tool_call", name: "read_file", summary: "src/app.ts", call_id: "tail-1" } });
   assert.equal(response.lastElementChild, activity,
     "working status should sit below the latest tool call");
@@ -2057,7 +2059,8 @@ test("scrolling back through a run does not strand you at the top of it", () => 
   send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Explain it" } });
   assert.equal(pill.hidden, true, "nothing to jump to while you are already at the end");
 
-  top = 1200;                                        // the user scrolls back to re-read
+  log.dispatchEvent(new dom.window.Event("wheel"));   // the user scrolls back to re-read
+  top = 1200;
   log.dispatchEvent(new dom.window.Event("scroll"));
   assert.equal(pill.hidden, false);
   assert.equal(doc.getElementById("to-latest-label").textContent, "Latest");

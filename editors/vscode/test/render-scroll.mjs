@@ -49,7 +49,8 @@ const read = () => page.evaluate(() => {
 await page.evaluate(() => { const l = document.getElementById("log"); l.scrollTop = l.scrollHeight; });
 await page.waitForTimeout(150);
 const atEnd = await read();
-await page.evaluate(() => { document.getElementById("log").scrollTop -= 200; });   // "slightly scroll up"
+await page.mouse.move(230, 300);
+await page.mouse.wheel(0, -200);                                                   // "slightly scroll up"
 await page.waitForTimeout(250);
 const scrolledUp = await read();
 await send({ type: "turn_end", turn_id: "live", reason: "completed", token_estimate: 10 });
