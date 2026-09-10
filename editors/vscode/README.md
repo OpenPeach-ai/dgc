@@ -7,6 +7,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 
 ## What it does
 
+- **Where you want it** — the chat is offered in the activity bar and in the secondary side bar; open it in either and the same conversation follows. The copy you leave behind says where it went.
 - **Chat panel** — CommonMark responses with headings, lists, quotes, tables, safe file/source links, syntax-highlighted code and exact-source copy. Reasoning and tool batches collapse into compact rows, with visible failures and a separate final response. Surfaces follow your Cursor/VS Code theme with DGC purple accents.
 - **Live controls** — browse skills and change permission mode during a turn. Enter steers native-model work at the next boundary; Alt+Enter or Queue submits a later turn. A separate Stop button remains available while drafting. Subscription CLI follow-ups queue, and their mode changes apply on the next turn. Unapplied steering can be restored after interruption.
 - **Turn ETA and walk-away notifications** — while a native turn runs, the timer shows a calibrated range such as `~2–4 min left · 3/5 tasks`, learned from this project's own history and the turn's task list (CLI 0.30.0, additive protocol-v6 `turn_eta` event). Enable **DGC: Notify On Turn End** for a notification when a turn longer than 20 seconds finishes while the panel is hidden.
@@ -31,7 +32,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **Sessions:** New, Resume, Rewind, Name, Compact, Generate Handoff.
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.
 - **Extensibility:** Skills, MCP Servers, Documentation, Permission Rules, Memory, Lifecycle Hooks.
-- **Maintenance:** Settings, Update CLI to Latest.
+- **Maintenance:** Settings, Update CLI to Latest. If the CLI is older than the extension, DGC offers to update it and then reconnect — the extension drives the DGC you installed rather than shipping its own copy of it.
 
 The in-composer `/` menu is generated from the CLI's canonical editor command registry. Commands
 that need structured editor state are routed through protocol frames rather than sent to the model.
