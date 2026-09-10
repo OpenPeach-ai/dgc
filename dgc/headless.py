@@ -34,7 +34,7 @@ from .redaction import redact_value, secret_values
 from .hooks import hook_catalog
 from .skills import discover_skills, normalize_skill_name, skill_catalog
 from .tools import TOOL_SCHEMAS
-from .ui import arg_summary, split_diff, tool_output_is_error
+from .ui import arg_summary, edit_preview, split_diff, tool_output_is_error
 
 _PLAN_MODES = ("auto", "acceptEdits", "default")
 _MAX_QUEUED_TURNS = 32
@@ -237,6 +237,8 @@ class HeadlessUI:
         self._rule_hook = None          # set by Backend to persist an allow rule
         self._rule_override: dict = {}   # tool -> explicit rule string the IDE dictated
         self.plan_feedback = ""         # one-shot feedback consumed by Agent after rejection
+        self.deny_reason = ""           # the editor's note on a denial, consumed by Agent
+        self.preview_root = None        # project root for edit previews on approval cards
 
     # streaming ----------------------------------------------------------------
     def on_text(self, chunk: str) -> None:
@@ -337,15 +339,20 @@ class HeadlessUI:
 
     def approve_live(self, name: str, args: dict, call_id: str | None = None, *, recheck=None) -> str:
         rid, ev = self.pending.register()
+        preview = edit_preview(name, args, self.preview_root) if self.preview_root else ""
         self.em.emit("permission_request", id=rid, call_id=call_id, name=name, args=args,
                      command=(args.get("command") if name == "bash" else None),
+                     summary=arg_summary(name, args), diff=preview or None,
                      suggested_rule=str(rule_for(name, args)),
                      choices=["once", "always", "deny"])
         payload = self._await(rid, ev, recheck=recheck, human=True) or {}
         if payload.get("rule"):
             self._rule_override[name] = payload["rule"]
-        return {"once": "once", "always": "always",
-                "deny": "no", "no": "no"}.get(payload.get("decision"), "no")
+        decision = {"once": "once", "always": "always",
+                    "deny": "no", "no": "no"}.get(payload.get("decision"), "no")
+        # A denial can carry the user's note; the agent hands it to the model as the reason.
+        self.deny_reason = str(payload.get("reason") or "")[:2000] if decision == "no" else ""
+        return decision
 
     def add_permission_rule(self, name: str, args: dict) -> None:
         rule = self._rule_override.pop(name, None) or str(rule_for(name, args))
@@ -425,6 +432,7 @@ class Backend:
         self.pending = PendingRequests()
         self.ui = HeadlessUI(self.em, self.pending,
                              float(config.get("approval_timeout_s", 300) or 300))
+        self.ui.preview_root = config.project_root   # edit previews on approval cards
         self.agent = Agent(config, self.ui)
         self.ui.cancelled = self.agent.cancelled
         self.ui._goal_hook = self._emit_goal
@@ -1656,7 +1664,8 @@ class Backend:
                          **_request_fields(request_id))
 
         elif t == "permission_response":
-            self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule")})
+            self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "rule": cmd.get("rule"),
+                                                 "reason": cmd.get("reason")})
         elif t == "plan_response":
             self.pending.resolve(cmd.get("id"), {"decision": cmd.get("decision"), "feedback": cmd.get("feedback")})
         elif t == "options_response":

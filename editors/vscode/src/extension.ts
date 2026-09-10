@@ -46,6 +46,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     vscode.commands.registerCommand("dgc.cycleMode", () => provider.cycleMode()),
     vscode.commands.registerCommand("dgc.setThinking", () => provider.setThinking()),
     vscode.commands.registerCommand("dgc.addSelection", () => provider.addSelection()),
+    vscode.commands.registerCommand("dgc.addFile",
+      (uri?: vscode.Uri, uris?: vscode.Uri[]) => provider.addFiles(uri, uris)),
     vscode.commands.registerCommand("dgc.restart", () => provider.restart()),
     vscode.commands.registerCommand("dgc.resume", () => provider.resume()),
     vscode.commands.registerCommand("dgc.rewind", () => provider.rewind()),
@@ -80,7 +82,12 @@ export function activate(context: vscode.ExtensionContext): void | object {
     }),
     vscode.commands.registerCommand("dgc.settings", () => provider.openSettings()),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
+      if (e.affectsConfiguration("dgc.command")) {
+        // The backend is the configured executable; a new path used to take effect only on the
+        // next window reload.
+        provider.restart();
+        void vscode.window.showInformationMessage("DGC restarted with the new command path.");
+      } else if (e.affectsConfiguration("dgc")) { provider.applyNativeSettings(); }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => provider.workspaceRootsChanged()),
   );

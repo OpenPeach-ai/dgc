@@ -117,12 +117,14 @@
 <li><strong>auto</strong> — model-requested tool actions are approved. Some integration consent prompts remain user-gated. Use only in a sandbox or a throwaway repo.</li>
 </ul>
 <p>Explicit <code>/permissions</code> rules are evaluated deny → ask → allow before those baseline decisions. Subscription turns map the mode into the selected vendor CLI&#x27;s own flags and policy instead. <code>/sandbox on</code> uses the strongest supported host boundary for native-loop spawned shell commands and hooks; it does not confine parent-process structured file tools or delegated vendor CLIs, and does <strong>not</strong> skip normal permission prompts. Linux/bubblewrap makes the project the only persistent writable host path for those commands, masks ambient user state, and provides private home, temporary, runtime, process, and network namespaces. macOS/sandbox-exec denies ambient-home reads outside the project and host writes except the project and shared system temporary paths; its temporary and process namespaces are not private. Network is blocked by default on both. Unsupported platforms fail closed instead of running a requested sandbox without confinement. Use <code>/sandbox network on</code> only when needed.</p>
+<div class="heading-row h2-row"><h2 id="in-vs-code-and-cursor">In VS Code and Cursor</h2><a class="anchor" href="#in-vs-code-and-cursor" aria-label="Link to this section">#</a></div>
+<p>The approval card shows what the step will do — its summary and, for an edit, the diff it would apply — so you approve against the change rather than raw arguments. <strong>Deny</strong> can carry a note; the model reads it as the reason and adjusts.</p>
       <nav class="pager" aria-label="Pagination">
 <a class="prev" href="command-line.html"><div class="k">← Previous</div><div class="t">Command line</div></a>
 <a class="next" href="plan-mode.html"><div class="k">Next →</div><div class="t">Plan mode</div></a>
 </nav>
   </article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#content" data-id="content" class="lvl2">Top</a></aside>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#in-vs-code-and-cursor" data-id="in-vs-code-and-cursor" class="lvl2">In VS Code and Cursor</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
 <div class="grp-h">Getting started</div>

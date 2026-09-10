@@ -54,6 +54,56 @@ def arg_summary(name: str, args: dict) -> str:
     return ""
 
 
+def _cap_diff(text: str, limit: int = 200) -> str:
+    rows = text.splitlines()
+    if len(rows) > limit:
+        return "\n".join(rows[:limit]) + f"\n… {len(rows) - limit} more lines"
+    return "\n".join(rows)
+
+
+def edit_preview(name: str, args: dict, root) -> str:
+    """A unified diff of what an edit tool WOULD do, for an approval card.
+
+    Read-only and bounded: the file is read once (skipped past 256 KB) and the diff is cut at
+    200 lines. "" when there is nothing to show — a tool that is not an edit, a target that
+    does not match, a no-op — so the card falls back to the raw arguments.
+    """
+    import difflib
+    from pathlib import Path
+    try:
+        if name == "apply_patch":
+            return _cap_diff(str(args.get("patch") or ""))
+        raw = str(args.get("path") or "")
+        if not raw or name not in ("write_file", "edit_file", "multi_edit"):
+            return ""
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path(str(root)) / path
+        old = ""
+        if path.is_file():
+            if path.stat().st_size > 262_144:
+                return ""
+            old = path.read_text(encoding="utf-8", errors="replace")
+        if name == "write_file":
+            new = str(args.get("content") or "")
+        else:
+            edits = ([args] if name == "edit_file" else
+                     [e for e in (args.get("edits") or []) if isinstance(e, dict)])
+            new = old
+            for edit in edits:
+                before, after = str(edit.get("old_string") or ""), str(edit.get("new_string") or "")
+                if not before or before not in new:
+                    return ""
+                new = new.replace(before, after) if edit.get("replace_all") else new.replace(before, after, 1)
+        if new == old:
+            return ""
+        lines = difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True),
+                                     fromfile=f"a/{raw}", tofile=f"b/{raw}")
+        return _cap_diff("".join(lines))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return ""
+
+
 def split_diff(out: str) -> tuple[bool, str]:
     """If a tool's output contains a unified diff, return (True, diff_text); else (False, "")."""
     if "\n--- " in out or out.startswith("---"):

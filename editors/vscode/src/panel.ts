@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { createHash } from "crypto";
 import { realpath } from "fs/promises";
-import { basename, isAbsolute, resolve, sep } from "path";
+import { basename, isAbsolute, join, resolve, sep } from "path";
 import { DgcBackend, DgcEvent } from "./backend";
 import { resolveDgcExecutable, userScopedString } from "./configuration";
 import { workspaceFile } from "./navigation";
@@ -285,9 +285,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       message: "DGC could not remember this chat for window reload. The saved conversation remains available under Resume." } }));
   }
 
+  /** The `dgc.ready` context key gates palette entries that need a running backend. */
+  private setReadyContext(value: boolean): void {
+    try {
+      const pending = vscode.commands?.executeCommand?.("setContext", "dgc.ready", value);
+      if (pending && typeof (pending as Thenable<unknown>).then === "function") {
+        (pending as Thenable<unknown>).then(undefined, () => { /* the host is what matters */ });
+      }
+    } catch { /* a stub host without commands — the key is only a palette convenience */ }
+  }
+
   private finishSessionHandshake(be: DgcBackend, adoptDraftFrom = ""): void {
     if (this.backend !== be) { return; }
     this.sessionReady = true;
+    this.setReadyContext(true);                                             // gates palette entries
     this.rememberSession();
     this.post({ type: "session_ready", sessionId: this.currentSessionId, adoptDraftFrom });
     this.initializingBackend = undefined;
@@ -841,15 +852,31 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                          range: { start_line: a, end_line: b }, text: sel });
       }
 
+      const mapDiagnostic = (d: vscode.Diagnostic) => ({
+        severity: vscode.DiagnosticSeverity[d.severity], message: d.message.slice(0, 2000),
+        source: d.source || "", code: typeof d.code === "object" ? d.code.value : d.code,
+        range: { start_line: d.range.start.line + 1, start_character: d.range.start.character + 1,
+                 end_line: d.range.end.line + 1, end_character: d.range.end.character + 1 },
+      });
       if (activeUri) {
-        const diagnostics = vscode.languages.getDiagnostics(activeUri).slice(0, 50).map((d) => ({
-          severity: vscode.DiagnosticSeverity[d.severity], message: d.message.slice(0, 2000),
-          source: d.source || "", code: typeof d.code === "object" ? d.code.value : d.code,
-          range: { start_line: d.range.start.line + 1, start_character: d.range.start.character + 1,
-                   end_line: d.range.end.line + 1, end_character: d.range.end.character + 1 },
-        }));
+        const diagnostics = vscode.languages.getDiagnostics(activeUri).slice(0, 50).map(mapDiagnostic);
         if (diagnostics.length) {
           resources.push({ type: "diagnostics", ...describe(activeUri), diagnostics });
+        }
+      }
+      // Files this chat touched, not just the one on screen: after editing five files the agent
+      // could not see the errors it had just created. Errors and warnings only, bounded.
+      const touched = new Set<string>(activeUri ? [activeUri.toString()] : []);
+      for (const change of this.chatChanges) {
+        if (touched.size >= 9) { break; }
+        if (!change.path) { continue; }
+        const uri = vscode.Uri.file(isAbsolute(change.path) ? change.path : join(change.root, change.path));
+        if (touched.has(uri.toString())) { continue; }
+        touched.add(uri.toString());
+        const diagnostics = vscode.languages.getDiagnostics(uri)
+          .filter((d) => d.severity <= vscode.DiagnosticSeverity.Warning).slice(0, 20).map(mapDiagnostic);
+        if (diagnostics.length) {
+          resources.push({ type: "diagnostics", ...describe(uri), diagnostics });
         }
       }
       return resources.slice(0, 64);
@@ -882,6 +909,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
     be.on("exit", (code: number | null) => {
       this.mcpUrls.clear();
+      this.setReadyContext(false);
       if (this.backend === be) {
         this.changesRefreshRevision++;
         this.workspaceChanges = [];
@@ -901,6 +929,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   restart(): void {
+    this._installPrompted = false;      // a fresh start earns a fresh prompt if the CLI is still missing
+    this.setReadyContext(false);
     this.changesRefreshRevision++;
     this.workspaceChanges = [];
     this.backend?.dispose();
@@ -1136,12 +1166,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private promptInstallCli(): void {
     if (this._installPrompted) { return; }
     this._installPrompted = true;
-    const INSTALL = "Install DGC CLI", SETPATH = "Set dgc.command…";
+    const INSTALL = "Install DGC CLI", SETPATH = "Set dgc.command…", RETRY = "Retry";
     vscode.window.showErrorMessage(
       "DGC needs the `dgc` command-line tool, which isn't installed or on PATH.",
-      INSTALL, SETPATH,
+      INSTALL, SETPATH, RETRY,
     ).then((choice) => {
-      if (choice === INSTALL) {
+      if (choice === RETRY) {
+        this.restart();
+      } else if (choice === INSTALL) {
         const term = vscode.window.createTerminal("Install DGC");
         term.show();
         term.sendText("curl -fsSL https://vibedgc.com/install.sh | bash");
@@ -1372,8 +1404,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         void this.startGoal(String(msg.text || ""), msg);
         break;
       case "permission_response":
-        be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule });
+        be.send({ type: "permission_response", id: msg.id, decision: msg.decision, rule: msg.rule,
+                  ...(typeof msg.reason === "string" && msg.reason.trim()
+                      ? { reason: msg.reason.trim().slice(0, 2000) } : {}) });
         break;
+      case "drop_uris": {
+        // files dragged into the chat from the explorer or a tab
+        const dropped = (Array.isArray(msg.uris) ? msg.uris : []).slice(0, 16)
+          .map((raw: unknown) => { try { return vscode.Uri.parse(String(raw), true); } catch { return undefined; } })
+          .filter((u: vscode.Uri | undefined): u is vscode.Uri => !!u && u.scheme === "file");
+        this.attachFiles(dropped);
+        break;
+      }
       case "plan_response":
         if (msg.decision === "auto") {
           const confirm = await vscode.window.showWarningMessage(
@@ -3188,6 +3230,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   addSelection(): void {
     const ed = vscode.window.activeTextEditor;
     if (!ed || ed.selection.isEmpty) {
+      void vscode.window.showInformationMessage("Select some text first — DGC: Add Selection sends the selection.");
       return;
     }
     const rel = vscode.workspace.asRelativePath(ed.document.uri);
@@ -3196,12 +3239,37 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const folder = vscode.workspace.getWorkspaceFolder(ed.document.uri);
     let text = ed.document.getText(ed.selection);
     if (text.length > 8192) { text = text.slice(0, 8192); }
-    this.focus();
-    this.post({ type: "attach", label: `${rel}:${a}-${b}`, resource: {
+    // Queued until the webview is up: the selection used to be dropped silently when the view
+    // had never been opened.
+    this.inVisiblePanel(() => this.post({ type: "attach", label: `${rel}:${a}-${b}`, resource: {
       type: "selection", uri: ed.document.uri.toString(), path: ed.document.uri.fsPath,
       relative_path: rel, workspace: folder?.name || "", language: ed.document.languageId,
       range: { start_line: a, end_line: b }, text,
-    } });
+    } }));
+  }
+
+  /** DGC: Add File to Chat — from the explorer, a tab, the palette, or a drop. */
+  addFiles(uri?: vscode.Uri, uris?: vscode.Uri[]): void {
+    const picked = (Array.isArray(uris) && uris.length ? uris : uri ? [uri] : [])
+      .filter((u): u is vscode.Uri => !!u && u.scheme === "file");
+    const active = vscode.window.activeTextEditor?.document.uri;
+    const list = picked.length ? picked : active && active.scheme === "file" ? [active] : [];
+    if (!list.length) {
+      void vscode.window.showInformationMessage("Open or select a file to add it to DGC.");
+      return;
+    }
+    this.attachFiles(list);
+  }
+
+  private attachFiles(list: vscode.Uri[]): void {
+    for (const u of list.slice(0, 16)) {
+      const folder = vscode.workspace.getWorkspaceFolder(u);
+      const rel = folder ? vscode.workspace.asRelativePath(u, false) : u.fsPath;
+      this.inVisiblePanel(() => this.post({ type: "attach", label: rel, resource: {
+        type: "file_mention", uri: u.toString(), path: u.fsPath, relative_path: rel,
+        workspace: folder?.name || "",
+      } }));
+    }
   }
 
   dispose(): void {

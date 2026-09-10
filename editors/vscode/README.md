@@ -2,7 +2,7 @@
 
 Run the **DGC** coding agent inside your editor — a docked chat panel, native menus, streaming tool calls and diffs — driven by **your own model**: Ollama, llama.cpp, LM Studio, vLLM, Anthropic, OpenAI, or another compatible endpoint. Your code stays on your machine unless you choose a cloud provider.
 
-> Use DGC CLI 0.30.0 or newer for all features; the connection requires editor protocol v6. Run `dgc setup`, then use
+> Use DGC CLI 0.32.0 or newer; the connection requires editor protocol v7. Run `dgc setup`, then use
 > **DGC: Restart Backend** after changing the executable or its configuration.
 
 ## What it does
@@ -12,7 +12,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **Turn ETA and walk-away notifications** — while a native turn runs, the timer shows a calibrated range such as `~2–4 min left · 3/5 tasks`, learned from this project's own history and the turn's task list (CLI 0.30.0, additive protocol-v6 `turn_eta` event). Enable **DGC: Notify On Turn End** for a notification when a turn longer than 20 seconds finishes while the panel is hidden.
 - **Goals** — start an objective with `/goal <objective>` or `<objective> /goal`. The card supports pause, resume, edit, delete and review of evidence, work time, cycles and reported tokens. Native and subscription routes continue until completion, pause or a blocker. Optional token budgets are checked between requests or vendor turns.
 - **Changed files** — the composer card shows changes recorded during the current chat, using actual pre-run file contents. **Workspace changes** opens the separate Git review. Saved chat previews exclude pre-existing edits and later manual changes; native diffs run through bounded inspection workers without executing repository filters.
-- **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics, explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
+- **Editor-aware** — each prompt carries bounded typed resources for the focused file, open tabs, diagnostics (for the focused file and every file this chat has touched), explicit mentions, and the current selection. Editor content stays in an untrusted data channel instead of being concatenated into the user's instructions.
 - **In-composer controls** — model, permission mode and thinking level live *in* the prompt box: a compact model picker with a reasoning slider, a permission-mode picker, native VS Code (codicon) icons, and a context-usage pill that compacts on click. Model/thinking controls follow the active native or subscription route; subscription pickers use vendor hints or a free-form vendor model id without querying the native endpoint. **Shift+Tab** cycles permission modes (`default` / `acceptEdits` / `plan` / `auto`).
 - **Composer commands and skills** — type `/` or `$` after a word boundary anywhere in the draft. Pick commands, skills and templates without losing surrounding text. `/plan`, `/review` and `/init` prepare shared CLI/editor workflows. Select up to eight skills/templates, including 22 bundled skills, and attach the same inputs to a goal.
 - **Draft recovery** — per-chat drafts and attachments survive panel reloads and backend restarts. Rejected or uncertain deliveries stay available for review; recovered prompts are never sent automatically.
@@ -20,13 +20,13 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **MCP manager** — add, edit, remove, enable, disable and reconnect local STDIO or remote servers. Browse resources, templates and prompts, preview text, and attach bounded snapshots to a draft or goal. Safe server metadata is persisted in DGC configuration while environment values and remote bearer tokens stay in VS Code SecretStorage and never enter the webview again.
 - **Categorized Settings page** (gear icon) — General, Models, Agents, Security, and Extensions cover provider routes, reasoning display, suggestions, permission/sandbox/network scope, plan/artifact behavior, tool profile, parallelism, and feature-manager shortcuts. Model credentials stay in endpoint-scoped VS Code SecretStorage; non-secret provider defaults can also be set in Settings UI → **DGC**.
 - **Keyboard and assistive access** — semantic buttons, menus, live status, non-color tool outcomes, dialog focus trapping, reduced-motion and forced-colors behavior, WCAG text-palette checks, and keyboard navigation cover the composer, tool/reasoning disclosures, approvals, attachments, and settings.
-- **Permission prompts** inline — allow once / always-allow (saves a rule) / deny. Permission, plan, option, and MCP cards are request-correlated and single-use; Stop/expiry/backend exit disables them immediately, and decision traffic stays ahead of queued prompts under transport pressure.
+- **Permission prompts** inline — each card shows what the step will do (its summary and, for an edit, the diff it would apply), then allow once / always-allow (saves a rule) / deny, with an optional note the model reads when you deny. Permission, plan, option, and MCP cards are request-correlated and single-use; Stop/expiry/backend exit disables them immediately, and decision traffic stays ahead of queued prompts under transport pressure.
 - **Session resume & rewind** — resuming pages through saved context with expandable tool arguments/results; long messages and very large histories have explicit display limits. Rewind restores your code and conversation to an earlier checkpoint.
 - **Your model, your machine** — the extension drives the local `dgc` CLI via `dgc serve` over stdio: same models, same config (`~/.dgc/config.json`), local-first. Model requests follow your selected local, cloud or subscription route. Enabled web tools and MCP servers can also contact their configured services.
 
 ## Commands
 
-- **Chat:** Focus Chat (`Ctrl/Cmd+Alt+D`), Open Command Menu, Add Selection (`Ctrl/Cmd+Alt+I`), Cycle Mode (`Ctrl/Cmd+Alt+M`).
+- **Chat:** Focus Chat (`Ctrl/Cmd+Alt+D`), Open Command Menu, Add Selection (`Ctrl/Cmd+Alt+I`), Add File to Chat (explorer and tab context menus — or drag a file into the chat), Cycle Mode (`Ctrl/Cmd+Alt+M`). Palette entries that need a running backend appear once it is connected.
 - **Runtime:** Select Model, Connect Provider, Set/Cycle Permission Mode, Set Thinking, Restart Backend.
 - **Sessions:** New, Resume, Rewind, Name, Compact, Generate Handoff.
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.

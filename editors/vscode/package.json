@@ -115,6 +115,11 @@
         "category": "DGC"
       },
       {
+        "command": "dgc.addFile",
+        "title": "DGC: Add File to Chat",
+        "category": "DGC"
+      },
+      {
         "command": "dgc.restart",
         "title": "DGC: Restart Backend",
         "category": "DGC"
@@ -241,6 +246,106 @@
           "command": "dgc.addSelection",
           "when": "editorHasSelection",
           "group": "dgc"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "dgc.addFile",
+          "when": "resourceScheme == file",
+          "group": "dgc"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "dgc.addFile",
+          "when": "resourceScheme == file",
+          "group": "dgc"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dgc.selectModel",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.connect",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.setMode",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.cycleMode",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.setThinking",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.resume",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.rewind",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.nameSession",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.openSkills",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.openMcp",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.openPermissions",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.openMemory",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.openHooks",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.viewPlan",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.artifacts",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.goal",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.handoff",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.retainedTasks",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.compact",
+          "when": "dgc.ready"
+        },
+        {
+          "command": "dgc.addSelection",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "dgc.addFile",
+          "when": "editorIsOpen"
         }
       ]
     },

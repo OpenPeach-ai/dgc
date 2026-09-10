@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 6
+PROTOCOL_VERSION = 7
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -102,6 +102,9 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "permission_request": {
         "id": _S(), "call_id": _NS(False), "name": _S(), "args": _O(),
         "command": _NS(False), "suggested_rule": _S(), "choices": _A(),
+        # v7: what the step would do, so an editor can approve against a summary and a diff
+        # instead of raw JSON, and say why it denied.
+        "summary": _S(False), "diff": _NS(False),
     },
     "rule_added": {"rule": _S()},
     "plan_proposal": {"id": _S(), "plan": _S(), "choices": _A()},
@@ -266,7 +269,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "set_workspace_roots": {"roots": _A(), "request_id": _S(False), "question_forms": _B(False)},
     "permission_response": {
         "id": _S(), "decision": _f("string", enum=("once", "always", "deny", "no")),
-        "rule": _S(False),
+        "rule": _S(False), "reason": _S(False),
     },
     "plan_response": {
         "id": _S(),

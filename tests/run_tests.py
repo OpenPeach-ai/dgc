@@ -12880,6 +12880,70 @@ def test_resize_reflow():
           blocks[1] == {"kind": "md", "text": "**bold** reply"} and blocks[0]["kind"] == "user")
 
 
+def test_editor_approval_gate():
+    """Protocol v7: an editor approves against what the step would do — a summary and, for an
+    edit, the diff it would apply — and can deny with a note the model then reads."""
+    import io as _io
+    import json as _json
+    import tempfile as _tempfile
+    import threading as _threading
+    from pathlib import Path as _Path
+    from dgc import editor_protocol as _EP
+    from dgc.headless import HeadlessUI
+    from dgc.protocol import Emitter, PendingRequests
+    from dgc.ui import edit_preview
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
+    (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    check("protocol v7 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 7
+          and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
+                               "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
+                               "diff": "--- a\n+++ b"}) is None
+          and _EP.command_error({"type": "permission_response", "id": "r1", "decision": "deny",
+                                 "reason": "not that file"}) is None)
+    preview = edit_preview("edit_file", {"path": "app.py", "old_string": "a - b", "new_string": "a + b"}, root)
+    check("an edit previews as the unified diff it would apply",
+          preview.startswith("--- a/app.py") and "-    return a - b" in preview and "+    return a + b" in preview)
+    check("a write previews against the file on disk, and a new file against nothing",
+          "+    return a + b" in edit_preview("write_file", {"path": "app.py", "content": "def add(a, b):\n    return a + b\n"}, root)
+          and edit_preview("write_file", {"path": "new.py", "content": "x = 1\n"}, root).startswith("--- a/new.py"))
+    check("multi-edit previews all edits in order",
+          "+    return b + a" in edit_preview("multi_edit", {"path": "app.py", "edits": [
+              {"old_string": "a - b", "new_string": "a + b"}, {"old_string": "a + b", "new_string": "b + a"}]}, root))
+    check("a patch previews as itself and a miss previews nothing",
+          edit_preview("apply_patch", {"path": "app.py", "patch": "--- x\n+++ y\n@@\n-1\n+2"}, root).startswith("--- x")
+          and edit_preview("edit_file", {"path": "app.py", "old_string": "nope", "new_string": "x"}, root) == ""
+          and edit_preview("bash", {"command": "ls"}, root) == "")
+    long = edit_preview("write_file", {"path": "big.txt", "content": "\n".join(str(i) for i in range(400)) + "\n"}, root)
+    check("a preview is cut at 200 lines and says so", long.count("\n") <= 201 and "more lines" in long)
+
+    sink = _io.StringIO()
+    pending = PendingRequests()
+    ui = HeadlessUI(Emitter(sink), pending, approval_timeout_s=5.0)
+    ui.preview_root = root
+    def answer():
+        for _ in range(200):
+            rid = next(iter(pending._slots), None)
+            if rid:
+                pending.resolve(rid, {"decision": "deny", "reason": "keep subtraction, add a new helper"})
+                return
+            _threading.Event().wait(0.01)
+    _threading.Thread(target=answer, daemon=True).start()
+    decision = ui.approve("edit_file", {"path": "app.py", "old_string": "a - b", "new_string": "a + b"}, "c1")
+    event = _json.loads(sink.getvalue().splitlines()[0])
+    check("the approval event carries the summary and the diff the editor shows",
+          event["type"] == "permission_request" and event["summary"] == "app.py"
+          and "+    return a + b" in (event["diff"] or ""))
+    check("a denial's note reaches the agent as the reason",
+          decision == "no" and ui.deny_reason == "keep subtraction, add a new helper")
+    sink.truncate(0); sink.seek(0)
+    _threading.Thread(target=lambda: (_threading.Event().wait(0.02), pending.resolve(next(iter(pending._slots)), {"decision": "once"})), daemon=True).start()
+    check("an allowance clears the last note",
+          ui.approve("bash", {"command": "ls"}, "c2") == "once" and ui.deny_reason == ""
+          and _json.loads(sink.getvalue().splitlines()[0])["diff"] is None)
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -18025,6 +18089,7 @@ def main():
         test_oneshot_machine_readable()
         test_paste_collapse()
         test_resize_reflow()
+        test_editor_approval_gate()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

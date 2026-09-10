@@ -156,3 +156,48 @@ test("keybindings do not collide with the host or with Claude Code", () => {
     assert.ok(!keys.includes(taken), `${taken} is claimed by the host or another harness`);
   }
 });
+
+test("protocol v7: the approval card gets a summary and a diff, and a denial can carry a note", () => {
+  const generated = readFileSync(join(here, "../src/protocol.generated.ts"), "utf8");
+  assert.match(generated, /DGC_PROTOCOL_VERSION = 7 as const/);
+  const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  assert.match(panel, /type: "permission_response", id: msg\.id, decision: msg\.decision, rule: msg\.rule,\s*\.\.\.\(typeof msg\.reason === "string"/,
+    "the panel forwards the denial note to the backend");
+  const webview = readFileSync(join(here, "../media/main.js"), "utf8");
+  assert.match(webview, /ev\.summary/, "the card shows the step summary");
+  assert.match(webview, /renderDiff\(String\(ev\.diff\)\)/, "an edit's diff renders on the card");
+  assert.match(webview, /reason: b\.dataset\.d === "deny" && note \? note : undefined/, "Deny sends the note");
+});
+
+test("entry points: explorer and tab menus, drag-and-drop, and palette entries that need a backend are gated", () => {
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  const menus = manifest.contributes.menus;
+  assert.ok(manifest.contributes.commands.some((c) => c.command === "dgc.addFile"), "DGC: Add File to Chat exists");
+  assert.ok(menus["explorer/context"].some((m) => m.command === "dgc.addFile"), "explorer context menu");
+  assert.ok(menus["editor/title/context"].some((m) => m.command === "dgc.addFile"), "editor tab context menu");
+  const gated = new Map(menus.commandPalette.map((m) => [m.command, m.when]));
+  for (const cmd of ["dgc.rewind", "dgc.compact", "dgc.goal", "dgc.handoff", "dgc.selectModel", "dgc.connect"]) {
+    assert.equal(gated.get(cmd), "dgc.ready", `${cmd} is hidden from the palette until the backend is ready`);
+  }
+  assert.equal(gated.get("dgc.addSelection"), "editorHasSelection");
+  const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  assert.match(panel, /setReadyContext\(true\)/); assert.match(panel, /setReadyContext\(false\)/);
+  assert.match(panel, /case "drop_uris"/, "dropped files reach the panel");
+  assert.match(panel, /type: "file_mention", uri: u\.toString\(\)/, "dropped and picked files attach as @-mentions");
+  const webview = readFileSync(join(here, "../media/main.js"), "utf8");
+  assert.match(webview, /addEventListener\("drop"/); assert.match(webview, /type: "drop_uris", uris/);
+});
+
+test("first-run dead ends: a queued selection, a restart on a new command path, and no permanent dismissal", () => {
+  const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  const addSelection = panel.slice(panel.indexOf("addSelection(): void {"), panel.indexOf("addFiles(uri?"));
+  assert.match(addSelection, /this\.inVisiblePanel\(\(\) => this\.post\(\{ type: "attach"/,
+    "the selection waits for the webview instead of being dropped when the view was never opened");
+  assert.match(addSelection, /showInformationMessage\("Select some text first/);
+  const restart = panel.slice(panel.indexOf("restart(): void {"), panel.indexOf("restart(): void {") + 400);
+  assert.match(restart, /this\._installPrompted = false/, "a restart earns a fresh install prompt");
+  assert.match(panel, /RETRY = "Retry"/, "the install prompt offers a retry");
+  const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
+  assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*provider\.restart\(\)/,
+    "changing dgc.command restarts the backend");
+});
