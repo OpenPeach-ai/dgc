@@ -892,6 +892,57 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("the approval card shows what the step will do, and Deny carries the note back", () => {
+  // Protocol v7. The card used to show raw JSON args and had no way to say why you refused,
+  // so this exercises the rendered card rather than the source that builds it.
+  const { errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "Fix the bug" });
+  event({ type: "permission_request", id: "p1", name: "edit_file",
+          args: { path: "app.py", old_string: "a - b", new_string: "a + b" },
+          summary: "app.py",
+          diff: "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n",
+          suggested_rule: "Edit(app.py)", choices: ["once", "always", "deny"] });
+  const card = doc.querySelector('.card[data-request-id="p1"]');
+  assert.ok(card, "the request card exists");
+  assert.match(card.textContent, /Run edit_file\?/, "the card names the tool");
+  assert.match(card.textContent, /app\.py/, "the card shows the step summary");
+  assert.doesNotMatch(card.textContent, /old_string/, "raw JSON args are not what the user approves against");
+  const diff = card.parentElement.querySelector(".diff, [class*='diff']") || card.querySelector(".diff, [class*='diff']");
+  assert.ok(diff, "the diff the step would apply is rendered");
+  assert.match(diff.textContent, /return a \+ b/, "the diff shows the new line");
+  const note = card.querySelector("textarea.feedback");
+  assert.ok(note, "a denial can carry a note");
+  note.value = "  keep subtraction, add a helper instead  ";
+  card.querySelector('button[data-d="deny"]').click();
+  const reply = posted.at(-1);
+  assert.equal(reply.type, "permission_response");
+  assert.equal(reply.id, "p1");
+  assert.equal(reply.decision, "deny");
+  assert.equal(reply.reason, "keep subtraction, add a helper instead", "the note is trimmed and sent");
+  assert.equal(reply.rule, undefined, "denying never saves a rule");
+  assert.deepEqual(errors, []);
+});
+
+test("an allow answer sends no note, and Always allow still carries the suggested rule", () => {
+  const { errors, posted, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "Run it" });
+  event({ type: "permission_request", id: "p2", name: "bash", args: { command: "npm test" },
+          command: "npm test", summary: "npm test", suggested_rule: "Bash(npm test)",
+          choices: ["once", "always", "deny"] });
+  const card = doc.querySelector('.card[data-request-id="p2"]');
+  assert.match(card.textContent, /npm test/);
+  card.querySelector('button[data-d="always"]').click();
+  const reply = posted.at(-1);
+  assert.equal(reply.decision, "always");
+  assert.equal(reply.rule, "Bash(npm test)");
+  assert.equal(reply.reason, undefined, "an approval carries no denial note");
+  assert.deepEqual(errors, []);
+});
+
 test("cancelled steering restores its draft and live mode resolves the approval card", () => {
   const { dom, errors, posted, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
