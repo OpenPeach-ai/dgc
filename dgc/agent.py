@@ -1593,6 +1593,7 @@ class Agent(GoalLifecycle):
         self._goal_running = False
         self._active_goal_request = None
         self._pending_goal_report = None
+        self._goal_stated = False           # is the full objective already in this context?
         self._goal_progress = None
         self._active_tool_intents: set[str] = set()
         self._active_skill_names: set[str] = set()
@@ -3172,11 +3173,12 @@ class Agent(GoalLifecycle):
                 if (getattr(self, "goal", "") and getattr(self, "goal_status", "none") == "active"
                         and not self._pending_goal_report and not goal_nudged and did_tools):
                     goal_nudged = True       #   don't stop with the goal unmet if we actually did work
-                    self.messages.append({"role": "user", "content":
-                        "<system-reminder>\nStanding goal for this session:\n" + self.goal +
-                        "\nBefore you stop: is that goal now FULLY met? If yes, call update_goal with completion evidence. "
-                        "If not, take the next concrete step toward it now — don't stop with it unmet.\n"
-                        "</system-reminder>"})
+                    # This reminder joins the HISTORY, so every copy is re-sent on every later
+                    # request. Restating the whole objective each turn charged the window for it
+                    # again and again — a long goal could spend most of the context repeating
+                    # itself. State it in full once per context, then refer back to it.
+                    self.messages.append({"role": "user", "content": self._goal_reminder()})
+                    self._goal_stated = True
                     if defer_completion:
                         withhold_final(
                             "[Completion withheld by DGC: the active standing goal required another step.]",
@@ -4816,6 +4818,7 @@ class Agent(GoalLifecycle):
                 if 0 < output_tokens <= 10_000_000:
                     compacted_assistant["_responses_compaction_tokens"] = output_tokens
                 digest = self.notes_digest()
+                self._goal_stated = False   # a compacted context has not seen the objective
                 self.messages = (
                     [self.messages[0],
                      {"role": "user",
@@ -4859,6 +4862,7 @@ class Agent(GoalLifecycle):
         digest = self.notes_digest()
         if digest:
             summary = f"{summary}\n\n{digest}"
+        self._goal_stated = False   # a compacted context has not seen the objective
         self.messages = (
             [self.messages[0],
              {"role": "user", "content": f"{_COMPACT_PREFIX}\n{summary}"},

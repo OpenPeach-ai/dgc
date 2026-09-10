@@ -158,7 +158,9 @@ class _ComposerLexer(Lexer):
         secret = bool(entry and entry.get("secret"))
         known = self._known() if not secret else {"/": frozenset(), "$": frozenset()}
         th = style_mod.theme()
-        marked = f"bold fg:{th.accent_bright}"
+        # A resolved command or skill is an attachment, not prose, so it reads as a chip: the
+        # accent on the composer's own raised surface, the way the editor draws its attachments.
+        marked = f"bold fg:{th.accent_bright} bg:{th.surface2}"
         pasted = f"fg:{th.accent_dim} italic"
         paste_token = getattr(type(self._tui), "_PASTE_TOKEN", None)
         lines = document.lines
@@ -178,6 +180,8 @@ class _ComposerLexer(Lexer):
                     continue
                 if start > index:
                     spans.append(("", text[index:start]))
+                # No padding: a lexer's fragments must match the document character for
+                # character, or the cursor and the selection drift away from the text.
                 spans.append((style, text[start:end]))
                 index = end
             if not spans:
@@ -4136,7 +4140,14 @@ class TUI:
                 try:
                     notices = start_terminal_goal(rest, self.agent)
                 except ValueError as exc:
-                    self._flash(str(exc)); return True
+                    # The composer was cleared before this ran, so a refused goal used to destroy
+                    # what the user wrote and leave a flash that expires in two seconds. Give the
+                    # objective back and put the reason somewhere it can be read.
+                    if rest and not self.input_buf.text:
+                        self.input_buf.insert_text(rest)
+                    self.error(str(exc))
+                    self._flash("goal not set \u00b7 your text is back in the composer", secs=6)
+                    return True
                 for notice in notices:
                     self.info(notice)
                 self._submit(self.agent.goal, expand_mentions=False)

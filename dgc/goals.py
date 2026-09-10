@@ -236,6 +236,34 @@ class GoalLifecycle:
         # Sanitize their newly introduced text before either native or delegated execution.
         return self._safe_text(prepared), context, images
 
+    _GOAL_REFERENCE_CHARS = 160         # enough to recognise the goal, not to restate it
+
+    def _goal_reminder(self) -> str:
+        """The standing-goal check. Full text the first time this context sees it; a reference
+        afterwards, because that earlier copy is still in the history the model is reading."""
+        check = ("\nBefore you stop: is that goal now FULLY met? If yes, call update_goal with "
+                 "completion evidence. If not, take the next concrete step toward it now — "
+                 "don't stop with it unmet.\n</system-reminder>")
+        if not getattr(self, "_goal_stated", False):
+            return "<system-reminder>\nStanding goal for this session:\n" + self.goal + check
+        flat = " ".join(str(self.goal or "").split())
+        head = flat[:self._GOAL_REFERENCE_CHARS] + ("\u2026" if len(flat) > self._GOAL_REFERENCE_CHARS else "")
+        return ("<system-reminder>\nYour standing goal for this session \u2014 stated in full earlier "
+                f"in this conversation \u2014 begins: {head}" + check)
+
+    def goal_max_chars(self) -> int:
+        """How long a standing objective may be, measured against the window it must live in.
+
+        It is stated in full once per context (and again after a compaction), so the ceiling is a
+        share of that window rather than a fixed number: an eighth of the context in tokens, with
+        a floor for tiny windows and a ceiling so no goal can dominate a very large one.
+        """
+        try:
+            window = int(self.context_size())
+        except Exception:
+            window = 32_768
+        return max(4_000, min(32_000, window // 2))     # tokens//8, expressed in characters
+
     def request_goal_control(self, action: str) -> bool:
         """A UI thread can stop/delete an active goal; its owner commits after tool cleanup."""
         if action not in ("pause", "clear") or not getattr(self, "_goal_running", False):
@@ -264,9 +292,15 @@ class GoalLifecycle:
     def set_goal(self, text: str, status: str = "active", *, token_budget: int | None = None,
                  replace: bool = False, inputs: dict | None = None) -> bool:
         clean = self._safe_text(text).strip()
-        if len(clean) > 4000:
-            self._last_persist_error = "Goal objectives must be at most 4,000 characters; no text was discarded"
+        limit = self.goal_max_chars()
+        if len(clean) > limit:
+            self._last_persist_error = (
+                f"That objective is {len(clean):,} characters; this session can hold {limit:,} "
+                "(the goal is stated in full once per context, and this context is "
+                f"{self.context_size():,} tokens). Shorten it to the aim itself, or send the "
+                "detail as an ordinary prompt and set a short goal alongside it.")
             return False
+        self._goal_stated = False           # a new objective must be stated in full again
         if getattr(self, "_goal_running", False) and self._goal_owner != threading.get_ident():
             self._last_persist_error = "Stop the active turn before editing its goal."
             return False
