@@ -733,6 +733,11 @@ Every conversation is a session, saved as you go.
 - **/resume** — reopen a past session (newest first); `dN` deletes one.
 - **/new** (Ctrl+N) — start fresh; DGC auto-titles it from your first prompt.
 - **/name** — rename the current session.
+- **/branch** (`/fork`) — continue in a new chat from here. Everything so far comes with you —
+  the conversation, the standing goal, the todos, the recovery points — and the chat you branched
+  from keeps exactly what it had, so a second approach costs you nothing. `/branch <name>` names
+  it; otherwise it takes the parent's name with *(branch)* after it. The editor offers the same
+  thing under a finished answer.
 - **/history** (Ctrl+R) — search and recall any past prompt.
 - **/jump** — scroll the transcript straight to a past turn.
 - **/recall** — read the earlier conversation a compaction summarised away (see below).
@@ -935,6 +940,73 @@ from a read-only `git status` that never runs filters or transports.
 - Writes stay inside the project. Browsing above the root is read-only, except in **auto** mode, which asks first.
 - The project root itself is never an operand. Trash, delete, rename, and move refuse it and every folder above it, in every mode, so browsing up to the parent and pressing **d** cannot throw the project away.
 - Trees over 5,000 entries or 512 MB are refused rather than half-copied; use the shell for those.
+""".strip()),
+    ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
+# In your editor
+
+DGC runs the same agent inside VS Code and Cursor. The extension drives your local `dgc` — the
+model, the permission mode, the skills, the MCP servers and the session history are the ones you
+already have, and nothing about your code leaves the machine that the terminal would not.
+
+## Install
+
+- **VS Code**: search the Marketplace for **Vibe DGC**, or `code --install-extension vibedgc.dgc`.
+- **Cursor**: search its own extension gallery for **Vibe DGC**. Cursor updates extensions on its
+  own schedule, so use *Extensions → Vibe DGC → Update* if you want a new version immediately.
+- The panel opens in the activity bar, or in the secondary sidebar if you prefer it on the right.
+
+Keep the CLI and the extension roughly in step. They speak a versioned protocol, and if one is
+too old the panel says which side to update rather than failing quietly. `dgc update` moves the
+CLI; the extension updates through your editor.
+
+## The composer
+
+- **@** attaches a file, **/** opens the command palette, **$** applies a skill.
+- Paste an image to attach it for a vision model. Drag files in from the explorer.
+- The send button fills with DGC purple as soon as there is something to send, and becomes a stop
+  button while a turn is running.
+- The row underneath holds the model, the reasoning effort and the permission mode. Every control
+  says what it does when you hover or focus it.
+- Scrolling back through a long run puts a **Latest** pill over the end of the transcript; it
+  turns purple and reads **New** when the model has written something you have not seen.
+
+## When a turn finishes
+
+DGC ends an answer with what it changed and what you can do about it.
+
+- **A summary of the files this turn touched**, each with its additions and deletions, and each
+  opening its own diff. **Review** opens every change this chat has made.
+- **Undo** puts those files back as they were before the turn and rewinds the conversation with
+  them. It finds the recovery point by the prompt that opened it and refuses if it can no longer
+  identify it, because an undo that guesses loses work you did not ask it to.
+- **Copy** takes the whole answer as Markdown.
+- **Rate** records a thumb up or down for this workspace. It is stored locally and sent nowhere.
+- **Branch** continues in a new chat from this point. The conversation comes with you and the
+  chat you branched from keeps everything it had, so you can try a second approach without
+  losing the first. `/branch` does the same in the terminal.
+- **Run again** re-sends the same prompt without disturbing whatever you were half-way through
+  typing; **edit and resend** puts the prompt back in the composer instead.
+
+## Approving work
+
+When DGC needs permission, the card shows what will actually happen — the command, or the diff
+the edit would apply — not the raw arguments. **Allow once**, **Always allow** (which writes a
+permission rule) or **Deny**, and a denial can carry a note that reaches the model as the reason.
+
+## Settings
+
+The gear opens five pages: **General** (permission mode, thinking, context size, tool profile),
+**Models** (a local host, a provider, or your own subscription CLI), **Agents** (the model and
+host that sub-agents and the fallback route use), **Security** (sandbox confinement and plan-mode
+limits) and **Extensions** (skills, MCP servers, hooks, permission rules, memory and these docs).
+Everything is a row: what it is on the left, the control on the right, the explanation beneath.
+
+## What the editor adds
+
+- Files DGC changed carry a mark in the explorer, and the diff opens in your editor's own viewer.
+- **Add to DGC** in the explorer and editor-tab context menus attaches a file to the composer.
+- The panel reads your selection and the file you are in as typed context, not as text glued into
+  the prompt.
 """.strip()),
     ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
 # Turn ETA & notifications

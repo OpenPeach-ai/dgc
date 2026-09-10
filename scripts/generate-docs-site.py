@@ -35,7 +35,8 @@ from site_common import render_shell, site_context  # noqa: E402
 GROUPS: list[tuple[str, list[str]]] = [
     ("Getting started", ["Getting started", "Keyboard shortcuts", "Slash commands", "Command line"]),
     ("Using DGC", ["Permission modes", "Plan mode", "Sessions & rewind", "Context notes",
-                   "Standing goals", "Files pane", "Turn ETA & notifications"]),
+                   "Standing goals", "Files pane", "In your editor",
+                   "Turn ETA & notifications"]),
     ("Providers & models", ["Connect your model", "Subscriptions", "Thinking & reasoning"]),
     ("Features", ["Artifacts", "MCP servers", "Lifecycle hooks", "Skills",
                   "Multiple agents", "Training export", "Python code-action (power mode)"]),

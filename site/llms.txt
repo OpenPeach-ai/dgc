@@ -21,6 +21,7 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Context notes: https://docs.vibedgc.com/context-notes
 - Standing goals: https://docs.vibedgc.com/standing-goals
 - Files pane: https://docs.vibedgc.com/files-pane
+- In your editor: https://docs.vibedgc.com/in-your-editor
 - Turn ETA & notifications: https://docs.vibedgc.com/turn-eta-notifications
 - Connect your model: https://docs.vibedgc.com/connect-your-model
 - Subscriptions: https://docs.vibedgc.com/subscriptions
