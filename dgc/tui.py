@@ -160,7 +160,7 @@ class _ComposerLexer(Lexer):
         th = style_mod.theme()
         # A resolved command or skill is an attachment, not prose, so it reads as a chip: the
         # accent on the composer's own raised surface, the way the editor draws its attachments.
-        marked = f"bold fg:{th.accent_bright} bg:{th.surface2}"
+        marked = f"bold fg:{th.bg} bg:{th.accent_dim}"
         pasted = f"fg:{th.accent_dim} italic"
         paste_token = getattr(type(self._tui), "_PASTE_TOKEN", None)
         lines = document.lines

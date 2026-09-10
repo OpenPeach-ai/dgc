@@ -13232,6 +13232,26 @@ def test_goal_refusal_keeps_the_text():
         check("the first reminder states the whole goal; later ones only refer back to it",
               agent.goal in full and agent.goal not in again
               and "stated in full earlier" in again and len(again) < 600 < len(full))
+        # --- a resolved command reads as an attachment, not as prose
+        from prompt_toolkit.document import Document as _Document
+        from dgc.tui import _ComposerLexer as _Lexer
+        from dgc import style as _style
+        chip_ui = object.__new__(_TUI); chip_ui._input = None
+        chip_ui.config = SimpleNamespace(project_root=str(project)); chip_ui.agent = None
+        lexer = _Lexer(chip_ui)
+        lexer._names = {"/": frozenset({"goal"}), "$": frozenset({"debug"})}
+        lexer._deadline = 9e9
+        fragments = lexer.lex_document(_Document("ship the fix /goal and $debug"))(0)
+        chips = [f for f in fragments if "bg:" in f[0]]
+        theme = _style.theme()
+        check("a resolved command and skill render as filled chips, not styled prose",
+              [f[1] for f in chips] == ["/goal", "$debug"]
+              and all(f"bg:{theme.accent_dim}" in f[0] and f"fg:{theme.bg}" in f[0] for f in chips))
+        check("the chip never changes the text, so the cursor cannot drift from it",
+              "".join(f[1] for f in fragments) == "ship the fix /goal and $debug")
+        check("an unresolved token stays plain prose",
+              all("bg:" not in f[0] for f in lexer.lex_document(_Document("no /nonsense here"))(0)))
+
         check("a later reminder still names enough of the goal to be recognised",
               roomy.split(".")[0][:60] in again and len(again) < len(full) / 10)
     finally:
