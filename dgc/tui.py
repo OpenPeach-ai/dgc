@@ -157,7 +157,10 @@ class _ComposerLexer(Lexer):
         entry = getattr(self._tui, "_input", None)
         secret = bool(entry and entry.get("secret"))
         known = self._known() if not secret else {"/": frozenset(), "$": frozenset()}
-        marked = f"bold fg:{style_mod.theme().accent_bright}"
+        th = style_mod.theme()
+        marked = f"bold fg:{th.accent_bright}"
+        pasted = f"fg:{th.accent_dim} italic"
+        paste_token = getattr(type(self._tui), "_PASTE_TOKEN", None)
         lines = document.lines
 
         def get_line(lineno: int):
@@ -166,13 +169,17 @@ class _ComposerLexer(Lexer):
             except IndexError:
                 return []
             spans, index = [], 0
-            for match in self._TOKEN.finditer(text):
-                if match[2] not in known[match[1]]:
+            tokens = [(m.start(), m.end(), marked) for m in self._TOKEN.finditer(text)
+                      if m[2] in known[m[1]]]
+            if paste_token is not None:      # a collapsed paste reads as a chip, not as prose
+                tokens += [(m.start(), m.end(), pasted) for m in paste_token.finditer(text)]
+            for start, end, style in sorted(tokens):
+                if start < index:
                     continue
-                if match.start() > index:
-                    spans.append(("", text[index:match.start()]))
-                spans.append((marked, match[0]))
-                index = match.end()
+                if start > index:
+                    spans.append(("", text[index:start]))
+                spans.append((style, text[start:end]))
+                index = end
             if not spans:
                 return [("", text)]
             if index < len(text):
@@ -363,6 +370,7 @@ class TUI:
         self._branch_cache = ("", 0.0)     # git branch of the project root, refreshed lazily
         self._naming = False               # inline "name this new session" prompt is active
         self._prompt_history: list[str] = []   # submitted prompts, for /history (Ctrl+R) recall
+        self._pastes: dict[int, str] = {}      # collapsed pastes in the composer: id → full text
         self._menu_rows: dict[int, str] = {}   # terminal-row → welcome-menu action (set on render)
         self._hover_row: int | None = None     # welcome-menu row under the mouse (hover highlight)
         self._ctx_hover = False                # the top-right context chip is under the mouse (→ morph)
@@ -1411,6 +1419,36 @@ class TUI:
             self._scroll_off = 0
         self._invalidate()
 
+    def _append_md(self, text: str) -> None:
+        """Store a Markdown entry as its SOURCE. It renders at the current width on demand, so a
+        resize reflows past answers exactly as it reflows the prompt bands; entries used to be
+        baked as ANSI at the width they first appeared at."""
+        self._append({"kind": "md", "text": str(text or "")})
+
+    def _md_block_ansi(self, blk: dict) -> str:
+        """The rendered form of a Markdown entry at the current width and theme, kept on the
+        entry until either changes."""
+        th = style_mod.theme()
+        stamp = (self._width, th.accent, th.text, th.faint)
+        cached = blk.get("_rendered")
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        ansi = self._rich(self._md(blk.get("text", "")))
+        blk["_rendered"] = (stamp, ansi)
+        return ansi
+
+    def _tool_diff(self, blk: dict) -> str:
+        """A step's diff, rendered at the current width. The unified-diff source stays on the
+        entry so a resize re-renders it instead of showing lines wrapped for the old width."""
+        src = blk.get("diff_src")
+        if not src:
+            return blk.get("diff") or ""
+        stamp = (self._width, style_mod.theme().accent)
+        if blk.get("_diff_stamp") != stamp:
+            blk["diff"] = self._rich(render_mod.render_diff(src.expandtabs(4)))
+            blk["_diff_stamp"] = stamp
+        return blk["diff"]
+
     def _invalidate(self) -> None:
         if self.app:
             try:
@@ -1528,6 +1566,9 @@ class TUI:
                 frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(
                     ANSI(self._user_band(b["text"], b.get("tag", ""))))))
                 add(frags, "user", nl)
+            elif isinstance(blk, dict) and blk.get("kind") == "md":
+                frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(ANSI(self._md_block_ansi(b)))))
+                add(frags, "text", nl)
             elif blk:
                 frags, nl = reuse(blk, lambda b=blk: list(to_formatted_text(ANSI(b))))
                 add(frags, "text", nl)
@@ -1590,11 +1631,13 @@ class TUI:
             # each carries a handler bound to its own block.
             return ("recall", blk.get("uid"), bool(blk.get("exp")), blk.get("rows"),
                     blk.get("dropped"), bool(blk.get("gone")), self._width, theme_key)
+        if kind == "md":
+            return ("md", blk.get("text", ""), self._width, theme_key)
         if kind == "tool":
             if blk.get("running"):
                 return None
             return ("tool", blk.get("name", ""), blk.get("summary", ""), bool(blk.get("exp")),
-                    bool(blk.get("error")), blk.get("diff") or "", blk.get("out") or "", theme_key)
+                    bool(blk.get("error")), self._tool_diff(blk), blk.get("out") or "", theme_key)
         if kind == "user":
             # The band spans the width, so its row plan depends on the CURRENT geometry; keeping
             # width and height in the identity preserves the resize reflow exactly.
@@ -1723,8 +1766,9 @@ class TUI:
 
     def _tool_collapsible(self, b: dict) -> bool:
         """Whether a tool block has output hidden behind its expand toggle."""
-        if b.get("diff"):
-            return b["diff"].count("\n") + 1 > self._DIFF_HEAD
+        diff = self._tool_diff(b)
+        if diff:
+            return diff.count("\n") + 1 > self._DIFF_HEAD
         return len((b.get("out") or "").splitlines()) > self._preview_budget(b)
 
     def _tool_outcome(self, b: dict) -> str:
@@ -1790,8 +1834,8 @@ class TUI:
             frags.append(rail())
             frags.append((f"fg:{th.accent_dim}", label, toggle))
 
-        diff = b.get("diff")
-        if diff:                                        # pre-rendered (coloured) diff — rail each line
+        diff = self._tool_diff(b)
+        if diff:                                        # rendered (coloured) diff — rail each line
             dlines = diff.split("\n")
             for ln in (dlines if exp else dlines[:self._DIFF_HEAD]):
                 frags.append(("", "\n"))
@@ -2057,9 +2101,12 @@ class TUI:
             _, compact, _, rows = self._user_band_layout(
                 blk.get("text", ""), blk.get("tag", ""))
             return len(rows) + (0 if compact else 2)
+        if isinstance(blk, dict) and blk.get("kind") == "md":
+            return self._md_block_ansi(blk).count("\n") + 1
         if isinstance(blk, dict) and blk.get("kind") == "tool":
-            if blk.get("diff"):
-                n = blk["diff"].count("\n") + 1
+            diff = self._tool_diff(blk)
+            if diff:
+                n = diff.count("\n") + 1
                 body = (n if blk.get("exp") else min(n, self._DIFF_HEAD)) + (1 if n > self._DIFF_HEAD else 0)
                 return 1 + body
             n = len((blk.get("out") or "").splitlines())
@@ -2606,7 +2653,7 @@ class TUI:
     def end_stream(self) -> None:
         self._flush_think()
         if self._buf.strip():
-            self._append(self._rich(self._md(self._buf)))
+            self._append_md(self._buf)
         self._buf = ""; self._think = ""
         self._streaming = False
         self._cur_tool = None
@@ -2683,7 +2730,9 @@ class TUI:
         if "\n--- " in out or out.startswith("---"):    # a diff → render it (rich) and keep for rail-wrapping
             diff = out[out.find("---"):]
             if len(diff) < 8000:
-                blk["diff"] = self._rich(render_mod.render_diff(diff.expandtabs(4)))
+                blk["diff_src"] = diff
+                blk.pop("_diff_stamp", None)
+                self._tool_diff(blk)                    # rendered now, re-rendered on resize
                 blk["out"] = None
                 rows = diff.splitlines()
                 blk["diff_stats"] = (sum(1 for r in rows if r.startswith("+") and not r.startswith("+++")),
@@ -2958,7 +3007,7 @@ class TUI:
     def _flush_text(self) -> None:
         self._flush_think()
         if self._buf.strip():
-            self._append(self._rich(self._md(self._buf)))
+            self._append_md(self._buf)
         self._buf = ""; self._think = ""
         self._streaming = False
 
@@ -3382,6 +3431,36 @@ class TUI:
         # inside it (_welcome_card's top-pad does the centering).
         return max(card_h, self._height - self._chrome_below())
 
+    _PASTE_TOKEN = re.compile(r"\[Pasted text #(\d+) \+(\d+) lines\]")
+    _PASTE_MIN_LINES = 5           # a paste this tall collapses to a chip instead of filling the screen
+    _PASTE_MIN_CHARS = 600
+
+    def _paste_into_composer(self, data: str) -> None:
+        """A bracketed paste. A tall or long one collapses to `[Pasted text #N +L lines]` so the
+        composer stays a few rows high — a 40-line paste used to take 41% of the screen — and
+        expands back to the full text when the prompt is sent. Short pastes insert as typed;
+        field prompts (a URL, a name) always take the raw text."""
+        data = str(data or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not data:
+            return
+        plain_field = self._input is not None or getattr(self, "_naming", False)
+        lines = data.count("\n") + (0 if data.endswith("\n") else 1)
+        if plain_field or (lines < self._PASTE_MIN_LINES and len(data) < self._PASTE_MIN_CHARS):
+            self.input_buf.insert_text(data)
+            return
+        n = max(self._pastes, default=0) + 1
+        self._pastes[n] = data
+        self.input_buf.insert_text(f"[Pasted text #{n} +{lines} lines]")
+
+    def _expand_pastes(self, text: str) -> str:
+        """The prompt as the model must see it: every chip replaced by its pasted text."""
+        if not self._pastes or "[Pasted text #" not in text:
+            return text
+        def swap(match):
+            body = self._pastes.get(int(match[1]))
+            return match[0] if body is None else body
+        return self._PASTE_TOKEN.sub(swap, text)
+
     def _composer_height(self) -> int:
         # Grow vertically with WRAPPED lines, not just explicit newlines: the composer wraps
         # (wrap_lines=True), so a long line past the terminal width needs extra rows or its tail hides.
@@ -3486,7 +3565,7 @@ class TUI:
             return
         path = self.agent._last_handoff_path
         saved = str(path) if path else ""
-        self._append(self._rich(self._md(md)))          # show the handoff in the chat
+        self._append_md(md)                             # show the handoff in the chat
         th = style_mod.theme()
         if saved:
             self._append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} handoff saved to [/]"
@@ -4348,7 +4427,7 @@ class TUI:
                     f"[bold {th.accent}]user DGC.md[/]\n[{th.faint}]{_esc(user_body)}[/]"))
         elif cmd == "trust":
             from .trust import handle_trust_command
-            self._append(self._rich(self._md(handle_trust_command(cfg, cfg.project_root, rest))))
+            self._append_md(handle_trust_command(cfg, cfg.project_root, rest))
         elif cmd == "permissions":
             perms = getattr(cfg, "permissions", {}) or {}
             spec = rest.strip().split(maxsplit=1)
@@ -4607,7 +4686,7 @@ class TUI:
                         made.append((len(blocks) - 1, body.replace("\n", " ")[:70]))   # /jump
             elif who == "assistant":
                 if body:
-                    blocks.append(self._rich(self._md(body)))   # _md → renderable; blocks need ANSI str
+                    blocks.append({"kind": "md", "text": body})  # rendered at whatever width shows it
                 names = row.get("tools") or ""
                 if names:
                     blocks.append(self._rich(f"[{th.faint}]{glyphs.MIDDOT} used {_esc(names)}[/]"))
@@ -5573,8 +5652,17 @@ class TUI:
                 else:
                     self._flash("cancelled")
                 return
-            if self._dispatch_composer_text(text) == "full":
-                self.input_buf.insert_text(text)
+            if self._dispatch_composer_text(self._expand_pastes(text)) == "full":
+                self.input_buf.insert_text(text)     # the chips stay collapsed for the retry
+            else:
+                self._pastes.clear()
+
+        @kb.add(Keys.BracketedPaste)
+        def _(ev):
+            if self._overlay is not None or self._pane is not None or self._req is not None:
+                self.input_buf.insert_text(str(ev.data or "").replace("\r\n", "\n").replace("\r", "\n"))
+                return
+            self._paste_into_composer(ev.data)
 
         @kb.add("escape")
         def _(ev):

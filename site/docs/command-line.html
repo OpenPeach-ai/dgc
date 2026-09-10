@@ -122,6 +122,13 @@
 <ul>
 <li><code>--mode MODE</code> — permission mode for this session: <code>default</code>, <code>acceptEdits</code>, <code>plan</code>, or <code>auto</code>. See <strong>Permission modes</strong>.</li>
 <li><code>--think LEVEL</code> — thinking level for this session: <code>off</code>, <code>low</code>, <code>medium</code>, <code>high</code>, or <code>xhigh</code>. With <code>dgc -p --engine</code>, it applies only to that delegated turn and does not change the native fallback. See <strong>Thinking &amp; reasoning</strong>.</li>
+<li><code>--output-format json</code> — with <code>-p</code>: instead of text, the NDJSON event stream that <code>dgc serve</code> speaks (<code>turn_start</code>, <code>text_delta</code>, <code>tool_call</code>, <code>tool_result</code>, <code>turn_end</code>…), ending in one <code>result</code> object with <code>ok</code>, <code>text</code>, <code>session_id</code> and <code>usage</code>.</li>
+<li><code>--output FILE</code> — with <code>-p</code>: also write the final answer to FILE.</li>
+<li><code>--print-session-id</code> — with <code>-p</code>: print the session id on stderr, for <code>--resume ID</code>.</li>
+<li>Piped input: <code>git diff | dgc -p &quot;review this&quot;</code> appends stdin to the prompt (2 MB cap); <code>dgc -p -</code> reads the whole prompt from stdin. A <code>-p</code> run never waits on a menu: a tool that would ask is denied with the rule to pre-approve, a plan is reported, not executed.</li>
+<li><code>--add-dir PATH</code> — let this run read and edit files under PATH too (repeatable).</li>
+<li><code>--allow-tool RULE</code> — pre-approve a tool for this run, e.g. <code>&quot;Bash(npm test)&quot;</code> or <code>Edit</code> (repeatable; never saved).</li>
+<li><code>--sandbox on|off|read-only</code> — confine shell commands for this run; <code>read-only</code> mounts the project read-only inside the sandbox and denies every file edit, for review runs.</li>
 <li><code>--trust</code> — persist the canonical workspace in <code>trusted_dirs</code> (covering its subdirectories) before a non-interactive <code>acceptEdits</code>/<code>auto</code> run. Without it, an unattended run in an untrusted directory will not edit. <code>dgc trust</code> lists every grant and <code>dgc trust revoke N|PATH|here</code> (or <code>/trust</code> inside DGC) forgets one; the gate then asks again on the next launch there. The gate warns when the folder is your home directory or the filesystem root, because a grant covers everything under it — including every future clone.</li>
 <li><code>--engine NAME</code> — with <code>dgc -p</code>, delegate that one-shot turn to a subscription CLI instead of the configured endpoint. See <strong>Subscriptions</strong>.</li>
 </ul>

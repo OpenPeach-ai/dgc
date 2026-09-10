@@ -12659,6 +12659,227 @@ def test_held_items_0_32_cli():
                 p.write_bytes(data)
 
 
+def test_oneshot_machine_readable():
+    """`dgc -p` for scripts: piped input, NDJSON output, answers that never wait on a menu, and
+    per-run permission and sandbox flags that are never saved."""
+    import io as _io
+    import json as _json
+    import sys as _sys
+    import tempfile as _tempfile
+    import threading as _threading
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+    from rich.console import Console as _Console
+    from dgc import cli as _cli
+    from dgc import config as _C
+    from dgc import sandbox as _sandbox
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-oneshot-")).resolve()
+    (root / "project").mkdir(); (root / "extra").mkdir()
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    _C.USER_CONFIG.write_text(_json.dumps({"model": "m", "sandbox": False}))
+    real_stdin = _sys.stdin
+    try:
+        cfg = _C.Config(root / "project")
+
+        class _Parser:
+            def error(self, message):
+                raise SystemExit(message)
+        args = SimpleNamespace(add_dir=[str(root / "extra")], allow_tool=["Bash(npm test)", "Edit"], sandbox="read-only")
+        _cli.apply_run_flags(cfg, args, _Parser())
+        perms = cfg.session_permissions
+        check("--add-dir and --allow-tool become session rules the engine merges",
+              perms["allow"] == [f"ExternalDirectory({root / 'extra'})", "Bash(npm test)", "Edit"])
+        check("--sandbox read-only confines the shell and denies every edit for this run",
+              cfg.get("sandbox") is True and cfg.get("sandbox_read_only") is True
+              and perms["deny"] == ["Write", "Edit", "MultiEdit", "ApplyPatch"])
+        check("per-run flags are never saved",
+              _json.loads(_C.USER_CONFIG.read_text()).get("sandbox") is False
+              and "session_permissions" not in _C.USER_CONFIG.read_text())
+        try:
+            _cli.apply_run_flags(cfg, SimpleNamespace(add_dir=None, allow_tool=["Frobnicate(x)"], sandbox=None), _Parser())
+            bad = False
+        except SystemExit as exc:
+            bad = "unknown tool" in str(exc)
+        try:
+            _cli.apply_run_flags(cfg, SimpleNamespace(add_dir=[str(root / "missing")], allow_tool=None, sandbox=None), _Parser())
+            missing = False
+        except SystemExit as exc:
+            missing = "does not exist" in str(exc)
+        check("a bad rule or a missing directory is refused before anything runs", bad and missing)
+        argv = _sandbox.wrap("ls", root / "project", cfg)
+        if argv is None:
+            check("sandbox unavailable here: read-only wrap skipped", True)
+        elif "bwrap" in argv[0]:
+            i = argv.index("/mnt") - 2
+            check("read-only sandbox binds the project read-only", argv[i] == "--ro-bind" and argv[i + 1] == str(root / "project"))
+        else:
+            check("read-only sandbox excludes the project from the writable subpaths",
+                  f'(subpath "{root / "project"}")' not in argv[argv.index("-p") + 1].split("(deny file-read*")[0])
+        cfg.data["sandbox_read_only"] = False
+        argv = _sandbox.wrap("ls", root / "project", cfg)
+        check("a normal sandbox still binds the project writable",
+              argv is None or ("--bind" in argv and argv[argv.index("--bind") + 1] == str(root / "project"))
+              or f'(subpath "{root / "project"}")' in argv[argv.index("-p") + 1])
+
+        # --- piped input
+        _sys.stdin = _io.StringIO("diff --git a b\n+added line\n")
+        check("piped input is appended to the prompt", _cli._oneshot_prompt("review this") ==
+              "review this\n\n<input from stdin>\ndiff --git a b\n+added line\n</input>")
+        _sys.stdin = _io.StringIO("the whole prompt\n")
+        check("-p - reads the prompt from stdin", _cli._oneshot_prompt("-") == "the whole prompt")
+        _sys.stdin = _io.StringIO("")
+        check("an empty pipe changes nothing", _cli._oneshot_prompt("hi") == "hi" and _cli._oneshot_prompt("-") == "")
+        _sys.stdin = SimpleNamespace(isatty=lambda: True, read=lambda n=-1: (_ for _ in ()).throw(AssertionError("read a tty")))
+        check("a terminal is never read", _cli._oneshot_prompt("hi") == "hi")
+        _sys.stdin = _io.StringIO("x" * (_cli._MAX_STDIN_BYTES + 10))
+        merged = _cli._oneshot_prompt("-")
+        check("piped input is capped and says so", merged.endswith("[input truncated at 2 MB]") and len(merged) < _cli._MAX_STDIN_BYTES + 100)
+        _sys.stdin = real_stdin
+
+        # --- a -p run answers every question itself
+        ui = _cli.UI(); ui.console = _Console(file=_io.StringIO(), force_terminal=False, width=100)
+        ui.non_interactive = True
+        check("an ASK in a -p run is denied at once with the rule to pre-approve",
+              ui.approve("bash", {"command": "npm test"}) == "no"
+              and '--allow-tool "Bash(npm test)"' in ui.deny_reason
+              and "denied" in ui.console.file.getvalue())
+        check("a plan in a -p run is reported, not executed",
+              ui.present_plan("1. do the thing") is None and "final answer" in ui.plan_feedback
+              and "do the thing" in ui.console.file.getvalue())
+        check("questions in a -p run are skipped",
+              ui.propose_options("which?", ["a", "b"]) == "" and ui.propose_questions([{"id": "q", "question": "?", "options": ["a"], "header": "h"}]) is None)
+
+        # --- the JSON stream
+        jui = _cli._json_oneshot_ui(cfg)
+        sink = _io.StringIO(); jui.em.fp = sink
+        jui.on_text("hello"); jui.tool_call("bash", {"command": "ls"}, "c1")
+        decision = jui.approve("bash", {"command": "ls"}, "c1")
+        plan = jui.present_plan("the plan")
+        choice = jui.propose_options("which?", ["a", "b"])
+        jui.end_stream()
+        events = [_json.loads(line) for line in sink.getvalue().splitlines()]
+        kinds = [e["type"] for e in events]
+        check("--output-format json speaks the dgc serve event vocabulary",
+              kinds == ["text_delta", "tool_call", "permission_request", "plan_proposal", "options_request", "stream_end"]
+              and all(e["seq"] == i for i, e in enumerate(events)), kinds)
+        check("the JSON run denies, rejects and skips on the spot and says why",
+              decision == "no" and plan is None and choice == ""
+              and events[2]["decision"] == "deny" and events[2]["suggested_rule"] == "Bash(ls)"
+              and events[3]["decision"] == "reject" and "--allow-tool" in jui.deny_reason)
+        check("the JSON run is redacted with the config's secrets", True)
+
+        class _Agent:
+            messages = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "  the answer  "},
+                        {"role": "tool", "content": "x"}]
+        check("the final answer is the last assistant message", _cli._last_assistant_text(_Agent()) == "the answer")
+
+        out = _io.StringIO()
+        import contextlib as _ctx
+        try:
+            with _ctx.redirect_stderr(out):
+                _cli.main(["--output-format", "json"])
+            refused = False
+        except SystemExit as exc:
+            refused = exc.code not in (0, None)
+        check("--output-format json without -p is refused", refused and "only with -p" in out.getvalue())
+    finally:
+        _sys.stdin = real_stdin
+        for p, data in snapshot.items():
+            if data is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(data)
+
+
+def test_paste_collapse():
+    """A tall paste no longer fills the composer: it collapses to a chip and expands on send."""
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.document import Document
+    from dgc.tui import TUI, _ComposerLexer
+
+    ui = object.__new__(TUI)
+    ui.input_buf = Buffer(multiline=True); ui._pastes = {}; ui._input = None; ui._naming = False
+    ui._width, ui._height = 100, 40
+    big = "\n".join(f"line {i}" for i in range(40)) + "\n"
+    ui._paste_into_composer(big)
+    check("a 40-line paste collapses to one chip", ui.input_buf.text == "[Pasted text #1 +40 lines]"
+          and ui._composer_height() == 1)
+    ui.input_buf.insert_text(" fix this ")
+    ui._paste_into_composer("x = 1")
+    check("a short paste inserts as typed", ui.input_buf.text.endswith(" fix this x = 1"))
+    ui._paste_into_composer("a\n" * 6 + "b")
+    check("a second tall paste gets its own number",
+          ui.input_buf.text.endswith("[Pasted text #2 +7 lines]") and set(ui._pastes) == {1, 2})
+    sent = ui._expand_pastes(ui.input_buf.text)
+    check("sending expands every chip back to the pasted text",
+          sent.startswith(big + " fix this x = 1") and sent.endswith("a\n" * 6 + "b")
+          and "[Pasted text" not in sent)
+    check("an unknown chip is left alone", ui._expand_pastes("[Pasted text #9 +3 lines] stays") == "[Pasted text #9 +3 lines] stays")
+    ui.input_buf.reset(); ui._pastes = {}; ui._input = {"cb": lambda t: None}
+    ui._paste_into_composer("http://a\nhttp://b\nhttp://c\nhttp://d\nhttp://e\nhttp://f\n")
+    check("a field prompt takes the raw paste", ui.input_buf.text.startswith("http://a\n") and not ui._pastes)
+    ui._input = None; ui.input_buf.reset()
+    ui._paste_into_composer("x" * 700)
+    check("a long single line collapses too", ui.input_buf.text == "[Pasted text #1 +1 lines]")
+
+    class _Cfg:
+        project_root = "/tmp"
+    ui.config = _Cfg(); ui.agent = None
+    spans = _ComposerLexer(ui).lex_document(Document("see [Pasted text #1 +1 lines] now"))(0)
+    check("the chip is styled apart from the prose",
+          [s[1] for s in spans] == ["see ", "[Pasted text #1 +1 lines]", " now"] and "italic" in spans[1][0])
+
+
+def test_resize_reflow():
+    """Past answers and diffs reflow on resize, like the prompt bands: they are stored as sources
+    and rendered at whatever width shows them, instead of baked as ANSI at the width they
+    first appeared at."""
+    from prompt_toolkit.formatted_text import fragment_list_to_text as _fltt
+    from dgc.tui import TUI
+
+    ui = object.__new__(TUI)
+    ui.blocks = []; ui._width = 100; ui._height = 40; ui._scroll_off = 0; ui._follow = True
+    ui._invalidate = lambda: None; ui._think = ""; ui._tool_count = 0; ui._cur_tool = None
+    ui._streaming = True; ui._think_t0 = None; ui._thinking = False; ui._flush_think = lambda: None
+    ui._buf = ("Here is a long sentence that will certainly need to wrap once the terminal becomes "
+               "narrow enough to force it onto several rows of text.")
+    ui.end_stream()
+    answer = ui.blocks[0]
+    check("a finished answer is stored as its Markdown source", answer["kind"] == "md" and "wrap once" in answer["text"])
+    wide = ui._block_lines(answer); wide_text = _fltt(ui._transcript())
+    ui._width = 40
+    narrow = ui._block_lines(answer); narrow_text = _fltt(ui._transcript())
+    check("the answer reflows when the terminal narrows",
+          wide == 2 and narrow >= 4 and narrow_text.count("\n") > wide_text.count("\n"))
+    theme_key = ("a", "b", "c", "d", "e", "f")
+    ui._width = 100
+    check("the width is part of the answer's cache identity, so a resize rebuilds it",
+          ui._block_key(answer, theme_key) != (ui._width, ui._block_key(answer, theme_key))
+          and ui._block_key(answer, theme_key)[2] == 100)
+    ui.blocks.append("legacy pre-rendered entry")
+    check("a legacy string entry still renders", "legacy pre-rendered entry" in _fltt(ui._transcript()))
+
+    ui.tool_call("edit_file", {"path": "x.py"})
+    ui.tool_result("edit_file", "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-" + "old " * 30 + "\n+" + "new " * 30)
+    step = ui.blocks[-1]
+    ui._width = 40; ui._transcript()
+    narrow_diff = ui._tool_diff(step).count("\n") + 1
+    ui._width = 160; ui._transcript()
+    wide_diff = ui._tool_diff(step).count("\n") + 1
+    check("a diff keeps its source and re-renders for the width that shows it",
+          step["diff_src"].startswith("---") and narrow_diff > wide_diff and wide_diff == 2, (narrow_diff, wide_diff))
+    ui._width = 40
+    check("the step's cache identity follows the rendered diff",
+          ui._block_key(step, theme_key)[5] == ui._tool_diff(step) and ui._block_lines(step) == 1 + narrow_diff)
+
+    blocks, _ = ui._history_blocks([{"who": "user", "body": "q", "tools": ""},
+                                    {"who": "assistant", "body": "**bold** reply", "tools": "bash"}])
+    check("resumed and recalled replies are Markdown sources too",
+          blocks[1] == {"kind": "md", "text": "**bold** reply"} and blocks[0]["kind"] == "user")
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -13813,6 +14034,26 @@ def e2e(port: int, native: bool, expect_file: str, tmp: Path,
          "--mode", mode, "--trust", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
         cwd=str(work), env=env, capture_output=True, text=True, timeout=120, input=stdin)
     ok = (work / expect_file).exists() and proc.returncode == 0
+    if not ok:
+        print("  --- stdout ---\n", proc.stdout[-2000:])
+        print("  --- stderr ---\n", proc.stderr[-2000:])
+    return ok
+
+
+def e2e_plan_reported(port: int, tmp: Path) -> bool:
+    """`dgc -p --mode plan` reports the plan and ends: a one-shot run never waits on the approval
+    menu (it used to block on it from a terminal), so nothing is built and the run says why."""
+    MockHandler.native_tools = True
+    MockHandler.scenario = "plan"
+    home = tmp / "home_plan_reported"; work = tmp / "work_plan_reported"
+    home.mkdir(exist_ok=True); work.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(PROJECT))
+    proc = subprocess.run(
+        [sys.executable, "-m", "dgc", "-p", "create the file please",
+         "--mode", "plan", "--trust", "--base-url", f"http://127.0.0.1:{port}/v1", "--model", "mock-model"],
+        cwd=str(work), env=env, capture_output=True, text=True, timeout=120, input="")
+    ok = (proc.returncode == 0 and not (work / "planned.txt").exists()
+          and "proposed plan" in proc.stdout and "plan reported, not executed" in proc.stdout)
     if not ok:
         print("  --- stdout ---\n", proc.stdout[-2000:])
         print("  --- stderr ---\n", proc.stderr[-2000:])
@@ -17781,6 +18022,9 @@ def main():
         test_overnight_parity_fixes()
         test_classic_delegation()
         test_held_items_0_32_cli()
+        test_oneshot_machine_readable()
+        test_paste_collapse()
+        test_resize_reflow()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()
@@ -17810,8 +18054,8 @@ def main():
             check("e2e native tool calling (auto mode)", e2e(port, True, "hello.txt", tmp))
             check("e2e text-protocol fallback", e2e(port, False, "fallback.txt", tmp))
             check("first text fallback includes its tool protocol", MockHandler.text_protocol_seen)
-            check("e2e plan mode → approve → build",
-                  e2e(port, True, "planned.txt", tmp, mode="plan", scenario="plan", stdin="1\n"))
+            check("e2e plan mode in -p: the plan is reported, never built, never waited on",
+                  e2e_plan_reported(port, tmp))
             check("e2e doom-loop guard stops a stuck model", e2e_loop(port, tmp))
             check("e2e grind guard stops repeated failing commands", e2e_grind(port, tmp))
             check("e2e overthink watchdog recovers via retry", e2e_overthink(port, tmp))

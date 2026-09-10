@@ -188,13 +188,15 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
         # replaced between turns and would execute on the host before confinement takes effect.
         return None
     network = bool(config and config.get("sandbox_network", False))
+    # `--sandbox read-only` (a review run): the project is visible but nothing under it is writable.
+    read_only = bool(config and config.get("sandbox_read_only", False))
     if kind == "bwrap":
         argv = [
             str(executable), "--unshare-all", "--unshare-user",
             *(["--share-net"] if network else []),
             "--die-with-parent", "--new-session", "--disable-userns",
             "--ro-bind", "/", "/",
-            "--bind", str(root), "/mnt",
+            "--ro-bind" if read_only else "--bind", str(root), "/mnt",
         ]
         # Hide ambient credentials and user state. The real project stays reachable at
         # /mnt and, when nested below a masked path, through a compatibility link.
@@ -217,9 +219,10 @@ def wrap(command: str, project_root, config=None) -> list[str] | None:
             return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
         home = Path.home().resolve(strict=False)
+        writable_project = "" if read_only else f'(subpath "{q(root)}") '
         profile = [
             "(version 1)", "(allow default)", "(deny file-write*)",
-            f'(allow file-write* (subpath "{q(root)}") (subpath "/tmp") (subpath "/private/tmp") '
+            f'(allow file-write* {writable_project}(subpath "/tmp") (subpath "/private/tmp") '
             '(literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") '
             '(literal "/dev/dtracehelper") (subpath "/dev/fd"))',
         ]
