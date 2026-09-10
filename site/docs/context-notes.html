@@ -121,9 +121,10 @@
 <p>Every note is bounded, redacted with the same secrets a saved session is, and carries the file, the tool and the date it came from, so a stale note can be judged rather than trusted.</p>
 <div class="heading-row h2-row"><h2 id="reading-them">Reading them</h2><a class="anchor" href="#reading-them" aria-label="Link to this section">#</a></div>
 <ul>
-<li><strong><code>/notes</code></strong> — the most recent notes. <strong><code>/notes &lt;query&gt;</code></strong> searches the whole trace: an error string, a test name, a file path.</li>
+<li><strong><code>/notes</code></strong> — the most recent notes. <strong><code>/notes &lt;query&gt;</code></strong> searches the whole trace: an error string, a test name, a file path. <code>dgc notes [QUERY]</code> does the same from a shell, and <strong>DGC: Show Context Notes</strong> runs it from the editor.</li>
 <li>The agent has a <strong><code>notes</code></strong> tool with the same reach, so it can check whether something already failed before trying it again. It is read-only and allowed in plan mode.</li>
 <li><strong>After a compaction</strong>, a bounded digest of requirements, decisions and recent failures is carried into the fresh context — the point at which this history would otherwise be lost.</li>
+<li><strong>While editing</strong>, a file that has failed before carries that history into the result the agent reads, once per file per turn, so the next attempt is not the same one again.</li>
 </ul>
 <div class="heading-row h2-row"><h2 id="turning-it-off">Turning it off</h2><a class="anchor" href="#turning-it-off" aria-label="Link to this section">#</a></div>
 <p><code>/notes off</code> stops recording everywhere, and <code>notes: false</code> in the config does the same. The store lives beside the session transcripts (<code>~/.dgc/sessions/&lt;project&gt;/notes.sqlite</code>), holds the most recent <code>notes_max_rows</code> entries, and is never sent anywhere.</p>

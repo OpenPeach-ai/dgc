@@ -32,6 +32,7 @@ Run the **DGC** coding agent inside your editor — a docked chat panel, native 
 - **Sessions:** New, Resume, Rewind, Name, Compact, Generate Handoff.
 - **Work:** View Saved Plan, Artifact Previews, Show Goal, Retained Sub-agent Tasks.
 - **Extensibility:** Skills, MCP Servers, Documentation, Permission Rules, Memory, Lifecycle Hooks.
+- **Context notes:** Show Context Notes — what this project already learned, across sessions. The agent searches the same trace itself.
 - **Maintenance:** Settings, Update CLI to Latest. If the CLI is older than the extension, DGC offers to update it and then reconnect — the extension drives the DGC you installed rather than shipping its own copy of it.
 
 The in-composer `/` menu is generated from the CLI's canonical editor command registry. Commands

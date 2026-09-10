@@ -222,6 +222,11 @@
         "category": "DGC"
       },
       {
+        "command": "dgc.openNotes",
+        "title": "DGC: Show Context Notes",
+        "category": "DGC"
+      },
+      {
         "command": "dgc.exportTraining",
         "title": "DGC: Export Training Data",
         "category": "DGC"

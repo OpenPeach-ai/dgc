@@ -10,7 +10,7 @@ export function activate(context: vscode.ExtensionContext): void | object {
   }
   const provider = new DgcViewProvider(context);
 
-  const runCliInTerminal = (subcommand: "update" | "export-training"): boolean => {
+  const runCliInTerminal = (subcommand: "update" | "export-training" | "notes"): boolean => {
     if (vscode.workspace.isTrusted === false) {
       void vscode.window.showWarningMessage(
         "DGC is disabled in Restricted Mode. Trust this workspace before running the CLI.");
@@ -24,7 +24,8 @@ export function activate(context: vscode.ExtensionContext): void | object {
     // Launch an exact executable/argv pair. Interpolating a configurable path into shell text would
     // allow metacharacters in that setting to execute an unrelated command.
     const term = vscode.window.createTerminal({
-      name: subcommand === "update" ? "DGC update" : "DGC export-training",
+      name: subcommand === "update" ? "DGC update"
+        : subcommand === "notes" ? "DGC notes" : "DGC export-training",
       shellPath: executable.command,
       shellArgs: [subcommand],
     });
@@ -76,6 +77,15 @@ export function activate(context: vscode.ExtensionContext): void | object {
       if (runCliInTerminal("update")) {
         vscode.window.showInformationMessage(
           "Updating the DGC CLI — run “DGC: Restart Backend” when it finishes.");
+      }
+    }),
+    vscode.commands.registerCommand("dgc.openNotes", () => {
+      // The trace is a CLI surface, so the editor shows it by running the CLI — the same shape as
+      // Update CLI and Export Training. A dedicated panel browser would need a protocol event, and
+      // a second lockstep upgrade so soon after v7 costs users more than the browser is worth.
+      if (runCliInTerminal("notes")) {
+        void vscode.window.showInformationMessage(
+          "Showing this project's context notes — see the terminal. The agent can also search them itself.");
       }
     }),
     vscode.commands.registerCommand("dgc.exportTraining", () => {

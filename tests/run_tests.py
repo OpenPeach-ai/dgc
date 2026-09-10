@@ -13103,6 +13103,28 @@ def test_context_notes():
               and "test_retry" in _notes.handle_command(agent, "test_retry")
               and "No notes match" in _notes.handle_command(agent, "zzz-nothing"))
 
+        # --- the edit-time reminder: the cheap half of "do not repeat a failed fix"
+        agent._notes_reminded = set()
+        agent.notes().add("failure", "edit_file on src/app.py failed: old_string not found",
+                          file="src/app.py", tool="edit_file")
+        first = agent._notes_reminder("edit_file", {"path": "src/app.py"})
+        check("touching a file that failed before carries that history into the result",
+              "has failed before" in first and "old_string not found" in first and len(first) <= 400)
+        check("a reminder is said once per subject per turn, and only for edits",
+              agent._notes_reminder("edit_file", {"path": "src/app.py"}) == ""
+              and agent._notes_reminder("edit_file", {"path": "src/untouched.py"}) == ""
+              and agent._notes_reminder("read_file", {"path": "src/app.py"}) == "")
+        agent._notes_reminded = set()
+        check("the next turn may say it again",
+              "has failed before" in agent._notes_reminder("edit_file", {"path": "src/app.py"}))
+        agent.config.data["notes"] = False
+        agent._notes = None
+        agent._notes_reminded = set()
+        check("no reminders when notes are off",
+              agent._notes_reminder("edit_file", {"path": "src/app.py"}) == "")
+        agent.config.data["notes"] = True
+        agent._notes = None
+
         # --- a broken store costs the turn nothing. Corrupt a project nothing else has open:
         #     with a live connection and its WAL still present, SQLite recovers the file and the
         #     test would prove nothing.

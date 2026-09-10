@@ -705,11 +705,14 @@ the tool and the date it came from, so a stale note can be judged rather than tr
 ## Reading them
 
 - **`/notes`** — the most recent notes. **`/notes <query>`** searches the whole trace: an error
-  string, a test name, a file path.
+  string, a test name, a file path. `dgc notes [QUERY]` does the same from a shell, and
+  **DGC: Show Context Notes** runs it from the editor.
 - The agent has a **`notes`** tool with the same reach, so it can check whether something already
   failed before trying it again. It is read-only and allowed in plan mode.
 - **After a compaction**, a bounded digest of requirements, decisions and recent failures is
   carried into the fresh context — the point at which this history would otherwise be lost.
+- **While editing**, a file that has failed before carries that history into the result the agent
+  reads, once per file per turn, so the next attempt is not the same one again.
 
 ## Turning it off
 

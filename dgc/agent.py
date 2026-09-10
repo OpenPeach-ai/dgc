@@ -880,6 +880,7 @@ class Agent(GoalLifecycle):
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self._recall_pending: list[dict] = []   # display rows the last compaction dropped
         self._notes = None                      # context notes, opened on first use
+        self._notes_reminded: set[str] = set()  # subjects already recalled this turn
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.chat_changes = ChatChanges(self.config.project_root)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
@@ -2007,6 +2008,7 @@ class Agent(GoalLifecycle):
         commit failed. Exceptions still propagate after the normal cleanup/persistence attempt.
         """
         self._last_turn_error = ""
+        self._notes_reminded = set()   # a reminder is worth saying once per turn
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
                 self._last_turn_error = self._last_persist_error = (
@@ -2103,6 +2105,7 @@ class Agent(GoalLifecycle):
         ``runner`` receives sanitized user text and returns the normalized subscription result.
         """
         self._last_turn_error = ""
+        self._notes_reminded = set()   # a reminder is worth saying once per turn
         with self._session_turn_scope(reentrant=False) as reserved:
             if not reserved:
                 message = ("This session has an active turn in another DGC process. Wait for it "
@@ -3928,8 +3931,11 @@ class Agent(GoalLifecycle):
             cancelled=self.cancelled)
         if post:
             out = redact_text(f"{out}\n[hook] {post}", secrets)
-        self.ui.tool_result(name, out, call_id)
+        reminder = self._notes_reminder(name, args)   # prior failures, before this call is recorded
         self._note_tool_result(name, args, out)
+        if reminder:
+            out = f"{out}\n\n{reminder}"
+        self.ui.tool_result(name, out, call_id)
         return out
 
     # ------------------------------------------------------------ context notes ---
@@ -3975,6 +3981,33 @@ class Agent(GoalLifecycle):
                            tool=name, evidence=tail, session=session)
         except Exception:
             pass                            # a note is never worth failing a turn over
+
+    def _notes_reminder(self, name: str, args: dict) -> str:
+        """What already failed here, said once per subject per turn.
+
+        A model that cannot see its own earlier attempts repeats them, and after a compaction it
+        cannot see them at all. This is the cheap half of the fix: when a step touches a file that
+        has failed before, the result it reads carries that history with it.
+        """
+        try:
+            if name not in ("write_file", "edit_file", "multi_edit", "apply_patch"):
+                return ""
+            store = self.notes()
+            if store is None:
+                return ""
+            subject = str((args or {}).get("path") or "")
+            if not subject or subject in self._notes_reminded:
+                return ""
+            rows = store.for_file(subject, kinds=("failure",), limit=2)
+            if not rows:
+                return ""
+            self._notes_reminded.add(subject)
+            from .notes import render
+            return render(rows, limit_chars=400,
+                          header=f"[context notes] {subject} has failed before — "
+                                 f"check this is not the same fix again:")
+        except Exception:
+            return ""
 
     def _note(self, kind: str, text: str, **fields) -> None:
         store = self.notes()

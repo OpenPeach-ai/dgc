@@ -1956,6 +1956,7 @@ def run_help() -> None:
     c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc export [ID] [FILE]  save a session as Markdown")
     c.print("  dgc trust               list the folders the trust gate skips  (dgc trust revoke N|PATH|here)")
+    c.print("  dgc notes [QUERY]       what this project already learned, across sessions")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
@@ -1974,6 +1975,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "update": "dgc update                         reinstall the latest DGC from vibedgc.com (runs the installer)",
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
     "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
+    "notes": "dgc notes [QUERY]                  what this project already learned; searches the trace",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
@@ -2042,6 +2044,12 @@ def main(argv: list[str] | None = None) -> int | None:
             return
         if raw_argv[0] == "update":
             run_update(); return
+        if raw_argv[0] == "notes":
+            from .notes import handle_command
+            cfg = Config()
+            agent = Agent(cfg, UI())
+            Console().print(render.render_markdown(handle_command(agent, " ".join(raw_argv[1:]))))
+            return 0
         if raw_argv[0] == "trust":
             from .trust import handle_trust_command
             cfg = Config()
