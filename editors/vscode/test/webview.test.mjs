@@ -77,9 +77,13 @@ test("webview shell pins the composer and gives scrolling exclusively to the tra
 // Pull the real HTML template out of panel.ts's html() and neutralise the
 // `${nonce}` / `${css}` / `${csp}` interpolations so the markup stays in sync
 // with what ships — the test never hand-rolls its own DOM.
-const htmlMatch = panelSrc.match(/<!doctype html>[\s\S]*?<\/body><\/html>/i);
+// panel.ts contains more than one document literal (the chat skeleton, and small notices such
+// as the one shown in a view the conversation has left), so pick the chat by a landmark rather
+// than by "the first doctype in the file".
+const htmlCandidates = [...panelSrc.matchAll(/<!doctype html>[\s\S]*?<\/body><\/html>/gi)].map((m) => m[0]);
+const htmlMatch = htmlCandidates.find((candidate) => candidate.includes('id="input"'));
 assert.ok(htmlMatch, "could not extract the webview HTML template from panel.ts");
-const html = htmlMatch[0].replace(/\$\{[^}]*\}/g, "");
+const html = htmlMatch.replace(/\$\{[^}]*\}/g, "");
 
 const activeDoms = new Set();
 afterEach(() => { for (const dom of activeDoms) dom.window.close(); activeDoms.clear(); });

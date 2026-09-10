@@ -182,8 +182,9 @@ export class DgcBackend extends EventEmitter {
     });
   }
 
-  private protocolFailure(message: string): void {
-    this.emit("event", { type: "error", message, fatal: true, protocol_error: true });
+  private protocolFailure(message: string, cliOutdated = false): void {
+    this.emit("event", { type: "error", message, fatal: true, protocol_error: true,
+                         ...(cliOutdated ? { cli_outdated: true } : {}) });
     this.rejectPending(message);
     this.dispose();
   }
@@ -240,6 +241,7 @@ export class DgcBackend extends EventEmitter {
             : `This DGC CLI is newer than this extension. Update the DGC extension (Extensions view → DGC → Update), then reload the window.`;
           this.protocolFailure(
             `${fix} (the extension speaks editor protocol v${DGC_PROTOCOL_VERSION}; this CLI speaks v${offered}.)`,
+            offered < DGC_PROTOCOL_VERSION,
           );
           return;
         }

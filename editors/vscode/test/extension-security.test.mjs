@@ -213,3 +213,36 @@ test("the recovery commands are never hidden behind a backend that will not star
     assert.equal(gated.get(command), undefined, `${command} must stay in the palette when the backend is down`);
   }
 });
+
+test("the chat is offered in the secondary side bar as well as the activity bar", () => {
+  // VS Code binds a container to exactly one location (the 1.107 contribution point takes
+  // activitybar | panel | secondarySidebar), so a second container is the only way a view can
+  // live in both places — the same shape the Codex extension ships.
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  const containers = manifest.contributes.viewsContainers;
+  assert.ok(containers.activitybar.some((c) => c.id === "dgc"), "the activity bar container stays");
+  assert.ok(containers.secondarySidebar.some((c) => c.id === "dgcSecondary"), "a secondary side bar container exists");
+  assert.deepEqual(Object.keys(containers).filter((k) => !["activitybar", "panel", "secondarySidebar"].includes(k)), [],
+    "no container location outside the ones VS Code declares");
+  assert.ok(manifest.contributes.views.dgcSecondary.some((v) => v.id === "dgc.chatSecondary" && v.type === "webview"));
+  const extension = readFileSync(join(here, "../src/extension.ts"), "utf8");
+  for (const id of ["dgc.chat", "dgc.chatSecondary"]) {
+    assert.match(extension, new RegExp(`registerWebviewViewProvider\\("${id.replace(".", "\\.")}", provider`),
+      `${id} is served by the same provider, so there is one conversation`);
+  }
+  for (const entry of manifest.contributes.menus["view/title"]) {
+    assert.match(entry.when, /view == dgc\.chat \|\| view == dgc\.chatSecondary/,
+      `${entry.command} keeps its title-bar action in both locations`);
+  }
+});
+
+test("an outdated CLI is offered the update, since the extension drives the CLI you installed", () => {
+  // Codex ships its binary inside a per-platform VSIX, so updating the extension updates the CLI.
+  // DGC drives the CLI on your machine instead, so the mismatch has to be one click to fix.
+  const backend = readFileSync(join(here, "../src/backend.ts"), "utf8");
+  assert.match(backend, /cli_outdated: true/, "the backend marks an older CLI");
+  const panel = readFileSync(join(here, "../src/panel.ts"), "utf8");
+  assert.match(panel, /cli_outdated/, "the panel reacts to it");
+  assert.match(panel, /install\.sh \| bash/, "the offer runs the installer");
+  assert.match(panel, /Restart Backend/, "and then offers the restart that reconnects");
+});
