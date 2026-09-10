@@ -808,8 +808,9 @@
   }
 
   function openFileBtn(path, line) {
-    const b = el("button", "link", "⤢ open"); b.type = "button";
+    const b = el("button", "link open-file", "⤢ open"); b.type = "button";
     b.setAttribute("aria-label", `Open ${path}${line ? ` at line ${line}` : ""}`);
+    b.title = `Open ${path}${line ? ` at line ${line}` : ""} in the editor`;
     b.onclick = (e) => { e.stopPropagation(); vscode.postMessage({ type: "openFile", path, line }); };
     return b;
   }
@@ -831,7 +832,10 @@
     if (value !== "running") {
       clearInterval(card._timer);
       const elapsed = card.querySelector(".tool-time");
-      if (elapsed && card._startedAt) elapsed.textContent = `${((Date.now() - card._startedAt) / 1000).toFixed(1)}s`;
+      if (elapsed && card._startedAt) {
+        const seconds = (Date.now() - card._startedAt) / 1000;
+        elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
+      }
     }
     refreshToolGroup(card.closest(".tool-group"));
   }
@@ -848,6 +852,7 @@
     const head = c.querySelector(".head");
     const toggle = c.querySelector(".tool-toggle");
     toggle.onclick = () => {
+      if (c.classList.contains("no-body")) return;
       const open = c.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
     };
@@ -858,8 +863,11 @@
     const dot = el("span", "dot run"); dot.setAttribute("aria-hidden", "true");
     head.appendChild(dot);
     head.appendChild(el("span", "badge"));
-    const elapsed = el("span", "tool-time", "0.0s"); head.appendChild(elapsed);
-    c._timer = setInterval(() => { elapsed.textContent = `${((Date.now() - c._startedAt) / 1000).toFixed(1)}s`; }, 200);
+    const elapsed = el("span", "tool-time", ""); head.appendChild(elapsed);
+    c._timer = setInterval(() => {
+      const seconds = (Date.now() - c._startedAt) / 1000;
+      elapsed.textContent = seconds >= 1 ? `${seconds.toFixed(1)}s` : "";
+    }, 200);
     setToolStatus(c, "running");
     appendTool(c); breakText(); return c;
   }
@@ -881,13 +889,15 @@
       return `<span class="${cls}"><span class="ln old">${oldNo}</span><span class="ln new">${newNo}</span><span class="dc">${esc(line) || " "}</span></span>`;
     }).join("");
     const bodyId = `diff-body-${++disclosureId}`;
-    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg">✎</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
+    wrap.innerHTML = `<div class="dhead"><button type="button" class="diff-toggle" aria-expanded="true" aria-controls="${bodyId}"><span class="chev" aria-hidden="true">⌄</span><span class="dg">✎</span><span class="f">${esc(path)}</span><span class="diff-stat add-stat">+${additions}</span><span class="diff-stat del-stat">−${deletions}</span><span class="diff-action sr-only">Hide diff</span></button></div><pre id="${bodyId}">${body}</pre>`;
     const toggle = wrap.querySelector(".diff-toggle");
+    toggle.title = "Collapse this diff";
     toggle.onclick = () => {
       const open = wrap.classList.toggle("open");
       toggle.setAttribute("aria-expanded", String(open));
       toggle.querySelector(".chev").textContent = open ? "⌄" : "›";
       toggle.querySelector(".diff-action").textContent = open ? "Hide diff" : "Review";
+      toggle.title = open ? "Collapse this diff" : "Show what changed in this file";
     };
     if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
     wrap.dataset.path = path; wrap.dataset.add = String(additions); wrap.dataset.del = String(deletions);
@@ -1620,7 +1630,7 @@
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
         if (ev.is_diff && ev.diff) {
-          c.querySelector(".body pre").textContent = ev.diff;
+          c.classList.add("no-body");           // the diff below is this step's detail
           const rendered = renderDiff(ev.diff); c.after(rendered);
           if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del);
         }
