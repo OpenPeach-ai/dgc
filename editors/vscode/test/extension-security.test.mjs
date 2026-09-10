@@ -201,3 +201,15 @@ test("first-run dead ends: a queued selection, a restart on a new command path, 
   assert.match(extension, /affectsConfiguration\("dgc\.command"\)\) \{\s*\/\/[^\n]*\n[^\n]*\n\s*provider\.restart\(\)/,
     "changing dgc.command restarts the backend");
 });
+
+test("the recovery commands are never hidden behind a backend that will not start", () => {
+  // Gating the palette on dgc.ready is only safe if the way OUT stays reachable: if the CLI is
+  // missing, the user must still be able to open settings, point dgc.command somewhere real,
+  // install the CLI and restart. Hiding those would make a failed first run unrecoverable.
+  const manifest = JSON.parse(readFileSync(join(here, "../package.json"), "utf8"));
+  const gated = new Map((manifest.contributes.menus.commandPalette || []).map((m) => [m.command, m.when]));
+  for (const command of ["dgc.settings", "dgc.restart", "dgc.updateCli", "dgc.focus", "dgc.openCommandMenu"]) {
+    assert.ok(manifest.contributes.commands.some((c) => c.command === command), `${command} exists`);
+    assert.equal(gated.get(command), undefined, `${command} must stay in the palette when the backend is down`);
+  }
+});

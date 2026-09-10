@@ -19,9 +19,16 @@ globalThis.__DGC_TEST_VSCODE = {
   Uri: {},
   env: {},
   commands: {},
+  // The bundle sees this object through live getters created at require time, so a key that is
+  // absent here can never be added by a test. Everything the panel touches has to exist now.
+  languages: { getDiagnostics: () => [] },
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3,
+                        0: "Error", 1: "Warning", 2: "Information", 3: "Hint" },
   StatusBarAlignment: { Left: 1 },
   ConfigurationTarget: { WorkspaceFolder: 1, Workspace: 2, Global: 3 },
   window: {
+    activeTextEditor: undefined,
+    tabGroups: { all: [] },
     createStatusBarItem: () => statusBar,
     showWarningMessage: async (message) => {
       notices.warnings.push(String(message));
@@ -1045,4 +1052,86 @@ test("MCP SecretStorage failure restores local records and the prior backend def
   assert.deepEqual(h.catalog(), [item]);
   assert.equal(h.rawSecrets.get("dgc.mcp.old"), priorRaw);
   assert.match(notices.errors.at(-1) || "", /prior MCP settings were restored/);
+});
+
+test("the prompt carries diagnostics for every file this chat touched, not only the focused one", () => {
+  // After editing five files the agent could not see the errors it had just created: only the
+  // active editor's diagnostics were ever sent. This drives the real collector.
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const uriFor = (p) => ({fsPath: p, scheme: "file", toString: () => `file://${p}`});
+  const range = {start: {line: 3, character: 2}, end: {line: 3, character: 9}};
+  const diag = (message, severity) => ({message, severity, source: "ts", code: "1", range});
+  const perFile = {
+    [`file://${scratch}/active.ts`]: [diag("active is broken", 0)],
+    [`file://${scratch}/edited-one.ts`]: [diag("the agent broke this", 0), diag("and warned here", 1)],
+    [`file://${scratch}/edited-two.ts`]: [diag("only a hint", 3)],
+  };
+  const saved = {Uri: vs.Uri, languages: vs.languages, DiagnosticSeverity: vs.DiagnosticSeverity,
+                 activeTextEditor: vs.window.activeTextEditor, tabGroups: vs.window.tabGroups,
+                 getWorkspaceFolder: vs.workspace.getWorkspaceFolder, asRelativePath: vs.workspace.asRelativePath};
+  try {
+    vs.Uri = {file: uriFor, parse: uriFor};
+    vs.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2, Hint: 3,
+                             0: "Error", 1: "Warning", 2: "Information", 3: "Hint"};
+    vs.languages = {getDiagnostics: (uri) => perFile[uri.toString()] || []};
+    vs.window.activeTextEditor = {
+      document: {uri: uriFor(`${scratch}/active.ts`), languageId: "typescript", getText: () => ""},
+      selection: {isEmpty: true, start: {line: 0}, end: {line: 0}},
+    };
+    vs.window.tabGroups = {all: []};
+    vs.workspace.getWorkspaceFolder = () => ({name: "fixture"});
+    vs.workspace.asRelativePath = (uri) => String(uri.fsPath).replace(`${scratch}/`, "");
+    const provider = new DgcViewProvider({subscriptions: [], globalState: {get() {}, update() {}},
+                                          workspaceState: {get() {}, update() {}}, secrets: {get: async () => undefined}});
+    provider.chatChanges = [
+      {path: "edited-one.ts", root: scratch}, {path: "edited-two.ts", root: scratch},
+      {path: "untouched-by-errors.ts", root: scratch},
+    ];
+    const diagnostics = provider.editorContext().filter((r) => r.type === "diagnostics");
+    const files = diagnostics.map((d) => d.relative_path).sort();
+    assert.deepEqual(files, ["active.ts", "edited-one.ts"],
+      "the focused file plus the touched files that actually have errors or warnings");
+    const edited = diagnostics.find((d) => d.relative_path === "edited-one.ts");
+    assert.equal(edited.diagnostics.length, 2);
+    assert.equal(edited.diagnostics[0].message, "the agent broke this");
+    assert.equal(edited.diagnostics[0].severity, "Error");
+    assert.ok(!diagnostics.some((d) => d.relative_path === "edited-two.ts"),
+      "a hint is not an error the agent made");
+  } finally {
+    vs.Uri = saved.Uri; vs.languages = saved.languages; vs.DiagnosticSeverity = saved.DiagnosticSeverity;
+    vs.window.activeTextEditor = saved.activeTextEditor; vs.window.tabGroups = saved.tabGroups;
+    vs.workspace.getWorkspaceFolder = saved.getWorkspaceFolder;
+    vs.workspace.asRelativePath = saved.asRelativePath;
+  }
+});
+
+test("files dropped into the chat attach as mentions, and non-file drops are ignored", () => {
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const saved = {Uri: vs.Uri, workspace: vs.workspace, commands: vs.commands};
+  try {
+    vs.Uri = {parse: (raw) => {
+      const text = String(raw);
+      if (!text.startsWith("file://") && !text.startsWith("untitled:")) { throw new Error("bad uri"); }
+      return {fsPath: text.replace(/^file:\/\//, ""), scheme: text.split(":")[0], toString: () => text};
+    }};
+    vs.workspace = {...saved.workspace, getWorkspaceFolder: () => ({name: "fixture"}),
+                    asRelativePath: (uri) => String(uri.fsPath).replace(`${scratch}/`, "")};
+    vs.commands = {executeCommand: () => Promise.resolve()};
+    const provider = new DgcViewProvider({subscriptions: [], globalState: {get() {}, update() {}},
+                                          workspaceState: {get() {}, update() {}}, secrets: {get: async () => undefined}});
+    const posted = [];
+    provider.post = (msg) => posted.push(msg);
+    provider.webviewReady = true;
+    provider.focus = () => {};
+    provider.onMessage({type: "drop_uris", uris: [
+      `file://${scratch}/dropped.ts`, "untitled:Untitled-1", "not a uri at all",
+    ]});
+    const attachments = posted.filter((m) => m.type === "attach");
+    assert.equal(attachments.length, 1, "only the real file attaches");
+    assert.equal(attachments[0].resource.type, "file_mention");
+    assert.equal(attachments[0].label, "dropped.ts");
+    assert.equal(attachments[0].resource.path, `${scratch}/dropped.ts`);
+  } finally {
+    Object.assign(vs, saved);
+  }
 });

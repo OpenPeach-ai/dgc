@@ -412,11 +412,40 @@ test("backend rejects incompatible protocol versions and never releases queued c
   assert.equal(backend.send({ type: "prompt", text: "must not run" }), true);
   const failure = await waitFor(backend, "event",
     (event) => event.type === "error" && event.protocol_error === true);
-  assert.match(failure.message, /protocol mismatch/i);
+  // Equality is deliberate, so the message must name the side to update: a newer CLI than the
+  // extension means the EXTENSION is behind. "protocol mismatch" alone strands whoever updated
+  // one half first, which is everyone for a while after a protocol bump.
+  assert.match(failure.message, /Update the DGC extension/);
+  assert.match(failure.message, /v7/);
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(backend.ready, false);
   assert.equal(seen.some((event) => event.type === "echo"), false);
   assert.equal(seen.some((event) => event.type === "command_rejected" && event.count === 1), true);
+  backend.dispose();
+});
+
+test("an older CLI is told to update itself, with the command that does it", async () => {
+  const backend = new DgcBackend(scratch, echoBackend("old-backend", 6));
+  const failure = waitFor(backend, "event",
+    (event) => event.type === "error" && event.protocol_error === true);
+  backend.start();
+  const message = (await failure).message;
+  assert.match(message, /DGC CLI is too old/);
+  assert.match(message, /dgc update/);
+  assert.match(message, /Restart Backend/);
+  assert.match(message, /speaks v6/);
+  backend.dispose();
+});
+
+test("a backend that reports no version is refused by the schema, before any version advice", async () => {
+  // The mismatch message can name a version because the schema has already guaranteed one.
+  const backend = new DgcBackend(scratch, echoBackend("versionless-backend", null));
+  const failure = waitFor(backend, "event",
+    (event) => event.type === "error" && event.protocol_error === true);
+  backend.start();
+  const message = (await failure).message;
+  assert.match(message, /violated protocol v7: ready\.protocol_version has the wrong type/);
+  assert.doesNotMatch(message, /speaks vnull|speaks vundefined|speaks vNaN/);
   backend.dispose();
 });
 

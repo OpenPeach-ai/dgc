@@ -230,8 +230,16 @@ export class DgcBackend extends EventEmitter {
           return;
         }
         if (ev.protocol_version !== DGC_PROTOCOL_VERSION) {
+          // Equality is deliberate — a version range would move the failure from second zero to
+          // turn forty — so the message has to say which side to update, and how. Whoever
+          // updates one half first lands here, and "protocol mismatch" alone strands them.
+          // The schema has already established that this is a number.
+          const offered = ev.protocol_version as number;
+          const fix = offered < DGC_PROTOCOL_VERSION
+            ? `This DGC CLI is too old for this extension. Update it — run "DGC: Update CLI to Latest", or \`dgc update\` in a terminal — then run "DGC: Restart Backend".`
+            : `This DGC CLI is newer than this extension. Update the DGC extension (Extensions view → DGC → Update), then reload the window.`;
           this.protocolFailure(
-            `DGC protocol mismatch: extension requires v${DGC_PROTOCOL_VERSION}, backend offered v${ev.protocol_version ?? "unknown"}`,
+            `${fix} (the extension speaks editor protocol v${DGC_PROTOCOL_VERSION}; this CLI speaks v${offered}.)`,
           );
           return;
         }
