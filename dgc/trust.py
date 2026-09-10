@@ -37,6 +37,87 @@ def is_trusted(config, path) -> bool:
     return False
 
 
+def list_trusted(config) -> list[str]:
+    return [str(t) for t in (config.data.get("trusted_dirs", []) or [])]
+
+
+def covering_entry(config, path) -> str:
+    """The stored trusted folder that covers ``path`` (itself or an ancestor), or ''."""
+    p = os.path.realpath(str(path))
+    for t in list_trusted(config):
+        tr = os.path.realpath(t)
+        if p == tr or p.startswith(tr + os.sep):
+            return t
+    return ""
+
+
+def revoke_trust(config, path) -> bool:
+    """Forget one trusted folder, by the stored text or its real path. Saves when it changed."""
+    target = os.path.realpath(str(path))
+    stored = list_trusted(config)
+    kept = [t for t in stored if t != str(path) and os.path.realpath(t) != target]
+    if len(kept) == len(stored):
+        return False
+    config.data["trusted_dirs"] = kept
+    config.save()
+    return True
+
+
+def broad_trust_warning(path) -> str:
+    """Why trusting this folder is wider than it looks; '' for an ordinary project folder.
+
+    Trust covers the subtree forever, so trusting $HOME quietly pre-trusts every future clone.
+    """
+    p = os.path.realpath(str(path))
+    home = os.path.realpath(os.path.expanduser("~"))
+    if p == home:
+        return ("This is your home directory — trusting it trusts every folder under it, "
+                "including every future clone.")
+    if os.path.dirname(p) == p:
+        return "This is the filesystem root — trusting it trusts every folder on this machine."
+    if home.startswith(p + os.sep):
+        return "This folder contains your home directory — trusting it trusts everything under it."
+    return ""
+
+
+def trust_markdown(config, project_root) -> str:
+    """The /trust and `dgc trust` listing."""
+    rows = list_trusted(config)
+    if not rows:
+        return ("No trusted folders yet — the gate asks the first time DGC opens a folder.\n\n"
+                "`/trust revoke N|PATH|here` forgets one once there are some.")
+    cover = covering_entry(config, project_root)
+    lines = ["**Trusted folders** — the gate is skipped for each of these and everything under it:", ""]
+    for i, t in enumerate(rows, 1):
+        note = "  ← covers this project" if t == cover else ""
+        broad = broad_trust_warning(t)
+        lines.append(f"{i}. `{style_mod.terminal_safe_text(t)}`{note}" + (f"  ⚠ {broad}" if broad else ""))
+    lines += ["", "`/trust revoke N` (or a path, or `here`) forgets one; the gate then asks again on the "
+                  "next launch there. Project rules already loaded stay loaded for this session."]
+    return "\n".join(lines)
+
+
+def handle_trust_command(config, project_root, rest: str) -> str:
+    """`/trust [revoke N|PATH|here]` for every surface; returns Markdown to show."""
+    words = str(rest or "").split()
+    if not words or words[0] in ("list", "show"):
+        return trust_markdown(config, project_root)
+    if words[0] in ("revoke", "forget", "remove", "untrust") and len(words) >= 2:
+        target = " ".join(words[1:])
+        rows = list_trusted(config)
+        if target == "here":
+            target = covering_entry(config, project_root)
+            if not target:
+                return "This project is not covered by any trusted folder."
+        elif target.isdigit() and 1 <= int(target) <= len(rows):
+            target = rows[int(target) - 1]
+        if revoke_trust(config, target):
+            return (f"Forgot `{style_mod.terminal_safe_text(target)}` — the gate asks again on the next "
+                    "launch there.")
+        return f"`{style_mod.terminal_safe_text(target)}` is not a trusted folder — `/trust` lists them."
+    return "Usage: `/trust` lists trusted folders · `/trust revoke N|PATH|here` forgets one."
+
+
 def mark_trusted(config, path) -> None:
     p = os.path.realpath(str(path))
     lst = config.data.setdefault("trusted_dirs", [])
@@ -99,6 +180,10 @@ def confirm_trust(config, project_root) -> bool:
                                 style=th.faint), cols))
         out.append(_center(Text("Your answer is remembered for this folder and everything under it.",
                                 style=th.faint), cols))
+        broad = broad_trust_warning(project_root)   # $HOME or / would pre-trust every future clone
+        if broad:
+            out.append(Text(""))
+            out.append(_center(Text(broad, style=f"bold {th.err}"), cols))
         if not in_git_repo(project_root):        # a warning when changes aren't tracked
             out.append(Text(""))
             out.append(_center(Text("Not inside a git repository — changes here are not version-controlled.",

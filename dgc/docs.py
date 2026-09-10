@@ -183,8 +183,11 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
   turn and does not change the native fallback. See **Thinking & reasoning**.
 - `--trust` — persist the canonical workspace in `trusted_dirs` (covering its
   subdirectories) before a non-interactive `acceptEdits`/`auto` run. Without it,
-  an unattended run in an untrusted directory will not edit. Remove that exact
-  entry from `~/.dgc/config.json` to revoke the grant.
+  an unattended run in an untrusted directory will not edit. `dgc trust` lists
+  every grant and `dgc trust revoke N|PATH|here` (or `/trust` inside DGC) forgets
+  one; the gate then asks again on the next launch there. The gate warns when the
+  folder is your home directory or the filesystem root, because a grant covers
+  everything under it — including every future clone.
 - `--engine NAME` — with `dgc -p`, delegate that one-shot turn to a subscription
   CLI instead of the configured endpoint. See **Subscriptions**.
 

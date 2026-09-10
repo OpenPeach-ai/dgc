@@ -12522,6 +12522,143 @@ def test_classic_delegation():
         S.run_turn, S.preflight = original_turn, original_preflight
 
 
+def test_held_items_0_32_cli():
+    """The 0.32.0 items that live in the terminal: the welcome tip, an explained first failure,
+    and trust that can be reviewed and revoked."""
+    import io as _io
+    import json as _json
+    import os as _os
+    import tempfile as _tempfile
+    import threading as _threading
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+    from prompt_toolkit.formatted_text import fragment_list_to_text as _fltt
+    from rich.console import Console as _Console
+    from dgc import cli as _cli
+    from dgc import config as _C
+    from dgc import trust as _trust
+    from dgc.llm import explain_llm_error
+    from dgc.tui import TUI
+
+    # --- the welcome tip is part of the layout now
+    ui = object.__new__(TUI)
+    ui.blocks = []; ui._buf = ""; ui._overlay = None; ui._pane = None
+    ui._width, ui._height = 100, 40
+    ui._card_body_rows = lambda mode, upd: 8
+    ui.input_buf = SimpleNamespace(text="")
+    ui._composer_height = lambda: 1
+    check("the welcome tip shows on an empty transcript and counts as chrome",
+          ui._tip_visible() and ui._chrome_below() == 6)
+    ui.blocks = ["an answer"]
+    check("the tip leaves once the conversation starts", not ui._tip_visible() and ui._chrome_below() == 5)
+    ui.blocks = []; ui._height = 12
+    check("a terminal too short for the card has no room for the tip", not ui._tip_visible())
+    ui._height = 40
+    ui._right_rows = lambda upd: 6
+    del ui._card_body_rows
+    check("the card metrics and the tip agree without measuring each other",
+          ui._tip_visible() and ui._welcome_metrics()[2] != "compact")
+
+    # --- the first failure says what to do, in doctor's words
+    e404 = explain_llm_error("HTTP 404 from http://h:11434: model 'qwen3:8b' not found, try pulling it first",
+                             model="qwen3:8b", base_url="http://h:11434/v1")
+    check("a 404 explains the missing model and how to get one",
+          e404.startswith("HTTP 404") and "ollama pull qwen3:8b" in e404 and "dgc --model" in e404)
+    refused = explain_llm_error("HTTPConnectionPool(host='h', port=11434): Max retries exceeded (Connection refused)",
+                                model="m", base_url="http://h:11434/v1")
+    check("a refused connection points at the server and dgc doctor",
+          "http://h:11434/v1 is not answering" in refused and "dgc doctor" in refused)
+    check("a rejected key says where the key goes",
+          "/connect" in explain_llm_error("HTTP 401 from https://x/v1: unauthorized", model="m", base_url="u"))
+    check("an unrelated failure is left alone",
+          explain_llm_error("context window exceeded", model="m", base_url="u") == "context window exceeded")
+
+    class _Client:
+        model = "qwen3:8b"; base_url = "http://h:11434/v1"
+    probe = object.__new__(_cli.Agent) if hasattr(_cli, "Agent") else None
+    from dgc.agent import Agent as _Agent
+    probe = object.__new__(_Agent); probe.client = _Client()
+    probe.config = SimpleNamespace(model="x", base_url="y")
+    check("the agent explains a failed turn with the client's own route",
+          "ollama pull qwen3:8b" in probe._explain_model_error(Exception("HTTP 404: model not found"))
+          and probe._explain_model_error(Exception("boom"), "fallback model also failed: ").startswith(
+              "fallback model also failed: boom"))
+
+    # --- trust: listed, covering entry, revoked, and the broad-grant warning
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-trust-")).resolve()
+    project = root / "repo"; project.mkdir()
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    try:
+        _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        _C.USER_CONFIG.write_text(_json.dumps({"model": "m", "trusted_dirs": []}))
+        cfg = _C.Config(project)
+        check("no grants yet reads as such",
+              "No trusted folders yet" in _trust.trust_markdown(cfg, project))
+        _trust.mark_trusted(cfg, root)
+        _trust.mark_trusted(cfg, root / "other")
+        listing = _trust.trust_markdown(cfg, project)
+        check("the listing numbers every grant and marks the one covering this project",
+              f"1. `{root}`  ← covers this project" in listing and f"2. `{root / 'other'}`" in listing
+              and _trust.covering_entry(cfg, project) == str(root))
+        home = _os.path.realpath(_os.path.expanduser("~"))
+        check("trusting the home directory or the root is called out as a broad grant",
+              "home directory" in _trust.broad_trust_warning(home)
+              and "filesystem root" in _trust.broad_trust_warning("/")
+              and "contains your home" in _trust.broad_trust_warning(_os.path.dirname(home))
+              and _trust.broad_trust_warning(project) == "")
+        check("/trust revoke N forgets that grant and saves",
+              "Forgot" in _trust.handle_trust_command(cfg, project, "revoke 2")
+              and _trust.list_trusted(cfg) == [str(root)]
+              and _json.loads(_C.USER_CONFIG.read_text())["trusted_dirs"] == [str(root)])
+        check("/trust revoke here forgets the grant covering this project",
+              "Forgot" in _trust.handle_trust_command(cfg, project, "revoke here")
+              and not _trust.is_trusted(cfg, project))
+        check("revoking an unknown folder says so and changes nothing",
+              "is not a trusted folder" in _trust.handle_trust_command(cfg, project, "revoke /nope")
+              and "not covered" in _trust.handle_trust_command(cfg, project, "revoke here"))
+        check("bad usage explains itself", "Usage:" in _trust.handle_trust_command(cfg, project, "frobnicate"))
+
+        _trust.mark_trusted(cfg, project)
+        tui = object.__new__(TUI)
+        tui.blocks = []; tui._width = 100; tui._invalidate = lambda: None; tui.config = cfg
+        tui._flash = lambda *a, **k: None; tui._scroll_off = 0; tui._follow = True
+        tui.agent = SimpleNamespace(session_name="", mode="default")
+        tui._handle_slash("/trust")
+        shown = "".join(str(b) for b in tui.blocks)
+        check("/trust in the app appends the listing to the transcript",
+              "Trusted folders" in shown and "covers this project" in shown)
+
+        classic = object.__new__(_cli.CLI); classic.config = cfg
+        classic.agent = SimpleNamespace(mode="default"); classic.ui = _cli.UI()
+        classic.ui.console = _Console(file=_io.StringIO(), force_terminal=False, width=100)
+        classic.console = classic.ui.console
+        classic.handle_slash("/trust revoke here")
+        check("/trust in the classic REPL revokes and reports",
+              "Forgot" in classic.console.file.getvalue() and not _trust.is_trusted(cfg, project))
+
+        real_config = _cli.Config
+        _cli.Config = lambda: cfg
+        try:
+            out = _io.StringIO()
+            import contextlib as _ctx
+            with _ctx.redirect_stdout(out):
+                code = _cli.main(["trust"])
+            check("`dgc trust` lists the grants from the command line",
+                  code == 0 and "Trusted folders" in out.getvalue() or "No trusted folders" in out.getvalue())
+            out = _io.StringIO()
+            with _ctx.redirect_stdout(out):
+                help_code = _cli.main(["trust", "--help"])
+            check("`dgc trust --help` prints usage", help_code == 0 and out.getvalue().startswith("usage: dgc trust"))
+        finally:
+            _cli.Config = real_config
+    finally:
+        for p, data in snapshot.items():
+            if data is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(data)
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -17643,6 +17780,7 @@ def main():
         test_recall_archive_is_display_only()
         test_overnight_parity_fixes()
         test_classic_delegation()
+        test_held_items_0_32_cli()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

@@ -933,6 +933,9 @@ class CLI:
                 self.ui.info(
                     f"export-training → wrote {summary['written']} session(s), "
                     f"skipped {summary['skipped']}, to {summary['out']} (secrets scrubbed)")
+        elif cmd == "trust":
+            from .trust import handle_trust_command
+            self.console.print(render.render_markdown(handle_trust_command(cfg, cfg.project_root, rest)))
         elif cmd == "permissions":
             self._permissions_cmd(rest)
         elif cmd == "memory":
@@ -1920,6 +1923,7 @@ def run_help() -> None:
     c.print("  dgc --classic           inline mode: the transcript stays in your terminal's scrollback")
     c.print("  dgc update              update DGC to the latest version")
     c.print("  dgc export [ID] [FILE]  save a session as Markdown")
+    c.print("  dgc trust               list the folders the trust gate skips  (dgc trust revoke N|PATH|here)")
     c.print("  dgc export-training     export your sessions as scrubbed fine-tuning JSONL")
     c.print("  dgc protocol describe   inspect the installed headless/editor contract as JSON")
     c.print("  dgc skills              list, create, install and manage skill packages")
@@ -1937,6 +1941,7 @@ SUBCOMMAND_USAGE: dict[str, str] = {
     "help": "dgc help                           the command overview",
     "update": "dgc update                         reinstall the latest DGC from vibedgc.com (runs the installer)",
     "export": "dgc export [ID] [FILE]             save a session as Markdown (default: the most recent, to ~/.dgc/exports)",
+    "trust": "dgc trust [revoke N|PATH|here]     list the folders the trust gate skips, or forget one",
     "export-training": "dgc export-training [--help]       export sessions as scrubbed fine-tuning JSONL",
     "serve": "dgc serve                          headless JSON backend for editor front-ends (stdio)",
     "acp": "dgc acp                            Agent Client Protocol backend (JSON-RPC over stdio)",
@@ -2005,6 +2010,12 @@ def main(argv: list[str] | None = None) -> int | None:
             return
         if raw_argv[0] == "update":
             run_update(); return
+        if raw_argv[0] == "trust":
+            from .trust import handle_trust_command
+            cfg = Config()
+            Console().print(render.render_markdown(
+                handle_trust_command(cfg, cfg.project_root, " ".join(raw_argv[1:]))))
+            return 0
         if raw_argv[0] == "export":
             return run_export(raw_argv[1:])
         if raw_argv[0] == "serve":

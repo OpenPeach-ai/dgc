@@ -1882,6 +1882,23 @@ class TUI:
             return frags[:i] + middle + frags[i + 1:]
         return frags + [marker]
 
+    def _tip_visible(self) -> bool:
+        """The welcome screen's one-line tip. It was defined and styled since the first release
+        and never placed in the layout, so nothing on the empty screen said what to press.
+
+        Measured without _welcome_metrics, which sizes the card from the chrome — and the tip is
+        part of the chrome. The tip shows whenever a stacked card still fits above it, which is
+        the same rule _welcome_metrics applies once the tip's row is counted.
+        """
+        if self.blocks or self._buf or self._overlay is not None or self._pane is not None:
+            return False
+        w, h = self._width, getattr(self, "_height", 30)
+        avail = h - (self._composer_height() + 4) - 1          # base chrome + the tip's own row
+        upd = cached_update()
+        if w >= self._WIDE_MIN and avail >= self._card_body_rows("wide", upd) + 8:
+            return True
+        return w >= 40 and avail >= self._card_body_rows("stacked", upd) + 8
+
     def _tip(self):
         th = style_mod.theme()
         if (self.blocks or self._buf or self._overlay or self._pane is not None
@@ -3336,8 +3353,10 @@ class TUI:
             Window(FormattedTextControl(self._goal_pane), height=self._goal_pane_height,
                    dont_extend_height=True),
             filter=Condition(self._goal_panel_visible))
+        tip = ConditionalContainer(Window(FormattedTextControl(self._tip), height=1),
+                                   filter=Condition(self._tip_visible))
         root = HSplit([header, transcript, pane_panel, overlay_panel, goal_panel, todo_panel,
-                       status, composer_box, shortcut_bar])
+                       tip, status, composer_box, shortcut_bar])
         # Adaptive colour depth (grey logo + solid accents stay clean at any depth); the dark
         # canvas is handled separately via OSC 10/11 (dgc/termbg.py).
         # Mouse capture ON so the wheel scrolls DGC's own transcript instead of the
@@ -3377,8 +3396,9 @@ class TUI:
         return min(max(1, rows), cap, 14)
 
     def _chrome_below(self) -> int:
-        # the actual rows under the header: status(1) + composer box(composer+2) + shortcut(1).
-        return self._composer_height() + 4
+        # the actual rows under the header: status(1) + composer box(composer+2) + shortcut(1),
+        # plus the welcome tip while the transcript is empty.
+        return self._composer_height() + 4 + (1 if self._tip_visible() else 0)
 
     def _line_prefix(self, line_no, wrap_count):
         th = style_mod.theme()
@@ -4326,6 +4346,9 @@ class TUI:
                 self._append(self._rich(
                     f"[bold {th.accent}]project DGC.md[/]\n[{th.faint}]{_esc(project_body)}[/]\n"
                     f"[bold {th.accent}]user DGC.md[/]\n[{th.faint}]{_esc(user_body)}[/]"))
+        elif cmd == "trust":
+            from .trust import handle_trust_command
+            self._append(self._rich(self._md(handle_trust_command(cfg, cfg.project_root, rest))))
         elif cmd == "permissions":
             perms = getattr(cfg, "permissions", {}) or {}
             spec = rest.strip().split(maxsplit=1)
