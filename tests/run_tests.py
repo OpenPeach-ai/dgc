@@ -1370,11 +1370,15 @@ def unit_tests(tmp: Path):
     _bg_secret_match = _re_bg.search(r"background task (bg\d+)", _bg_secret_start)
     _bg_secret_id = _bg_secret_match.group(1) if _bg_secret_match else ""
     _bg_secret_out = ""
-    for _ in range(100):
+    # Wait for the handle to be OBSERVED finished, not for a fixed second: a contended macOS
+    # runner needed longer, so bash_kill legitimately killed a live process group and the next
+    # check read that as a product failure. The bound stays generous but finite.
+    _bg_secret_deadline = _time_tools.monotonic() + 30.0
+    while _time_tools.monotonic() < _bg_secret_deadline:
         _bg_secret_out = execute("bash_output", {"id": _bg_secret_id}, _output_ctx)
         if "exited 0" in _bg_secret_out and "[REDACTED]" in _bg_secret_out:
             break
-        _time_tools.sleep(0.01)
+        _time_tools.sleep(0.02)
     _bg_secret_finished_kill = execute("bash_kill", {"id": _bg_secret_id}, _output_ctx)
     check("background commands and buffered output are redacted before bounded retention",
           bool(_bg_secret_id) and _tool_secret not in _bg_secret_start + _bg_secret_out
@@ -1418,14 +1422,15 @@ def unit_tests(tmp: Path):
     _orphan_entry = _tools_bg._BG.get(_orphan_id, {})
     _orphan_output = ""
     _orphan_pid_match = None
-    for _ in range(200):
+    _orphan_deadline = _time_tools.monotonic() + 30.0     # same reason as the handle above
+    while _time_tools.monotonic() < _orphan_deadline:
         _orphan_output = execute("bash_output", {"id": _orphan_id}, ctx)
         _orphan_pid_match = _re_bg.search(r"BG_ORPHAN=(\d+)", _orphan_output)
         _orphan_proc = _orphan_entry.get("proc")
         if (_orphan_pid_match and _orphan_proc is not None
                 and _orphan_proc.poll() is not None):
             break
-        _time_tools.sleep(0.01)
+        _time_tools.sleep(0.02)
     _orphan_pid = int(_orphan_pid_match.group(1)) if _orphan_pid_match else 0
     _orphan_was_alive = _live_process(_orphan_pid, wait=0.05)
     _orphan_controls = _tools_bg.bash_handle_tools(ctx)
