@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC — coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -396,7 +396,7 @@
           "type": "string",
           "default": "dgc",
           "scope": "machine",
-          "description": "Path to the DGC CLI executable (v0.32.0+; editor protocol v7 required)."
+          "description": "Path to the DGC CLI executable (v0.33.0+ recommended; editor protocol v7 required)."
         },
         "dgc.checkForUpdates": {
           "type": "boolean",

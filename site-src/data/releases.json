@@ -1,13 +1,25 @@
 {
-  "refreshed_at": "2026-09-10T06:45:41Z",
+  "refreshed_at": "2026-09-10T15:03:54Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.33.0",
+      "date": "2026-09-10",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.33.0",
+      "status": "current",
+      "notes": [
+        "Context notes: DGC now keeps a searchable trace of what a project has already learned, and it outlives the context window. A command that failed, an edit that did not apply, a test suite that passed — each is recorded as the work happens, by the harness rather than the model, so it behaves the same on every local endpoint. The notes are per project, so a run spread over days accumulates one trace.",
+        "The point of keeping them is not to have them. After a compaction — the moment this history used to be lost — a bounded digest of requirements, decisions and recent failures rides into the fresh context, and when a step touches a file that has failed before, that history is attached to the result the agent reads. An agent that cannot see its own failed attempts repeats them; now it can.",
+        "Read the trace yourself with /notes, /notes <query>, or dgc notes from a shell; the agent searches it with a read-only notes tool that is allowed in plan mode. Notes are bounded, redacted like a saved session, and off with /notes off. They are not the /recall archive, which stays your raw scrollback and still never re-enters the model's context."
+      ],
+      "headline": "context notes that survive compaction"
+    },
+    {
       "version": "0.32.0",
       "date": "2026-09-10",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.32.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "dgc -p for scripts. Piped input joins the prompt (git diff | dgc -p \"review this\"; -p - reads it whole), --output-format json streams the dgc serve events and ends with one result object (ok, text, session_id, usage), --output FILE saves the answer and --print-session-id gives you the id for --resume. A -p run never waits on a menu: a tool that would ask is denied with the exact --allow-tool rule to pre-approve, and a plan is reported rather than executed. --add-dir, --allow-tool and --sandbox on|off|read-only apply to that run only.",
         "The classic REPL runs your subscription too, and the terminal explains itself. dgc --classic now runs a connected Claude, Codex, Qwen, Kimi or Copilot subscription’s turns (it used to fall back to the native model silently), and every front-end shares one delegated-turn path. A fresh install’s first failure says what to do in dgc doctor’s words instead of a raw 404 or Connection refused; /trust and dgc trust list every trusted folder and revoke one, and the gate warns before trusting your home directory; the welcome screen shows its tip at last.",
@@ -228,10 +240,21 @@
   ],
   "extension": [
     {
-      "version": "0.18.0",
+      "version": "0.18.1",
       "date": "2026-09-10",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
+      "notes": [
+        "DGC: Show Context Notes — what this project has already learned, across sessions. The agent searches the same trace itself, so after a compaction it can see which fixes already failed. Needs CLI 0.33.0; editor protocol v7 is unchanged, so this is not a lockstep upgrade.",
+        "The chat is offered in the secondary side bar as well as the activity bar — open it in either and the same conversation follows.",
+        "An older CLI is offered the fix rather than only told about it: Update DGC CLI, then Restart Backend."
+      ]
+    },
+    {
+      "version": "0.18.0",
+      "date": "2026-09-10",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "shipped",
       "notes": [
         "Approve against the change: the permission card shows the step’s summary and, for an edit, the diff it would apply, instead of raw JSON; Deny can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0.",
         "The agent sees the errors it made: each prompt carries diagnostics for every file this chat touched, not just the focused one. Add File to Chat from the explorer and tab context menus, or drag a file into the chat; palette entries that need a running backend appear once it is connected.",
