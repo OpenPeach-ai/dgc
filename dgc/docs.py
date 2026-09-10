@@ -830,6 +830,10 @@ time, review button, pause/resume button, and edit/delete controls stay above th
 Editing preserves the goal's identity and accumulated work time. Reopening a saved
 session pauses its goal; time spent offline is not counted as work.
 
+Picking `/goal` from the `/` menu attaches it to the composer as a chip and leaves the cursor
+after it, so you type the objective and press Enter to send — the same way `$skills` attach. A
+command that takes nothing, such as `/help`, still runs the moment you pick it.
+
 - `/goal` or `/goal review` — inspect the objective, status, work time, cycles, and evidence.
 - `/goal pause` — stop work and retain the goal for later.
 - `/goal complete` — retain the objective as an auditable completed record.
@@ -843,11 +847,11 @@ A standing goal is stated to the model in full once per context — and again af
 which starts a fresh one — while later turns only refer back to it. That keeps the recurring
 cost of a goal to a few dozen tokens a turn rather than restating the whole objective every time.
 
-Because the full statement has to fit the window it lives in, the limit follows your context
-size: an eighth of it, so a 32k context allows about 16,000 characters and a 128k one about
-32,000. If an objective is too long DGC says so, gives you the text back, and keeps the goal you
-already had — nothing is truncated and nothing is lost. Long detail belongs in an ordinary
-prompt; the goal is the aim you want held to.
+Because the full statement has to fit the window it lives in, the limit is a share of your
+context rather than a fixed number: a quarter of it, leaving three quarters for the work. A 32k
+context allows about 32,000 characters, a 128k one about 131,000 — raise `context_size` and the
+allowance rises with it. If an objective is still too long DGC says so, gives you the text back,
+and keeps the goal you already had: nothing is truncated and nothing is lost.
 
 Native models use `update_goal` with a summary and evidence. Delegated models submit
 a structured closing report that DGC validates and removes from the displayed answer.

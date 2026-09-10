@@ -2477,7 +2477,9 @@ class Agent(GoalLifecycle):
                 self.usage_totals = sessions.usage_of(path, self.session_root, record)
                 self.activity_totals = sessions.activity_of(path, self.session_root, record)
                 self.timing_totals = sessions.timing_of(path, self.session_root, record)
-            self.goal = self._safe_text(str(record.get("goal") or ""))[:_GOAL_MAX_CHARS]
+            # Truncating here to a fixed 4,000 would silently shorten a long objective that was
+            # accepted when it was set, so resume uses the same rule the setter does.
+            self.goal = self._safe_text(str(record.get("goal") or ""))[:self.goal_max_chars()]
             raw_status = str(record.get("goal_status") or "active")
             self.goal_status = (raw_status if self.goal
                                 and raw_status in GOAL_STATUSES
