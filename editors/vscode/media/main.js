@@ -1380,11 +1380,19 @@
       case "permission_request": {
         ensureTurn();
         speak(`Permission required to run ${ev.name}`);
-        const cmd = ev.command ? `<pre>$ ${esc(ev.command)}</pre>` : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
-        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${cmd}<div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        // v7: the step's summary and, for an edit, the diff it would apply — approve against
+        // what will happen, not raw JSON. A denial can carry a note for the model.
+        const summary = ev.summary ? `<div class="muted">${esc(ev.summary)}</div>` : "";
+        const detail = ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
+          : ev.diff ? "" : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
+        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${summary}${detail}<textarea class="feedback" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
+          const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
           if (!resolveCard(c)) return;
-          vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d, rule: b.dataset.d === "always" ? ev.suggested_rule : undefined });
+          vscode.postMessage({ type: "permission_response", id: ev.id, decision: b.dataset.d,
+            rule: b.dataset.d === "always" ? ev.suggested_rule : undefined,
+            reason: b.dataset.d === "deny" && note ? note : undefined });
         });
         break;
       }
@@ -1926,6 +1934,21 @@
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(e.altKey ? "queue" : undefined); }
     else if (e.key === "Escape" && streaming) doStop();
   });
+  // Files dragged from the explorer (or a tab) attach as @-mentions, like the popup does.
+  for (const zone of [input, log]) {
+    zone.addEventListener("dragover", (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("text/uri-list")) {
+        e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+      }
+    });
+    zone.addEventListener("drop", (e) => {
+      const list = e.dataTransfer ? e.dataTransfer.getData("text/uri-list") : "";
+      const uris = list.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#")).slice(0, 16);
+      if (!uris.length) return;
+      e.preventDefault();
+      vscode.postMessage({ type: "drop_uris", uris });
+    });
+  }
   input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for (const it of items) {

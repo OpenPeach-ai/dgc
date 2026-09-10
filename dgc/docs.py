@@ -277,6 +277,13 @@ reads outside the project and host writes except the project and shared system
 temporary paths; its temporary and process namespaces are not private. Network is
 blocked by default on both. Unsupported platforms fail closed instead of running a
 requested sandbox without confinement. Use `/sandbox network on` only when needed.
+
+## In VS Code and Cursor
+
+The approval card shows what the step will do — its summary and, for an edit, the diff it
+would apply — so you approve against the change rather than raw arguments. **Deny** can carry
+a note; the model reads it as the reason and adjusts.
+
 """.strip()),
 
     ("Plan mode", "read-only planning, then one-tap approve", """
