@@ -4791,8 +4791,12 @@ def unit_tests(tmp: Path):
           and _g2.goal_elapsed_seconds(_goal_time.time() + 60) >= 4)
     _g3 = _Ag(_Cfg(_goal_root), _AgUI()); _g3.load_session(_gp)
     check("completed goal status survives resume", _g3.goal_status == "completed")
+    # The cap follows the context window (the objective is stated in full once per context), so
+    # this asks the session what its own limit is instead of hardcoding one.
     check("oversized goals are rejected without silently losing the existing objective",
-          not _g3.set_goal("x" * 5000) and _g3.goal == "ship the release")
+          not _g3.set_goal("x" * (_g3.goal_max_chars() + 1)) and _g3.goal == "ship the release"
+          and _g3.set_goal("x" * _g3.goal_max_chars()) and len(_g3.goal) == _g3.goal_max_chars())
+    _g3.set_goal("ship the release")
     _g3.update_goal("active")
     _goal_tool = _g3._handle_call(_ToolCall("g1", "update_goal", {
         "status": "blocked", "summary": "External dependency missing", "evidence": ["Dependency check failed"]}))
@@ -13153,6 +13157,88 @@ def test_context_notes():
             p.unlink(missing_ok=True) if data is None else p.write_bytes(data)
 
 
+def _goal_cap(agent, context_size: int) -> int:
+    agent.config.data["context_size"] = context_size
+    return agent.goal_max_chars()
+
+
+def test_goal_refusal_keeps_the_text():
+    """A refused objective must explain itself and hand the text back.
+
+    The composer is cleared before a slash command runs, so a rejected `/goal` used to destroy
+    what the user had written — a long pasted objective — and replace it with a flash that
+    expired in two seconds.
+    """
+    import tempfile as _tempfile
+    import threading as _threading
+    from pathlib import Path as _Path
+    from types import SimpleNamespace
+    from prompt_toolkit.buffer import Buffer as _Buffer
+    from dgc import config as _C
+    from dgc.agent import Agent as _Agent
+    from dgc.cli import UI as _UI
+    from dgc.tui import TUI as _TUI
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-goal-")).resolve()
+    project = root / "project"; project.mkdir()
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    _C.USER_CONFIG.write_text('{"model": "m"}')
+    try:
+        agent = _Agent(_C.Config(project), _UI())
+        agent.config.data["context_size"] = 32_768          # cap: 16,384 characters
+        objective = "Refactor the retry layer so a lease is never dropped. " * 400   # ~21k chars
+        check("a short objective is accepted", agent.set_goal("Ship the bounds fix") is True)
+        check("an over-long objective is refused without truncating it",
+              agent.set_goal(objective) is False and agent.goal == "Ship the bounds fix")
+        message = agent._last_persist_error
+        check("the refusal states the actual size, this session's cap, and where the detail goes",
+              f"{len(objective.strip()):,}" in message and "16,384" in message
+              and "32,768 tokens" in message and "ordinary prompt" in message, message)
+
+        ui = object.__new__(_TUI)
+        ui.agent = agent
+        ui.config = agent.config
+        ui.input_buf = _Buffer(multiline=True)
+        ui.blocks = []; ui._width = 80; ui._scroll_off = 0; ui._follow = True
+        ui._invalidate = lambda: None; ui._turn = _threading.Event()
+        ui._pastes = {}; ui._input = None; ui._naming = False
+        flashes, errors = [], []
+        ui._flash = lambda msg, secs=2.2: flashes.append(msg)
+        ui.error = lambda msg: errors.append(str(msg))
+        ui._submit = lambda *a, **k: errors.append("SUBMITTED")     # must not run the turn
+        ui._handle_slash("/goal " + objective)
+        check("the refused objective is returned to the composer, not destroyed",
+              ui.input_buf.text.strip() == objective.strip())
+        check("the reason is written where it can still be read, and no turn starts",
+              errors and "16,384" in errors[0] and "SUBMITTED" not in errors
+              and any("your text is back" in f for f in flashes), (errors[:1], flashes))
+        check("the standing goal is unchanged by the refusal", agent.goal == "Ship the bounds fix")
+
+        # --- the cap follows the window the objective has to live in
+        check("the cap scales with the context and stays bounded at both ends",
+              [_goal_cap(agent, ctx) for ctx in (8_192, 32_768, 131_072, 1_000_000)]
+              == [4_096, 16_384, 32_000, 32_000])
+        agent.config.data["context_size"] = 32_768
+        roomy = "Refactor the retry layer so a lease is never dropped. " * 150      # 7,950 chars
+        check("an objective the old fixed cap refused now fits a 32k window",
+              len(roomy.strip()) > 4_000 and agent.set_goal(roomy) is True)
+
+        # --- and the reason the cap could rise: the objective is stated once, not every turn
+        agent._goal_stated = False
+        full = agent._goal_reminder()
+        agent._goal_stated = True
+        again = agent._goal_reminder()
+        check("the first reminder states the whole goal; later ones only refer back to it",
+              agent.goal in full and agent.goal not in again
+              and "stated in full earlier" in again and len(again) < 600 < len(full))
+        check("a later reminder still names enough of the goal to be recognised",
+              roomy.split(".")[0][:60] in again and len(again) < len(full) / 10)
+    finally:
+        for p, data in snapshot.items():
+            p.unlink(missing_ok=True) if data is None else p.write_bytes(data)
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -18300,6 +18386,7 @@ def main():
         test_resize_reflow()
         test_editor_approval_gate()
         test_context_notes()
+        test_goal_refusal_keeps_the_text()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

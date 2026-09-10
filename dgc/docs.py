@@ -837,6 +837,18 @@ session pauses its goal; time spent offline is not counted as work.
 - `/goal resume` — reactivate the goal and continue work immediately.
 - `/goal clear` — remove it.
 
+## How long an objective may be
+
+A standing goal is stated to the model in full once per context — and again after a compaction,
+which starts a fresh one — while later turns only refer back to it. That keeps the recurring
+cost of a goal to a few dozen tokens a turn rather than restating the whole objective every time.
+
+Because the full statement has to fit the window it lives in, the limit follows your context
+size: an eighth of it, so a 32k context allows about 16,000 characters and a 128k one about
+32,000. If an objective is too long DGC says so, gives you the text back, and keeps the goal you
+already had — nothing is truncated and nothing is lost. Long detail belongs in an ordinary
+prompt; the goal is the aim you want held to.
+
 Native models use `update_goal` with a summary and evidence. Delegated models submit
 a structured closing report that DGC validates and removes from the displayed answer.
 Completion is applied after the work cycle succeeds; failed or cancelled work cannot
