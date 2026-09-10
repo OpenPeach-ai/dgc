@@ -449,6 +449,81 @@
   // One CommonMark renderer for live answers, history, skills, and documentation.
   const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+  // ---- hover labels ----
+  // The panel relied on the browser's `title` tooltip: about a second of delay, operating-system
+  // chrome that matches nothing else on screen, and nothing at all for a keyboard user. This is
+  // one shared label that appears quickly, follows the panel's own type and surfaces, and works
+  // on focus as well as hover. `title` stays in the DOM as the source of truth — it is the
+  // accessible fallback and what the tests read — and is lifted off only while ours is showing,
+  // so a control never explains itself twice.
+  const hoverTip = (() => {
+    const node = el("div", "tip");
+    node.hidden = true; node.setAttribute("role", "tooltip"); node.id = "hover-tip";
+    document.body.appendChild(node);
+    let timer = 0, warm = 0, target = null, native = "";
+    function hide() {
+      clearTimeout(timer);
+      if (target && native) target.setAttribute("title", native);
+      if (node.hidden === false) warm = Date.now();
+      target = null; native = ""; node.hidden = true; node.className = "tip";
+    }
+    function paint(el0, label) {
+      const [head, ...rest] = label.split("\n").map((line) => line.trim()).filter(Boolean);
+      node.textContent = head;
+      if (rest.length) {
+        const detail = document.createElement("span");
+        detail.className = "tip-detail"; detail.textContent = rest.join(" ");
+        node.appendChild(detail);
+      }
+      node.hidden = false;
+      // Above by default, below when there is no room, and never off the side of the panel.
+      const anchorBox = el0.getBoundingClientRect(), box = node.getBoundingClientRect(), gap = 6;
+      let top = anchorBox.top - box.height - gap, side = "above";
+      if (top < 4) { top = anchorBox.bottom + gap; side = "below"; }
+      const left = Math.max(4, Math.min(Math.round(anchorBox.left + anchorBox.width / 2 - box.width / 2),
+                                        window.innerWidth - box.width - 4));
+      node.style.top = `${Math.round(top)}px`;
+      node.style.left = `${left}px`;
+      // The arrow points at the control, not at the middle of the label — they part company
+      // whenever the label has been nudged away from the edge of the panel.
+      const centre = anchorBox.left + anchorBox.width / 2 - left;
+      node.style.setProperty("--tip-arrow", `${Math.round(Math.max(8, Math.min(centre, box.width - 8)))}px`);
+      node.classList.add(side);
+    }
+    function show(el0, instant) {
+      if (el0 === target) return;
+      const label = (el0.getAttribute("title") || el0.dataset.tip || "").trim();
+      if (!label || el0.closest("[hidden]")) return;
+      hide();
+      target = el0; native = el0.getAttribute("title") || "";
+      // Moving to a neighbouring control should not make you wait again.
+      const delay = instant || Date.now() - warm < 500 ? 0 : 380;
+      timer = setTimeout(() => {
+        if (target !== el0 || !el0.isConnected) return;
+        if (native) el0.removeAttribute("title");
+        paint(el0, label);
+      }, delay);
+    }
+    return { show, hide, node };
+  })();
+  const tipTarget = (event) => event.target?.closest?.("[title], [data-tip]") || null;
+  document.addEventListener("pointerover", (e) => {
+    const found = tipTarget(e);
+    if (found) hoverTip.show(found, false); else hoverTip.hide();
+  });
+  document.addEventListener("pointerdown", () => hoverTip.hide(), true);
+  document.addEventListener("focusin", (e) => {
+    const found = tipTarget(e);
+    // Only for keyboard focus: a label that pops up on every click is noise. A host that cannot
+    // evaluate the selector should still get labels, so an unsupported pseudo-class means yes.
+    let keyboard = true;
+    try { keyboard = found ? found.matches(":focus-visible") : false; } catch { keyboard = !!found; }
+    if (found && keyboard) hoverTip.show(found, true); else hoverTip.hide();
+  });
+  document.addEventListener("focusout", () => hoverTip.hide());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hoverTip.hide(); }, true);
+  window.addEventListener("blur", () => hoverTip.hide());
+
   // ---- keeping the transcript's height honest while still skipping what is off screen ----
   // `content-visibility: auto` lets the browser skip rendering a block that has scrolled away,
   // but a skipped block is laid out at its `contain-intrinsic-size`, not its real height. A
@@ -568,8 +643,9 @@
               ? `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`
               : `<span class="ts-new">New</span>`)
           + `<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")}</div>`
-      + `<div class="ts-actions"><button type="button" class="act ts-undo">Undo</button>`
-      + `<button type="button" class="act ts-review">Review</button></div>`;
+      + `<div class="ts-actions">`
+      + `<button type="button" class="act ts-undo" title="Put these files back as they were before this turn">Undo</button>`
+      + `<button type="button" class="act ts-review" title="Open the diff for every file this chat changed">Review</button></div>`;
     card.querySelectorAll("[data-file]").forEach((row) => row.onclick = () => {
       const entry = files[Number(row.dataset.file)];
       if (entry) vscode.postMessage({ type: "reviewChange", path: entry[0], scope: "chat" });
@@ -1481,6 +1557,7 @@
           const reasonId = `reasoning-${++disclosureId}`;
           d.type = "button"; d.setAttribute("aria-expanded", "false"); d.setAttribute("aria-controls", reasonId); r.id = reasonId;
           d.dataset.label = "Thinking"; turn.reasonStarted = Date.now();
+          d.title = "Show the model\u2019s reasoning for this turn";
           d.onclick = () => { const open = r.classList.toggle("show"); d.textContent = (open ? "▾" : "▸") + " " + d.dataset.label; d.setAttribute("aria-expanded", String(open)); };
           appendTurnContent(d); appendTurnContent(r); turn.reasonEl = r;
         }
@@ -1968,7 +2045,8 @@
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
       const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}`), label = el("span", "chip-label"), remove = el("button", "x", "×");
-      label.textContent = a.label; label.title = a.label; remove.type = "button"; remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
+      label.textContent = a.label; label.title = a.label; remove.type = "button"; remove.title = "Remove this attachment";
+      remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
       chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
     });
@@ -2355,6 +2433,7 @@
     log.querySelectorAll(".hist").forEach((e) => e.remove());
     const history = el("div", "hist history-pages");
     const older = el("button", "act history-older", "Show earlier messages");
+    older.title = "Load the previous page of this chat\u2019s history";
     history.appendChild(older);
     let cursor = items.length;
     function page() {

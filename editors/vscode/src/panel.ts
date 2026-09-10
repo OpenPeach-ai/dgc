@@ -3470,12 +3470,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <label class="sr-only" for="goal-editor-text">Goal</label>
     <textarea id="goal-editor-text" rows="8" aria-label="Goal" maxlength="4000"></textarea>
     <label class="goal-budget">Token budget (optional)<input id="goal-editor-budget" type="number" min="0" max="1000000000000" step="1" placeholder="No limit"></label>
-    <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act">Cancel</button><button type="button" id="goal-editor-save" class="act primary">Save</button></div>
+    <div class="goal-dialog-actions"><button type="button" id="goal-editor-cancel" class="act" title="Close without changing the objective">Cancel</button><button type="button" id="goal-editor-save" class="act primary" title="Save the objective and start pursuing it">Save</button></div>
   </div>
 </div>
 <div id="goal-review" class="modal-layer" role="dialog" aria-modal="true" aria-labelledby="goal-review-title" hidden>
   <div class="goal-dialog">
-    <button type="button" id="goal-review-close" class="fbtn goal-dialog-close" aria-label="Close goal review"><span class="codicon codicon-close" aria-hidden="true"></span></button>
+    <button type="button" id="goal-review-close" class="fbtn goal-dialog-close" aria-label="Close goal review" title="Close"><span class="codicon codicon-close" aria-hidden="true"></span></button>
     <h2 id="goal-review-title">Review goal</h2>
     <div id="goal-review-body" class="surface-markdown" tabindex="0"></div>
   </div>
@@ -3486,11 +3486,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <button type="button" id="set-close" class="fbtn" title="Close" aria-label="Close settings"><span class="codicon codicon-close" aria-hidden="true"></span></button>
   </div>
   <div class="settings-nav" role="tablist" aria-label="Settings categories">
-    <button type="button" class="set-tab active" role="tab" aria-selected="true" data-section="general">General</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="models">Models</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="agents">Agents</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="security">Security</button>
-    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="extensions">Extensions</button>
+    <button type="button" class="set-tab active" role="tab" aria-selected="true" data-section="general" title="Permission mode, thinking, context size and tool profile">General</button>
+    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="models" title="Where DGC sends a turn: a local host, a provider, or your own subscription CLI">Models</button>
+    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="agents" title="The model and host that sub-agents and the fallback route use">Agents</button>
+    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="security" title="Sandbox confinement, plan-mode limits and artifact previews">Security</button>
+    <button type="button" class="set-tab" role="tab" aria-selected="false" data-section="extensions" title="Skills, MCP servers, hooks and permission rules">Extensions</button>
   </div>
   <div class="set-body">
     <section class="set-section" data-section="models" hidden>
@@ -3585,18 +3585,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     <div class="set-group">Agent extensions</div>
     <p class="set-note">Manage the same local DGC capabilities used by the CLI. Credentials entered for editor-managed MCP servers stay in VS Code SecretStorage.</p>
     <div class="settings-links">
-      <button type="button" class="act" data-open-surface="mcp">MCP servers</button>
-      <button type="button" class="act" data-open-surface="skills">Skills</button>
-      <button type="button" class="act" data-open-surface="permissions">Permission rules</button>
-      <button type="button" class="act" data-open-surface="memory">Memory</button>
-      <button type="button" class="act" data-open-surface="hooks">Lifecycle hooks</button>
-      <button type="button" class="act" data-open-surface="docs">Documentation</button>
+      <button type="button" class="act" data-open-surface="mcp" title="Connect and manage Model Context Protocol servers">MCP servers</button>
+      <button type="button" class="act" data-open-surface="skills" title="Reusable instructions DGC can apply to a request">Skills</button>
+      <button type="button" class="act" data-open-surface="permissions" title="What DGC may run and edit without asking">Permission rules</button>
+      <button type="button" class="act" data-open-surface="memory" title="Facts DGC keeps about this project and about you">Memory</button>
+      <button type="button" class="act" data-open-surface="hooks" title="Commands that run at points in a turn, such as before an edit">Lifecycle hooks</button>
+      <button type="button" class="act" data-open-surface="docs" title="How-to guides, read inside the panel">Documentation</button>
     </div>
     </section>
   </div>
   <div class="set-foot">
-    <button type="button" id="set-save" class="act primary set-save">Save</button>
-    <button type="button" id="set-cancel" class="fbtn">Close</button>
+    <button type="button" id="set-save" class="act primary set-save" title="Save these settings for this workspace">Save</button>
+    <button type="button" id="set-cancel" class="fbtn" title="Close without saving">Close</button>
   </div>
 </div>
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
@@ -3605,11 +3605,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>
-      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
-      <button type="button" id="changes-review-button" class="rail-text-action">Review</button>
+      <button type="button" id="changes-main" class="rail-main" aria-label="Review changed files" title="Every file this chat has changed, with its diff"><span class="codicon codicon-diff-multiple rail-icon" aria-hidden="true"></span><span id="changes-count">1 file changed in this chat</span><span id="changes-add" class="change-add">+0</span><span id="changes-del" class="change-del">−0</span></button>
+      <button type="button" id="changes-review-button" class="rail-text-action" title="Open the list of changed files">Review</button>
     </section>
     <section id="goalbar" class="rail-item" aria-label="Standing goal" hidden>
-      <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>
+      <button type="button" id="goal-main" class="rail-main" aria-label="Expand and edit goal" title="Read and edit the standing objective"><span class="goal-icon codicon codicon-target rail-icon" aria-hidden="true"></span><span id="goal-status">Pursuing goal</span><span id="goal-text"></span><time id="goal-time">0:00</time></button>
       <div class="goal-actions">
         <button type="button" id="goal-review-button" class="rail-icon-button" title="Review goal" aria-label="Review goal"><span class="codicon codicon-inspect" aria-hidden="true"></span></button>
         <button type="button" id="goal-clear" class="rail-icon-button" title="Clear goal" aria-label="Clear goal"><span class="codicon codicon-trash" aria-hidden="true"></span></button>
@@ -3633,7 +3633,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           <div id="ctx-usage" class="context-usage">0 in · 0 out · 0 requests</div>
           <div class="context-last"><span class="codicon codicon-history" aria-hidden="true"></span><span id="ctx-last">DGC compacts automatically near 85%.</span></div>
           <p id="ctx-detail" class="context-detail" hidden></p>
-          <button type="button" id="ctx-compact" class="context-action">Compact now</button>
+          <button type="button" id="ctx-compact" class="context-action" title="Summarise the conversation now so the model has room to keep working">Compact now</button>
         </section>
       </div>
       <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
