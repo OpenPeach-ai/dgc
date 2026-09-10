@@ -261,7 +261,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
 <link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC releases\" href=\"/changelog.xml\">
 {f'<link rel="preload" href="{html.escape(preload_mobile_image, quote=True)}" as="image" fetchpriority="high" media="(max-width:800px)">' if preload_mobile_image else ''}
 {f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high" media="(min-width:801px)">' if preload_image and preload_mobile_image else (f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high">' if preload_image else '')}
-<link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>
+<link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/jetbrains-mono-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>
 <style data-critical-revision=\"{ctx['ASSET_REVISION']}\">{critical_css}</style>
 <link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\" media=\"print\" id=\"site-styles\">{style_loader}<noscript><link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\"></noscript>
 <script type=\"application/ld+json\">{json_script(ld)}</script>"""
