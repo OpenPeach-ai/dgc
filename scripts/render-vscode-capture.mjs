@@ -672,6 +672,23 @@ async function main() {
       .filter({ hasText: "return min(lower, max(upper, value))" }).count()) {
       throw new Error("visible Monaco buffer still contains the pre-edit clamp expression");
     }
+    // The summary a finished turn writes is the last thing in the transcript. If the panel is
+    // not at the bottom when the run ends, the capture shows an answer with its result cut off.
+    const tail = await frame.evaluate(() => {
+      const log = document.getElementById("log");
+      const card = document.querySelector(".turn-summary");
+      const actions = document.querySelector(".response-actions");
+      const view = log.getBoundingClientRect();
+      return { gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
+               card: !!card, actions: !!actions,
+               cardVisible: !!card && card.getBoundingClientRect().bottom <= view.bottom + 1 };
+    });
+    if (!tail.card || !tail.actions) {
+      throw new Error(`the finished turn rendered no summary (card=${tail.card} actions=${tail.actions})`);
+    }
+    if (tail.gap > 4 || !tail.cardVisible) {
+      throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`);
+    }
     const remaining = minimumSeconds * 1000 - (Date.now() - recordingStarted);
     if (remaining > 0) await page.waitForTimeout(remaining);
     await page.waitForTimeout(800);
@@ -714,6 +731,7 @@ async function main() {
       rendered_test_tool: true,
       rendered_final: true,
       rendered_completed_goal: true,
+      finished_turn_summary_in_view: true,
       visible_editor_matches_diff: true,
       user_dgc_unchanged: true,
       raw_seconds: Number(rawSeconds.toFixed(3)),

@@ -551,7 +551,12 @@
     node.classList.add("settled");        // only now may the browser skip it
     blockSizes?.observe(node);
   }
-  let following = true;          // is the view still tracking the end of the run?
+  // Is the view still tracking the end of the run? It stops only when you scroll away yourself.
+  // Following "whenever we happen to be at the bottom" is not enough: anything that moves the
+  // transcript once — a focused control scrolled into view, a card resolving, the composer
+  // growing — leaves it more than a screen-edge away, and from then on nothing ever scrolls
+  // again, so a run keeps writing into a part of the panel nobody is looking at.
+  let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; following = true; }
   // ---- reading back without losing the end ----
@@ -562,8 +567,7 @@
   let unread = false;
   function renderToLatest() {
     const away = !atBottom();
-    following = !away;
-    if (!away) unread = false;
+    if (!away) { unread = false; following = true; }
     toLatest.hidden = !away;
     toLatest.classList.toggle("unread", away && unread);
     $("to-latest-label").textContent = away && unread ? "New" : "Latest";
@@ -572,7 +576,14 @@
       : "Jump to the newest message";
   }
   function noteNewContent() { if (!atBottom()) { unread = true; renderToLatest(); } }
-  log.addEventListener("scroll", renderToLatest, { passive: true });
+  // Only a gesture counts as "I want to read back". A scroll the page did to itself does not.
+  for (const kind of ["wheel", "touchmove", "pointerdown", "keydown"]) {
+    log.addEventListener(kind, () => { userScrolledAt = Date.now(); }, { passive: true });
+  }
+  log.addEventListener("scroll", () => {
+    if (Date.now() - userScrolledAt < 700) following = atBottom();
+    renderToLatest();
+  }, { passive: true });
   toLatest.onclick = () => { scroll(); unread = false; renderToLatest(); input.focus(); };
   // The composer grows and shrinks under the transcript: the goal rail and the changed-files
   // rail appear as a turn ends, the follow-up hint comes and goes, attachments wrap. Every one
@@ -768,7 +779,7 @@
     const node = textBlock(); node._markdown = turn._buf;
     if (!turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
-      const stick = atBottom(); flushText(); if (stick) scroll(); else noteNewContent();
+      const stick = atBottom(); flushText(); if (stick || following) scroll(); else noteNewContent();
     }, 48);
   }
   function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
@@ -1946,7 +1957,7 @@
       case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
       case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(ev.reason); setSending(false); break;
     }
-    if (stick) scroll(); else noteNewContent();
+    if (stick || following) scroll(); else noteNewContent();
   }
 
   // ---- composer ----
