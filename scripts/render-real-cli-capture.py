@@ -35,8 +35,13 @@ from collections.abc import Callable
 ROOT = Path(__file__).resolve().parents[1]
 VIEWPORT = (1280, 720)
 MIN_CAPTURE_SECONDS = 46.0
-TARGET_LONG_CAPTURE_SECONDS = 56.0
+TARGET_LONG_CAPTURE_SECONDS = 100.0
 MAX_RAW_SECONDS = 210.0
+# The site gate publishes the focus-pane capture uncompressed, so the target above must be
+# longer than a real run rather than shorter: a machine with another model resident makes the
+# same fixture turn take half again as long, and compressing it to fit is what the gate
+# refuses. Raising the target can only reduce compression; a run already inside it is
+# published exactly as before.
 PROMPT = (
     "Use exactly four tool calls in this order, then stop: read_file path clamp.py; "
     "read_file path test_clamp.py; edit_file path clamp.py replacing only "
