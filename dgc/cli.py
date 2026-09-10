@@ -33,7 +33,7 @@ from .config import (PROVIDERS, SEARCH_PROVIDERS, USER_CONFIG, USER_HOME, Config
 from .llm import LLMError
 from .menu import select as menu_select
 from .permissions import DISPLAY, MODES, MODE_DESCRIPTIONS, Rule, rule_for
-from .redaction import redact_text, secret_values
+from .redaction import redact_text, redact_value, secret_values
 from .style import (ANSI_DIM, ANSI_RESET, BRAND, BRAND_MAGENTA, DIM, section,
                     terminal_safe_text)
 from .tools import TOOL_SCHEMAS
@@ -79,6 +79,7 @@ class UI:
         self._tool_count = 0    # tools used in the current turn (for the done marker)
         self.deny_reason = ""   # optional steer captured when the user denies a tool
         self.plan_feedback = "" # one-shot steer captured when the user rejects a plan
+        self.non_interactive = False   # `dgc -p`: never wait on a menu, answer on the spot
 
     # --------------------------------------------------- working indicator ---
     def start_working(self, label: str = "working") -> None:
@@ -239,6 +240,17 @@ class UI:
     # ---------------------------------------------------------- approvals ---
     def approve(self, name: str, args: dict, call_id: str | None = None) -> str:
         """Return 'once' | 'always' | 'no'."""
+        if getattr(self, "non_interactive", False):
+            # A one-shot run from a terminal used to block on this arrow menu. A script has
+            # nobody to answer it: deny, and tell the model and the user how to pre-approve.
+            rule = rule_for(name, args)
+            self.stop_working()
+            self.console.print(f"  [{DIM}]permission needed for {_markup_literal(name)} — denied: a -p run "
+                               f"never waits on a menu; rerun with --allow-tool \"{_markup_literal(rule)}\" "
+                               f"or --mode acceptEdits|auto[/]", highlight=False)
+            self.deny_reason = (f"non-interactive run: permission was not granted; the user can rerun "
+                                f"with --allow-tool \"{rule}\" or --mode acceptEdits|auto")
+            return "no"
         self._yield_stdin()
         section(self.console, "permission requested", name)
         if name == "bash":
@@ -263,9 +275,16 @@ class UI:
 
     def present_plan(self, plan: str):
         """Return target mode string on approval, or None to keep planning."""
-        self._yield_stdin()
+        if not getattr(self, "non_interactive", False):
+            self._yield_stdin()
         section(self.console, "📋 proposed plan")
         self.console.print(render.render_markdown(terminal_safe_text(plan or "(empty plan)")))
+        if getattr(self, "non_interactive", False):
+            self.console.print(f"  [{DIM}]plan reported, not executed: a -p run cannot approve it — "
+                               f"rerun with --mode acceptEdits|auto to build it[/]", highlight=False)
+            self.plan_feedback = ("non-interactive run: the plan cannot be approved here; stop and "
+                                  "report it as your final answer")
+            return None
         idx = menu_select("Approve this plan?",
                           ["build with acceptEdits", "build in default", "build in full-auto",
                            "keep planning"],
@@ -295,6 +314,10 @@ class UI:
 
     def propose_options(self, question: str, options: list[str]) -> str:
         """Model-driven multiple choice — the agent asks, the user picks. Returns the chosen text."""
+        if getattr(self, "non_interactive", False):
+            self.console.print(f"  [{DIM}]question skipped in a -p run: {_markup_literal(question)}[/]",
+                               highlight=False)
+            return ""
         self._yield_stdin()
         idx = menu_select(terminal_safe_text(question or "Choose one"),
                           [terminal_safe_text(option) for option in options] + ["Other"],
@@ -312,6 +335,8 @@ class UI:
     def propose_questions(self, questions: list[dict]) -> dict | None:
         """Review/edit separate decisions and explicitly submit the complete batch."""
         from .questions import valid_answers
+        if getattr(self, "non_interactive", False):
+            return None
         self._yield_stdin()
         answers = {}
         while True:
@@ -572,10 +597,10 @@ class ClassicSlashCompleter(Completer):
 
 
 class CLI:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, ui=None):
         self.config = config
         style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
-        self.ui = UI()
+        self.ui = ui if ui is not None else UI()
         self.ui._rule_hook = self._add_rule
         self.agent = Agent(config, self.ui)
         self.console = self.ui.console
@@ -1917,6 +1942,10 @@ def run_help() -> None:
     c.print("  dgc doctor              check the endpoint + model are reachable")
     c.print("  dgc help                this help")
     c.print("  dgc -p \"<task>\"         run one task and exit  (add --mode auto for hands-off)")
+    c.print("  git diff | dgc -p \"…\"   piped input is appended to the prompt; -p - reads it as the prompt")
+    c.print("  dgc -p … --output-format json   the dgc serve event stream, ending in a result object")
+    c.print("  dgc -p … --output FILE --print-session-id      save the answer · print the id for --resume")
+    c.print("  dgc --add-dir PATH --allow-tool RULE --sandbox on|off|read-only   per-run permissions")
     c.print("  dgc --mode MODE         default | acceptEdits | plan | auto")
     c.print("  dgc -c / --continue     resume the most recent session in this directory")
     c.print("  dgc --resume            pick a past session to resume")
@@ -2072,6 +2101,18 @@ def main(argv: list[str] | None = None) -> int | None:
     parser.add_argument("--autonomous-max-turns", type=int, default=None, metavar="N",
                         help="bound on failed --autonomous-gate retries before the turn stops (default 30)")
     parser.add_argument("--classic", action="store_true", help="use the classic inline REPL instead of the full-screen app")
+    parser.add_argument("--output-format", choices=("text", "json"), default="text",
+                        help="with -p: text, or the NDJSON event stream `dgc serve` speaks, ending in a result object")
+    parser.add_argument("--output", metavar="FILE", default=None,
+                        help="with -p: also write the final answer to FILE")
+    parser.add_argument("--print-session-id", action="store_true",
+                        help="with -p: print the session id on stderr, for --resume")
+    parser.add_argument("--add-dir", action="append", metavar="PATH", default=None,
+                        help="let this run read and edit files under PATH as well (repeatable)")
+    parser.add_argument("--allow-tool", action="append", metavar="RULE", default=None,
+                        help='pre-approve a tool for this run, e.g. "Bash(npm test)" or "Edit" (repeatable)')
+    parser.add_argument("--sandbox", choices=("on", "off", "read-only"), default=None,
+                        help="confine shell commands for this run; read-only also denies every file edit")
     parser.add_argument("--version", action="version", version=f"dgc {__version__}")
     args = parser.parse_args(argv)
     if not args.prompt:          # one-shot `-p` has no banner to show an update in — skip the check
@@ -2082,6 +2123,12 @@ def main(argv: list[str] | None = None) -> int | None:
         print(f"warning: {warning}", file=sys.stderr)
     if args.engine is not None and args.prompt is None:
         parser.error("--engine is available only with -p/--prompt")
+    for flag, given in (("--output-format json", args.output_format == "json"),
+                        ("--output", args.output is not None),
+                        ("--print-session-id", args.print_session_id)):
+        if given and args.prompt is None:
+            parser.error(f"{flag} is available only with -p/--prompt")
+    apply_run_flags(config, args, parser)
     # Work out the one-shot route before applying native model/thinking overrides.  When a
     # subscription engine owns this turn, --model/--think are vendor-CLI pass-throughs for this
     # invocation only; they must not silently rewrite the fallback native route in config.json.
@@ -2143,7 +2190,8 @@ def main(argv: list[str] | None = None) -> int | None:
         elif config.data.get("mode") in ("acceptEdits", "auto") and not is_trusted(config, config.project_root):
             parser.error("non-interactive acceptEdits/auto requires a trusted workspace; review it, then add --trust")
 
-    cli = CLI(config)
+    cli = CLI(config, ui=_json_oneshot_ui(config)
+              if args.prompt is not None and args.output_format == "json" else None)
 
     # session persistence (transcripts resume across runs)
     if args.cont:
@@ -2183,18 +2231,7 @@ def main(argv: list[str] | None = None) -> int | None:
         cli.agent.session_file = sessions_mod.new_path(config.project_root)
 
     if args.prompt is not None:
-        if _oneshot_engine:
-            return _run_subscription_oneshot(
-                config, cli.agent, _oneshot_engine, cli.expand_mentions(args.prompt),
-                bool(args.cont or args.resume is not None),
-                model_override=args.model, effort_override=args.think)
-        if config.data.get("mode") == "auto":
-            print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
-        outcome = cli.agent.run_turn(cli.expand_mentions(args.prompt))
-        cli.ui.end_stream()
-        print()
-        if outcome is False:
-            return 1
+        return _run_oneshot(cli, config, args, parser, _oneshot_engine)
     else:
         import atexit
 
@@ -2230,23 +2267,22 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     subscription). DGC streams the vendor CLI's output; the vendor owns auth, the
     model call, its tools, and its ToS. Returns a process exit code."""
     from . import subscriptions as subs
-    c = Console()
+    ui = agent.ui
     engine = subs.get_engine(engine_key)
     if engine is None:
-        c.print(f"  [red]unknown subscription engine "
-                f"{_markup_literal(engine_key)}[/red] — one of: {', '.join(subs.ENGINE_KEYS)}")
+        ui.error(f"unknown subscription engine {engine_key} — one of: {', '.join(subs.ENGINE_KEYS)}")
         return 1
     if getattr(agent, "_pending_images", None):
         agent._pending_images = None
-        c.print("  [yellow]subscription CLI delegation does not yet support DGC image "
-                "attachments; no vendor process was started[/yellow]")
+        ui.error("subscription CLI delegation does not yet support DGC image attachments; "
+                 "no vendor process was started")
         return 1
     try:
         subs.preflight(engine)
     except subs.EngineError as e:
-        c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
+        ui.error(str(e))
         return 1
-    c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} —[/dim]")
+    ui.info(f"running your turn through {engine.label}…")
     configured_engine = str(config.get("subscription_engine", "")).strip().lower()
     model = (str(model_override).strip() if model_override is not None else
              str(config.get("subscription_model", "")).strip()
@@ -2259,30 +2295,201 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     if effort == "off":
         effort = ""
     if effort and not engine.supports_effort():
-        c.print(f"  [yellow]{terminal_safe_text(engine.short_label)} does not expose a "
-                "reasoning-effort flag; omit --think or choose its reasoning model with --model[/yellow]")
+        ui.error(f"{engine.short_label} does not expose a reasoning-effort flag; omit --think or "
+                 "choose its reasoning model with --model")
         return 1
     try:
-        # The classic UI renders the stream exactly as a native `dgc -p` turn: text as it arrives,
-        # tool cards with their edit diffs, and nothing styled when stdout is a pipe.
-        res = subs.delegate_turn(config, agent, agent.ui, engine, prompt,
+        # The run's UI renders the stream exactly as a native `dgc -p` turn does: text as it
+        # arrives, tool cards with their edit diffs — inline, or as NDJSON events.
+        res = subs.delegate_turn(config, agent, ui, engine, prompt,
                                  model=model, effort=effort, cont=bool(cont))
     except subs.EngineError as e:
-        c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
+        ui.error(str(e))
         return 1
-    print()
     if res.get("timeout"):
-        c.print("  [yellow]! the delegated turn hit the time budget and was stopped[/yellow]")
+        ui.error("the delegated turn hit the time budget and was stopped")
         return 1
     if res.get("cancelled"):
-        c.print("  [yellow]! delegated turn was stopped[/yellow]")
+        ui.error("delegated turn was stopped")
         return 1
     if res.get("error"):
-        c.print(f"  [red]{_markup_literal(res['error'])}[/red]")
+        ui.error(str(res["error"]))
     elif res.get("rc") not in (0, None):
-        c.print(f"  [red]{terminal_safe_text(engine.short_label)} exited with status "
-                f"{res['rc']}[/red]")
+        ui.error(f"{engine.short_label} exited with status {res['rc']}")
     return 0 if res.get("ok") else 1
+
+
+_MAX_STDIN_BYTES = 2 * 1024 * 1024
+
+
+def _oneshot_prompt(prompt: str) -> str:
+    """`-p` reads piped input too: `git diff | dgc -p "review"` appends the diff to the prompt,
+    and `-p -` is the input alone. A terminal or /dev/null contributes nothing."""
+    stream = sys.stdin
+    try:
+        interactive = stream is None or stream.isatty()
+    except (AttributeError, ValueError):
+        interactive = True
+    data = ""
+    if not interactive:
+        try:
+            data = stream.read(_MAX_STDIN_BYTES + 1)
+        except (OSError, ValueError):
+            data = ""
+    truncated = len(data) > _MAX_STDIN_BYTES
+    data = data[:_MAX_STDIN_BYTES].rstrip("\n")
+    if not data.strip():
+        return "" if prompt == "-" else prompt
+    note = "\n[input truncated at 2 MB]" if truncated else ""
+    if prompt == "-":
+        return data + note
+    return f"{prompt}\n\n<input from stdin>\n{data}{note}\n</input>"
+
+
+def _last_assistant_text(agent) -> str:
+    for message in reversed(getattr(agent, "messages", []) or []):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
+
+
+def apply_run_flags(config, args, parser) -> None:
+    """--add-dir / --allow-tool / --sandbox apply to this run only.
+
+    The rules go to ``config.session_permissions``, which the permission engine merges with the
+    saved rules and ``config.save()`` never writes, and the sandbox choice is set without
+    persisting. The plumbing already served the editor bridge; the CLI just never wired it.
+    """
+    from pathlib import Path
+    from .permissions import Rule
+    allow: list[str] = []
+    deny: list[str] = []
+    for raw in (getattr(args, "add_dir", None) or []):
+        try:
+            path = Path(str(raw)).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError):
+            parser.error(f"--add-dir: {raw} does not exist")
+        if not path.is_dir():
+            parser.error(f"--add-dir: {raw} is not a directory")
+        allow.append(f"ExternalDirectory({path})")
+    for raw in (getattr(args, "allow_tool", None) or []):
+        try:
+            allow.append(Rule.parse(str(raw), "allow").render())
+        except ValueError as exc:
+            parser.error(f"--allow-tool: {exc}")
+    choice = getattr(args, "sandbox", None)
+    if choice:
+        config.set("sandbox", choice != "off", persist=False)
+        config.data["sandbox_read_only"] = choice == "read-only"
+        if choice == "read-only":                      # deny wins over every mode and rule
+            deny += ["Write", "Edit", "MultiEdit", "ApplyPatch"]
+    if allow or deny:
+        existing = getattr(config, "session_permissions", None) or {}
+        config.session_permissions = {
+            "allow": [*(existing.get("allow") or []), *allow],
+            "ask": list(existing.get("ask") or []),
+            "deny": [*(existing.get("deny") or []), *deny],
+        }
+
+
+def _json_oneshot_ui(config):
+    """`-p --output-format json`: the `dgc serve` event stream on stdout, every blocking question
+    answered on the spot — a script has nobody to ask — and a closing `result` object."""
+    from .headless import HeadlessUI
+    from .protocol import Emitter, PendingRequests
+
+    class _OneShotJsonUI(HeadlessUI):
+        non_interactive = True
+
+        def __init__(self, emitter, pending):
+            super().__init__(emitter, pending)
+            # stdout carries only events; anything the CLI prints directly goes to stderr
+            self.console = Console(file=sys.stderr, highlight=False)
+            self.deny_reason = ""
+
+        def approve_live(self, name, args, call_id=None, *, recheck=None):
+            rule = str(rule_for(name, args))
+            self.em.emit("permission_request", id=None, call_id=call_id, name=name, args=args,
+                         command=(args.get("command") if name == "bash" else None),
+                         suggested_rule=rule, choices=["once", "always", "deny"],
+                         decision="deny", reason="non-interactive run")
+            self.deny_reason = (f"non-interactive run: permission was not granted; the user can "
+                                f"rerun with --allow-tool \"{rule}\" or --mode acceptEdits|auto")
+            return "no"
+
+        def present_plan(self, plan):
+            self.em.emit("plan_proposal", id=None, plan=plan,
+                         choices=["auto", "acceptEdits", "default", "reject"],
+                         decision="reject", reason="non-interactive run")
+            self.plan_feedback = ("non-interactive run: the plan cannot be approved here; stop and "
+                                  "report it as your final answer")
+            return None
+
+        def propose_options(self, question, options):
+            self.em.emit("options_request", id=None, question=question, options=list(options),
+                         decision=None, reason="non-interactive run")
+            return ""
+
+        def propose_questions(self, questions):
+            first = questions[0] if questions else {}
+            self.em.emit("options_request", id=None, question=str(first.get("question", "")),
+                         options=list(first.get("options", [])), questions=questions,
+                         decision=None, reason="non-interactive run")
+            return None
+
+        def mcp_input(self, server, kind, payload, *, cancel=None):
+            return {"action": "cancel"}
+
+    return _OneShotJsonUI(Emitter(sys.stdout, sanitizer=lambda event: redact_value(
+        event, secret_values(config))), PendingRequests())
+
+
+def _run_oneshot(cli, config, args, parser, engine_key: str) -> int:
+    """`dgc -p`: one turn, then exit with 0 on success — as text, or as NDJSON events."""
+    json_mode = args.output_format == "json"
+    prompt = _oneshot_prompt(args.prompt)
+    if not prompt.strip():
+        parser.error("-p - reads the prompt from stdin, which was empty")
+    cli.ui.non_interactive = True
+    started = time.time()
+
+    def session_id() -> str:
+        sf = getattr(cli.agent, "session_file", None)
+        return sf.stem if sf else ""
+    if json_mode:
+        cli.ui.em.emit("turn_start", turn_id="t1", prompt=prompt, session_id=session_id())
+    if engine_key:
+        ok = _run_subscription_oneshot(
+            config, cli.agent, engine_key, cli.expand_mentions(prompt),
+            bool(args.cont or args.resume is not None),
+            model_override=args.model, effort_override=args.think) == 0
+    else:
+        if config.data.get("mode") == "auto" and not json_mode:
+            print("⚠ auto mode: DGC will run every command and file write with no approval.", file=sys.stderr)
+        ok = cli.agent.run_turn(cli.expand_mentions(prompt)) is not False
+        cli.ui.end_stream()
+        if not json_mode:
+            print()
+    text = _last_assistant_text(cli.agent)
+    if args.output:
+        from pathlib import Path
+        target = Path(args.output).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text + ("\n" if text and not text.endswith("\n") else ""), encoding="utf-8")
+    if json_mode:
+        cancelled = bool(getattr(cli.agent, "cancelled", None) and cli.agent.cancelled.is_set())
+        cli.ui.em.emit("turn_end", turn_id="t1",
+                       reason="completed" if ok else ("cancelled" if cancelled else "error"),
+                       token_estimate=int(cli.agent.estimate_tokens() or 0))
+        cli.ui.em.emit("result", ok=ok, text=text, session_id=session_id(),
+                       elapsed_s=round(time.time() - started, 3),
+                       usage=dict(getattr(cli.agent, "usage_totals", {}) or {}),
+                       output=str(args.output) if args.output else None)
+    elif args.print_session_id and session_id():
+        print(f"session: {session_id()}", file=sys.stderr)
+    return 0 if ok else 1
 
 
 def run_export(argv: list[str]) -> int:

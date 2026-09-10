@@ -150,6 +150,10 @@ while a turn is still running. The text goes to your system clipboard through th
 If you would rather drag-select with the mouse: DGC captures the mouse so the wheel scrolls its
 own transcript and rows stay clickable, and that capture is what stops your terminal's own
 selection. **/select** hands the mouse back for this session (PageUp/PageDn still scroll), and
+A paste of five lines or more (or a very long one) collapses in the composer to a chip such as
+`[Pasted text #1 +40 lines]`, so a tall paste no longer fills the screen; it expands back to the
+full text the moment you send. Short pastes insert as typed.
+
 **/mouse off** remembers that choice. **Shift+drag** (**Option+drag** on some terminals) selects
 without leaving scroll mode at all, where the terminal passes the modifier through.
 
@@ -181,6 +185,19 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
 - `--think LEVEL` — thinking level for this session: `off`, `low`, `medium`,
   `high`, or `xhigh`. With `dgc -p --engine`, it applies only to that delegated
   turn and does not change the native fallback. See **Thinking & reasoning**.
+- `--output-format json` — with `-p`: instead of text, the NDJSON event stream that
+  `dgc serve` speaks (`turn_start`, `text_delta`, `tool_call`, `tool_result`, `turn_end`…),
+  ending in one `result` object with `ok`, `text`, `session_id` and `usage`.
+- `--output FILE` — with `-p`: also write the final answer to FILE.
+- `--print-session-id` — with `-p`: print the session id on stderr, for `--resume ID`.
+- Piped input: `git diff | dgc -p "review this"` appends stdin to the prompt (2 MB cap);
+  `dgc -p -` reads the whole prompt from stdin. A `-p` run never waits on a menu: a tool
+  that would ask is denied with the rule to pre-approve, a plan is reported, not executed.
+- `--add-dir PATH` — let this run read and edit files under PATH too (repeatable).
+- `--allow-tool RULE` — pre-approve a tool for this run, e.g. `"Bash(npm test)"` or `Edit`
+  (repeatable; never saved).
+- `--sandbox on|off|read-only` — confine shell commands for this run; `read-only` mounts
+  the project read-only inside the sandbox and denies every file edit, for review runs.
 - `--trust` — persist the canonical workspace in `trusted_dirs` (covering its
   subdirectories) before a non-interactive `acceptEdits`/`auto` run. Without it,
   an unattended run in an untrusted directory will not edit. `dgc trust` lists
