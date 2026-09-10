@@ -692,10 +692,11 @@ async function main() {
     // not at the bottom when the run ends, the capture shows an answer with its result cut off.
     const tail = await frame.evaluate(() => {
       const log = document.getElementById("log");
+      const build = window.__dgcPanelBuild || "(none)";
       const card = document.querySelector(".turn-summary");
       const actions = document.querySelector(".response-actions");
       const view = log.getBoundingClientRect();
-      return { gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
+      return { build, gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
                card: !!card, actions: !!actions,
                cardVisible: !!card && card.getBoundingClientRect().bottom <= view.bottom + 1 };
     });
@@ -711,6 +712,7 @@ async function main() {
       });
       const trace = await frame.evaluate(() => (window.__trace || []).slice(-24));
       throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`
+        + ` (panel build ${tail.build})`
         + ` (before=${JSON.stringify(forced.before)} forced=${forced.after})`
         + (trace.length ? `\ntrace: ${JSON.stringify(trace)}` : ""));
     }

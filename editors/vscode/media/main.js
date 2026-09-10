@@ -556,6 +556,7 @@
   // transcript once — a focused control scrolled into view, a card resolving, the composer
   // growing — leaves it more than a screen-edge away, and from then on nothing ever scrolls
   // again, so a run keeps writing into a part of the panel nobody is looking at.
+  window.__dgcPanelBuild = "follow-4";   // proves which panel code a recording actually ran
   let following = true, userScrolledAt = 0;
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; following = true; }
