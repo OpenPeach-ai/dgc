@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <script>document.documentElement.classList.add('defer-styles');document.documentElement.classList.add('fh');try{if(localStorage.getItem("dgc-announcement-0.33.1")==='dismissed')document.documentElement.classList.add('announcement-dismissed')}catch{}if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver'in window)document.documentElement.classList.add('reveal-ready')</script>
-<title>Connect your model · DGC Docs</title>
-<meta name="description" content="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">
+<title>In your editor · DGC Docs</title>
+<meta name="description" content="the VS Code and Cursor panel, and what a finished turn gives you">
 
 <meta name="theme-color" content="#0B0B0D">
-<link rel="canonical" href="https://docs.vibedgc.com/connect-your-model">
+<link rel="canonical" href="https://docs.vibedgc.com/in-your-editor">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Vibe DGC">
-<meta property="og:title" content="Connect your model · DGC Docs">
-<meta property="og:description" content="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">
-<meta property="og:url" content="https://docs.vibedgc.com/connect-your-model">
+<meta property="og:title" content="In your editor · DGC Docs">
+<meta property="og:description" content="the VS Code and Cursor panel, and what a finished turn gives you">
+<meta property="og:url" content="https://docs.vibedgc.com/in-your-editor">
 <meta property="og:image" content="https://vibedgc.com/og-docs.png">
 <meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Connect your model · DGC Docs"><meta name="twitter:description" content="point DGC at Ollama, llama.cpp, vLLM, or a cloud host"><meta name="twitter:image" content="https://vibedgc.com/og-docs.png">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="In your editor · DGC Docs"><meta name="twitter:description" content="the VS Code and Cursor panel, and what a finished turn gives you"><meta name="twitter:image" content="https://vibedgc.com/og-docs.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><link rel="manifest" href="/site.webmanifest">
 <link rel="alternate" type="application/atom+xml" title="DGC releases" href="/changelog.xml">
 
@@ -24,7 +24,7 @@
 <link rel="preload" href="/assets/fonts/geist-regular-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/geist-medium-latin.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/jetbrains-mono-regular-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style data-critical-revision="64ee0d2d17b3">@font-face{font-family:Geist;src:url('/assets/fonts/geist-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}@font-face{font-family:Geist;src:url('/assets/fonts/geist-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}@font-face{font-family:'Geist Fallback';src:local('Arial');font-style:normal;font-weight:400 500;size-adjust:102.21%;ascent-override:98.33%;descent-override:28.86%;line-gap-override:0%}@font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-regular-latin.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}@font-face{font-family:'JetBrains Mono';src:url('/assets/fonts/jetbrains-mono-medium-latin.woff2') format('woff2');font-style:normal;font-weight:500;font-display:swap}@font-face{font-family:'JetBrains Mono Fallback';src:local('DejaVu Sans Mono');font-style:normal;font-weight:400 500;size-adjust:99.66%;ascent-override:102.35%;descent-override:30.10%;line-gap-override:0%}:root{color-scheme:dark;--bg:#0b0b0d;--surface:#121215;--raised:#18181d;--overlay:#1d1d22;--line:#26262d;--line-strong:#34343c;--text:#ededf1;--text-2:#a6a6b0;--text-3:#686874;--muted:#7c7c88;--accent:#7c5cff;--lavender:#a78bfa;--accent-soft:rgba(124,92,255,.12);--accent-line:rgba(124,92,255,.35);--mark:#7c5cff;--mark-neutral:#6b6b78;--good:#5bcb8b;--warn:#fab219;--fail:#d85b63;--sans:Geist,'Geist Fallback',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'JetBrains Mono','JetBrains Mono Fallback','SFMono-Regular',Consolas,monospace;--e0:none;--e1:inset 0 1px rgba(255,255,255,.025);--e2:0 24px 70px rgba(0,0,0,.34),inset 0 1px rgba(255,255,255,.05);--e3:0 40px 100px rgba(0,0,0,.58),inset 0 1px rgba(255,255,255,.06);--radius:8px;--radius-lg:14px;--max:1240px;--gutter:clamp(20px,4vw,48px);--section:112px;--t-fast:160ms;--t-med:280ms;--t-slow:600ms;--ease:cubic-bezier(.22,1,.36,1)}@media(max-width:1040px){:root{--section:80px}}@media(max-width:760px){:root{--section:64px;--gutter:20px}}@media(prefers-reduced-motion:reduce){:root{--t-fast:0ms;--t-med:0ms;--t-slow:0ms}}*,*::before,*::after{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--text);font:400 15.5px/1.6 var(--sans);-webkit-font-smoothing:antialiased}button,input,textarea,select{font:inherit}button,a{touch-action:manipulation}a{color:inherit;text-decoration:none}img,svg,video{display:block;max-width:100%}figure,blockquote,p,h1,h2,h3,h4,ul,ol{margin:0}ul,ol{padding:0}code,kbd,.mono{font-family:var(--mono)}code{font-size:.9em;color:var(--lavender)}:focus-visible{outline:2px solid var(--lavender);outline-offset:3px;border-radius:3px}.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip-link{position:fixed;left:16px;top:-80px;z-index:1000;padding:10px 14px;background:#fff;color:#000;border-radius:6px}.skip-link:focus{top:16px}.container{width:min(var(--max),calc(100% - (var(--gutter)*2)));margin-inline:auto}.micro,.eyebrow{font:500 11px/1.35 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}.eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:22px;color:var(--text-2)}.eyebrow::before{content:"";width:2px;height:14px;background:var(--accent)}.eyebrow b{font-weight:500;color:var(--lavender)}.lede{max-width:52ch;color:var(--text-2);font-size:15px;line-height:1.55}h1,h2,h3,h4{color:#fff;font-weight:500;text-wrap:balance}h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.035em}.announcement{height:32px;display:flex;align-items:center;justify-content:center;gap:12px;border-bottom:1px solid var(--line);background:#101013;font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-2);position:relative;z-index:80}.announcement[hidden],.announcement-dismissed .announcement{display:none}.fh body{display:none}.defer-styles .site-footer{display:none}.announcement a{display:flex;align-items:center;gap:8px;min-height:24px}.announcement button{position:absolute;right:14px;top:2px;width:28px;height:28px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:18px}.status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 12px rgba(91,203,139,.55)}.site-header{position:sticky;top:0;z-index:70;height:72px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding-inline:max(var(--gutter),calc((100% - var(--max))/2));background:linear-gradient(to bottom,rgba(11,11,13,.96),rgba(11,11,13,.86));backdrop-filter:blur(18px);border-bottom:1px solid transparent}.brand{display:inline-flex;align-items:center;width:max-content;color:#fff;font:800 17px/1 var(--mono);letter-spacing:.06em}.brand svg{width:1.7em;height:1.7em;margin-right:.42em;fill:var(--accent)}.brand-cursor{width:9px;height:16px;margin-left:3px;background:var(--accent)}.nav-pill{justify-self:center;display:flex;align-items:center;padding:4px;border:1px solid var(--line);border-radius:999px;background:rgba(18,18,21,.8);box-shadow:var(--e1)}.nav-pill a{padding:8px 12px;border-radius:999px;color:var(--text-2);font:500 11px/1 var(--mono)}.nav-pill a[aria-current=page]{background:var(--raised);color:#fff}.nav-pill .nav-github{border-left:1px solid var(--line);border-radius:0 999px 999px 0;margin-left:3px}.button{min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 17px;border:1px solid var(--line-strong);border-radius:7px;color:#fff;font:500 12px/1 var(--mono);cursor:pointer}.button-primary{background:var(--accent);border-color:var(--accent);color:#09090b}.nav-install{justify-self:end}.nav-toggle{display:none;justify-self:end;width:44px;height:44px;border:1px solid var(--line);border-radius:7px;background:var(--surface);cursor:pointer;padding:13px 11px}.nav-toggle span[aria-hidden]{display:block;height:1px;background:var(--text);margin:5px 0}@media(max-width:1040px){.site-header{grid-template-columns:1fr auto}.nav-pill,.nav-install{display:none}.nav-toggle{display:block}}@media(max-width:760px){body{font-size:15px}.announcement{justify-content:flex-start;padding-left:var(--gutter)}.announcement button{right:8px}.site-header{height:64px;background:var(--bg);backdrop-filter:none}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}.docs-shell{display:grid;grid-template-columns:250px minmax(0,1fr) 210px;gap:42px;width:min(1440px,calc(100% - 40px));margin:0 auto;padding:42px 0 90px}.docs-sidebar,.docs-toc{position:sticky;top:96px;align-self:start;max-height:calc(100vh - 120px);overflow:auto}.docs-sidebar{padding-right:20px;border-right:1px solid var(--line)}.docs-sidebar .grp+.grp{margin-top:22px}.docs-sidebar .grp-h{margin-bottom:8px;color:var(--muted);font:500 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase}.docs-sidebar a{display:block;padding:6px 8px;border-radius:4px;color:var(--text-2);font-size:12.5px}.docs-sidebar a[aria-current=page]{background:var(--surface);color:#fff}.docs-article{min-width:0;max-width:760px}.docs-article .lead{margin:10px 0 26px;color:var(--text-2);font-size:17px}.crumb{color:var(--muted);font:500 10px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.09em}.docs-article h1{font-size:clamp(38px,6vw,58px)}.docs-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:34px;padding-bottom:16px;border-bottom:1px solid var(--line)}.docs-search{flex:1;min-width:160px}.docs-search input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#0d0d10;color:#fff;font:400 11px/1 var(--mono)}.docs-menu-button{display:none}@media(max-width:1040px){.docs-shell{grid-template-columns:220px minmax(0,1fr)}.docs-toc{display:none}}@media(max-width:760px){.docs-shell{display:block;width:min(100% - 40px,760px);padding-top:28px}.docs-sidebar{display:none}.docs-menu-button{display:inline-flex}.docs-article h1{font-size:40px}.docs-tools>a{margin-left:0}}</style>
 <link rel="stylesheet" href="/assets/site.css?v=64ee0d2d17b3" media="print" id="site-styles"><script>(()=>{const l=document.getElementById('site-styles'),r=document.documentElement;let applied=false,failed=false,guard;const reveal=()=>r.classList.remove('defer-styles','fh'),fail=()=>{if(failed||applied)return;failed=true;r.dataset.stylesFailOpen='true';reveal();dispatchEvent(new Event('dgc:styles-fail-open'))},done=()=>{if(applied)return;applied=true;clearTimeout(guard);delete r.dataset.stylesFailOpen;r.dataset.stylesReady='true';reveal();dispatchEvent(new Event('dgc:styles-ready'))};l.media='all';guard=setTimeout(fail,3000);l.addEventListener('load',done,{once:true});l.addEventListener('error',fail,{once:true});if(l.sheet)done()})()</script><noscript><link rel="stylesheet" href="/assets/site.css?v=64ee0d2d17b3"></noscript>
-<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.33.1","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"DGC","item":"https://vibedgc.com"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://docs.vibedgc.com"},{"@type":"ListItem","position":3,"name":"Connect your model","item":"https://docs.vibedgc.com/connect-your-model"}]}]</script>
+<script type="application/ld+json">[{"@context":"https://schema.org","@type":"Organization","name":"OpenPeach","url":"https://vibedgc.com","founder":{"@type":"Person","name":"Mohit Kalra"},"sameAs":["https://github.com/OpenPeach-ai/dgc"]},{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Vibe DGC","alternateName":"DGC","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows via WSL","softwareVersion":"0.33.1","url":"https://vibedgc.com","offers":{"@type":"Offer","price":"0","priceCurrency":"USD","description":"Free for noncommercial use"}},{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"DGC","item":"https://vibedgc.com"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://docs.vibedgc.com"},{"@type":"ListItem","position":3,"name":"In your editor","item":"https://docs.vibedgc.com/in-your-editor"}]}]</script>
 </head>
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
@@ -66,7 +66,7 @@
 </dialog>
 
 <main id="content">
-<div class="docs-shell" data-doc-page="connect-your-model">
+<div class="docs-shell" data-doc-page="in-your-editor">
   <nav class="docs-sidebar" id="docs-sidebar" aria-label="Documentation navigation"><div class="grp">
 <div class="grp-h">Getting started</div>
 <a href="index.html" class="" data-title="Overview" data-desc="every page, grouped">Overview</a>
@@ -83,12 +83,12 @@
 <a href="context-notes.html" class="" data-title="Context notes" data-desc="what the project already learned, across context windows">Context notes</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
 <a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
-<a href="in-your-editor.html" class="" data-title="In your editor" data-desc="the VS Code and Cursor panel, and what a finished turn gives you">In your editor</a>
+<a href="in-your-editor.html" aria-current="page" class="active" data-title="In your editor" data-desc="the VS Code and Cursor panel, and what a finished turn gives you">In your editor</a>
 <a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
-<a href="connect-your-model.html" aria-current="page" class="active" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
 <a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 </div>
@@ -108,32 +108,56 @@
 </div></nav>
   <article class="docs-article">
     <div class="docs-tools"><button class="version-stub docs-menu-button" type="button" aria-expanded="false" aria-controls="docs-menu">Browse docs</button><label class="docs-search"><span class="sr-only">Search documentation</span><input id="docsearch" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false"></label><span class="version-stub">DGC v0.33.1</span><a href="https://github.com/OpenPeach-ai/dgc/edit/main/dgc/docs.py">Edit on GitHub ↗</a></div>
-      <div class="crumb">Providers &amp; models<span class="sep">/</span>Connect your model</div>
-      <p class="lead">point DGC at Ollama, llama.cpp, vLLM, or a cloud host</p>
-<div class="heading-row h1-row"><h1 id="connect-your-model">Connect your model</h1><a class="anchor" href="#connect-your-model" aria-label="Link to this section">#</a></div>
-<p>DGC talks to any supported native or OpenAI-compatible endpoint. Pick one with <code>/connect</code> (or <code>dgc setup</code> on first run), then <code>/model</code> to choose the served model.</p>
-<div class="heading-row h2-row"><h2 id="local-runtimes">Local runtimes</h2><a class="anchor" href="#local-runtimes" aria-label="Link to this section">#</a></div>
+      <div class="crumb">Using DGC<span class="sep">/</span>In your editor</div>
+      <p class="lead">the VS Code and Cursor panel, and what a finished turn gives you</p>
+<div class="heading-row h1-row"><h1 id="in-your-editor">In your editor</h1><a class="anchor" href="#in-your-editor" aria-label="Link to this section">#</a></div>
+<p>DGC runs the same agent inside VS Code and Cursor. The extension drives your local <code>dgc</code> — the model, the permission mode, the skills, the MCP servers and the session history are the ones you already have, and nothing about your code leaves the machine that the terminal would not.</p>
+<div class="heading-row h2-row"><h2 id="install">Install</h2><a class="anchor" href="#install" aria-label="Link to this section">#</a></div>
 <ul>
-<li><strong>Ollama</strong> — <code>/connect ollama</code> uses <code>http://localhost:11434/v1</code>. DGC auto-detects Ollama and speaks its native chat API (which round-trips the model&#x27;s own thinking).</li>
-<li><strong>llama.cpp</strong> — run <code>llama-server</code>, then <code>/connect llamacpp</code> (<code>http://localhost:8080/v1</code>, no real key needed). This is the OpenAI-compatible <code>/v1</code> server built into <code>llama.cpp</code>.</li>
-<li><strong>vLLM / SGLang</strong> — <code>/connect vllm</code> (<code>http://localhost:8000/v1</code>). The server renders the chat template, so DGC sends the reasoning switch it understands.</li>
-<li><strong>LM Studio</strong> — <code>/connect lmstudio</code> (<code>http://localhost:1234/v1</code>).</li>
+<li><strong>VS Code</strong>: search the Marketplace for <strong>Vibe DGC</strong>, or <code>code --install-extension vibedgc.dgc</code>.</li>
+<li><strong>Cursor</strong>: search its own extension gallery for <strong>Vibe DGC</strong>. Cursor updates extensions on its own schedule, so use *Extensions → Vibe DGC → Update* if you want a new version immediately.</li>
+<li>The panel opens in the activity bar, or in the secondary sidebar if you prefer it on the right.</li>
 </ul>
-<div class="heading-row h2-row"><h2 id="unsloth-ggufs">unsloth GGUFs</h2><a class="anchor" href="#unsloth-ggufs" aria-label="Link to this section">#</a></div>
-<p>unsloth is not a serving runtime — its GGUF/quantized models are served <strong>through</strong> llama.cpp (<code>llama-server</code>), vLLM, or Ollama. Start one of those with your unsloth model, then pick that runtime&#x27;s preset. <code>/think &lt;level&gt;</code> reaches Qwen3-family templates (which read the effort from inside <code>chat_template_kwargs</code>) automatically.</p>
-<div class="heading-row h2-row"><h2 id="custom-lan-hosts">Custom / LAN hosts</h2><a class="anchor" href="#custom-lan-hosts" aria-label="Link to this section">#</a></div>
-<p><code>/connect http://&lt;host&gt;:&lt;port&gt;</code> points DGC at any other OpenAI-compatible server. If you enter a bare host, DGC appends the <code>/v1</code> chat-completions path for you and prints a notice (Anthropic and native Ollama URLs are left as-is). Models are auto-discovered from the endpoint&#x27;s <code>/v1/models</code>, so <code>/model</code> lists what the host actually serves.</p>
-<div class="heading-row h2-row"><h2 id="cloud-providers">Cloud providers</h2><a class="anchor" href="#cloud-providers" aria-label="Link to this section">#</a></div>
-<p><code>/connect openai | anthropic | openrouter | groq | deepseek | together | mistral</code> prompt for the provider&#x27;s key and use its native auth contract. See <strong>Subscriptions</strong> to instead run your own Claude/Codex/Qwen/Kimi/Copilot plan through its official CLI.</p>
+<p>Keep the CLI and the extension roughly in step. They speak a versioned protocol, and if one is too old the panel says which side to update rather than failing quietly. <code>dgc update</code> moves the CLI; the extension updates through your editor.</p>
+<div class="heading-row h2-row"><h2 id="the-composer">The composer</h2><a class="anchor" href="#the-composer" aria-label="Link to this section">#</a></div>
+<ul>
+<li><strong>@</strong> attaches a file, <strong>/</strong> opens the command palette, <strong>$</strong> applies a skill.</li>
+<li>Paste an image to attach it for a vision model. Drag files in from the explorer.</li>
+<li>The send button fills with DGC purple as soon as there is something to send, and becomes a stop button while a turn is running.</li>
+<li>The row underneath holds the model, the reasoning effort and the permission mode. Every control says what it does when you hover or focus it.</li>
+<li>Scrolling back through a long run puts a <strong>Latest</strong> pill over the end of the transcript; it turns purple and reads <strong>New</strong> when the model has written something you have not seen.</li>
+</ul>
+<div class="heading-row h2-row"><h2 id="when-a-turn-finishes">When a turn finishes</h2><a class="anchor" href="#when-a-turn-finishes" aria-label="Link to this section">#</a></div>
+<p>DGC ends an answer with what it changed and what you can do about it.</p>
+<ul>
+<li><strong>A summary of the files this turn touched</strong>, each with its additions and deletions, and each opening its own diff. <strong>Review</strong> opens every change this chat has made.</li>
+<li><strong>Undo</strong> puts those files back as they were before the turn and rewinds the conversation with them. It finds the recovery point by the prompt that opened it and refuses if it can no longer identify it, because an undo that guesses loses work you did not ask it to.</li>
+<li><strong>Copy</strong> takes the whole answer as Markdown.</li>
+<li><strong>Rate</strong> records a thumb up or down for this workspace. It is stored locally and sent nowhere.</li>
+<li><strong>Branch</strong> continues in a new chat from this point. The conversation comes with you and the chat you branched from keeps everything it had, so you can try a second approach without losing the first. <code>/branch</code> does the same in the terminal.</li>
+<li><strong>Run again</strong> re-sends the same prompt without disturbing whatever you were half-way through typing; <strong>edit and resend</strong> puts the prompt back in the composer instead.</li>
+</ul>
+<div class="heading-row h2-row"><h2 id="approving-work">Approving work</h2><a class="anchor" href="#approving-work" aria-label="Link to this section">#</a></div>
+<p>When DGC needs permission, the card shows what will actually happen — the command, or the diff the edit would apply — not the raw arguments. <strong>Allow once</strong>, <strong>Always allow</strong> (which writes a permission rule) or <strong>Deny</strong>, and a denial can carry a note that reaches the model as the reason.</p>
+<div class="heading-row h2-row"><h2 id="settings">Settings</h2><a class="anchor" href="#settings" aria-label="Link to this section">#</a></div>
+<p>The gear opens five pages: <strong>General</strong> (permission mode, thinking, context size, tool profile), <strong>Models</strong> (a local host, a provider, or your own subscription CLI), <strong>Agents</strong> (the model and host that sub-agents and the fallback route use), <strong>Security</strong> (sandbox confinement and plan-mode limits) and <strong>Extensions</strong> (skills, MCP servers, hooks, permission rules, memory and these docs). Everything is a row: what it is on the left, the control on the right, the explanation beneath.</p>
+<div class="heading-row h2-row"><h2 id="what-the-editor-adds">What the editor adds</h2><a class="anchor" href="#what-the-editor-adds" aria-label="Link to this section">#</a></div>
+<ul>
+<li>Files DGC changed carry a mark in the explorer, and the diff opens in your editor&#x27;s own viewer.</li>
+<li><strong>Add to DGC</strong> in the explorer and editor-tab context menus attaches a file to the composer.</li>
+<li>The panel reads your selection and the file you are in as typed context, not as text glued into the prompt.</li>
+</ul>
       <nav class="pager" aria-label="Pagination">
-<a class="prev" href="turn-eta-notifications.html"><div class="k">← Previous</div><div class="t">Turn ETA &amp; notifications</div></a>
-<a class="next" href="subscriptions.html"><div class="k">Next →</div><div class="t">Subscriptions</div></a>
+<a class="prev" href="files-pane.html"><div class="k">← Previous</div><div class="t">Files pane</div></a>
+<a class="next" href="turn-eta-notifications.html"><div class="k">Next →</div><div class="t">Turn ETA &amp; notifications</div></a>
 </nav>
   </article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#local-runtimes" data-id="local-runtimes" class="lvl2">Local runtimes</a>
-<a href="#unsloth-ggufs" data-id="unsloth-ggufs" class="lvl2">unsloth GGUFs</a>
-<a href="#custom-lan-hosts" data-id="custom-lan-hosts" class="lvl2">Custom / LAN hosts</a>
-<a href="#cloud-providers" data-id="cloud-providers" class="lvl2">Cloud providers</a></aside>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install" data-id="install" class="lvl2">Install</a>
+<a href="#the-composer" data-id="the-composer" class="lvl2">The composer</a>
+<a href="#when-a-turn-finishes" data-id="when-a-turn-finishes" class="lvl2">When a turn finishes</a>
+<a href="#approving-work" data-id="approving-work" class="lvl2">Approving work</a>
+<a href="#settings" data-id="settings" class="lvl2">Settings</a>
+<a href="#what-the-editor-adds" data-id="what-the-editor-adds" class="lvl2">What the editor adds</a></aside>
 </div>
 <dialog class="mobile-nav docs-menu" id="docs-menu" aria-label="Documentation pages"><div class="mobile-nav-head"><span class="micro">Documentation</span><button type="button" data-close-docs aria-label="Close documentation menu">×</button></div><nav><div class="grp">
 <div class="grp-h">Getting started</div>
@@ -151,12 +175,12 @@
 <a href="context-notes.html" class="" data-title="Context notes" data-desc="what the project already learned, across context windows">Context notes</a>
 <a href="standing-goals.html" class="" data-title="Standing goals" data-desc="persistent objectives with an explicit lifecycle">Standing goals</a>
 <a href="files-pane.html" class="" data-title="Files pane" data-desc="a file explorer under the transcript while the agent works">Files pane</a>
-<a href="in-your-editor.html" class="" data-title="In your editor" data-desc="the VS Code and Cursor panel, and what a finished turn gives you">In your editor</a>
+<a href="in-your-editor.html" aria-current="page" class="active" data-title="In your editor" data-desc="the VS Code and Cursor panel, and what a finished turn gives you">In your editor</a>
 <a href="turn-eta-notifications.html" class="" data-title="Turn ETA &amp; notifications" data-desc="how long the turn still needs, and a ping when it is done">Turn ETA &amp; notifications</a>
 </div>
 <div class="grp">
 <div class="grp-h">Providers &amp; models</div>
-<a href="connect-your-model.html" aria-current="page" class="active" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
+<a href="connect-your-model.html" class="" data-title="Connect your model" data-desc="point DGC at Ollama, llama.cpp, vLLM, or a cloud host">Connect your model</a>
 <a href="subscriptions.html" class="" data-title="Subscriptions" data-desc="bring your own Claude / Codex / Qwen / Kimi / Copilot plan">Subscriptions</a>
 <a href="thinking-reasoning.html" class="" data-title="Thinking &amp; reasoning" data-desc="off · low · medium · high · xhigh, and preserving it">Thinking &amp; reasoning</a>
 </div>
