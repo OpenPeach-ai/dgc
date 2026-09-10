@@ -126,3 +126,41 @@ if (end.gap > 4 || !end.cardVisible) {
   process.exit(1);
 }
 console.log("ok: the end of a finished turn stays in view when the composer grows");
+
+// --- third scenario: answering a card inside the transcript is not "I scrolled away" --------
+// Approval cards, plan cards and question forms live in the transcript, so pressing one of
+// their buttons is a pointer event on the scroller. Treating that as a reader scrolling back
+// stops the panel following the rest of the run — which is how a finished turn's summary ended
+// up 203px below the visible transcript in the release capture.
+const browser3 = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
+const page3 = await browser3.newPage({ viewport: { width: 460, height: 620 } });
+await page3.setContent(html, { waitUntil: "load" });
+await page3.evaluate(([mjs, mdjs]) => {
+  window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+  eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+  eval(mjs);
+}, [mainJs, markdownJs]);
+const send3 = (e) => page3.evaluate(ev => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: ev } })), e);
+await send3({ type: "ready", capabilities: {}, model: "m", mode: "default", think: "off", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+await send3({ type: "turn_start", turn_id: "t", prompt: "Fix the clamp bounds" });
+await send3({ type: "text_delta", text: para + "\n" });
+await send3({ type: "permission_request", id: "p1", name: "bash", args: { command: "pytest -q" },
+  command: "pytest -q", summary: "pytest -q", suggested_rule: "Bash(pytest -q)",
+  choices: ["once", "always", "deny"] });
+await page3.waitForTimeout(200);
+await page3.locator('.card[data-request-id="p1"] .btns button').first().click();   // Allow once
+await page3.waitForTimeout(200);
+for (let i = 0; i < 4; i++) await send3({ type: "text_delta", text: para + "\n" });
+await send3({ type: "turn_end", turn_id: "t", reason: "completed", token_estimate: 20 });
+await page3.waitForTimeout(400);
+const afterApproval = await page3.evaluate(() => {
+  const log = document.getElementById("log");
+  return Math.round(log.scrollHeight - log.scrollTop - log.clientHeight);
+});
+console.log(`after approving a card: ${afterApproval}px from the bottom`);
+await browser3.close();
+if (afterApproval > 4) {
+  console.error("FAIL: answering a card in the transcript stopped the panel following the run");
+  process.exit(1);
+}
+console.log("ok: answering a card does not stop the transcript following the run");
