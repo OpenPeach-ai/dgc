@@ -551,8 +551,9 @@
     node.classList.add("settled");        // only now may the browser skip it
     blockSizes?.observe(node);
   }
+  let following = true;          // is the view still tracking the end of the run?
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
-  function scroll() { log.scrollTop = log.scrollHeight; }
+  function scroll() { log.scrollTop = log.scrollHeight; following = true; }
   // ---- reading back without losing the end ----
   // Scrolling up during a run is normal; being stranded there is not. The pill appears only
   // while you are away from the bottom, and turns into the accent once something has arrived
@@ -561,6 +562,7 @@
   let unread = false;
   function renderToLatest() {
     const away = !atBottom();
+    following = !away;
     if (!away) unread = false;
     toLatest.hidden = !away;
     toLatest.classList.toggle("unread", away && unread);
@@ -572,6 +574,15 @@
   function noteNewContent() { if (!atBottom()) { unread = true; renderToLatest(); } }
   log.addEventListener("scroll", renderToLatest, { passive: true });
   toLatest.onclick = () => { scroll(); unread = false; renderToLatest(); input.focus(); };
+  // The composer grows and shrinks under the transcript: the goal rail and the changed-files
+  // rail appear as a turn ends, the follow-up hint comes and goes, attachments wrap. Every one
+  // of those takes height from the transcript while its scroll position stays put, which walks
+  // the newest content off the bottom of the view — the end-of-turn summary went with it. If we
+  // were following the run, keep following it.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => { if (atBottom() || following) scroll(); })
+      .observe(document.querySelector("footer"));
+  }
 
   // ---- turn lifecycle ----
   // Two prompts are "the same" when their opening prose matches; the composer's own bubble may

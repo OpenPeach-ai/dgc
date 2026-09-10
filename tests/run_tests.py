@@ -13241,6 +13241,18 @@ def test_branch_session():
         check("/branch is offered by the terminal, the classic REPL and the editor",
               "branch" in surfaces and surfaces["branch"].surfaces
               >= {"tui", "classic", "editor"} and "fork" in surfaces["branch"].aliases)
+
+        # A protocol bump that leaves the capture's fixture backend behind does not fail the
+        # suite — it fails the release, forty minutes later, inside a recording. The extension
+        # enforces exact equality, so the fixture must declare the version the code does.
+        import re as _re
+        from dgc import editor_protocol as _EP2
+        fixture = (_Path(__file__).resolve().parents[1] / "scripts" / "fixtures"
+                   / "vscode-capture-backend.cjs")
+        declared = _re.search(r"protocol_version:\s*(\d+)", fixture.read_text())
+        check("the capture's fixture backend speaks the protocol the extension demands",
+              declared and int(declared.group(1)) == _EP2.PROTOCOL_VERSION,
+              declared.group(1) if declared else "not declared")
     finally:
         for p, data in snapshot.items():
             p.unlink(missing_ok=True) if data is None else p.write_bytes(data)
