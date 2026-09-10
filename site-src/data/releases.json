@@ -1,13 +1,25 @@
 {
-  "refreshed_at": "2026-09-09T18:52:27Z",
+  "refreshed_at": "2026-09-10T06:45:41Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.32.0",
+      "date": "2026-09-10",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.32.0",
+      "status": "current",
+      "notes": [
+        "dgc -p for scripts. Piped input joins the prompt (git diff | dgc -p \"review this\"; -p - reads it whole), --output-format json streams the dgc serve events and ends with one result object (ok, text, session_id, usage), --output FILE saves the answer and --print-session-id gives you the id for --resume. A -p run never waits on a menu: a tool that would ask is denied with the exact --allow-tool rule to pre-approve, and a plan is reported rather than executed. --add-dir, --allow-tool and --sandbox on|off|read-only apply to that run only.",
+        "The classic REPL runs your subscription too, and the terminal explains itself. dgc --classic now runs a connected Claude, Codex, Qwen, Kimi or Copilot subscription’s turns (it used to fall back to the native model silently), and every front-end shares one delegated-turn path. A fresh install’s first failure says what to do in dgc doctor’s words instead of a raw 404 or Connection refused; /trust and dgc trust list every trusted folder and revoke one, and the gate warns before trusting your home directory; the welcome screen shows its tip at last.",
+        "A composer and a transcript that behave. A paste of five lines or more collapses to [Pasted text #1 +N lines] and expands when sent; past answers and diffs reflow when the terminal is resized instead of staying wrapped at the old width. Editor protocol v7 lets VS Code and Cursor approve against a step’s summary and diff and deny with a note (extension 0.18.0)."
+      ],
+      "headline": "scriptable -p · classic subscriptions · protocol v7"
+    },
+    {
       "version": "0.31.1",
       "date": "2026-09-10",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.31.1",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Close two holes a side-by-side with Claude Code and Codex found. A cloned repository’s .dgc/permissions.json was in force before the trust gate ran, and under dgc -p the gate never runs at all; a project’s own rules now load only once its folder is trusted, and the gate says so. dgc update --help piped the installer into bash instead of printing help; every subcommand now answers --help before anything runs, and flags given with -p, such as --model, apply to that run only instead of silently becoming your default.",
         "Text gets out. Ctrl+Y or /copy puts the last reply on your system clipboard through the terminal (OSC 52, so it works over SSH and inside tmux); /copy code takes the last code block, /copy N an earlier reply and /copy all the whole conversation. /export writes the session as Markdown outside the project tree (also dgc export ID), /select hands the mouse to your terminal for drag-select, and /mouse off remembers that. During a turn, a command that has to wait, such as /model, is refused visibly instead of being sent to the model as a prompt.",
@@ -216,10 +228,21 @@
   ],
   "extension": [
     {
-      "version": "0.17.2",
+      "version": "0.18.0",
       "date": "2026-09-10",
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "current",
+      "notes": [
+        "Approve against the change: the permission card shows the step’s summary and, for an edit, the diff it would apply, instead of raw JSON; Deny can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0.",
+        "The agent sees the errors it made: each prompt carries diagnostics for every file this chat touched, not just the focused one. Add File to Chat from the explorer and tab context menus, or drag a file into the chat; palette entries that need a running backend appear once it is connected.",
+        "No more first-run dead ends: Add Selection waits for the panel instead of dropping the selection when the view was never opened; changing dgc.command restarts the backend; the install prompt offers Retry and no longer latches every command to a no-op after one dismissal."
+      ]
+    },
+    {
+      "version": "0.17.2",
+      "date": "2026-09-10",
+      "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
+      "status": "shipped",
       "notes": [
         "Keep the autonomous gate and every model route under the user’s control: DGC: Autonomous Gate, DGC: Base Url, DGC: Subagent Base Url and DGC: Fallback Base Url are now machine-scoped, so a cloned repository’s .vscode/settings.json can no longer point the panel’s model traffic at its own server or disable the gate. A workspace value for any of them is ignored.",
         "Stop fighting VS Code’s own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts.",
