@@ -18,7 +18,13 @@ const allRoutes = process.argv.includes("--all-routes");
 const routes = JSON.parse(readFileSync(resolve(ROOT, "site", "routes.json"), "utf8")).html;
 const representativeRoutes = ["/", "/benchmark", "/vscode"];
 const routeLabel = route => route === "/" ? "home" : route.slice(1).replaceAll("/", "--");
-const targets = (allRoutes ? routes : representativeRoutes).map(route => [routeLabel(route), route]);
+// `--route /docs/x` audits one route, so a single marginal result can be checked for
+// reproducibility without re-running all 96 measurements.
+const onlyIndex = process.argv.indexOf("--route");
+const only = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : "";
+const selected = only ? routes.filter(route => route === only) : (allRoutes ? routes : representativeRoutes);
+if (only && !selected.length) { throw new Error(`unknown route ${only}`); }
+const targets = selected.map(route => [routeLabel(route), route]);
 // Match the three visual-acceptance viewports. Tablet deliberately keeps mobile
 // scoring/throttling: it exercises the responsive breakpoint under the stricter
 // performance model instead of becoming a second desktop-shaped audit.
