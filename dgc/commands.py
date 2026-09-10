@@ -144,6 +144,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("permissions", "list or add allow · ask · deny rules",
                 frozenset({"tui", "classic", "editor"}), "permissions",
                 usage="permissions [RULE…]"),
+    CommandSpec("notes", "what this project already learned · search it", _TC,
+                accepts_args=True, usage="notes [QUERY|on|off]", available_while_running=True),
     CommandSpec("trust", "list the folders the trust gate skips · revoke one", _TC,
                 accepts_args=True, usage="trust [revoke N|PATH|here]"),
     CommandSpec("init", "inspect the project and prepare its DGC.md guide", _TCE, "workflow:init", True,

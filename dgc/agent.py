@@ -587,6 +587,7 @@ class AgentContext:
     on_todo: object = None
     cancelled: threading.Event | None = None
     on_tool_timing: object = None
+    notes: object = None                # the project's NoteStore, when notes are enabled
     # Process-local tool handles (background jobs and retained command output) must not be readable
     # by another headless/editor session merely because it guessed a short handle such as ``out1``.
     tool_owner: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -847,7 +848,8 @@ class Agent(GoalLifecycle):
         self.ctx = AgentContext(project_root=config.project_root, config=config,
                                 skills=self.skills, todos=self.todos,
                                 on_todo=safe_todo_callback, cancelled=self.cancelled,
-                                on_tool_timing=self._record_tool_timing)
+                                on_tool_timing=self._record_tool_timing,
+                                notes=lambda: self.notes())
         self.messages: list[dict] = []
         self.session_file = None  # set by the CLI for --continue/--resume/new-session persistence
         # Tool execution is rooted at config.project_root. A managed fleet worktree deliberately
@@ -877,6 +879,7 @@ class Agent(GoalLifecycle):
         self._mode_prompt_dirty = False
         self.depth = 0                       # sub-agent nesting depth (via the task tool)
         self._recall_pending: list[dict] = []   # display rows the last compaction dropped
+        self._notes = None                      # context notes, opened on first use
         self.checkpoints = CheckpointManager(self.config.project_root, on_change=self._persist)
         self.chat_changes = ChatChanges(self.config.project_root)
         self._pending_images: list | None = None  # data: URIs attached to the next prompt
@@ -1340,6 +1343,11 @@ class Agent(GoalLifecycle):
             if not self._skill_catalog():
                 schemas = [tool for tool in schemas
                            if tool.get("function", {}).get("name") != "skill"]
+            if not self._has_notes():
+                # Nothing recorded yet: advertising a search over an empty trace would spend
+                # request tokens on every turn of every fresh project to say "no notes".
+                schemas = [tool for tool in schemas
+                           if tool.get("function", {}).get("name") != "notes"]
             useful_process_tools = bash_handle_tools(self.ctx)
             schemas = [tool for tool in schemas
                        if (tool.get("function", {}).get("name") not in
@@ -3921,7 +3929,74 @@ class Agent(GoalLifecycle):
         if post:
             out = redact_text(f"{out}\n[hook] {post}", secrets)
         self.ui.tool_result(name, out, call_id)
+        self._note_tool_result(name, args, out)
         return out
+
+    # ------------------------------------------------------------ context notes ---
+    def notes(self):
+        """The project's note store, or None when notes are off or unavailable."""
+        if not self.config.get("notes", True):
+            return None
+        if self._notes is None:
+            from .notes import NoteStore
+            self._notes = NoteStore(self.config.project_root,
+                                    redact_secrets=self._secret_values())
+        return self._notes
+
+    #: The tools whose outcome is worth remembering, and the argument naming their subject.
+    _NOTE_TOOLS = {"bash": "command", "python": "code", "write_file": "path", "edit_file": "path",
+                   "multi_edit": "path", "apply_patch": "path"}
+    _TEST_COMMAND = re.compile(r"\b(pytest|npm (run )?test|go test|cargo test|unittest|jest|vitest)\b")
+
+    def _note_tool_result(self, name: str, args: dict, out: str) -> None:
+        """Record what a step actually did. Deterministic — no model involved, so it behaves the
+        same on every endpoint — and never allowed to disturb the turn."""
+        try:
+            store = self.notes()
+            if store is None or name not in self._NOTE_TOOLS:
+                return
+            from .ui import tool_output_is_error
+            subject = str((args or {}).get(self._NOTE_TOOLS[name]) or "")
+            if not subject:
+                return
+            shell = name in ("bash", "python")
+            path = "" if shell else subject
+            session = self.session_file.stem if getattr(self, "session_file", None) else ""
+            tail = "\n".join(str(out or "").splitlines()[-6:])
+            if tool_output_is_error(out):
+                what = (f"`{subject[:120]}` failed" if shell
+                        else f"{name} on {subject[:120]} failed")
+                self._note("failure", what, file=path, tool=name, evidence=tail, session=session)
+            elif not shell:
+                self._note("outcome", f"{name} succeeded on {subject[:120]}",
+                           file=path, tool=name, session=session)
+            elif self._TEST_COMMAND.search(subject):
+                self._note("outcome", f"tests passed: `{subject[:120]}`",
+                           tool=name, evidence=tail, session=session)
+        except Exception:
+            pass                            # a note is never worth failing a turn over
+
+    def _note(self, kind: str, text: str, **fields) -> None:
+        store = self.notes()
+        if store is not None:
+            store.add(kind, text, **fields)
+
+    def _has_notes(self) -> bool:
+        try:
+            store = self.notes()
+            return store is not None and store.has_notes()
+        except Exception:
+            return False
+
+    def notes_digest(self, limit_chars: int = 1_200) -> str:
+        """What this project already learned, for a context that just lost its history."""
+        store = self.notes()
+        if store is None:
+            return ""
+        from .notes import render
+        rows = store.recent(6, kinds=("requirement", "decision", "failure"))
+        return render(rows, header="Earlier in this project (context notes, most recent first):",
+                      limit_chars=limit_chars)
 
     def rewind(self, idx: int) -> tuple[int, int]:
         """Restore code + conversation to checkpoint `idx`. Returns (msgs_kept, files_restored)."""
@@ -4707,9 +4782,11 @@ class Agent(GoalLifecycle):
                 output_tokens = normalize_usage(usage)["output_tokens"]
                 if 0 < output_tokens <= 10_000_000:
                     compacted_assistant["_responses_compaction_tokens"] = output_tokens
+                digest = self.notes_digest()
                 self.messages = (
                     [self.messages[0],
-                     {"role": "user", "content": f"{_COMPACT_PREFIX}\n{fallback}",
+                     {"role": "user",
+                      "content": f"{_COMPACT_PREFIX}\n{fallback}" + (f"\n\n{digest}" if digest else ""),
                       "_responses_compaction_display": True},
                      compacted_assistant]
                     + self.messages[split:])
@@ -4744,6 +4821,11 @@ class Agent(GoalLifecycle):
             fallback_reasons.append("less than one second remained for a summary request")
         if not summary:
             summary = fallback
+        # A summary says what happened; the notes say what was already learned — including which
+        # fixes failed. Without them a compacted turn cheerfully tries the same thing again.
+        digest = self.notes_digest()
+        if digest:
+            summary = f"{summary}\n\n{digest}"
         self.messages = (
             [self.messages[0],
              {"role": "user", "content": f"{_COMPACT_PREFIX}\n{summary}"},

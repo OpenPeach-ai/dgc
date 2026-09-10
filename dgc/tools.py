@@ -192,6 +192,13 @@ TOOL_SCHEMAS = [
         "URLs and snippets; follow up with web_fetch on a result URL to read the full page. Uses the user's "
         "configured provider (DuckDuckGo by default; Brave/Tavily/SearXNG if set up).",
         {"query": {"type": "string", "description": "The search query"}}, ["query"]),
+    _fn("notes", "Search this project's context notes — what was already tried, decided, and "
+        "what failed, including work from earlier sessions that is no longer in the conversation. "
+        "Check before retrying something that may have failed before.",
+        {"query": {"type": "string", "description": "Words, an error string, or a file path. "
+                                                   "Omit to list the most recent notes."},
+         "file": {"type": "string", "description": "Only notes about this file"},
+         "limit": {"type": "integer", "description": "How many notes (default 8, max 25)"}}, []),
     _fn("todo", "Replace the session todo list. Use it to track multi-step work.",
         {"todos": {"type": "array", "items": {"type": "object", "properties": {
             "content": {"type": "string"},
@@ -2942,6 +2949,30 @@ def web_search(args: dict, ctx) -> str:
                   url=str(cfg.get("search_url", "")))
 
 
+def notes_tool(args: dict, ctx) -> str:
+    """Read-only access to the project's trace. Never raises into the loop: no store, no notes."""
+    from .notes import render
+    provider = getattr(ctx, "notes", None)
+    store = provider() if callable(provider) else provider
+    if store is None:
+        return "notes are turned off for this project (/notes on to enable)"
+    limit = args.get("limit")
+    limit = max(1, min(int(limit), 25)) if isinstance(limit, int) else 8
+    path, query = str(args.get("file") or "").strip(), str(args.get("query") or "").strip()
+    if path:
+        rows = store.for_file(path, kinds=(), limit=limit)
+        label = f"notes about {path}"
+    elif query:
+        rows = store.search(query, limit=limit)
+        label = f"notes matching {query!r}"
+    else:
+        rows = store.recent(limit)
+        label = "most recent notes"
+    if not rows:
+        return f"no {label}"
+    return render(rows, header=f"{label} ({len(rows)}):", limit_chars=4_000)
+
+
 def todo(args: dict, ctx) -> str:
     ctx.todos = [{"content": str(t.get("content", "")),
                   "status": t.get("status", "pending")} for t in args.get("todos", [])]
@@ -3034,7 +3065,7 @@ EXECUTORS = {
     "glob": glob_tool, "grep": grep_tool, "repo_map": repo_map, "code_intel": code_intel,
     "git_diff": git_diff,
     "web_fetch": web_fetch,
-    "web_search": web_search, "todo": todo, "skill": skill_tool, "add_skill": add_skill,
+    "web_search": web_search, "todo": todo, "notes": notes_tool, "skill": skill_tool, "add_skill": add_skill,
     "save_memory": save_memory,
 }
 

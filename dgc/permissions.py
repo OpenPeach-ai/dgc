@@ -34,7 +34,7 @@ DISPLAY = {
     "apply_patch": "ApplyPatch", "repo_map": "RepoMap", "code_intel": "CodeIntel", "git_diff": "GitDiff",
     "bash": "Bash", "bash_output": "BashOutput", "bash_kill": "BashKill", "python": "Python",
     "glob": "Glob", "grep": "Grep", "web_fetch": "WebFetch", "web_search": "WebSearch",
-    "todo": "Todo", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
+    "todo": "Todo", "notes": "Notes", "skill": "Skill", "add_skill": "AddSkill", "save_memory": "SaveMemory",
     "mcp_search": "MCPSearch", "mcp_call": "MCPCall",
     "present_plan": "PresentPlan", "propose_options": "ProposeOptions", "artifact": "Artifact",
     "task": "Task", "external_directory": "ExternalDirectory",
@@ -48,11 +48,11 @@ RULE_ARG = {
     "glob": "pattern", "grep": "pattern", "repo_map": "path", "code_intel": "path", "git_diff": "path",
     "web_fetch": "url", "web_search": "query", "skill": "name", "add_skill": "url",
     "mcp_search": "query", "mcp_call": "name",
-    "save_memory": "scope", "artifact": "path", "task": "description",
+    "save_memory": "scope", "artifact": "path", "task": "description", "notes": "query",
     "external_directory": "path",
 }
 
-READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "skill",
+READ_ONLY_TOOLS = {"read_file", "glob", "grep", "repo_map", "code_intel", "git_diff", "web_fetch", "web_search", "todo", "notes", "skill",
                    "bash_output", "propose_options", "mcp_search", "update_goal"}
 EDIT_TOOLS = {"write_file", "edit_file", "multi_edit", "apply_patch"}
 
