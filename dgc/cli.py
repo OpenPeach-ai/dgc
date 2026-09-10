@@ -223,9 +223,16 @@ class UI:
 
     @staticmethod
     def _arg_summary(name: str, args: dict) -> str:
-        for key in ("path", "command", "pattern", "url", "name", "memory", "symbol", "operation"):
-            if key in args:
-                value = terminal_safe_text(args[key]).replace("\n", " ")
+        """The one argument worth showing beside a tool name — DGC's own keys first, then the keys
+        a delegated vendor tool uses (Claude's `Read`/`Edit` carry `file_path`, Codex's `shell` a
+        `command` list), so a subscription turn's cards are not blank."""
+        for key in ("path", "file_path", "command", "cmd", "pattern", "query", "url", "name",
+                    "memory", "symbol", "operation", "description"):
+            if key in args and args[key] not in (None, ""):
+                raw = args[key]
+                if isinstance(raw, (list, tuple)):
+                    raw = " ".join(str(v) for v in raw)
+                value = terminal_safe_text(raw).replace("\n", " ")
                 return value[:120] + ("…" if len(value) > 120 else "")
         return ""
 
@@ -567,7 +574,6 @@ class ClassicSlashCompleter(Completer):
 class CLI:
     def __init__(self, config: Config):
         self.config = config
-        self._classic_native_route = False
         style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
         self.ui = UI()
         self.ui._rule_hook = self._add_rule
@@ -604,8 +610,7 @@ class CLI:
         c = self.console
         cfg = self.config
         mode = cfg.data.get("mode", "default")
-        engine = ("" if self._classic_native_route else
-                  str(cfg.get("subscription_engine", "") or "").strip().lower())
+        engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
         think = (str(cfg.get("subscription_effort", "") or "").strip()
                  or "off") if engine else cfg.data.get("thinking", "off")
         active_model = (str(cfg.get("subscription_model", "") or "").strip()
@@ -697,9 +702,7 @@ class CLI:
                 from . import subscriptions as subs
                 engine = subs.get_engine(target)
                 if engine is not None:
-                    self.ui.error(
-                        f"{engine.short_label} subscription delegation is unavailable in --classic; "
-                        "exit and run dgc, or use dgc -p --engine " + engine.key)
+                    self._connect_engine(engine)
                     return True
                 cfg.set("subscription_engine", "")
                 cfg.set("subscription_model", "")
@@ -735,7 +738,15 @@ class CLI:
                 if mi is not None:
                     self._set_model(models[mi])
         elif cmd == "model":
-            if rest:
+            _se = str(cfg.get("subscription_engine", "") or "").strip().lower()
+            if _se:                                    # steer the subscription's model, not the endpoint
+                if rest:
+                    cfg.set("subscription_model", rest.strip())
+                    self.ui.info(f"subscription model → {rest.strip()}")
+                else:
+                    self.ui.info(f"subscription model: {cfg.get('subscription_model', '') or f'{_se} default'}"
+                                 f"  ·  /model <name> steers {_se}")
+            elif rest:
                 self._set_model(rest.strip())
             else:
                 self.ui.info(f"model: {cfg.model}")
@@ -746,8 +757,8 @@ class CLI:
             if rest not in MODES:
                 self.ui.error(f"unknown mode {rest!r} — choose from {', '.join(MODES)}")
                 return True
-            # Mode is durable and shared with the full-screen route.  Preserve the configured
-            # subscription invariant even though --classic itself executes the native fallback.
+            # Mode is durable and shared with the full-screen route, and a connected subscription
+            # runs the classic REPL's turns too, so its mode invariant holds here as well.
             from . import subscriptions as subs
             active_engine = str(cfg.get("subscription_engine", "") or "").strip().lower()
             try:
@@ -830,6 +841,20 @@ class CLI:
                 self.ui.info(f"standing goal → active: {self.agent.goal[:120]}")
                 self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
         elif cmd == "think":
+            _se = str(cfg.get("subscription_engine", "") or "").strip().lower()
+            if _se:                                    # /think steers the subscription's reasoning effort
+                from . import subscriptions as subs
+                eng = subs.get_engine(_se)
+                if eng is not None and not eng.supports_effort():
+                    self.ui.error(f"{eng.short_label} takes no reasoning-effort flag — steer it via /model")
+                elif rest in ("off", "low", "medium", "high", "xhigh", "max"):
+                    val = "" if rest == "off" else rest
+                    cfg.set("subscription_effort", val)
+                    self.ui.info(f"subscription effort → {val or 'default'}")
+                else:
+                    self.ui.info(f"subscription effort: {cfg.get('subscription_effort', '') or 'default'}"
+                                 "  ·  /think off|low|medium|high|xhigh|max")
+                return True
             if not rest:
                 i = THINK_LEVELS.index(cfg.get("thinking", "off"))
                 rest = THINK_LEVELS[(i + 1) % len(THINK_LEVELS)]
@@ -1339,7 +1364,7 @@ class CLI:
                     f"  [{DIM}]{glyphs.ARROW} {_markup_literal(line)}[/]", highlight=False)
             else:
                 try:                                    # ❯ prefix + right-aligned `model · mode`
-                    rp = ANSI(f"{dim}{terminal_safe_text(self.config.model)}  {glyphs.MIDDOT}  "
+                    rp = ANSI(f"{dim}{terminal_safe_text(self._model_label())}  {glyphs.MIDDOT}  "
                               f"{terminal_safe_text(mode)}{rst}")
                     line = session.prompt(ANSI(f"{acc}{glyphs.ARROW}{rst} "), rprompt=rp, default=draft).strip()
                     draft = ""
@@ -1387,6 +1412,85 @@ class CLI:
                 self.ui.error(f"{type(e).__name__}: {e}")
         self.console.print("[dim]bye[/dim]")
 
+    def _run_turn_body(self, text: str):
+        """One turn: through the connected subscription CLI when there is one, else the native
+        agent loop. _run_turn_live cleared stale state before exposing the interruptible turn, so
+        neither path resets cancellation — an Esc that lands while the worker starts must hold."""
+        engine = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        if engine:
+            return self._run_delegated_turn(engine, text)
+        return self.agent.run_turn(text, reset_cancel=False)
+
+    def _run_delegated_turn(self, engine_key: str, prompt: str) -> bool:
+        """The classic REPL's delegated turn. The vendor CLI's stream renders through the same
+        inline callbacks a native turn uses, so the spinner, the tool cards and the done marker
+        behave identically; Esc/Ctrl-C kills the vendor's whole process group. --classic used to
+        fall back to the native model here, silently, whatever the user had connected."""
+        from . import subscriptions as subs
+        engine = subs.get_engine(engine_key)
+        if engine is None:
+            self.ui.error(f"unknown subscription engine '{engine_key}'")
+            return False
+        if getattr(self.agent, "_pending_images", None):
+            self.agent._pending_images = None
+            self.ui.error("subscription CLI delegation does not yet support DGC image attachments")
+            return False
+        try:
+            subs.preflight(engine)
+        except subs.EngineError as exc:
+            self.ui.error(str(exc))
+            return False
+        self.ui.info(f"running this turn through {engine.label}…")
+        self.ui.start_working(engine.short_label)     # info() cleared the spinner; spin to the first event
+        try:
+            res = subs.delegate_turn(self.config, self.agent, self.ui, engine, prompt)
+        except subs.EngineError as exc:
+            self.ui.error(str(exc))
+            return False
+        if res.get("cancelled"):
+            return False
+        if res.get("timeout"):
+            self.ui.error("the delegated turn hit the time budget and was stopped")
+            return False
+        if res.get("error"):
+            self.ui.error(str(res["error"]))
+        elif res.get("rc") not in (0, None):
+            self.ui.error(f"{engine.short_label} exited with status {res['rc']}")
+        return bool(res.get("ok"))
+
+    def _model_label(self) -> str:
+        """What the prompt calls 'the model': the connected subscription's route when there is
+        one (its own model if steered), else the endpoint model — as the full-screen app shows."""
+        engine_key = str(self.config.get("subscription_engine", "") or "").strip().lower()
+        if engine_key:
+            from . import subscriptions as subs
+            engine = subs.get_engine(engine_key)
+            if engine is not None:
+                model = str(self.config.get("subscription_model", "") or "").strip()
+                return f"{engine.short_label} · {model}" if model else f"{engine.short_label} · subscription"
+        return str(self.config.model)
+
+    def _connect_engine(self, engine) -> None:
+        """/connect <engine>: route this REPL's turns through the user's own subscription CLI."""
+        from . import subscriptions as subs
+        try:
+            subs.preflight(engine)
+        except subs.EngineError as exc:
+            self.ui.error(str(exc))
+            return
+        try:
+            subs.validate_engine_mode(engine.key, self.agent.mode)
+        except subs.EngineModeUnsupported as exc:
+            self.ui.error(f"{exc} — change it with /mode first, then /connect {engine.key}")
+            return
+        cfg = self.config
+        cfg.set("subscription_engine", engine.key)
+        cfg.set("subscription_model", "")
+        cfg.set("subscription_effort", "")
+        self.ui.info(f"{engine.label} now runs your turns  ·  "
+                     "/model and /think steer its own model and effort  ·  "
+                     "/connect <provider> returns to a model endpoint")
+
     def _run_turn_live(self, text: str, queue: list[str]) -> None:
         """Run a turn on a worker thread while the main thread watches the keyboard:
         Esc / Ctrl-C interrupts the turn; Enter steers native turns, Tab queues the next turn.
@@ -1402,9 +1506,7 @@ class CLI:
 
         def work() -> None:
             try:
-                # _run_turn_live cleared stale state before exposing the interruptible turn.
-                # Preserve any Esc/Ctrl-C that arrives while this worker thread is starting.
-                outcome["failed"] = self.agent.run_turn(text, reset_cancel=False) is False
+                outcome["failed"] = self._run_turn_body(text) is False
             except Exception as e:
                 outcome["failed"] = True
                 self.ui.error(f"{type(e).__name__}: {e}")
@@ -1977,7 +2079,7 @@ def main(argv: list[str] | None = None) -> int | None:
                        if args.prompt is not None else "")
     _interactive_engine = (
         str(config.get("subscription_engine", "") or "").strip().lower()
-        if args.prompt is None and not args.classic and sys.stdout.isatty() else ""
+        if args.prompt is None else ""
     )
     _override_engine = _oneshot_engine or _interactive_engine
     if args.think == "max" and not _override_engine:
@@ -2100,17 +2202,7 @@ def main(argv: list[str] | None = None) -> int | None:
                         lan=(str(config.get("artifact_bind", "localhost")).lower() == "lan"))
                 except Exception:
                     pass
-            _se = str(config.get("subscription_engine", "")).strip().lower()
             if args.classic or not sys.stdout.isatty():
-                cli._classic_native_route = True
-                if _se:
-                    from . import subscriptions as _subs
-                    _eng = _subs.get_engine(_se)
-                    if _eng is not None:
-                        Console().print(
-                            f'  [yellow]note[/yellow] {terminal_safe_text(_eng.label)} (subscription) '
-                            f'delegation runs in the full-screen app and one-shot ([bold]dgc -p[/bold]); '
-                            f'the classic REPL uses your fallback model.\n')
                 cli.repl()
             else:
                 from .tui import TUI
@@ -2143,37 +2235,7 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
     except subs.EngineError as e:
         c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
         return 1
-    c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} "
-            f"(your subscription) —[/dim]")
-    last = {"text": "", "shown": False}
-
-    def on_event(ev: dict) -> None:
-        kind = ev.get("kind")
-        if kind == "tool_call":
-            name = terminal_safe_text(str(ev.get("name") or "tool"))
-            args = ev.get("args") or {}
-            summ = terminal_safe_text(str(args.get("command") or args.get("file_path")
-                                          or args.get("path") or ""))[:120]
-            c.print(f"· {name}{(' ' + summ) if summ else ''}", style="dim", markup=False, highlight=False)
-        elif kind == "thinking" and ev.get("text"):
-            c.print(f"  {terminal_safe_text(ev['text'][:200])}", style="dim", markup=False, highlight=False)
-        elif kind == "status" and ev.get("text"):
-            c.print(f"· {terminal_safe_text(ev['text'])}", style="dim", markup=False, highlight=False)
-        elif kind == "error" and ev.get("text"):
-            # Render once after process exit, where it can be paired with the exit status.
-            return
-        elif kind == "text" and ev.get("text"):
-            last["shown"] = True
-            last["text"] = ev["text"]
-            sys.stdout.write(terminal_safe_text(ev["text"]))
-            sys.stdout.flush()
-        elif kind == "result" and ev.get("text", "").strip() and not last["shown"]:
-            last["shown"] = True
-            sys.stdout.write(terminal_safe_text(ev["text"]))
-            sys.stdout.flush()
-
-    budget = int(config.get("turn_budget_s") or 0) or 1800
-    mode = str(config.data.get("mode", "default"))
+    c.print(f"[dim]— running your turn through {terminal_safe_text(engine.label)} —[/dim]")
     configured_engine = str(config.get("subscription_engine", "")).strip().lower()
     model = (str(model_override).strip() if model_override is not None else
              str(config.get("subscription_model", "")).strip()
@@ -2189,27 +2251,11 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
         c.print(f"  [yellow]{terminal_safe_text(engine.short_label)} does not expose a "
                 "reasoning-effort flag; omit --think or choose its reasoning model with --model[/yellow]")
         return 1
-    from .ultra import delegated_effort, delegated_prompt
-    effort = delegated_effort(config, engine.key, effort, engine.supports_effort())
-    session_id = agent.subscription_session_id(engine.key, mode, model, effort) if cont else ""
-
-    def delegate(safe_prompt: str) -> dict:
-        nonlocal session_id
-        last["text"] = ""
-        last["shown"] = False
-        result = subs.run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
-                               cont=bool(session_id), session_id=session_id, mode=mode,
-                               timeout=budget, on_event=on_event, model=model, effort=effort,
-                               cancel=agent.cancelled.is_set, goal_request=agent._active_goal_request,
-                               redact_secrets=agent._secret_values())
-        if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
-            agent.remember_subscription_session(
-                engine.key, result["session_id"], mode, model, effort)
-            session_id = result["session_id"]
-        return result
-
     try:
-        res = agent.run_external_turn(prompt, delegate)
+        # The classic UI renders the stream exactly as a native `dgc -p` turn: text as it arrives,
+        # tool cards with their edit diffs, and nothing styled when stdout is a pipe.
+        res = subs.delegate_turn(config, agent, agent.ui, engine, prompt,
+                                 model=model, effort=effort, cont=bool(cont))
     except subs.EngineError as e:
         c.print(f"  [yellow]{_markup_literal(str(e))}[/yellow]")
         return 1

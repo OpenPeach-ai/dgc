@@ -5850,65 +5850,13 @@ class TUI:
         except subs.EngineError as e:
             self.error(str(e))
             return False
-        self.info(f"running this turn through {engine.label} (your subscription)…")
-        shown = {"text": False}
-        names, diffs = {}, {}                     # tool_use id → (display name, prebuilt edit diff)
-
-        def on_event(ev: dict) -> None:
-            kind = ev.get("kind")
-            if kind == "text" and ev.get("text"):            # the assistant's answer, streamed
-                shown["text"] = True
-                self.on_text(ev["text"])
-            elif kind == "thinking" and ev.get("text"):      # dimmed reasoning, like a native turn
-                self.on_thinking(ev["text"])
-            elif kind == "tool_call":                        # a real tool card (name + args)
-                nm, cid = ev.get("name", "tool"), ev.get("id") or None
-                if cid:
-                    names[cid] = nm
-                    d = subs.edit_diff(nm, ev.get("args") or {})
-                    if d:
-                        diffs[cid] = d
-                self.tool_call(nm, ev.get("args") or {}, cid)
-            elif kind == "tool_result":                      # fills the card; a diff renders as a diff
-                cid = ev.get("id") or None
-                output = ("error: " + str(ev.get("output") or "tool failed") if ev.get("error")
-                          else diffs.get(cid) or ev.get("output", ""))
-                self.tool_result(names.get(cid, ""), output, cid)
-            elif kind == "result" and not shown["text"] and ev.get("text"):
-                self.on_text(ev["text"] if ev["text"].endswith("\n") else ev["text"] + "\n")
-            elif kind == "status" and ev.get("text"):
-                self.info(ev["text"])
-
-        budget = int(self.config.get("turn_budget_s") or 0) or 1800
-        mode = str(self.config.data.get("mode", "default"))
-        model = str(self.config.get("subscription_model", "")).strip()
-        configured_effort = str(self.config.get("subscription_effort", "")).strip()
-        from .ultra import delegated_effort, delegated_prompt
-        effort = delegated_effort(
-            self.config, engine.key, configured_effort, engine.supports_effort())
-        session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
-
-        def delegate(safe_prompt: str) -> dict:
-            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
-            shown["text"] = False
-            result = subs.run_turn(
-                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
-                cont=bool(session_id), session_id=session_id, mode=mode,
-                timeout=budget, on_event=on_event, cancel=self._cancel.is_set,
-                model=model, effort=effort, goal_request=self.agent._active_goal_request,
-                redact_secrets=self.agent._secret_values())
-            if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
-                self.agent.remember_subscription_session(
-                    engine.key, result["session_id"], mode, model, effort)
-            return result
-
+        self.info(f"running this turn through {engine.label}…")
         try:
-            res = self.agent.run_external_turn(prompt, delegate, reset_cancel=False)
+            res = subs.delegate_turn(self.config, self.agent, self, engine, prompt,
+                                     cancel=self._cancel.is_set)
         except subs.EngineError as e:
             self.error(str(e))
             return False
-        finally:
-            self.end_stream()
         if res.get("cancelled"):
             self.info("stopped.")
             return False
