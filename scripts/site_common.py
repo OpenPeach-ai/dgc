@@ -207,6 +207,14 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
     ctx = site_context()
     canonical = canonical_url or (ctx["SITE_URL"] + canonical_path(path))
     critical_css = critical_css_for(path)
+    # The docs pages are prose whose largest paint IS text, and they carry inline code in almost
+    # every paragraph: without this the monospace face lands after first paint and its swap
+    # re-wraps a paragraph (a measured CLS of 0.001394 on /docs/subscriptions). Everywhere else
+    # the largest paint is an image, and spending 35 KB of the critical path on a font costs it
+    # ~150 ms — enough to push the home page past its LCP bound — for no shift to prevent.
+    mono_preload = ('<link rel="preload" href="/assets/fonts/jetbrains-mono-regular-latin.woff2" '
+                    'as="font" type="font/woff2" crossorigin>'
+                    if canonical_path(path).startswith("/docs") else "")
     if canonical_path(path) == "/":
         style_loader = """<script>(()=>{const l=document.getElementById('site-styles'),r=document.documentElement,events=['wheel','touchstart','pointerdown','keydown','click','dgc:load-styles'];let ready=false,wanted=Boolean(location.hash),applied=false,failed=false,timer,guard;const cleanup=()=>events.forEach(n=>removeEventListener(n,want,true)),reveal=()=>r.classList.remove('defer-styles','fh'),fail=()=>{if(failed||applied)return;failed=true;clearTimeout(timer);r.dataset.stylesFailOpen='true';reveal();dispatchEvent(new Event('dgc:styles-fail-open'))},done=()=>{if(applied)return;applied=true;clearTimeout(timer);clearTimeout(guard);cleanup();l.media='all';delete r.dataset.stylesFailOpen;r.dataset.stylesReady='true';reveal();dispatchEvent(new Event('dgc:styles-ready'))},markReady=()=>{if(ready)return;ready=true;clearTimeout(guard);guard=undefined;if(wanted)done();else timer=setTimeout(done,3600)},want=()=>{wanted=true;l.media='all';if(ready)done();else if(!guard)guard=setTimeout(fail,3000)};guard=setTimeout(fail,3000);if(wanted)l.media='all';events.forEach(n=>addEventListener(n,want,{once:true,passive:true,capture:true}));l.addEventListener('load',markReady,{once:true});l.addEventListener('error',fail,{once:true});if(l.sheet)markReady()})()</script>"""
     else:
@@ -261,7 +269,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
 <link rel=\"alternate\" type=\"application/atom+xml\" title=\"DGC releases\" href=\"/changelog.xml\">
 {f'<link rel="preload" href="{html.escape(preload_mobile_image, quote=True)}" as="image" fetchpriority="high" media="(max-width:800px)">' if preload_mobile_image else ''}
 {f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high" media="(min-width:801px)">' if preload_image and preload_mobile_image else (f'<link rel="preload" href="{html.escape(preload_image, quote=True)}" as="image" fetchpriority="high">' if preload_image else '')}
-<link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/jetbrains-mono-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>
+<link rel=\"preload\" href=\"/assets/fonts/geist-regular-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin><link rel=\"preload\" href=\"/assets/fonts/geist-medium-latin.woff2\" as=\"font\" type=\"font/woff2\" crossorigin>{mono_preload}
 <style data-critical-revision=\"{ctx['ASSET_REVISION']}\">{critical_css}</style>
 <link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\" media=\"print\" id=\"site-styles\">{style_loader}<noscript><link rel=\"stylesheet\" href=\"/assets/site.css?v={ctx['ASSET_REVISION']}\"></noscript>
 <script type=\"application/ld+json\">{json_script(ld)}</script>"""
