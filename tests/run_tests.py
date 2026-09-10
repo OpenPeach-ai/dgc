@@ -12723,19 +12723,59 @@ def test_oneshot_machine_readable():
               argv is None or ("--bind" in argv and argv[argv.index("--bind") + 1] == str(root / "project"))
               or f'(subpath "{root / "project"}")' in argv[argv.index("-p") + 1])
 
-        # --- piped input
-        _sys.stdin = _io.StringIO("diff --git a b\n+added line\n")
+        # --- piped input. Every case uses a REAL file descriptor: what may be read is decided by
+        #     the KIND of fd, and a StringIO cannot express that.
+        import os as _os
+        import socket as _socket
+
+        def as_stdin(fd_or_file):
+            _sys.stdin = fd_or_file
+            return fd_or_file
+
+        def pipe_with(data: bytes):
+            r, w = _os.pipe()
+            _os.write(w, data); _os.close(w)
+            return _os.fdopen(r, "r")
+
+        as_stdin(pipe_with(b"diff --git a b\n+added line\n"))
         check("piped input is appended to the prompt", _cli._oneshot_prompt("review this") ==
               "review this\n\n<input from stdin>\ndiff --git a b\n+added line\n</input>")
-        _sys.stdin = _io.StringIO("the whole prompt\n")
+        _sys.stdin.close()
+        as_stdin(pipe_with(b"the whole prompt\n"))
         check("-p - reads the prompt from stdin", _cli._oneshot_prompt("-") == "the whole prompt")
-        _sys.stdin = _io.StringIO("")
-        check("an empty pipe changes nothing", _cli._oneshot_prompt("hi") == "hi" and _cli._oneshot_prompt("-") == "")
-        _sys.stdin = SimpleNamespace(isatty=lambda: True, read=lambda n=-1: (_ for _ in ()).throw(AssertionError("read a tty")))
-        check("a terminal is never read", _cli._oneshot_prompt("hi") == "hi")
-        _sys.stdin = _io.StringIO("x" * (_cli._MAX_STDIN_BYTES + 10))
+        _sys.stdin.close()
+        as_stdin(pipe_with(b""))
+        check("an empty pipe changes nothing", _cli._oneshot_prompt("hi") == "hi")
+        _sys.stdin.close()
+        redirected = root / "stdin.txt"
+        redirected.write_text("from a redirected file\n", encoding="utf-8")
+        as_stdin(open(redirected, encoding="utf-8"))
+        check("a redirected file is read too", _cli._oneshot_prompt("-") == "from a redirected file")
+        _sys.stdin.close()
+        as_stdin(SimpleNamespace(isatty=lambda: True,
+                                 read=lambda n=-1: (_ for _ in ()).throw(AssertionError("read a tty"))))
+        check("a terminal is never read", _cli._oneshot_prompt("hi") == "hi" and not _cli._piped_stdin())
+        as_stdin(open(_os.devnull, encoding="utf-8"))
+        check("/dev/null contributes nothing", _cli._oneshot_prompt("hi") == "hi")
+        _sys.stdin.close()
+        # The regression that hung a release: a supervisor, an editor or a background launcher
+        # hands down an open SOCKET. It is not a terminal and it never closes, so reading it
+        # blocks forever — `dgc -p` must not read it at all.
+        left, right = _socket.socketpair()
+        try:
+            as_stdin(_os.fdopen(_os.dup(left.fileno()), "r"))
+            check("an inherited socket is never read, so -p cannot hang on it",
+                  not _cli._piped_stdin() and _cli._oneshot_prompt("hi") == "hi")
+            _sys.stdin.close()
+        finally:
+            left.close(); right.close()
+        big = root / "big.txt"
+        big.write_text("x" * (_cli._MAX_STDIN_BYTES + 10), encoding="utf-8")
+        as_stdin(open(big, encoding="utf-8"))
         merged = _cli._oneshot_prompt("-")
-        check("piped input is capped and says so", merged.endswith("[input truncated at 2 MB]") and len(merged) < _cli._MAX_STDIN_BYTES + 100)
+        check("piped input is capped and says so",
+              merged.endswith("[input truncated at 2 MB]") and len(merged) < _cli._MAX_STDIN_BYTES + 100)
+        _sys.stdin.close()
         _sys.stdin = real_stdin
 
         # --- a -p run answers every question itself

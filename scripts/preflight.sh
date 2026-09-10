@@ -33,7 +33,17 @@ for other in python3.10 python3.11 python3.12 python3.13; do
     echo "dgc does not compile under $other ($(command -v "$other"))" >&2; exit 1; }
 done
 "$PYTHON" -m py_compile bench/*.py scripts/generate-sbom.py scripts/release_bundle.py
-"$PYTHON" tests/run_tests.py
+# A hung check must fail the release, not stall it. An unbounded stdin read once held a release
+# for hours with no output, because preflight runs with stdin inherited from whatever launched it.
+if command -v timeout >/dev/null 2>&1; then
+  timeout --kill-after=60 2700 "$PYTHON" tests/run_tests.py < /dev/null || {
+    status=$?
+    [ "$status" -eq 124 ] && echo "the test suite exceeded its 45-minute bound and was stopped" >&2
+    exit "$status"
+  }
+else
+  "$PYTHON" tests/run_tests.py < /dev/null
+fi
 "$PYTHON" -m pip check
 SBOM_TMP=$(mktemp)
 EDIT_GATE_TMP=
