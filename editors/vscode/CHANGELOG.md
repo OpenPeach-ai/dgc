@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0 — 2026-09-10
+
+- Approve against the change: the permission card shows the step's summary and, for an edit, the diff it would apply, instead of raw JSON; **Deny** can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0 (an older CLI is refused at connect with the version to update to).
+- The agent sees the errors it made: each prompt carries diagnostics for every file this chat touched, not just the focused one. **DGC: Add File to Chat** from the explorer and tab context menus, or drag a file into the chat; palette entries that need a running backend appear once it is connected.
+- No more first-run dead ends: Add Selection waits for the panel instead of dropping the selection when the view was never opened (and says so when nothing is selected); changing `dgc.command` restarts the backend; the install prompt offers Retry and a restart earns a fresh prompt instead of latching every command to a no-op after one dismissal.
+
 ## 0.17.2 — 2026-09-10
 
 - Keep the autonomous gate and every model route under the user's control: **DGC: Autonomous Gate**, **DGC: Base Url**, **DGC: Subagent Base Url** and **DGC: Fallback Base Url** are now machine-scoped settings, so a cloned repository's `.vscode/settings.json` can no longer point the panel's model traffic at its own server or disable the gate. A workspace value for any of them is ignored and the user setting (or the default) is used.

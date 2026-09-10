@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.31.1">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.31.1 is out · clipboard, export and trust-gated rules <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.31.1 is out · scriptable -p · classic subscriptions · protocol v7 <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -72,7 +72,7 @@
     <h1>The harness, inside your editor.</h1>
     <p class="lede">Run DGC beside the code. Read structured answers, follow expandable tool activity, and review changes without leaving your workspace. Durable goals run on local, API and subscription routes with pause, resume and evidence review.</p>
     <div class="hero-actions"><a class="button button-primary" href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc">Install from Marketplace ↗</a><a class="button" href="/vscode/dgc.vsix">Download .vsix</a></div>
-    <div class="page-meta"><span class="status-pill live">extension 0.17.2</span><span class="status-pill">CLI v0.31.1 recommended</span><span class="status-pill">protocol v6 required</span></div>
+    <div class="page-meta"><span class="status-pill live">extension 0.18.0</span><span class="status-pill">CLI v0.31.1 recommended</span><span class="status-pill">protocol v7 required</span></div>
   </div>
 </header>
 
@@ -118,8 +118,8 @@
 
 <section class="section">
   <div class="container content-grid">
-    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Current release</div><h2>0.17.2 speaks typed protocol v6.</h2><p class="lede">Native DGC plans, permission decisions, tools, and images are correlated with the CLI backend instead of reconstructed from terminal text. Goal evidence, lifecycle controls and prompt acknowledgements stay typed across routes. Selected skills, saved drafts and shared plan/review workflows keep work moving between terminal and editor. Vendor CLIs retain ownership of their internal tools and permissions.</p></header>
-    <aside class="card reveal"><span class="micro">Extension 0.17.2</span><h3 style="margin-top:18px">Keep the autonomous gate and every model route under the user’s control: DGC: Autonomous Gate, DGC: Base Url, DGC: Subagent Base Url and DGC: Fallback Base Url are now machine-scoped, so a cloned repository’s .vscode/settings.json can no longer point the panel’s model traffic at its own server or disable the gate. A workspace value for any of them is ignored.</h3><p>Stop fighting VS Code’s own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts. · Pairs with CLI 0.31.0; editor protocol v6 is unchanged, so CLI 0.30.0 and newer keep working exactly as before..</p><a class="button" href="/changelog#extension" style="margin-top:24px">Extension changelog →</a></aside>
+    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Current release</div><h2>0.18.0 speaks typed protocol v7.</h2><p class="lede">Native DGC plans, permission decisions, tools, and images are correlated with the CLI backend instead of reconstructed from terminal text. Goal evidence, lifecycle controls and prompt acknowledgements stay typed across routes. Selected skills, saved drafts and shared plan/review workflows keep work moving between terminal and editor. Vendor CLIs retain ownership of their internal tools and permissions.</p></header>
+    <aside class="card reveal"><span class="micro">Extension 0.18.0</span><h3 style="margin-top:18px">Approve against the change: the permission card shows the step’s summary and, for an edit, the diff it would apply, instead of raw JSON; Deny can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0.</h3><p>The agent sees the errors it made: each prompt carries diagnostics for every file this chat touched, not just the focused one. Add File to Chat from the explorer and tab context menus, or drag a file into the chat; palette entries that need a running backend appear once it is connected. · No more first-run dead ends: Add Selection waits for the panel instead of dropping the selection when the view was never opened; changing dgc.command restarts the backend; the install prompt offers Retry and no longer latches every command to a no-op after one dismissal..</p><a class="button" href="/changelog#extension" style="margin-top:24px">Extension changelog →</a></aside>
   </div>
 </section>
 
