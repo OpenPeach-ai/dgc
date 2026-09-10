@@ -576,10 +576,22 @@
       : "Jump to the newest message";
   }
   function noteNewContent() { if (!atBottom()) { unread = true; renderToLatest(); } }
-  // Only a gesture counts as "I want to read back". A scroll the page did to itself does not.
-  for (const kind of ["wheel", "touchmove", "pointerdown", "keydown"]) {
-    log.addEventListener(kind, () => { userScrolledAt = Date.now(); }, { passive: true });
-  }
+  // Only a gesture counts as "I want to read back". A scroll the page did to itself does not —
+  // and neither does pressing a button that happens to live inside the transcript. Approval
+  // cards, plan cards and question forms are all in there, so a plain pointerdown on the
+  // scroller is usually someone answering DGC, not someone scrolling away from it.
+  const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+  const readingBack = () => { userScrolledAt = Date.now(); };
+  log.addEventListener("wheel", readingBack, { passive: true });
+  log.addEventListener("touchmove", readingBack, { passive: true });
+  log.addEventListener("pointerdown", (e) => {
+    if (e.offsetX > log.clientWidth) readingBack();          // the scrollbar, not the content
+  }, { passive: true });
+  log.addEventListener("keydown", (e) => {
+    if (SCROLL_KEYS.has(e.key) && !e.target.closest("input, textarea, select, [contenteditable]")) {
+      readingBack();
+    }
+  }, { passive: true });
   log.addEventListener("scroll", () => {
     if (Date.now() - userScrolledAt < 700) following = atBottom();
     renderToLatest();
