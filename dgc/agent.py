@@ -2544,6 +2544,14 @@ class Agent(GoalLifecycle):
         finally:
             lease.release()
 
+    def _explain_model_error(self, exc, prefix: str = "") -> str:
+        """The failure plus what to do about it, in the words `dgc doctor` uses."""
+        from .llm import explain_llm_error
+        client = getattr(self, "client", None)
+        return explain_llm_error(prefix + str(exc),
+                                 model=str(getattr(client, "model", "") or self.config.model or ""),
+                                 base_url=str(getattr(client, "base_url", "") or self.config.base_url or ""))
+
     def _fail_turn(self, message: str) -> bool:
         """Record and render one handled terminal failure for every frontend."""
         self._last_turn_error = self._safe_text(message or "the turn failed")
@@ -2939,7 +2947,7 @@ class Agent(GoalLifecycle):
                                 "completion withheld — model endpoints failed before verification")
                         else:
                             self.ui.end_stream()
-                        return self._fail_turn(f"fallback model also failed: {e2}")
+                        return self._fail_turn(self._explain_model_error(e2, "fallback model also failed: "))
                 else:
                     if held_final_messages:
                         withhold_final(
@@ -2947,7 +2955,7 @@ class Agent(GoalLifecycle):
                             "completion withheld — the model failed before verification")
                     else:
                         self.ui.end_stream()
-                    return self._fail_turn(str(e))
+                    return self._fail_turn(self._explain_model_error(e))
             if (deadline is not None and chat_cancel.is_set() and not self.cancelled.is_set()):
                 if held_final_messages:
                     withhold_final(

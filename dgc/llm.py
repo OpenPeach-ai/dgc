@@ -453,6 +453,34 @@ def _wait_for_retry(delay: float, cancel=None) -> bool:
         time.sleep(min(remaining, 0.05))
 
 
+def explain_llm_error(message: str, *, model: str = "", base_url: str = "") -> str:
+    """Turn a transport failure into the two lines `dgc doctor` would print.
+
+    A fresh install's first message used to be a raw `HTTP 404 from http://…: model 'x' not
+    found` or a `Connection refused`; doctor already knew what each meant and what to do.
+    The original message stays first, so nothing is hidden.
+    """
+    text = str(message or "")
+    low = text.lower()
+    hint = ""
+    if re.search(r"connection refused|failed to establish|max retries|name or service not known"
+                 r"|nodename nor servname|could not connect|connection error|unreachable"
+                 r"|timed out|timeout|no route to host", low):
+        hint = (f"the endpoint {base_url or 'you configured'} is not answering — start your server "
+                "(ollama serve / llama-server / LM Studio) or fix the URL; `dgc doctor` checks both")
+    elif re.search(r"\b404\b|not found|no such model|does not exist|unknown model", low):
+        hint = (f"the server offers no model named '{model}'" if model else "the server does not know that model")
+        hint += (f" — pull it (ollama pull {model})" if model else " — pull it") + \
+                ", pick one with /model or `dgc --model NAME`, or run `dgc setup`"
+    elif re.search(r"\b401\b|\b403\b|unauthori[sz]ed|invalid api key|authentication|forbidden", low):
+        hint = "the endpoint rejected the key — set it with /connect, `dgc --api-key-env NAME` or DGC_API_KEY"
+    elif re.search(r"\b429\b|rate limit|too many requests", low):
+        hint = "the endpoint is rate-limiting this key — wait a moment, or lower max_parallel_tasks"
+    elif re.search(r"\b50[023]\b|bad gateway|service unavailable|internal server error", low):
+        hint = "the server failed on its side — check its logs; `dgc doctor` shows what it offers"
+    return f"{text}\n  → {hint}" if hint else text
+
+
 class LLMError(Exception):
     pass
 
