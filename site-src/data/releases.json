@@ -1,13 +1,25 @@
 {
-  "refreshed_at": "2026-09-10T15:03:54Z",
+  "refreshed_at": "2026-09-10T17:05:24Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.33.1",
+      "date": "2026-09-10",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.33.1",
+      "status": "current",
+      "notes": [
+        "A standing goal is stated to the model in full once per context — and again after a compaction, which starts a fresh one — instead of being repeated on every turn. Restating it each turn charged the context window for the whole objective again and again: a 4,000-character goal cost about a third of a 32k window after ten turns and four fifths after twenty-five. An extra goal turn now costs about a hundred tokens rather than two thousand.",
+        "Because the objective no longer repeats, the length limit follows the window it has to fit rather than a fixed number: an eighth of the context, so a 32k session allows about 16,000 characters where it allowed 4,000, and a 128k one about 32,000. A refused objective now says how long it actually is, what this session allows and why — and gives the text back to the composer instead of discarding it behind a message that expires.",
+        "A resolved /command or $skill fills as a chip in the composer, so it reads as an attachment rather than as part of the sentence."
+      ],
+      "headline": "goals that do not eat the context window"
+    },
+    {
       "version": "0.33.0",
       "date": "2026-09-10",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.33.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Context notes: DGC now keeps a searchable trace of what a project has already learned, and it outlives the context window. A command that failed, an edit that did not apply, a test suite that passed — each is recorded as the work happens, by the harness rather than the model, so it behaves the same on every local endpoint. The notes are per project, so a run spread over days accumulates one trace.",
         "The point of keeping them is not to have them. After a compaction — the moment this history used to be lost — a bounded digest of requirements, decisions and recent failures rides into the fresh context, and when a step touches a file that has failed before, that history is attached to the result the agent reads. An agent that cannot see its own failed attempts repeats them; now it can.",
