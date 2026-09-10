@@ -191,7 +191,9 @@ without leaving scroll mode at all, where the terminal passes the modifier throu
 - `--output FILE` — with `-p`: also write the final answer to FILE.
 - `--print-session-id` — with `-p`: print the session id on stderr, for `--resume ID`.
 - Piped input: `git diff | dgc -p "review this"` appends stdin to the prompt (2 MB cap);
-  `dgc -p -` reads the whole prompt from stdin. A `-p` run never waits on a menu: a tool
+  `dgc -p -` reads the whole prompt from stdin. Only a pipe or a redirected file is read — a
+  terminal, `/dev/null`, and an fd inherited from a launcher (a supervisor, an editor) are left
+  alone, so `-p` never waits on input nobody is going to send. A `-p` run never waits on a menu: a tool
   that would ask is denied with the rule to pre-approve, a plan is reported, not executed.
 - `--add-dir PATH` — let this run read and edit files under PATH too (repeatable).
 - `--allow-tool RULE` — pre-approve a tool for this run, e.g. `"Bash(npm test)"` or `Edit`

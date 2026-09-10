@@ -2322,16 +2322,34 @@ def _run_subscription_oneshot(config, agent, engine_key: str, prompt: str, cont:
 _MAX_STDIN_BYTES = 2 * 1024 * 1024
 
 
+def _piped_stdin() -> bool:
+    """Whether stdin is something that was piped or redirected in, and can safely be read.
+
+    Only a pipe or a regular file — `git diff | dgc -p …`, `dgc -p - < notes.txt`. A terminal is
+    the user, and anything else (most importantly an inherited socket, which is what a supervisor,
+    an editor or a background launcher hands down) is NOT input: reading it blocks until a peer
+    that will never write decides to close. `dgc -p` hung forever in exactly that shape.
+    """
+    import stat as stat_mod
+    stream = sys.stdin
+    if stream is None:
+        return False
+    try:
+        if stream.isatty():
+            return False
+        mode = os.fstat(stream.fileno()).st_mode
+    except (AttributeError, OSError, ValueError):
+        return False
+    return stat_mod.S_ISFIFO(mode) or stat_mod.S_ISREG(mode)
+
+
 def _oneshot_prompt(prompt: str) -> str:
     """`-p` reads piped input too: `git diff | dgc -p "review"` appends the diff to the prompt,
-    and `-p -` is the input alone. A terminal or /dev/null contributes nothing."""
+    and `-p -` is the input alone. A terminal, /dev/null, or an inherited socket contributes
+    nothing."""
     stream = sys.stdin
-    try:
-        interactive = stream is None or stream.isatty()
-    except (AttributeError, ValueError):
-        interactive = True
     data = ""
-    if not interactive:
+    if _piped_stdin():
         try:
             data = stream.read(_MAX_STDIN_BYTES + 1)
         except (OSError, ValueError):
