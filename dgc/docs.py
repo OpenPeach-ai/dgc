@@ -968,8 +968,10 @@ chat-completions path (the Anthropic/Ollama paths are untouched).
 # Subscriptions
 
 Instead of a raw model endpoint, DGC can drive a coding CLI you already pay for and
-are logged into through the full-screen TUI, editor/headless backend, or a one-shot
-`dgc -p --engine` run. The legacy `--classic` REPL uses the configured native endpoint.
+are logged into — from the full-screen app, the classic inline REPL (`dgc --classic`),
+the editor/headless backend, or a one-shot `dgc -p --engine` run. Every route renders
+the vendor's stream the same way: its tool steps as cards with their diffs, its
+reasoning dimmed, and its answer as it arrives.
 
 ## Engines
 

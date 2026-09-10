@@ -3361,7 +3361,7 @@ def unit_tests(tmp: Path):
         project_root = tmp; model = "fixture"; base_url = "http://localhost.invalid/v1"
         def get(self, key, default=None): return False if key == "suggest" else default
     _terminal_cfg = _TerminalCfg(); _classic_agent = _TerminalProbeAgent(_terminal_cfg)
-    _classic = object.__new__(_CLI); _classic.agent = _classic_agent
+    _classic = object.__new__(_CLI); _classic.agent = _classic_agent; _classic.config = _terminal_cfg
     _classic.ui = type("LiveUI", (), {
         "_tool_count": 0,
         "start_working": lambda self: None,
@@ -12398,6 +12398,130 @@ def test_overnight_parity_fixes():
         _shutil.rmtree(root, ignore_errors=True)
 
 
+def test_classic_delegation():
+    """`--classic` runs a connected subscription's turns instead of silently falling back.
+
+    All four front-ends now share subscriptions.delegate_turn, so the classic REPL renders the
+    vendor's stream through its own inline callbacks: the spinner, the tool cards with their edit
+    diffs, the reasoning and the done marker behave exactly as they do for a native turn.
+    """
+    import io as _io
+    import tempfile as _tempfile
+    import threading as _threading
+    from rich.console import Console as _Console
+    from dgc import subscriptions as S
+    from dgc.cli import CLI, UI, _run_subscription_oneshot
+
+    td = _tempfile.mkdtemp(prefix="dgc-classic-delegation-")
+
+    class _Config:
+        project_root = td
+        model = "native-model"
+        base_url = "http://native.invalid/v1"
+        def __init__(self):
+            self.data = {"mode": "default", "subscription_engine": "codex",
+                         "subscription_model": "gpt-5", "subscription_effort": "high", "turn_budget_s": 5}
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+        def set(self, key, value, **_):
+            self.data[key] = value
+
+    class _Agent:
+        mode = "default"
+        def __init__(self):
+            self.cancelled = _threading.Event(); self.remembered = None
+            self._active_goal_request = None; self.native_turns = []
+        def _secret_values(self): return ()
+        def subscription_session_id(self, *args): return "prior-thread"
+        def remember_subscription_session(self, *args): self.remembered = args
+        def run_external_turn(self, prompt, runner, reset_cancel=False): return runner(prompt)
+        def run_turn(self, text, reset_cancel=True): self.native_turns.append(text); return True
+        def refresh_client(self): pass
+
+    def fresh_cli():
+        cli = object.__new__(CLI)
+        cli.config = _Config(); cli.agent = _Agent(); cli.ui = UI()
+        cli.ui.console = _Console(file=_io.StringIO(), force_terminal=False, width=100)
+        cli.console = cli.ui.console
+        cli.agent.ui = cli.ui
+        return cli
+
+    captured = {}
+    def _fake_turn(_engine, _prompt, _workdir, **kwargs):
+        captured.clear(); captured.update(kwargs)
+        kwargs["on_event"]({"kind": "thinking", "text": "weighing it"})
+        kwargs["on_event"]({"kind": "tool_call", "name": "shell", "args": {"command": "pytest -q"}, "id": "t1"})
+        kwargs["on_event"]({"kind": "tool_result", "output": "3 passed", "id": "t1"})
+        kwargs["on_event"]({"kind": "text", "text": "the fix is in"})
+        return {"ok": True, "rc": 0, "text": "the fix is in", "session_id": "next-thread",
+                "timeout": False, "cancelled": False, "error": ""}
+    original_turn, original_preflight = S.run_turn, S.preflight
+    S.run_turn = _fake_turn
+    S.preflight = lambda engine: "/usr/bin/" + engine.binary
+    try:
+        cli = fresh_cli()
+        ok = cli._run_delegated_turn("codex", "fix the flaky test")
+        out = cli.console.file.getvalue()
+        check("classic: a delegated turn renders the vendor's tools and answer inline",
+              ok and "running this turn through Codex" in out and "shell" in out
+              and "pytest -q" in out and "3 passed" in out and "the fix is in" in out
+              and "weighing it" in out, out[-300:])
+        check("classic: the delegated turn resumes the remembered vendor session exactly",
+              captured.get("cont") is True and captured.get("session_id") == "prior-thread"
+              and captured.get("model") == "gpt-5" and captured.get("effort") == "high"
+              and cli.agent.remembered[1] == "next-thread")
+        check("classic: the done marker counts the vendor's tools", cli.ui._tool_count == 1)
+
+        cli = fresh_cli()
+        cli._run_turn_body("hello")
+        routed_delegated = not cli.agent.native_turns and "running this turn through Codex" in cli.console.file.getvalue()
+        cli.config.data["subscription_engine"] = ""
+        cli._run_turn_body("hello again")
+        check("classic: a turn goes to the connected subscription, or natively when none is",
+              routed_delegated and cli.agent.native_turns == ["hello again"])
+
+        cli = fresh_cli(); cli.config.data["subscription_engine"] = ""
+        cli.handle_slash("/connect codex")
+        out = cli.console.file.getvalue()
+        check("classic: /connect <engine> connects the subscription instead of refusing",
+              cli.config.data["subscription_engine"] == "codex" and "now runs your turns" in out
+              and "unavailable" not in out, out[-200:])
+        cli.handle_slash("/model gpt-5-codex")
+        cli.handle_slash("/think medium")
+        check("classic: /model and /think steer the connected subscription, not the endpoint",
+              cli.config.data["subscription_model"] == "gpt-5-codex"
+              and cli.config.data["subscription_effort"] == "medium"
+              and cli.config.data.get("model") is None and cli.config.data.get("thinking") is None)
+        cli.handle_slash("/think off")
+        check("classic: /think off returns the vendor's default effort", cli.config.data["subscription_effort"] == "")
+        check("classic: the prompt names the subscription route, not the endpoint model",
+              cli._model_label().startswith("Codex") and "gpt-5-codex" in cli._model_label())
+        cli.handle_slash("/connect ollama")
+        check("classic: /connect <provider> returns to a model endpoint",
+              cli.config.data["subscription_engine"] == "" and bool(cli.config.data.get("base_url")))
+
+        S.preflight = lambda engine: (_ for _ in ()).throw(S.EngineNotInstalled(f"{engine.label} is not installed"))
+        cli = fresh_cli(); cli.config.data["subscription_engine"] = ""
+        cli.handle_slash("/connect claude")
+        check("classic: an engine that is not installed is refused with the reason and nothing connected",
+              cli.config.data["subscription_engine"] == "" and "not installed" in cli.console.file.getvalue())
+        S.preflight = lambda engine: "/usr/bin/" + engine.binary
+
+        cli = fresh_cli()
+        code = _run_subscription_oneshot(cli.config, cli.agent, "codex", "one shot", False)
+        check("one-shot: rides the shared turn, fresh vendor session without --continue",
+              code == 0 and captured.get("cont") is False and captured.get("session_id") == ""
+              and "the fix is in" in cli.console.file.getvalue())
+        code = _run_subscription_oneshot(cli.config, cli.agent, "codex", "again", True,
+                                         model_override="o3", effort_override="low")
+        check("one-shot: --continue resumes exactly and flags steer only this invocation",
+              code == 0 and captured.get("cont") is True and captured.get("session_id") == "prior-thread"
+              and captured.get("model") == "o3" and captured.get("effort") == "low"
+              and cli.config.data["subscription_model"] == "gpt-5")
+    finally:
+        S.run_turn, S.preflight = original_turn, original_preflight
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -17518,6 +17642,7 @@ def main():
         test_transcript_reuses_unchanged_entries()
         test_recall_archive_is_display_only()
         test_overnight_parity_fixes()
+        test_classic_delegation()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

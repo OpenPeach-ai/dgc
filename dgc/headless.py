@@ -584,69 +584,11 @@ class Backend:
         if engine is None:
             self.ui.error(f"unknown subscription engine '{engine_key}'")
             return False
-        mode = str(self.config.data.get("mode", "default"))
-        model = str(self.config.get("subscription_model", "")).strip()
-        configured_effort = str(self.config.get("subscription_effort", "")).strip()
-        from .ultra import delegated_effort, delegated_prompt
-        effort = delegated_effort(
-            self.config, engine.key, configured_effort, engine.supports_effort())
-        session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
-        names: dict[str, str] = {}
-        diffs: dict[str, str] = {}
-        shown = {"text": False}
-
-        def on_event(event: dict) -> None:
-            kind = event.get("kind")
-            if kind == "text" and event.get("text"):
-                shown["text"] = True
-                self.ui.on_text(event["text"])
-            elif kind == "thinking" and event.get("text"):
-                self.ui.on_thinking(event["text"])
-            elif kind == "tool_call":
-                name = str(event.get("name") or "tool")
-                call_id = str(event.get("id") or "") or None
-                args = event.get("args") if isinstance(event.get("args"), dict) else {}
-                if call_id:
-                    names[call_id] = name
-                    diff = subs.edit_diff(name, args)
-                    if diff:
-                        diffs[call_id] = diff
-                self.ui.tool_call(name, args, call_id)
-            elif kind == "tool_result":
-                call_id = str(event.get("id") or "") or None
-                output = diffs.get(call_id or "") or str(event.get("output") or "")
-                if event.get("error"):
-                    output = "error: " + str(event.get("output") or "tool failed")
-                self.ui.tool_result(names.get(call_id or "", ""), output, call_id)
-            elif kind == "status" and event.get("text"):
-                self.ui.info(str(event["text"]))
-            elif kind == "result" and not shown["text"] and event.get("text"):
-                shown["text"] = True
-                self.ui.on_text(str(event["text"]))
-
-        budget = int(self.config.get("turn_budget_s") or 0) or 1800
-
-        def delegate(safe_prompt: str) -> dict:
-            session_id = self.agent.subscription_session_id(engine.key, mode, model, effort)
-            shown["text"] = False
-            result = subs.run_turn(
-                engine, delegated_prompt(self.config, safe_prompt, mode), self.config.project_root,
-                cont=bool(session_id), session_id=session_id, mode=mode,
-                timeout=budget, on_event=on_event, cancel=self.agent.cancelled.is_set,
-                model=model, effort=effort, goal_request=self.agent._active_goal_request,
-                redact_secrets=self.agent._secret_values())
-            if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
-                self.agent.remember_subscription_session(
-                    engine.key, result["session_id"], mode, model, effort)
-            return result
-
         try:
-            result = self.agent.run_external_turn(prompt, delegate, reset_cancel=False)
+            result = subs.delegate_turn(self.config, self.agent, self.ui, engine, prompt)
         except subs.EngineError as exc:
             self.ui.error(str(exc))
             return False
-        finally:
-            self.ui.end_stream()
         if result.get("timeout"):
             self.ui.error("the delegated turn hit the time budget and was stopped")
         elif result.get("error") and result.get("persisted", True):

@@ -606,6 +606,85 @@ def preflight(engine: SubEngine) -> str:
     return binary
 
 
+def delegate_turn(config, agent, ui, engine: SubEngine, prompt: str, *, cancel=None,
+                  model: str | None = None, effort: str | None = None,
+                  cont: bool | None = None) -> dict:
+    """One delegated turn through DGC's session boundary, rendered through ``ui`` like a native turn.
+
+    Every front-end shares this — the full-screen app, the classic inline REPL, the editor bridge
+    and ``dgc -p`` — so the event mapping (tool cards with prebuilt edit diffs, reasoning, status,
+    the terminal ``result`` shown once when no text streamed), the exact-resume bookkeeping, goal
+    requests and redaction cannot drift between them. ``model``/``effort`` default to the
+    configured subscription route. ``cont=False`` starts the first step from a fresh vendor session
+    (``dgc -p`` without --continue) and still resumes exactly for the steps that follow. The caller
+    reports the outcome; this returns the normalized result and raises ``EngineError`` only when
+    the engine is missing or signed out.
+    """
+    from .ultra import delegated_effort, delegated_prompt
+    mode = str(config.data.get("mode", "default"))
+    if model is None:
+        model = str(config.get("subscription_model", "") or "").strip()
+    if effort is None:
+        effort = str(config.get("subscription_effort", "") or "").strip()
+    effort = delegated_effort(config, engine.key, effort, engine.supports_effort())
+    budget = int(config.get("turn_budget_s") or 0) or 1800
+    if cancel is None:
+        cancel = agent.cancelled.is_set
+    names: dict[str, str] = {}
+    diffs: dict[str, str] = {}
+    shown = {"text": False}
+    fresh = {"first": cont is False}
+
+    def on_event(event: dict) -> None:
+        kind = event.get("kind")
+        if kind == "text" and event.get("text"):
+            shown["text"] = True
+            ui.on_text(str(event["text"]))
+        elif kind == "thinking" and event.get("text"):
+            ui.on_thinking(str(event["text"]))
+        elif kind == "tool_call":
+            name = str(event.get("name") or "tool")
+            call_id = str(event.get("id") or "") or None
+            args = event.get("args") if isinstance(event.get("args"), dict) else {}
+            if call_id:
+                names[call_id] = name
+                diff = edit_diff(name, args)
+                if diff:
+                    diffs[call_id] = diff
+            ui.tool_call(name, args, call_id)
+        elif kind == "tool_result":
+            call_id = str(event.get("id") or "") or None
+            output = diffs.get(call_id or "") or str(event.get("output") or "")
+            if event.get("error"):
+                output = "error: " + str(event.get("output") or "tool failed")
+            ui.tool_result(names.get(call_id or "", ""), output, call_id)
+        elif kind == "status" and event.get("text"):
+            ui.info(str(event["text"]))
+        elif kind == "result" and not shown["text"] and str(event.get("text") or "").strip():
+            shown["text"] = True
+            ui.on_text(str(event["text"]))
+
+    def delegate(safe_prompt: str) -> dict:
+        session_id = "" if fresh["first"] else agent.subscription_session_id(
+            engine.key, mode, model, effort)
+        fresh["first"] = False
+        shown["text"] = False
+        result = run_turn(engine, delegated_prompt(config, safe_prompt, mode), config.project_root,
+                          cont=bool(session_id), session_id=session_id, mode=mode, timeout=budget,
+                          on_event=on_event, cancel=cancel, model=model, effort=effort,
+                          goal_request=agent._active_goal_request,
+                          redact_secrets=agent._secret_values())
+        if result.get("session_id") and not result.get("cancelled") and not result.get("timeout"):
+            agent.remember_subscription_session(
+                engine.key, result["session_id"], mode, model, effort)
+        return result
+
+    try:
+        return agent.run_external_turn(prompt, delegate, reset_cancel=False)
+    finally:
+        ui.end_stream()
+
+
 def run_turn(engine: SubEngine, prompt: str, workdir, *, cont: bool = False,
              timeout: int = 1800, on_event: Callable[[dict], None] | None = None,
              env: dict | None = None, cancel: Callable[[], bool] | None = None,
