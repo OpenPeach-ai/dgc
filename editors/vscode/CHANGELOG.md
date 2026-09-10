@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1 — 2026-09-10
+
+- **DGC: Show Context Notes** — what this project has already learned, across sessions: the failures, edits and passing tests DGC recorded as the work happened. The agent searches the same trace itself, so after a compaction it can see which fixes already failed instead of trying them again. Needs CLI 0.33.0; editor protocol v7 is unchanged, so this is not a lockstep upgrade.
+- The chat is offered in the secondary side bar as well as the activity bar — open it in either and the same conversation follows.
+- An older CLI now offers the fix instead of only naming it: **Update DGC CLI**, then **Restart Backend**.
+
 ## 0.18.0 — 2026-09-10
 
 - Approve against the change: the permission card shows the step's summary and, for an edit, the diff it would apply, instead of raw JSON; **Deny** can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0 (an older CLI is refused at connect with the version to update to).
