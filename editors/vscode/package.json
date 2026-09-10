@@ -1,6 +1,6 @@
 {
   "name": "dgc",
-  "displayName": "Vibe DGC — coding agent for your own models",
+  "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
   "version": "0.18.1",
   "publisher": "vibedgc",
@@ -407,7 +407,7 @@
           "type": "string",
           "scope": "machine",
           "default": "",
-          "description": "Main model host — a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
+          "description": "Main model host \u2014 a supported native or OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). Blank = use the CLI's own config (~/.dgc/config.json). Also editable in the panel's Settings page."
         },
         "dgc.model": {
           "type": "string",
@@ -423,7 +423,7 @@
           "type": "string",
           "scope": "machine",
           "default": "",
-          "description": "Host for `task` sub-agents — run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
+          "description": "Host for `task` sub-agents \u2014 run them on a DIFFERENT machine/model than the main loop. Blank = inherit the main host."
         },
         "dgc.subagentApiMode": {
           "type": "string",
@@ -529,7 +529,9 @@
     "check-types": "tsc --noEmit",
     "package": "npm run check-types && node esbuild.js --production",
     "test": "node --test \"test/**/*.test.mjs\"",
-    "test:host": "node test/run-extension-host.mjs"
+    "test:host": "node test/run-extension-host.mjs",
+    "shot": "node test/render-panel.mjs",
+    "scroll-check": "node test/render-scroll.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

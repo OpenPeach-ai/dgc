@@ -2248,6 +2248,30 @@ class Agent(GoalLifecycle):
                     "use /new or resume the latest saved session before making more edits.")
                 return False
 
+    def fork_session(self, name: str = "") -> bool:
+        """Continue this conversation in a new session file, leaving the current one as it stands.
+
+        A branch inherits everything the chat has accumulated — messages, goal, todos, recovery
+        points and the record of what it changed — because "from here" is what a branch means.
+        Only the identity is new, so the parent transcript keeps the state it had when the branch
+        was taken and the two histories stop sharing a file. A failed save is not a fork: the
+        session identity is restored so the caller is never left writing to a file it never wrote.
+        """
+        from . import sessions
+        if not self.session_file:
+            return False
+        previous = (self.session_file, self.session_name,
+                    self._session_revision, self._session_exists)
+        base = (str(name or "").strip()[:180] or str(self.session_name or "")).strip()
+        self.session_file = sessions.new_path(self.config.project_root)
+        self._session_revision, self._session_exists = 0, False
+        self.session_name = f"{base} (branch)"[:200] if base else None
+        if self._persist():
+            return True
+        (self.session_file, self.session_name,
+         self._session_revision, self._session_exists) = previous
+        return False
+
     def name_session(self, name: str) -> bool:
         """Give the current session a human name (shown in --resume / the session picker)."""
         value = self._safe_text(name).strip() or None

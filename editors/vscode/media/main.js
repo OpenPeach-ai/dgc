@@ -449,18 +449,66 @@
   // One CommonMark renderer for live answers, history, skills, and documentation.
   const md = (source) => DgcMarkdown.render(source);
   function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+  // ---- keeping the transcript's height honest while still skipping what is off screen ----
+  // `content-visibility: auto` lets the browser skip rendering a block that has scrolled away,
+  // but a skipped block is laid out at its `contain-intrinsic-size`, not its real height. A
+  // guessed placeholder therefore changes the page's length every time a block is skipped or
+  // rendered, which is what moved the viewport. Measure once, pin the measured value, and keep
+  // it current with a ResizeObserver: skipped and rendered then occupy exactly the same space.
+  const blockSizes = typeof ResizeObserver === "function" ? new ResizeObserver((entries) => {
+    for (const entry of entries) pinBlockHeight(entry.target);
+  }) : null;
+  function pinBlockHeight(node) {
+    const height = Math.round(node.offsetHeight);
+    // A skipped block reports no size — to itself and to the observer. Writing that back would
+    // replace the measurement with zero, which is the guessed placeholder all over again.
+    if (height < 8 || Math.abs((node._pinnedHeight || 0) - height) < 2) return false;
+    node._pinnedHeight = height;
+    node.style.containIntrinsicSize = `auto ${height}px`;
+    return true;
+  }
+  function settleBlock(node) {
+    if (!node || node.classList.contains("settled")) return;
+    if (!pinBlockHeight(node)) {          // not laid out yet; settle on a later frame
+      requestAnimationFrame(() => settleBlock(node));
+      return;
+    }
+    node.classList.add("settled");        // only now may the browser skip it
+    blockSizes?.observe(node);
+  }
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; }
 
   // ---- turn lifecycle ----
-  function startTurn() {
+  // Two prompts are "the same" when their opening prose matches; the composer's own bubble may
+  // carry attachment labels the backend never echoes, and the backend may expand a template.
+  function sameProse(a, b) {
+    const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const x = norm(a), y = norm(b);
+    return !!x && !!y && (x.startsWith(y) || y.startsWith(x));
+  }
+  function echoPrompt(text) {
+    const body = String(text || "").trim();
+    if (!body) return;
+    // The composer renders what the user typed there. A turn begun anywhere else — a slash
+    // command, an editor action, a queued follow-up, a retry, the terminal beside us — must
+    // still show its prompt, or the transcript reads as answers to questions nobody asked.
+    const last = [...log.querySelectorAll(".msg.user > .bubble")].at(-1);
+    if (last && sameProse(last.textContent, body)) return;
+    const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
+    m.appendChild(el("div", "bubble", esc(body)));
+    log.appendChild(m); settleBlock(m);
+  }
+  function startTurn(prompt = "") {
     if (turn) endTurn("cancelled");
     speak("DGC is working");
+    echoPrompt(prompt);
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
     const t0 = Date.now();
-    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "" };
+    turn = { block, act, t0, chars: 0, textEl: null, reasonEl: null, _buf: "", eta: "",
+             prompt: String(prompt || ""), edits: new Map() };
     turn.timer = setInterval(renderTurnMeta, 200);
     renderTurnMeta();
     scroll();
@@ -485,17 +533,102 @@
     const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
     if (lastText && !lastText.classList.contains("commentary") && reason === "completed") {
       lastText.classList.add("final");
-      const actions = el("div", "response-actions");
-      const copy = el("button", "response-copy codicon codicon-copy");
-      copy.type = "button"; copy.title = "Copy response"; copy.setAttribute("aria-label", "Copy response");
-      copy.onclick = () => vscode.postMessage({ type: "copy", text: lastText._markdown || lastText.textContent });
-      actions.appendChild(copy); lastText.after(actions);
+      // What this turn changed, then what you can do about it — the two things a reader wants
+      // at the end of an answer, in that order.
+      const summary = turnSummaryCard(turn.edits, turn.prompt);
+      const actions = responseActions(lastText, turn.prompt);
+      lastText.after(actions);
+      if (summary) lastText.after(summary);
       // The work summary separates the collapsed activity from the final response.
       turn.block.insertBefore(turn.act, lastText);
     }
     turn.act.classList.add("done");
     turn.act.textContent = `${reason === "cancelled" ? "Stopped" : reason === "error" ? "Failed" : "Worked"} for ${Math.floor((Date.now() - turn.t0) / 1000)}s`;
+    const finished = turn.block;
     turn = null;
+    // After every mutation this turn will make, so the height that gets pinned is the final one.
+    requestAnimationFrame(() => settleBlock(finished));
+  }
+  // ---- what the turn changed, and what you can do about it ----
+  function turnSummaryCard(edits, prompt) {
+    const files = [...(edits || new Map()).entries()];
+    if (!files.length) return null;
+    const additions = files.reduce((n, [, v]) => n + v.additions, 0);
+    const deletions = files.reduce((n, [, v]) => n + v.deletions, 0);
+    const card = el("div", "turn-summary");
+    card.setAttribute("role", "group");
+    card.setAttribute("aria-label", "Files changed in this turn");
+    card.innerHTML = `<div class="ts-head"><span class="codicon codicon-diff-multiple" aria-hidden="true"></span>`
+      + `<span class="ts-title">${files.length} ${files.length === 1 ? "file" : "files"} changed</span>`
+      + `<span class="change-add">+${additions}</span><span class="change-del">\u2212${deletions}</span></div>`
+      + `<div class="ts-list">${files.map(([path, v], i) =>
+          `<button type="button" class="ts-row" data-file="${i}" title="Review ${esc(path)}">`
+          + `<span class="change-path">${esc(path)}</span>`
+          + (v.additions || v.deletions
+              ? `<span class="change-add">+${v.additions}</span><span class="change-del">\u2212${v.deletions}</span>`
+              : `<span class="ts-new">New</span>`)
+          + `<span class="codicon codicon-chevron-right" aria-hidden="true"></span></button>`).join("")}</div>`
+      + `<div class="ts-actions"><button type="button" class="act ts-undo">Undo</button>`
+      + `<button type="button" class="act ts-review">Review</button></div>`;
+    card.querySelectorAll("[data-file]").forEach((row) => row.onclick = () => {
+      const entry = files[Number(row.dataset.file)];
+      if (entry) vscode.postMessage({ type: "reviewChange", path: entry[0], scope: "chat" });
+    });
+    card.querySelector(".ts-review").onclick = () => openChangesReview("chat");
+    // Undo restores the workspace to the recovery point this turn opened. The extension
+    // identifies it by the prompt, refuses when it can no longer find it, and confirms first.
+    card.querySelector(".ts-undo").onclick = () => vscode.postMessage({
+      type: "undoTurn", prompt: String(prompt || ""), files: files.map(([path]) => path) });
+    return card;
+  }
+  //: One rating per response, kept in this workspace and sent nowhere.
+  function responseActions(textEl, prompt) {
+    const actions = el("div", "response-actions");
+    const add = (act, icon, label) => {
+      const b = el("button", `ract ract-${act}`, `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`);
+      b.type = "button"; b.title = label; b.setAttribute("aria-label", label); b.dataset.act = act;
+      actions.appendChild(b); return b;
+    };
+    add("copy", "copy", "Copy response");
+    add("up", "thumbsup", "Good response \u2014 kept in this workspace, sent nowhere");
+    add("down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere");
+    add("branch", "git-branch", "Branch into a new chat from here");
+    add("retry", "refresh", "Run this prompt again");
+    add("edit", "edit", "Edit this prompt and send it again");
+    const body = () => textEl._markdown || textEl.textContent;
+    actions.onclick = (event) => {
+      const button = event.target.closest("[data-act]");
+      if (!button) return;
+      const act = button.dataset.act;
+      if (act === "copy") { vscode.postMessage({ type: "copy", text: body() }); flashAction(button, "check"); return; }
+      if (act === "up" || act === "down") {
+        const on = button.classList.contains("on");
+        actions.querySelectorAll(".ract-up, .ract-down").forEach((b) => b.classList.remove("on"));
+        if (!on) button.classList.add("on");
+        vscode.postMessage({ type: "rateResponse", rating: on ? "none" : act, prompt: String(prompt || "") });
+        return;
+      }
+      if (act === "branch") { vscode.postMessage({ type: "branchChat", prompt: String(prompt || "") }); return; }
+      if (act === "retry") { resend(prompt); return; }
+      if (act === "edit") {
+        input.value = String(prompt || ""); input.selectionStart = input.selectionEnd = input.value.length;
+        input.focus(); onInput(); scroll();
+      }
+    };
+    return actions;
+  }
+  function flashAction(button, icon) {
+    const glyph = button.querySelector(".codicon"), was = glyph.className;
+    glyph.className = `codicon codicon-${icon}`;
+    setTimeout(() => { glyph.className = was; }, 1100);
+  }
+  // Retry runs the same prompt again without eating whatever is half-typed in the composer.
+  function resend(prompt) {
+    const text = String(prompt || "").trim();
+    if (!text) return;
+    const draft = input.value;
+    input.value = text; submit();
+    if (input.value === "" && draft) { input.value = draft; onInput(); }
   }
   function discardTurn() {
     if (turn) {
@@ -662,7 +795,17 @@
       toggle.querySelector(".diff-action").textContent = open ? "Hide diff" : "Review";
     };
     if (path !== "changed file") wrap.querySelector(".dhead").appendChild(openFileBtn(path));
+    wrap.dataset.path = path; wrap.dataset.add = String(additions); wrap.dataset.del = String(deletions);
     return wrap;
+  }
+  //: Tools that change files on disk. Their diffs are what the end-of-turn summary counts.
+  const EDIT_TOOLS = new Set(["edit_file", "write_file", "multi_edit", "apply_patch", "create_file"]);
+  function recordEdit(path, additions = 0, deletions = 0) {
+    const name = String(path || "").replace(/^[ab]\//, "").replace(/^\/+/, "").trim();
+    if (!turn || !name || name === "changed file") return;
+    const prior = turn.edits.get(name) || { additions: 0, deletions: 0 };
+    turn.edits.set(name, { additions: prior.additions + (Number(additions) || 0),
+                           deletions: prior.deletions + (Number(deletions) || 0) });
   }
   function decisionCard(inner, label = "DGC decision") { const c = el("div", "card"); c.setAttribute("role", "group"); c.setAttribute("aria-label", label); c.innerHTML = inner; appendConversationContent(c); breakText(); return c; }
   function requestArtifactStop(id, container, button) {
@@ -1273,6 +1416,11 @@
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
+        // A branch keeps the conversation on screen — that is the whole point of it.
+        if (ev.kind === "forked") {
+          sysLine(`Branched into a new chat${ev.name ? ` — ${ev.name}` : ""}. `
+            + "The chat you came from keeps everything up to this point.");
+        }
         setThreadTitle(ev.name, ev.session_id, ev.kind === "cleared" || ev.kind === "new");
         if (ev.session_id) selectDraftSession(ev.session_id);
         renderUnconfirmedDrafts();
@@ -1288,7 +1436,7 @@
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
-      case "turn_start": startTurn(); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "turn_start": startTurn(ev.prompt); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");
@@ -1338,7 +1486,17 @@
         }
         turn.reasonEl.textContent += ev.text; break;
       case "stream_end": finishReasoning(); breakText(); break;
-      case "tool_call": ensureTurn(); finishReasoning(); turn._tools = turn._tools || Object.create(null); turn._tools[ev.call_id || ev.name] = toolCard(ev); break;
+      case "tool_call": {
+        ensureTurn(); finishReasoning();
+        turn._tools = turn._tools || Object.create(null);
+        turn._tools[ev.call_id || ev.name] = toolCard(ev);
+        // Remember the path an edit tool was called with, so a result that carries no diff
+        // (a brand-new file, a binary write) still reaches the end-of-turn summary.
+        turn._paths = turn._paths || Object.create(null);
+        const target = ev.args && (ev.args.path || ev.args.file_path || ev.args.file);
+        if (EDIT_TOOLS.has(String(ev.name || "")) && target) turn._paths[ev.call_id || ev.name] = String(target);
+        break;
+      }
       case "tool_progress": {
         ensureTurn();
         turn._tools = turn._tools || Object.create(null);
@@ -1354,6 +1512,9 @@
       }
       case "tool_result": {
         ensureTurn();
+        if (!ev.is_error && EDIT_TOOLS.has(String(ev.name || "")) && !ev.is_diff) {
+          recordEdit(turn._paths?.[ev.call_id || ev.name]);
+        }
         turn._tools = turn._tools || Object.create(null);
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
@@ -1362,7 +1523,11 @@
         if (ev.is_error) {
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
-        if (ev.is_diff && ev.diff) { c.querySelector(".body pre").textContent = ev.diff; c.after(renderDiff(ev.diff)); }
+        if (ev.is_diff && ev.diff) {
+          c.querySelector(".body pre").textContent = ev.diff;
+          const rendered = renderDiff(ev.diff); c.after(rendered);
+          if (!ev.is_error) recordEdit(rendered.dataset.path, rendered.dataset.add, rendered.dataset.del);
+        }
         else { const out = String(ev.output || ""); c.querySelector(".body pre").textContent = out.slice(0, 4000); c.querySelector(".badge").textContent = out.split("\n").length + " ln"; }
         breakText(); break;
       }
@@ -1382,10 +1547,11 @@
         speak(`Permission required to run ${ev.name}`);
         // v7: the step's summary and, for an edit, the diff it would apply — approve against
         // what will happen, not raw JSON. A denial can carry a note for the model.
-        const summary = ev.summary ? `<div class="muted">${esc(ev.summary)}</div>` : "";
         const detail = ev.command ? `<pre>$ ${esc(ev.command)}</pre>`
           : ev.diff ? "" : `<pre>${esc(JSON.stringify(ev.args))}</pre>`;
-        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span> Run <b>${esc(ev.name)}</b>?</div>${summary}${detail}<textarea class="feedback" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
+        const restates = ev.summary && detail.includes(esc(String(ev.summary)));
+        const summary = ev.summary && !restates ? `<div class="muted">${esc(ev.summary)}</div>` : "";
+        const c = requestCard(decisionCard(`<div class="q"><span class="codicon codicon-shield" aria-hidden="true"></span><span>Run <b>${esc(ev.name)}</b></span></div>${summary}${detail}<textarea class="feedback" rows="1" placeholder="If you deny: a note for the model (optional)"></textarea><div class="btns"><button type="button" class="act primary" data-d="once">Allow once</button><button type="button" class="act" data-d="always">Always allow</button><button type="button" class="act" data-d="deny">Deny</button></div>`, "Tool permission request"), ev.id);
         if (ev.diff) { c.querySelector(".feedback").before(renderDiff(String(ev.diff))); }
         c.querySelectorAll("button").forEach((b) => b.onclick = () => {
           const note = (c.querySelector(".feedback")?.value || "").trim().slice(0, 2000);
@@ -1673,6 +1839,9 @@
     const label = stop ? "Stop generation" : streaming ? (nativeSteering ? "Steer current run" : "Queue next turn") : "Send message";
     send.innerHTML = `<span class="codicon codicon-${stop ? "debug-stop" : "arrow-up"}" aria-hidden="true"></span>`;
     send.title = label; send.setAttribute("aria-label", label);
+    // Filled (DGC purple) only when the button will actually do something: text to send, or a
+    // run to stop. Empty composer leaves it a quiet surface, so the accent stays meaningful.
+    send.classList.toggle("ready", hasDraft || streaming);
     $("queue-send").hidden = !streaming || !nativeSteering;
     $("queue-send").disabled = !hasDraft;
     $("stop-run").hidden = !streaming || !hasDraft;
@@ -1780,13 +1949,13 @@
       if (custom) {
           const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
           m.appendChild(el("div", "bubble", esc(text)));
-          log.appendChild(m); setSending(true);
+          log.appendChild(m); settleBlock(m); setSending(true);
       }
       vscode.postMessage({ type: "slashText", text });
       input.value = ""; input.style.height = "auto"; persistDraft(); scroll(); return;
     }
     const m = el("div", "msg user"); m.appendChild(el("div", "role", "you"));
-    m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m);
+    m.appendChild(el("div", "bubble", esc(text) + attachments.map((a) => `\n[${esc(a.label)}]`).join(""))); log.appendChild(m); settleBlock(m);
     const requestId = `${promptPrefix}-${++promptSequence}`;
     pendingPrompts.set(requestId, { text, attachments: [...attachments], node: m, session: draftSession });
     vscode.postMessage({ type: "prompt", text, requestId, images: imgs.length ? imgs : undefined,
@@ -2223,7 +2392,9 @@
       }
       });
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
+      const landed = [...frag.children];
       older.after(frag); cursor = start; older.hidden = cursor === 0;
+      landed.forEach(settleBlock);
       log.scrollTop = oldTop + log.scrollHeight - oldHeight;
     }
     older.type = "button"; older.onclick = page;

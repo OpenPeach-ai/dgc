@@ -1,4 +1,4 @@
-"""Authoritative DGC editor/headless protocol-v6 contract and code generation.
+"""Authoritative DGC editor/headless protocol-v8 contract and code generation.
 
 The Python backend imports this module directly.  The VS Code/Cursor client and the reviewable
 JSON Schema are generated from the same data by ``scripts/generate-editor-protocol.py``; tests fail
@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 7
+PROTOCOL_VERSION = 8
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -241,7 +241,7 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "workspace_roots": {"roots": _A(), "request_id": _S(False)},
     "saved_plan": {"plan": _S(), "exists": _B(), "request_id": _S(False)},
     "session": {
-        "kind": _f("string", enum=("new", "cleared", "resumed")),
+        "kind": _f("string", enum=("new", "cleared", "resumed", "forked")),
         "message_count": _I(), "session_id": _S(False), "path": _S(False),
         "name": _S(False),
         "request_id": _S(False),
@@ -353,6 +353,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_goal": {"request_id": _S(False)},
     "get_plan": {"request_id": _S(False)},
     "new_session": {"request_id": _S(False)},
+    "fork_session": {"name": _S(False), "request_id": _S(False)},
     "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
     "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},

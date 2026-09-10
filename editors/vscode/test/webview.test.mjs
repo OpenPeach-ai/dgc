@@ -796,7 +796,7 @@ test("CommonMark preserves semantic structure and only explicit safe navigation"
   const final = doc.querySelector(".text.final");
   assert.ok(final);
   assert.equal(final.previousElementSibling, doc.querySelector(".thinking.done"));
-  doc.querySelector(".response-copy").click();
+  doc.querySelector(".ract-copy").click();
   assert.equal(posted.at(-1).text, text, "copy response preserves Markdown source");
   assert.deepEqual(errors, []);
   dom.window.close();
@@ -897,7 +897,7 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
 });
 
 test("the approval card shows what the step will do, and Deny carries the note back", () => {
-  // Protocol v7. The card used to show raw JSON args and had no way to say why you refused,
+  // Protocol v8. The card used to show raw JSON args and had no way to say why you refused,
   // so this exercises the rendered card rather than the source that builds it.
   const { errors, posted, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });
@@ -910,7 +910,7 @@ test("the approval card shows what the step will do, and Deny carries the note b
           suggested_rule: "Edit(app.py)", choices: ["once", "always", "deny"] });
   const card = doc.querySelector('.card[data-request-id="p1"]');
   assert.ok(card, "the request card exists");
-  assert.match(card.textContent, /Run edit_file\?/, "the card names the tool");
+  assert.match(card.textContent, /Run edit_file/, "the card names the tool");
   assert.match(card.textContent, /app\.py/, "the card shows the step summary");
   assert.doesNotMatch(card.textContent, /old_string/, "raw JSON args are not what the user approves against");
   const diff = card.parentElement.querySelector(".diff, [class*='diff']") || card.querySelector(".diff, [class*='diff']");
@@ -1844,4 +1844,149 @@ test("a new chat excludes pre-existing workspace changes and rejects stale chat 
   send({ type: "chat_changes", sessionId: "chat-one", total: 10, files: [] });
   assert.equal(doc.getElementById("changesbar").hidden, true);
   assert.deepEqual(errors, []);
+});
+
+test("a finished turn summarises what it changed and offers Undo and Review", () => {
+  const { errors, posted, send, doc } = makeDom();
+  const prompt = "Fix the clamp bounds and prove it with a test";
+  const diff = "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n"
+    + "-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n";
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt } });
+  send({ type: "event", event: { type: "tool_call", call_id: "c1", name: "edit_file", args: { path: "src/clamp.py" } } });
+  send({ type: "event", event: { type: "tool_result", call_id: "c1", name: "edit_file", output: diff, is_diff: true, diff } });
+  send({ type: "event", event: { type: "tool_call", call_id: "c2", name: "write_file", args: { path: "tests/test_clamp.py" } } });
+  send({ type: "event", event: { type: "tool_result", call_id: "c2", name: "write_file", output: "wrote 9 lines" } });
+  send({ type: "event", event: { type: "text_delta", text: "Bounds corrected and covered by a test." } });
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 12 } });
+
+  const card = doc.querySelector(".turn-summary");
+  assert.ok(card, "a turn that changed files must say so");
+  assert.equal(card.querySelector(".ts-title").textContent, "2 files changed");
+  assert.equal(card.querySelector(".ts-head .change-add").textContent, "+1");
+  assert.equal(card.querySelector(".ts-head .change-del").textContent, "−1");
+  const rows = [...card.querySelectorAll(".ts-row .change-path")].map((n) => n.textContent);
+  assert.equal(rows.join(" · "), "src/clamp.py · tests/test_clamp.py",
+    "a write with no diff still names the file it created");
+  card.querySelector(".ts-row").click();
+  assert.equal(posted.at(-1).type, "reviewChange");
+  assert.equal(posted.at(-1).path, "src/clamp.py");
+  assert.equal(posted.at(-1).scope, "chat");
+  card.querySelector(".ts-undo").click();
+  assert.equal(posted.at(-1).type, "undoTurn");
+  assert.equal(posted.at(-1).prompt, prompt, "undo must identify the turn by the prompt that opened it");
+  assert.equal([...posted.at(-1).files].join(" · "), "src/clamp.py · tests/test_clamp.py");
+  // The card belongs to the turn, so a turn that changed nothing must not grow one.
+  send({ type: "event", event: { type: "turn_start", turn_id: "t2", prompt: "What does it do?" } });
+  send({ type: "event", event: { type: "text_delta", text: "It clamps a value." } });
+  send({ type: "event", event: { type: "turn_end", turn_id: "t2", reason: "completed", token_estimate: 4 } });
+  assert.equal(doc.querySelectorAll(".turn-summary").length, 1);
+  assert.deepEqual(errors, []);
+});
+
+test("every turn shows its prompt exactly once, wherever the turn was started", () => {
+  const { errors, posted, send, doc } = makeDom();
+  send({ type: "session_ready", sessionId: "chat-1" });
+  send({ type: "event", event: { type: "ready", session_id: "chat-1" } });
+  // Started from somewhere else — an editor command, a slash command, the terminal beside us.
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Summarise the diff" } });
+  assert.equal([...doc.querySelectorAll(".msg.user .bubble")].map((n) => n.textContent).join(" · "),
+    "Summarise the diff");
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 1 } });
+  // Started from the composer, which already drew the bubble: the echo must not double it.
+  const input = doc.getElementById("input");
+  input.value = "Now add a test";
+  doc.getElementById("send").click();
+  assert.equal(posted.at(-1).type, "prompt");
+  send({ type: "event", event: { type: "turn_start", turn_id: "t2", prompt: "Now add a test" } });
+  assert.equal([...doc.querySelectorAll(".msg.user .bubble")].map((n) => n.textContent).join(" · "),
+    "Summarise the diff · Now add a test");
+  assert.deepEqual(errors, []);
+});
+
+test("response actions copy, rate locally, branch and re-run the same prompt", () => {
+  const { errors, posted, send, doc } = makeDom();
+  send({ type: "session_ready", sessionId: "chat-1" });
+  send({ type: "event", event: { type: "ready", session_id: "chat-1" } });
+  const prompt = "Explain the clamp fix";
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt } });
+  send({ type: "event", event: { type: "text_delta", text: "The bounds were **swapped**." } });
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 6 } });
+  const actions = doc.querySelector(".response-actions");
+  assert.ok(actions);
+  actions.querySelector(".ract-copy").click();
+  assert.equal(posted.at(-1).type, "copy");
+  assert.equal(posted.at(-1).text, "The bounds were **swapped**.");
+
+  actions.querySelector(".ract-up").click();
+  assert.equal(posted.at(-1).type, "rateResponse");
+  assert.equal(posted.at(-1).rating, "up");
+  assert.equal(posted.at(-1).prompt, prompt);
+  assert.equal(actions.querySelector(".ract-up").classList.contains("on"), true);
+  actions.querySelector(".ract-down").click();
+  assert.equal(posted.at(-1).rating, "down");
+  assert.equal(actions.querySelector(".ract-up").classList.contains("on"), false,
+    "a response carries one rating, not two");
+  actions.querySelector(".ract-down").click();
+  assert.equal(posted.at(-1).rating, "none", "clicking the same thumb again withdraws it");
+  assert.equal(actions.querySelector(".ract-down").classList.contains("on"), false);
+
+  actions.querySelector(".ract-branch").click();
+  assert.equal(posted.at(-1).type, "branchChat");
+  assert.equal(posted.at(-1).prompt, prompt);
+
+  // Retry re-runs the prompt and leaves a half-typed draft where it was.
+  const input = doc.getElementById("input");
+  input.value = "a draft I was still writing";
+  actions.querySelector(".ract-retry").click();
+  assert.equal(posted.at(-1).type, "prompt");
+  assert.equal(posted.at(-1).text, prompt);
+  assert.equal(input.value, "a draft I was still writing");
+
+  input.value = "";
+  actions.querySelector(".ract-edit").click();
+  assert.equal(input.value, prompt, "edit-and-resend puts the prompt back in the composer");
+  assert.deepEqual(errors, []);
+});
+
+test("a finished block is pinned to its measured height before it may be skipped", async () => {
+  const { dom, errors, send, doc } = makeDom();
+  // jsdom has no layout, so stand in for it: every block is 400px tall while it is rendered and
+  // reports nothing once the browser skips it — which is exactly the state that used to erase
+  // the measurement and shorten the page under the scrollbar.
+  let rendered = true;
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight",
+    { configurable: true, get() { return rendered && this.classList?.contains("msg") ? 400 : 0; } });
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Explain the fix" } });
+  send({ type: "event", event: { type: "text_delta", text: "Because the bounds were swapped." } });
+  const live = doc.querySelector(".msg.dgc");
+  assert.equal(live.classList.contains("settled"), false,
+    "a turn still running must never be skippable — its height is still changing");
+  send({ type: "event", event: { type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 3 } });
+  await new Promise((done) => dom.window.requestAnimationFrame(() => dom.window.setTimeout(done, 0)));
+  assert.equal(live.classList.contains("settled"), true);
+  assert.equal(live.style.containIntrinsicSize, "auto 400px",
+    "the pinned size is the height the block actually had");
+  const prompt = doc.querySelector(".msg.user");
+  assert.equal(prompt.style.containIntrinsicSize, "auto 400px",
+    "the prompt bubble is pinned as soon as it is on screen");
+
+  rendered = false;                       // the browser skips it: no content, no reported size
+  live.dispatchEvent(new dom.window.Event("resize"));
+  await new Promise((done) => dom.window.setTimeout(done, 0));
+  assert.equal(live.style.containIntrinsicSize, "auto 400px",
+    "a skipped block must not overwrite its own measurement with zero");
+  assert.deepEqual(errors, []);
+});
+
+test("transcript blocks cannot shrink inside the column that holds them", () => {
+  // #log is a column flex container. A skipped block has no content, so its automatic minimum
+  // size is zero and the default flex-shrink collapses it — the page gets shorter as you scroll
+  // and the viewport jumps. The declaration below is the whole fix; keep it.
+  const block = /\.msg \{([^}]*)\}/.exec(mainCss);
+  assert.ok(block, ".msg must be styled");
+  assert.match(block[1], /flex:\s*none/, ".msg must not shrink");
+  const skippers = [...mainCss.matchAll(/([^{}]+)\{[^}]*content-visibility:\s*auto/g)]
+    .map((m) => m[1].trim().split("\n").at(-1).trim());
+  assert.deepEqual(skippers, [".msg.settled"],
+    "only a block whose real height has been pinned may be skipped");
 });

@@ -49,6 +49,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("docs", "in-app how-to guides", frozenset({"tui", "editor"}), "docs",
                 aliases=("doc", "guide")),
     CommandSpec("new", "start a new session", _TCE, "new", aliases=("session",)),
+    CommandSpec("branch", "continue in a new chat, leaving this one as it stands", _TCE,
+                "branchChat", usage="branch [NAME]", aliases=("fork",)),
     CommandSpec("resume", "reopen a past session · ^D deletes one", _TCE, "resume"),
     CommandSpec("history", "search & recall a past prompt", _T, aliases=("hist",)),
     CommandSpec("jump", "jump the transcript to a past turn", _T),
