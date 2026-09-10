@@ -952,7 +952,7 @@ already have, and nothing about your code leaves the machine that the terminal w
 
 - **VS Code**: search the Marketplace for **Vibe DGC**, or `code --install-extension vibedgc.dgc`.
 - **Cursor**: search its own extension gallery for **Vibe DGC**. Cursor updates extensions on its
-  own schedule, so use *Extensions → Vibe DGC → Update* if you want a new version immediately.
+  own schedule, so use **Extensions → Vibe DGC → Update** if you want a new version immediately.
 - The panel opens in the activity bar, or in the secondary sidebar if you prefer it on the right.
 
 Keep the CLI and the extension roughly in step. They speak a versioned protocol, and if one is
