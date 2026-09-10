@@ -43,12 +43,23 @@ const send = (event) => page.evaluate(e => window.dispatchEvent(new MessageEvent
 await send({ type: "ready", capabilities: {}, model: "qwen3.8:27b", mode: "default", think: "off", base_url: "http://localhost:11434/v1", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
 await send({ type: "turn_start", turn_id: "t1", prompt: "Fix the clamp bounds and prove it with a test" });
 await send({ type: "text_delta", text: "I'll read the file, correct the bounds and run the test.\n\n" });
-await send({ type: "tool_call", call_id: "c1", name: "read_file", args: { path: "src/clamp.py" } });
+await send({ type: "tool_call", call_id: "c1", name: "read_file", args: { path: "src/clamp.py" }, summary: "src/clamp.py" });
 await send({ type: "tool_result", call_id: "c1", name: "read_file", output: "def clamp(v, lo, hi):\n    return min(lo, max(hi, v))\n" });
-await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: "src/clamp.py" } });
+await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: "src/clamp.py" }, summary: "src/clamp.py" });
 await send({ type: "tool_result", call_id: "c2", name: "edit_file", output: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n", is_diff: true, diff: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n" });
-await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" } });
+await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" }, summary: "tests/test_clamp.py" });
 await send({ type: "tool_result", call_id: "c3", name: "write_file", output: "wrote 9 lines" });
+if (process.argv.includes("--steps")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  await page.evaluate(() => {
+    document.querySelectorAll(".tool-group").forEach((g) => { g.open = true; });
+    document.querySelectorAll(".tool").forEach((t) => {
+      t.classList.add("open"); t.querySelector(".tool-toggle")?.setAttribute("aria-expanded", "true"); });
+  });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--latest")) {
   const out = process.argv[2] || "/tmp/panel.png";
   for (let i = 0; i < 6; i++) {

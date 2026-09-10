@@ -195,7 +195,8 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool .verb { color: var(--text); font-weight: var(--w-semi); white-space: nowrap; }
 .tool .arg { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tool .badge { color: var(--faint); font-size: var(--t-xs); flex: none; }
-.tool .tool-time { color: var(--faint); font-size: var(--t-xs); min-width: 30px; text-align: right; flex: none; }
+.tool .tool-time { color: var(--faint); font-size: var(--t-xs); text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+.tool .tool-time:not(:empty) { min-width: 30px; }
 .tool .dot { width: 6px; height: 6px; border-radius: var(--r-full); flex: none; background: var(--faint); }
 .tool .dot.run { background: var(--accent); animation: pulse 1s infinite; }
 .tool .dot.ok { background: var(--muted); }
@@ -203,6 +204,13 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .tool .dot.deny { background: var(--faint); }
 .tool .body { display: none; margin: 0 var(--sp-2) var(--sp-2) var(--sp-6); padding: 0 0 0 var(--sp-2); border-left: 1px solid var(--border-strong); }
 .tool.open .body { display: block; }
+/* A step whose whole result is the diff card beneath it has nothing left to disclose. */
+.tool.no-body .body, .tool.no-body .chev { display: none; }
+.tool.no-body .tool-toggle { cursor: default; padding-left: var(--sp-3); }
+.tool.no-body .open-file { display: none; }
+.tool.no-body { border-color: var(--border); background: var(--term);
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 0; }
+.tool.no-body + .diff { border-top-left-radius: 0; border-top-right-radius: 0; }
 .tool pre { margin: 0; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
 
 /* diffs — native review colors, compact until the user opens detail */
