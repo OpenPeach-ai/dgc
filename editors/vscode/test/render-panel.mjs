@@ -4,6 +4,9 @@
 //   npm run shot -- /tmp/panel.png                    a finished turn
 //   npm run shot -- /tmp/set.png --settings           the settings dialog
 //   npm run shot -- /tmp/set.png --settings --section=models
+//   npm run shot -- /tmp/ask.png --permission          an open approval card
+//   npm run shot -- /tmp/tip.png --tip=#btn-add        a hover label
+//   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -46,6 +49,25 @@ await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: 
 await send({ type: "tool_result", call_id: "c2", name: "edit_file", output: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n", is_diff: true, diff: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n" });
 await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" } });
 await send({ type: "tool_result", call_id: "c3", name: "write_file", output: "wrote 9 lines" });
+if (process.argv.includes("--latest")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  for (let i = 0; i < 6; i++) {
+    await send({ type: "text_delta", text: "More output that pushes the transcript past the fold. ".repeat(12) + "\n\n" });
+  }
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { document.getElementById("log").scrollTop = 200; });
+  await page.waitForTimeout(150);
+  await send({ type: "text_delta", text: "And one more line arrives while you are reading.\n" });
+  await page.waitForTimeout(400);
+  if (process.argv.includes("--verbose")) console.log(JSON.stringify(await page.evaluate(() => {
+    const log = document.getElementById("log"), pill = document.getElementById("to-latest");
+    return { top: Math.round(log.scrollTop), h: Math.round(log.scrollHeight), c: log.clientHeight,
+             hidden: pill.hidden, unread: pill.classList.contains("unread"),
+             label: document.getElementById("to-latest-label").textContent };
+  })));
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--permission")) {
   await send({ type: "permission_request", id: "p1", name: "bash", args: { command: "pytest -q" },
     command: "pytest -q", summary: "pytest -q", suggested_rule: "Bash(pytest -q)",
