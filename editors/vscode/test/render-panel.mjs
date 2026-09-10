@@ -87,6 +87,36 @@ if (process.argv.includes("--permission")) {
   await send({ type: "text_delta", text: "The bounds were swapped: `min` and `max` had traded places, so every value came back pinned to the wrong end. I corrected the order and added a regression test that fails on the old code.\n" });
   await send({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 240 });
 }
+if (process.argv.includes("--endstate")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  // Short enough that the transcript overflows, so the rails really do take height from it.
+  await page.setViewportSize({ width: 460, height: 560 });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => { const l = document.getElementById("log"); l.scrollTop = l.scrollHeight; });
+  await page.waitForTimeout(200);
+  await send({ type: "goal_changed", text: "Ship a verified bounds fix", status: "completed",
+               elapsed_seconds: 109, running: false });
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+    type: "chat_changes", total: 1, additions: 1, deletions: 1,
+    files: [{ path: "src/clamp.py", additions: 1, deletions: 1 }] } })));
+  await page.waitForTimeout(400);
+  console.log(JSON.stringify(await page.evaluate(() => {
+    const log = document.getElementById("log");
+    const card = document.querySelector(".turn-summary");
+    const box = card && card.getBoundingClientRect();
+    const view = log.getBoundingClientRect();
+    const foot = document.querySelector("footer").getBoundingClientRect();
+    const rail = document.getElementById("composer-rail");
+    return { footer: Math.round(foot.height), railHidden: rail.hidden,
+             top: Math.round(log.scrollTop), h: Math.round(log.scrollHeight), c: log.clientHeight,
+             atBottom: log.scrollHeight - log.scrollTop - log.clientHeight,
+             card: !!card, cardBottom: box && Math.round(box.bottom),
+             logBottom: Math.round(view.bottom) };
+  })));
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--settings")) {
   await send({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 1 });
   const section = (process.argv.find(a => a.startsWith("--section=")) || "--section=general").slice(10);

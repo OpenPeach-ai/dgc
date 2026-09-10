@@ -82,3 +82,46 @@ await browser.close();
 if (drift > 8) { console.error(`FAIL: the transcript moved ${drift}px when the turn ended`); process.exit(1); }
 if (!honest) { console.error("FAIL: the scrollbar describes a different length from the blocks on screen"); process.exit(1); }
 console.log("ok: the transcript holds its place and reports its real length");
+
+// --- second scenario: the composer takes height from the transcript as a turn ends -----------
+// The goal rail and the changed-files rail appear when a run finishes, and they arrive as
+// extension messages rather than protocol events — the path with no scroll follow-up. The end
+// of the transcript, which is where the end-of-turn summary lives, walked off the bottom.
+const browser2 = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
+const page2 = await browser2.newPage({ viewport: { width: 460, height: 620 } });
+await page2.setContent(html, { waitUntil: "load" });
+await page2.evaluate(([mjs, mdjs]) => {
+  window.acquireVsCodeApi = () => ({ postMessage() {}, getState: () => undefined, setState() {} });
+  eval(mdjs + "\nglobalThis.DgcMarkdown = DgcMarkdown;");
+  eval(mjs);
+}, [mainJs, markdownJs]);
+const send2 = (e) => page2.evaluate(ev => window.dispatchEvent(new MessageEvent("message", { data: { type: "event", event: ev } })), e);
+await send2({ type: "ready", capabilities: {}, model: "m", mode: "default", think: "off", commands: [], custom_commands: [], goal: { text: "", status: "none" }, context_size: 65536, session_id: "s1" });
+await send2({ type: "turn_start", turn_id: "t", prompt: "Fix the clamp bounds" });
+const diff = "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n";
+await send2({ type: "tool_call", call_id: "c1", name: "edit_file", args: { path: "src/clamp.py" }, summary: "src/clamp.py" });
+await send2({ type: "tool_result", call_id: "c1", name: "edit_file", output: diff, is_diff: true, diff });
+await send2({ type: "text_delta", text: para + "\n" });
+await send2({ type: "turn_end", turn_id: "t", reason: "completed", token_estimate: 30 });
+await page2.waitForTimeout(250);
+await send2({ type: "goal_changed", text: "Ship a verified bounds fix", status: "completed", elapsed_seconds: 109, running: false });
+await page2.waitForTimeout(150);
+await page2.evaluate(() => window.dispatchEvent(new MessageEvent("message", { data: {
+  type: "chat_changes", total: 1, additions: 1, deletions: 1,
+  files: [{ path: "src/clamp.py", additions: 1, deletions: 1 }] } })));
+await page2.waitForTimeout(400);
+const end = await page2.evaluate(() => {
+  const log = document.getElementById("log");
+  const card = document.querySelector(".turn-summary");
+  return { gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
+           card: !!card,
+           cardVisible: !!card && card.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1 };
+});
+console.log(`end of turn: ${end.gap}px from the bottom · summary card ${end.card ? "rendered" : "MISSING"}`);
+await browser2.close();
+if (!end.card) { console.error("FAIL: a turn that changed a file rendered no summary"); process.exit(1); }
+if (end.gap > 4 || !end.cardVisible) {
+  console.error(`FAIL: the rails pushed the end of the turn ${end.gap}px out of view`);
+  process.exit(1);
+}
+console.log("ok: the end of a finished turn stays in view when the composer grows");
