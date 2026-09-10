@@ -682,6 +682,46 @@ baseline fingerprints remain visible and droppable but deliberately require manu
 of unsafe auto-apply. VS Code/Cursor exposes the same operations through its command Quick Pick.
 """.strip()),
 
+    ("Context notes", "what the project already learned, across context windows", """
+# Context notes
+
+Compaction protects the model's context window. It also throws away what was already tried,
+which is why an agent can cheerfully re-attempt a fix that failed an hour ago. DGC keeps the
+durable half separately: short, typed notes about this project, written as the work happens.
+
+They are **per project**, so a run spread over days accumulates one trace, and they are written
+by the harness from tool results it already sees — no model cooperation required, so the same
+behaviour holds on any local endpoint.
+
+## What gets recorded
+
+- **failure** — a command or an edit that failed, with its exit code and the tail of its output.
+- **outcome** — a file that was written or patched; a test command that passed.
+- **requirement** / **decision** — from your standing goal and from a compaction summary.
+
+Every note is bounded, redacted with the same secrets a saved session is, and carries the file,
+the tool and the date it came from, so a stale note can be judged rather than trusted.
+
+## Reading them
+
+- **`/notes`** — the most recent notes. **`/notes <query>`** searches the whole trace: an error
+  string, a test name, a file path.
+- The agent has a **`notes`** tool with the same reach, so it can check whether something already
+  failed before trying it again. It is read-only and allowed in plan mode.
+- **After a compaction**, a bounded digest of requirements, decisions and recent failures is
+  carried into the fresh context — the point at which this history would otherwise be lost.
+
+## Turning it off
+
+`/notes off` stops recording everywhere, and `notes: false` in the config does the same. The
+store lives beside the session transcripts (`~/.dgc/sessions/<project>/notes.sqlite`), holds the
+most recent `notes_max_rows` entries, and is never sent anywhere.
+
+This is not the `/recall` archive. That is your raw scrollback, kept for you to read and never
+put back into the model's context. Notes are a small curated projection that deliberately can
+be — which is why they are bounded and redacted.
+""".strip()),
+
     ("Sessions & rewind", "resume, jump, and undo whole turns", """
 # Sessions & rewind
 

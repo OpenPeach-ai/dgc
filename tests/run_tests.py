@@ -12989,6 +12989,148 @@ def test_editor_approval_gate():
           and _json.loads(sink.getvalue().splitlines()[0])["diff"] is None)
 
 
+def test_context_notes():
+    """0.33.0 — a searchable per-project trace that survives compaction and restarts.
+
+    Compaction protects the model's context and discards what was already tried, so a model
+    repeats fixes that already failed. The notes are the durable half: written by the harness
+    from tool results it already sees, so the behaviour does not depend on the model.
+    """
+    import json as _json
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+    from dgc import config as _C
+    from dgc import notes as _notes
+    from dgc.agent import Agent as _Agent, _COMPACT_PREFIX as _CP
+    from dgc.cli import UI as _UI
+    from dgc.permissions import PermissionEngine as _Engine
+    from dgc.tools import execute as _execute
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-notes-")).resolve()
+    project, other = root / "project", root / "other"
+    project.mkdir(); other.mkdir()
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    _C.USER_CONFIG.write_text(_json.dumps({"model": "m"}))
+    try:
+        agent = _Agent(_C.Config(project), _UI())
+        agent.session_file = project / "20260910-101010-aaaabbbb.json"
+
+        # --- the deterministic writers: a failing step, an edit, a passing test suite
+        agent._note_tool_result("bash", {"command": "pytest -q tests/test_retry.py"},
+                                "exit code: 1\nE   assert 1 == 2")
+        agent._note_tool_result("edit_file", {"path": "src/app.py"}, "--- a/src/app.py\n+++ b")
+        agent._note_tool_result("bash", {"command": "pytest -q"}, "12 passed in 0.4s")
+        agent._note_tool_result("read_file", {"path": "src/app.py"}, "error: unreadable")
+        store = agent.notes()
+        kinds = sorted((r["kind"], r["tool"]) for r in store.recent(10))
+        check("a failing command, an edit and a passing test are recorded; a read is not",
+              kinds == [("failure", "bash"), ("outcome", "bash"), ("outcome", "edit_file")], kinds)
+        failure = next(r for r in store.recent(10) if r["kind"] == "failure")
+        check("a failure keeps the command and the evidence that it failed",
+              "tests/test_retry.py" in failure["text"] and "assert 1 == 2" in failure["evidence"]
+              and failure["session"] == "20260910-101010-aaaabbbb")
+
+        # --- search is the point: by error string, by test name, by path
+        check("the trace is searchable by test name, by error text and by file",
+              [r["kind"] for r in store.search("test_retry")] == ["failure"]
+              and [r["kind"] for r in store.search("assert")] in ([], ["failure"])
+              and [r["file"] for r in store.search("src/app.py")] == ["src/app.py"])
+        check("a per-file lookup returns only notes about that file",
+              [r["file"] for r in store.for_file("src/app.py", kinds=())] == ["src/app.py"]
+              and [r["file"] for r in store.for_file("app.py", kinds=())] == ["src/app.py"]
+              and store.for_file("never-touched.py", kinds=()) == [])
+
+        # --- the store is per project and survives a restart
+        elsewhere = _Agent(_C.Config(other), _UI())
+        check("another project has its own trace", elsewhere.notes().count() == 0 and store.count() == 3)
+        reopened = _Agent(_C.Config(project), _UI())
+        check("the trace survives a restart", reopened.notes().count() == 3)
+
+        # --- redaction, on write and on read
+        secret_agent = _Agent(_C.Config(project), _UI())
+        secret_agent._notes = _notes.NoteStore(project, redact_secrets=("sk-live-notesecret",))
+        secret_agent._note_tool_result("bash", {"command": "deploy --key sk-live-notesecret"},
+                                       "exit code: 1\ntoken sk-live-notesecret rejected")
+        raw = _notes.notes_path(project).read_bytes()
+        check("a secret never reaches the database, and is stripped again on read",
+              b"sk-live-notesecret" not in raw
+              and all("sk-live-notesecret" not in r["text"] + r["evidence"]
+                      for r in secret_agent.notes().recent(10)))
+
+        # --- what the model can do with them
+        check("the notes tool searches, filters by file, and lists the recent ones",
+              "test_retry" in _execute("notes", {"query": "test_retry"}, agent.ctx)
+              and "src/app.py" in _execute("notes", {"file": "src/app.py"}, agent.ctx)
+              and "most recent notes" in _execute("notes", {}, agent.ctx)
+              and _execute("notes", {"query": "nothing-at-all"}, agent.ctx).startswith("no notes"))
+        fresh_root = root / "fresh"; fresh_root.mkdir()
+        fresh = _Agent(_C.Config(fresh_root), _UI())
+        fresh_tools = {t["function"]["name"] for t in fresh._tool_schemas()}
+        with_notes = {t["function"]["name"] for t in agent._tool_schemas()}
+        check("a project with no trace never pays request tokens for a search over nothing",
+              "notes" not in fresh_tools and "notes" in with_notes
+              and fresh.notes().has_notes() is False and agent.notes().has_notes() is True)
+        check("reading the trace is read-only work, so plan mode allows it",
+              _Engine("plan", {"allow": [], "ask": [], "deny": []}, project)
+              .decide("notes", {"query": "x"})[0] == "allow")
+
+        # --- the compaction seam: the digest is what stops a repeated failed fix
+        digest = agent.notes_digest()
+        check("the digest carries the failures a compacted context would otherwise lose",
+              "tests/test_retry.py" in digest and digest.startswith("Earlier in this project")
+              and len(digest) <= 1_200)
+        check("the digest is bounded even when asked for less",
+              len(agent.notes_digest(limit_chars=200)) <= 200)
+
+        # --- off means off
+        agent.config.data["notes"] = False
+        agent._notes = None
+        before = store.count()
+        agent._note_tool_result("bash", {"command": "false"}, "exit code: 1")
+        agent.config.data["notes"] = True
+        agent._notes = None
+        check("disabled notes record nothing, inject nothing, and say so",
+              agent.notes().count() == before and _notes.handle_command(agent, "off").startswith("Context notes are **off**")
+              and agent.config.get("notes") is False, )
+        agent.config.data["notes"] = True
+        agent._notes = None
+
+        # --- /notes for the terminals
+        listing = _notes.handle_command(agent, "")
+        check("/notes shows what the project learned, and searches it",
+              "What this project has learned" in listing and "test_retry" in listing
+              and "test_retry" in _notes.handle_command(agent, "test_retry")
+              and "No notes match" in _notes.handle_command(agent, "zzz-nothing"))
+
+        # --- a broken store costs the turn nothing. Corrupt a project nothing else has open:
+        #     with a live connection and its WAL still present, SQLite recovers the file and the
+        #     test would prove nothing.
+        corrupt_root = root / "corrupt"; corrupt_root.mkdir()
+        seed = _notes.NoteStore(corrupt_root)
+        seed.add("failure", "one")
+        seed.close()
+        corrupt_path = _notes.notes_path(corrupt_root)
+        for leftover in corrupt_path.parent.glob("notes.sqlite-*"):
+            leftover.unlink()
+        corrupt_path.write_bytes(b"this is not a database at all")
+        broken = _notes.NoteStore(corrupt_root)
+        check("a corrupt database degrades to no notes instead of raising",
+              broken.add("failure", "x") is None and broken.search("x") == []
+              and broken.recent() == [] and broken.count() == 0)
+        unopenable_root = root / "unopenable"; unopenable_root.mkdir()
+        _notes.notes_path(unopenable_root).mkdir()          # a directory where the database goes
+        blocked = _notes.NoteStore(unopenable_root)
+        check("a store that cannot be opened at all behaves the same",
+              blocked.add("failure", "x") is None and blocked.recent() == [] and blocked.count() == 0)
+        agent._notes = blocked
+        agent._note_tool_result("bash", {"command": "false"}, "exit code: 1")   # must not raise
+        check("a turn survives a store it cannot write to", agent.notes_digest() == "")
+    finally:
+        for p, data in snapshot.items():
+            p.unlink(missing_ok=True) if data is None else p.write_bytes(data)
+
+
 def test_transcript_reuses_unchanged_entries():
     """A frame must not cost the whole history, and the cursor must land exactly where it did.
 
@@ -18135,6 +18277,7 @@ def main():
         test_paste_collapse()
         test_resize_reflow()
         test_editor_approval_gate()
+        test_context_notes()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

@@ -958,6 +958,9 @@ class CLI:
                 self.ui.info(
                     f"export-training → wrote {summary['written']} session(s), "
                     f"skipped {summary['skipped']}, to {summary['out']} (secrets scrubbed)")
+        elif cmd == "notes":
+            from .notes import handle_command
+            self.console.print(render.render_markdown(handle_command(self.agent, rest)))
         elif cmd == "trust":
             from .trust import handle_trust_command
             self.console.print(render.render_markdown(handle_trust_command(cfg, cfg.project_root, rest)))

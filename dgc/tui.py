@@ -4425,6 +4425,9 @@ class TUI:
                 self._append(self._rich(
                     f"[bold {th.accent}]project DGC.md[/]\n[{th.faint}]{_esc(project_body)}[/]\n"
                     f"[bold {th.accent}]user DGC.md[/]\n[{th.faint}]{_esc(user_body)}[/]"))
+        elif cmd == "notes":
+            from .notes import handle_command
+            self._append_md(handle_command(self.agent, rest))
         elif cmd == "trust":
             from .trust import handle_trust_command
             self._append_md(handle_trust_command(cfg, cfg.project_root, rest))
