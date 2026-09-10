@@ -622,6 +622,22 @@ async function main() {
       .waitFor({ state: "visible", timeout: 10_000 });
     await dismissNotifications(page);
 
+    if (process.env.DGC_CAPTURE_TRACE === "1") {
+      await frame.evaluate(() => {
+        const log = document.getElementById("log");
+        window.__trace = [];
+        const note = (what) => window.__trace.push({ what, t: Math.round(performance.now()),
+          top: Math.round(log.scrollTop), h: Math.round(log.scrollHeight), c: log.clientHeight });
+        log.addEventListener("scroll", () => note("scroll"), { passive: true });
+        new MutationObserver((records) => {
+          for (const r of records) for (const n of r.addedNodes) {
+            if (n.nodeType === 1 && (n.classList.contains("turn-summary")
+              || n.classList.contains("response-actions"))) note("added:" + n.className);
+          }
+        }).observe(log, { childList: true, subtree: true });
+        new ResizeObserver(() => note("log-resize")).observe(log);
+      });
+    }
     recorder = spawn("ffmpeg", [
       "-hide_banner", "-loglevel", "error", "-y", "-f", "x11grab", "-draw_mouse", "0",
       "-framerate", "30", "-video_size", `${viewport.width}x${viewport.height}`,
@@ -693,8 +709,10 @@ async function main() {
         log.scrollTop = log.scrollHeight;
         return { before, after: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight) };
       });
+      const trace = await frame.evaluate(() => (window.__trace || []).slice(-24));
       throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`
-        + ` (before=${JSON.stringify(forced.before)} forced=${forced.after})`);
+        + ` (before=${JSON.stringify(forced.before)} forced=${forced.after})`
+        + (trace.length ? `\ntrace: ${JSON.stringify(trace)}` : ""));
     }
     const remaining = minimumSeconds * 1000 - (Date.now() - recordingStarted);
     if (remaining > 0) await page.waitForTimeout(remaining);
