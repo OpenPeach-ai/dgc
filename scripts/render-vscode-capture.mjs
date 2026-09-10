@@ -657,6 +657,27 @@ async function main() {
       if (state.state === "failed") throw new Error(state.reason || "fixture backend failed");
       return state.state === "passed";
     }, "the deterministic extension fixture did not complete", maximumFlowMs);
+    // The summary a finished turn writes is the last thing in the transcript, so measure it the
+    // moment the run ends — before this script opens any disclosure. Expanding a collapsed group
+    // inserts its content above the view, which moves the end of the transcript down exactly the
+    // way it would for anyone who opened it by hand; that is the disclosure working, not a fault.
+    const tail = await frame.evaluate(() => {
+      const log = document.getElementById("log");
+      const card = document.querySelector(".turn-summary");
+      const actions = document.querySelector(".response-actions");
+      const view = log.getBoundingClientRect();
+      return { build: window.__dgcPanelBuild || "(none)",
+               gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
+               card: !!card, actions: !!actions,
+               cardVisible: !!card && card.getBoundingClientRect().bottom <= view.bottom + 1 };
+    });
+    if (!tail.card || !tail.actions) {
+      throw new Error(`the finished turn rendered no summary (card=${tail.card} actions=${tail.actions})`);
+    }
+    if (tail.gap > 4 || !tail.cardVisible) {
+      throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`
+        + ` (panel build ${tail.build})`);
+    }
     await frame.locator('.tool[data-tool-name="read_file"] .tool-status')
       .getByText("completed", { exact: true }).waitFor({ state: "attached", timeout: 10_000 });
     await frame.locator('.tool[data-tool-name="edit_file"] .tool-status')
@@ -688,34 +709,13 @@ async function main() {
       .filter({ hasText: "return min(lower, max(upper, value))" }).count()) {
       throw new Error("visible Monaco buffer still contains the pre-edit clamp expression");
     }
-    // The summary a finished turn writes is the last thing in the transcript. If the panel is
-    // not at the bottom when the run ends, the capture shows an answer with its result cut off.
-    const tail = await frame.evaluate(() => {
+    // Everything this script opened for the camera pushed the end of the transcript down. Put
+    // the panel back at the end of the answer so the recording finishes on the result.
+    await frame.evaluate(() => {
       const log = document.getElementById("log");
-      const build = window.__dgcPanelBuild || "(none)";
-      const card = document.querySelector(".turn-summary");
-      const actions = document.querySelector(".response-actions");
-      const view = log.getBoundingClientRect();
-      return { build, gap: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight),
-               card: !!card, actions: !!actions,
-               cardVisible: !!card && card.getBoundingClientRect().bottom <= view.bottom + 1 };
+      log.scrollTop = log.scrollHeight;
     });
-    if (!tail.card || !tail.actions) {
-      throw new Error(`the finished turn rendered no summary (card=${tail.card} actions=${tail.actions})`);
-    }
-    if (tail.gap > 4 || !tail.cardVisible) {
-      const forced = await frame.evaluate(() => {
-        const log = document.getElementById("log");
-        const before = { top: Math.round(log.scrollTop), h: Math.round(log.scrollHeight), c: log.clientHeight };
-        log.scrollTop = log.scrollHeight;
-        return { before, after: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight) };
-      });
-      const trace = await frame.evaluate(() => (window.__trace || []).slice(-24));
-      throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`
-        + ` (panel build ${tail.build})`
-        + ` (before=${JSON.stringify(forced.before)} forced=${forced.after})`
-        + (trace.length ? `\ntrace: ${JSON.stringify(trace)}` : ""));
-    }
+    await page.waitForTimeout(400);
     const remaining = minimumSeconds * 1000 - (Date.now() - recordingStarted);
     if (remaining > 0) await page.waitForTimeout(remaining);
     await page.waitForTimeout(800);
