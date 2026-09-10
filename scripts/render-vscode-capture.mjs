@@ -687,7 +687,14 @@ async function main() {
       throw new Error(`the finished turn rendered no summary (card=${tail.card} actions=${tail.actions})`);
     }
     if (tail.gap > 4 || !tail.cardVisible) {
-      throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`);
+      const forced = await frame.evaluate(() => {
+        const log = document.getElementById("log");
+        const before = { top: Math.round(log.scrollTop), h: Math.round(log.scrollHeight), c: log.clientHeight };
+        log.scrollTop = log.scrollHeight;
+        return { before, after: Math.round(log.scrollHeight - log.scrollTop - log.clientHeight) };
+      });
+      throw new Error(`the end of the finished turn is ${tail.gap}px below the visible transcript`
+        + ` (before=${JSON.stringify(forced.before)} forced=${forced.after})`);
     }
     const remaining = minimumSeconds * 1000 - (Date.now() - recordingStarted);
     if (remaining > 0) await page.waitForTimeout(remaining);
