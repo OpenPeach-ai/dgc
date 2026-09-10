@@ -187,6 +187,7 @@ function managedMcpIdentity(item: ManagedMcpServer): string {
 
 export class DgcViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
+  private viewType = "dgc.chat";   // the container the chat currently lives in
   private turnStartedAt = 0;
   private backend?: DgcBackend;
   private state = { model: "", mode: "default", think: "off", ultra: false,
@@ -194,6 +195,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
                     subscriptionEngine: "",
                     goal: { text: "", status: "none", elapsed_seconds: 0 } };
   private _installPrompted = false;
+  private _updatePrompted = false;
   private featureRequest = 0;
   private correlatedStateRequests = false;
   private routeState: {
@@ -930,6 +932,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   restart(): void {
     this._installPrompted = false;      // a fresh start earns a fresh prompt if the CLI is still missing
+    this._updatePrompted = false;
     this.setReadyContext(false);
     this.changesRefreshRevision++;
     this.workspaceChanges = [];
@@ -1156,6 +1159,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (ev.type === "error" && (ev as any).notInstalled) {
       this.promptInstallCli();
     }
+    if (ev.type === "error" && (ev as any).cli_outdated) {
+      this.promptUpdateCli();
+    }
     if (["tool_result", "turn_end", "rewound", "session"].includes(ev.type)) {
       this.scheduleWorkspaceChanges(ev.type === "tool_result" ? 120 : 0);
     }
@@ -1181,6 +1187,30 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           "Installing the DGC CLI in the terminal. When it finishes, reload the window to connect.");
       } else if (choice === SETPATH) {
         vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
+      }
+    });
+  }
+
+  /** The CLI is older than this extension — offer the update instead of only naming the problem.
+   *  DGC drives the CLI you installed rather than shipping its own copy, so the fix is one click
+   *  and then a restart, not a silent swap of a bundled binary. */
+  private promptUpdateCli(): void {
+    if (this._updatePrompted) { return; }
+    this._updatePrompted = true;
+    const UPDATE = "Update DGC CLI", SETPATH = "Set dgc.command…";
+    void vscode.window.showErrorMessage(
+      "This DGC CLI is older than the DGC extension. Update it to reconnect.", UPDATE, SETPATH,
+    ).then((choice) => {
+      if (choice === UPDATE) {
+        const term = vscode.window.createTerminal("Update DGC");
+        term.show();
+        term.sendText("curl -fsSL https://vibedgc.com/install.sh | bash");
+        void vscode.window.showInformationMessage(
+          "Updating the DGC CLI in the terminal. When it finishes, run “DGC: Restart Backend”.",
+          "Restart Backend",
+        ).then((next) => { if (next === "Restart Backend") { this.restart(); } });
+      } else if (choice === SETPATH) {
+        void vscode.commands.executeCommand("workbench.action.openSettings", "dgc.command");
       }
     });
   }
@@ -1241,7 +1271,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
   // ---- webview -------------------------------------------------------------
   resolveWebviewView(view: vscode.WebviewView): void {
+    const previous = this.view;
+    if (previous && previous !== view) {
+      // retainContextWhenHidden keeps the abandoned twin alive, so it must say where the
+      // conversation went instead of sitting there looking like a second, dead chat.
+      try {
+        previous.webview.html = this.movedNotice(view.viewType === "dgc.chatSecondary"
+          ? "the secondary side bar" : "the activity bar");
+      } catch { /* the old view may already be disposed */ }
+    }
     this.view = view;
+    this.viewType = view.viewType || "dgc.chat";
     this.webviewReady = false;
     view.webview.options = {
       enableScripts: true,
@@ -1265,8 +1305,18 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   focus(): void {
-    vscode.commands.executeCommand("dgc.chat.focus");
+    // Focus wherever the chat actually is: the activity bar by default, or the secondary side
+    // bar once the user has opened it there.
+    vscode.commands.executeCommand(`${this.viewType}.focus`);
     this.view?.show?.(true);
+  }
+
+  /** Shown in the copy of the view the conversation just left. */
+  private movedNotice(where: string): string {
+    const css = "font:13px var(--vscode-font-family);color:var(--vscode-descriptionForeground);"
+      + "padding:16px;line-height:1.5";
+    return `<!DOCTYPE html><html><body style="${css}">DGC is open in ${where}.` +
+      ` This copy stays out of the way — close it, or run <b>DGC: Focus Chat</b> to come back.</body></html>`;
   }
 
   private inVisiblePanel(action: () => void): void {

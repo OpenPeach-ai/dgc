@@ -33,7 +33,13 @@ export function activate(context: vscode.ExtensionContext): void | object {
   };
 
   context.subscriptions.push(
+    // The same chat, offered in the activity bar and in the secondary sidebar. VS Code binds a
+    // container to exactly one location, so a second container is how a view can live in both;
+    // the provider keeps a single conversation and follows whichever one the user opens.
     vscode.window.registerWebviewViewProvider("dgc.chat", provider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerWebviewViewProvider("dgc.chatSecondary", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     provider,

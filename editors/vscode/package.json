@@ -54,12 +54,27 @@
           "title": "DGC",
           "icon": "media/dgc.svg"
         }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "dgcSecondary",
+          "title": "DGC",
+          "icon": "media/dgc.svg"
+        }
       ]
     },
     "views": {
       "dgc": [
         {
           "id": "dgc.chat",
+          "type": "webview",
+          "name": "DGC",
+          "icon": "media/dgc.svg"
+        }
+      ],
+      "dgcSecondary": [
+        {
+          "id": "dgc.chatSecondary",
           "type": "webview",
           "name": "DGC",
           "icon": "media/dgc.svg"
@@ -222,22 +237,22 @@
       "view/title": [
         {
           "command": "dgc.openCommandMenu",
-          "when": "view == dgc.chat",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@0"
         },
         {
           "command": "dgc.resume",
-          "when": "view == dgc.chat",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@1"
         },
         {
           "command": "dgc.newSession",
-          "when": "view == dgc.chat",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@2"
         },
         {
           "command": "dgc.settings",
-          "when": "view == dgc.chat",
+          "when": "view == dgc.chat || view == dgc.chatSecondary",
           "group": "navigation@3"
         }
       ],
