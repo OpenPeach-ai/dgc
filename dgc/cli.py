@@ -1036,6 +1036,13 @@ class CLI:
         elif cmd == "compact":
             if not self.agent.maybe_compact(force=True, trigger="manual"):
                 self.ui.error(self.agent._last_persist_error or "context compaction failed")
+        elif cmd in ("branch", "fork"):
+            if self.agent.fork_session(rest):
+                self.ui.info(f"branched into {self.agent.session_name or 'a new chat'}"
+                             " — this chat keeps everything up to here")
+            else:
+                self.ui.error(getattr(self.agent, "_last_persist_error", "")
+                              or "the branch could not be saved")
         elif cmd in ("clear", "new"):
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(cfg.project_root)

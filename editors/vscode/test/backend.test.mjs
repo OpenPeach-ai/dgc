@@ -416,7 +416,7 @@ test("backend rejects incompatible protocol versions and never releases queued c
   // extension means the EXTENSION is behind. "protocol mismatch" alone strands whoever updated
   // one half first, which is everyone for a while after a protocol bump.
   assert.match(failure.message, /Update the DGC extension/);
-  assert.match(failure.message, /v7/);
+  assert.match(failure.message, /v8/);
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(backend.ready, false);
   assert.equal(seen.some((event) => event.type === "echo"), false);
@@ -444,7 +444,7 @@ test("a backend that reports no version is refused by the schema, before any ver
     (event) => event.type === "error" && event.protocol_error === true);
   backend.start();
   const message = (await failure).message;
-  assert.match(message, /violated protocol v7: ready\.protocol_version has the wrong type/);
+  assert.match(message, /violated protocol v8: ready\.protocol_version has the wrong type/);
   assert.doesNotMatch(message, /speaks vnull|speaks vundefined|speaks vNaN/);
   backend.dispose();
 });

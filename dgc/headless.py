@@ -57,7 +57,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
-    "delete_session", "list_checkpoints", "rewind", "list_retained_tasks",
+    "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
@@ -1897,6 +1897,22 @@ class Backend:
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,
                          session_id=self.agent.session_file.stem, name="",
+                         **_request_fields(request_id))
+            self._emit_context(request_id)
+            self._emit_goal()
+        elif t == "fork_session":
+            # "Branch from here" keeps the conversation and hands it a new identity, so the
+            # chat it came from stops where the branch began instead of being overwritten.
+            if not self.agent.fork_session(str(cmd.get("name") or "")):
+                self.em.emit("command_rejected", command=t, reason="session_fork_failed",
+                             message=getattr(self.agent, "_last_persist_error", "")
+                             or "the branch could not be saved",
+                             **_request_fields(request_id))
+                return
+            self.em.emit("session", kind="forked",
+                         message_count=max(0, len(self.agent.messages) - 1),
+                         session_id=self.agent.session_file.stem,
+                         name=str(self.agent.session_name or ""),
                          **_request_fields(request_id))
             self._emit_context(request_id)
             self._emit_goal()

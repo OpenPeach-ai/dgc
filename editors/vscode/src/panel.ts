@@ -1527,6 +1527,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "reviewChange":
         await this.reviewWorkspaceChange(String(msg.path || ""), msg.scope === "chat");
         break;
+      case "undoTurn":
+        await this.undoTurn(String(msg.prompt || ""),
+                            Array.isArray(msg.files) ? msg.files.map(String) : []);
+        break;
+      case "branchChat":
+        await this.branchChat(String(msg.prompt || ""));
+        break;
+      case "rateResponse":
+        await this.rateResponse(String(msg.rating || "none"), String(msg.prompt || ""));
+        break;
       case "pickModel":
         this.selectModel();
         break;
@@ -2138,6 +2148,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "clear": this.ensureBackend().send(
         this.stateCommand("session-clear", { type: "clear_session" })); break;
       case "rewind": this.rewind(); break;
+      case "branchChat": void this.branchChat(""); break;
       case "retainedTasks": void this.retainedTasks(); break;
       case "subagent": this.openSettings("agents"); break;
       case "settings": this.openSettings(); break;
@@ -2390,6 +2401,85 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       qp.onDidHide(() => { qp.dispose(); resolve(); });
       qp.show();
     });
+  }
+
+  /**
+   * Undo one turn's edits. The turn is identified by the prompt that opened its recovery point,
+   * so a card from further up the transcript refuses rather than rewinding the wrong turn — the
+   * failure mode of an "undo" that guesses is losing work the user never asked to lose.
+   */
+  async undoTurn(prompt: string, files: string[]): Promise<void> {
+    const be = this.ensureBackend();
+    let items: any[] = [];
+    try {
+      const response = await this.requestState(
+        be, "checkpoints", { type: "list_checkpoints" }, "checkpoints", 2500);
+      items = Array.isArray(response.items) ? response.items : [];
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(
+        err?.message || "DGC could not read its recovery points.");
+      return;
+    }
+    // The backend stores the first 70 characters of the prompt, stripped, as the preview.
+    const wanted = prompt.trim().slice(0, 70);
+    const squash = (value: string) => value.replace(/\s+/g, " ").trim();
+    let match: any;
+    for (const item of items) {
+      const preview = String(item?.preview ?? "");
+      if (preview === wanted || (wanted && squash(preview) === squash(wanted))) match = item;
+    }
+    if (!match || typeof match.index !== "number") {
+      void vscode.window.showWarningMessage(
+        "DGC can no longer undo that turn — its recovery point has been used or pruned. "
+        + "Open Review to see the changes and revert the ones you want.");
+      return;
+    }
+    const count = Number(match.files) || files.length;
+    const choice = await vscode.window.showWarningMessage(
+      `Undo this turn? DGC restores ${count} file${count === 1 ? "" : "s"} and rewinds the `
+      + "conversation to just before this prompt.",
+      { modal: true, detail: wanted }, "Undo turn");
+    if (choice !== "Undo turn") return;
+    let outcome: any;
+    try {
+      outcome = await this.requestState(
+        be, "rewind", { type: "rewind", index: match.index }, "rewound", 5000);
+    } catch (err: any) {
+      outcome = { message: err?.message || "DGC could not queue the undo." };
+    }
+    if (outcome?.type === "rewound" && outcome.ok === true) {
+      void vscode.window.showInformationMessage(
+        `↩ Undone; DGC restored ${outcome.files_restored} file(s).`);
+    } else {
+      void vscode.window.showErrorMessage(
+        outcome?.message || "DGC could not undo the turn; the recovery point was kept.");
+    }
+  }
+
+  /** Continue in a new chat from this point, leaving the chat it came from as it stands. */
+  async branchChat(prompt: string): Promise<void> {
+    const be = this.ensureBackend();
+    const name = prompt.trim().replace(/\s+/g, " ").slice(0, 60);
+    try {
+      await this.requestState(
+        be, "session", { type: "fork_session", name }, "session", 5000);
+    } catch (err: any) {
+      void vscode.window.showErrorMessage(
+        err?.message || "DGC could not branch this chat into a new one.");
+    }
+  }
+
+  /**
+   * A rating is a private note about this workspace's own history. It is stored in workspace
+   * state, is never sent anywhere, and exists so a later session can be asked what went well.
+   */
+  async rateResponse(rating: string, prompt: string): Promise<void> {
+    if (!["up", "down", "none"].includes(rating)) return;
+    const key = "dgc.responseRatings";
+    const stored = this.context.workspaceState.get<any[]>(key);
+    const rows = Array.isArray(stored) ? stored.slice(-199) : [];
+    rows.push({ rating, prompt: prompt.trim().slice(0, 200), at: new Date().toISOString() });
+    await this.context.workspaceState.update(key, rows);
   }
 
   async rewind(): Promise<void> {

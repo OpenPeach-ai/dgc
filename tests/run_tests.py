@@ -12944,8 +12944,8 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v7 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 7
+    check("protocol v8 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 8
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None
@@ -13160,6 +13160,90 @@ def test_context_notes():
 def _goal_cap(agent, context_size: int) -> int:
     agent.config.data["context_size"] = context_size
     return agent.goal_max_chars()
+
+
+def test_branch_session():
+    """Branching continues the conversation in a new chat and leaves the old one where it was.
+
+    "Start a new chat from here" is not "start a new chat": the point is that everything so far
+    comes with you and the chat you came from stops at the branch instead of being overwritten.
+    A branch that half-happens — new identity, unwritten file — would strand the next save, so a
+    failed write must leave the session exactly as it found it.
+    """
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+    from dgc import config as _C, commands as _CM, sessions as _S
+    from dgc.agent import Agent as _Agent
+    from dgc.cli import UI as _UI
+    from dgc.headless import Backend as _Backend
+
+    root = _Path(_tempfile.mkdtemp(prefix="dgc-branch-")).resolve()
+    project = root / "project"; project.mkdir()
+    snapshot = {p: (p.read_bytes() if p.exists() else None) for p in (_C.USER_CONFIG, _C.USER_SECRETS)}
+    _C.USER_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    _C.USER_CONFIG.write_text('{"model": "m"}')
+    try:
+        agent = _Agent(_C.Config(project), _UI())
+        agent.session_file = _S.new_path(agent.config.project_root)
+        agent.name_session("clamp bounds")
+        agent.messages.append({"role": "user", "content": "fix the clamp bounds"})
+        agent.messages.append({"role": "assistant", "content": "swapped min and max"})
+        agent._persist()
+        parent_file = agent.session_file
+        parent_bytes = parent_file.read_bytes()
+
+        check("a branch takes a new file and keeps the conversation",
+              agent.fork_session() is True and agent.session_file != parent_file
+              and agent.session_file.is_file()
+              and [m["content"] for m in agent.messages if m["role"] != "system"]
+              == ["fix the clamp bounds", "swapped min and max"])
+        check("the branch is named after the chat it came from",
+              agent.session_name == "clamp bounds (branch)")
+        check("the branch carries the whole transcript into its own file",
+              len(_S.load_record(agent.session_file, agent.session_root)["messages"])
+              == len(agent.messages))
+
+        # The whole point: what happens next must not reach back into the parent.
+        agent.messages.append({"role": "user", "content": "only the branch hears this"})
+        agent._persist()
+        check("the chat it branched from is untouched by anything the branch does",
+              parent_file.read_bytes() == parent_bytes)
+
+        branch_file, branch_name = agent.session_file, agent.session_name
+        agent._persist = lambda: False               # a full disk, a lost lease, a read-only dir
+        check("a branch that cannot be saved is not a branch — the session is left alone",
+              agent.fork_session("elsewhere") is False
+              and agent.session_file == branch_file and agent.session_name == branch_name)
+        del agent._persist
+
+        # --- the editor route reports it, and reports a refusal instead of pretending
+        backend = object.__new__(_Backend)
+        backend.agent, backend.config = agent, agent.config
+        events = []
+        backend.em = type("E", (), {"emit": lambda _s, typ, **f: events.append({"type": typ, **f})})()
+        backend._emit_context = lambda *a, **k: None
+        backend._emit_goal = lambda *a, **k: None
+        backend.dispatch({"type": "fork_session", "name": "review pass"})
+        check("the editor is told a branch happened, with its new identity",
+              events and events[0]["type"] == "session" and events[0]["kind"] == "forked"
+              and events[0]["name"] == "review pass (branch)"
+              and events[0]["session_id"] == agent.session_file.stem
+              and events[0]["message_count"] == len(agent.messages) - 1, events[:1])
+        events.clear()
+        agent._persist = lambda: False
+        backend.dispatch({"type": "fork_session"})
+        check("a branch the backend could not save is rejected, not announced",
+              events and events[0]["type"] == "command_rejected"
+              and events[0]["command"] == "fork_session", events[:1])
+        del agent._persist
+
+        surfaces = {c.name: c for c in _CM.BUILTIN_COMMANDS}
+        check("/branch is offered by the terminal, the classic REPL and the editor",
+              "branch" in surfaces and surfaces["branch"].surfaces
+              >= {"tui", "classic", "editor"} and "fork" in surfaces["branch"].aliases)
+    finally:
+        for p, data in snapshot.items():
+            p.unlink(missing_ok=True) if data is None else p.write_bytes(data)
 
 
 def test_goal_refusal_keeps_the_text():
@@ -18447,6 +18531,7 @@ def main():
         test_editor_approval_gate()
         test_context_notes()
         test_goal_refusal_keeps_the_text()
+        test_branch_session()
         test_steering()
         test_add_skill_url()
         test_toolcall_recovery()

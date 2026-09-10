@@ -4117,6 +4117,15 @@ class TUI:
             self._open_rewind()
         elif cmd in ("new", "session"):
             self._prompt_new_session()
+        elif cmd in ("branch", "fork"):
+            # Everything so far carries over; only the file it saves to is new, so the chat
+            # this branched from keeps exactly what it had when the branch was taken.
+            if self.agent.fork_session(rest):
+                self._flash(f"branched into {self.agent.session_name or 'a new chat'}"
+                            " · this chat keeps everything up to here")
+            else:
+                self.error(getattr(self.agent, "_last_persist_error", "")
+                           or "the branch could not be saved")
         elif cmd == "name":
             if rest:
                 if self._name_session(self.active, rest):
