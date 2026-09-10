@@ -553,6 +553,25 @@
   }
   function atBottom() { return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
   function scroll() { log.scrollTop = log.scrollHeight; }
+  // ---- reading back without losing the end ----
+  // Scrolling up during a run is normal; being stranded there is not. The pill appears only
+  // while you are away from the bottom, and turns into the accent once something has arrived
+  // that you have not seen.
+  const toLatest = $("to-latest");
+  let unread = false;
+  function renderToLatest() {
+    const away = !atBottom();
+    if (!away) unread = false;
+    toLatest.hidden = !away;
+    toLatest.classList.toggle("unread", away && unread);
+    $("to-latest-label").textContent = away && unread ? "New" : "Latest";
+    toLatest.title = away && unread
+      ? "DGC has written more since you scrolled up \u2014 jump to it"
+      : "Jump to the newest message";
+  }
+  function noteNewContent() { if (!atBottom()) { unread = true; renderToLatest(); } }
+  log.addEventListener("scroll", renderToLatest, { passive: true });
+  toLatest.onclick = () => { scroll(); unread = false; renderToLatest(); input.focus(); };
 
   // ---- turn lifecycle ----
   // Two prompts are "the same" when their opening prose matches; the composer's own bubble may
@@ -738,7 +757,7 @@
     const node = textBlock(); node._markdown = turn._buf;
     if (!turn.renderedAt || Date.now() - turn.renderedAt >= 48) flushText();
     else if (!turn.renderTimer) turn.renderTimer = setTimeout(() => {
-      const stick = atBottom(); flushText(); if (stick) scroll();
+      const stick = atBottom(); flushText(); if (stick) scroll(); else noteNewContent();
     }, 48);
   }
   function breakText() { if (turn) { flushText(); turn.textEl = null; turn._buf = ""; turn.renderedAt = 0; } }
@@ -1906,7 +1925,7 @@
       case "error": speak(`DGC error: ${ev.message}`); sysLine(ev.message, true); if (ev.fatal) { endTurn("error"); setSending(false); } break;
       case "turn_end": speak(ev.reason === "cancelled" ? "DGC generation stopped" : ev.reason === "error" ? "DGC response ended with an error" : "DGC response complete"); endTurn(ev.reason); setSending(false); break;
     }
-    if (stick) scroll();
+    if (stick) scroll(); else noteNewContent();
   }
 
   // ---- composer ----

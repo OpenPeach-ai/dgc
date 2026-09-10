@@ -2044,3 +2044,32 @@ test("no control in the panel is left without a hover label", () => {
   assert.deepEqual(unlabelled, [], `these buttons say nothing on hover: ${unlabelled.join(", ")}`);
   void skeleton;
 });
+
+test("scrolling back through a run does not strand you at the top of it", () => {
+  const { dom, errors, send, doc } = makeDom();
+  const log = doc.getElementById("log"), pill = doc.getElementById("to-latest");
+  // jsdom has no layout, so stand in for a transcript taller than its viewport.
+  let top = 0;
+  Object.defineProperty(log, "scrollHeight", { configurable: true, get: () => 4000 });
+  Object.defineProperty(log, "clientHeight", { configurable: true, get: () => 500 });
+  Object.defineProperty(log, "scrollTop", { configurable: true, get: () => top, set: (v) => { top = v; } });
+
+  send({ type: "event", event: { type: "turn_start", turn_id: "t1", prompt: "Explain it" } });
+  assert.equal(pill.hidden, true, "nothing to jump to while you are already at the end");
+
+  top = 1200;                                        // the user scrolls back to re-read
+  log.dispatchEvent(new dom.window.Event("scroll"));
+  assert.equal(pill.hidden, false);
+  assert.equal(doc.getElementById("to-latest-label").textContent, "Latest");
+
+  send({ type: "event", event: { type: "tool_call", call_id: "c1", name: "read_file", args: { path: "a.py" } } });
+  assert.equal(doc.getElementById("to-latest-label").textContent, "New",
+    "content that arrived while you were reading is worth saying so");
+  assert.equal(pill.classList.contains("unread"), true);
+  assert.equal(top, 1200, "and it must not drag you back down on its own");
+
+  pill.click();
+  assert.equal(top, 4000, "the pill returns you to the end");
+  assert.equal(pill.hidden, true);
+  assert.deepEqual(errors, []);
+});

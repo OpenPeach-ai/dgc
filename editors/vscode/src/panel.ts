@@ -3440,6 +3440,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 </head><body>
 <header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
+<button type="button" id="to-latest" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><span class="codicon codicon-arrow-down" aria-hidden="true"></span><span id="to-latest-label">Latest</span></button>
 <div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="surface" class="panel-overlay" role="dialog" aria-modal="true" aria-labelledby="surface-title" hidden>
   <div class="set-head">
