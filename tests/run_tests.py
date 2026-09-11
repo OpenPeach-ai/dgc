@@ -1360,6 +1360,109 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    # ---- resuming a goal, and starting over mid-turn -----------------------------------------
+    from dgc import editor_protocol as _EPR
+    from dgc.goals import RESUME_PROMPT as _RESUME
+    from dgc.headless import _BUSY_MUTATIONS as _BUSY
+
+    # Resuming used to re-submit the objective, so the chat filled with text the user wrote days
+    # ago and the model read it as a fresh request.
+    check("the resume prompt tells the model to continue, not to restart",
+          "continue" in _RESUME.lower() and "again" in _RESUME.lower(), _RESUME)
+    check("the resume prompt carries no objective of its own",
+          "{" not in _RESUME and "%s" not in _RESUME, _RESUME)
+    _tui_src = (PROJECT / "dgc" / "tui.py").read_text(encoding="utf-8")
+    _cli_src = (PROJECT / "dgc" / "cli.py").read_text(encoding="utf-8")
+    # Setting a goal SHOULD echo the objective -- the user just typed it. Resuming should not.
+    check("every terminal frontend resumes with the continuation prompt",
+          "self._submit(RESUME_PROMPT" in _tui_src
+          and "_run_turn_live(RESUME_PROMPT" in _cli_src)
+    check("protocol v10 has a resume_goal command",
+          "resume_goal" in _EPR.COMMAND_FIELDS)
+    check("a resumed turn is labelled so the panel need not fake a user message",
+          _EPR.event_error({"type": "turn_start", "seq": 0, "turn_id": "t1",
+                            "prompt": _RESUME, "kind": "resume"}) is None
+          and _EPR.event_error({"type": "turn_start", "seq": 0, "turn_id": "t1",
+                                "prompt": "x", "kind": "nonsense"}) is not None)
+
+    # Asking for a new chat mid-turn is a decision to abandon that turn, not a mistake.
+    check("new_session is no longer refused while a turn runs", "new_session" not in _BUSY)
+    check("the commands that really cannot run mid-turn still cannot",
+          {"rewind", "compact", "resume_session", "set_config"} <= _BUSY)
+
+    from dgc import sessions as _sessions
+    # A reopened session keeps its checklist: resuming a goal tells the model to pick up the
+    # first unfinished step, which needs the steps to still be there.
+    _todo_root = tmp / "todo-session"
+    _todo_root.mkdir(parents=True, exist_ok=True)
+    _todo_path = _sessions.new_path(_todo_root)
+    _sessions.save(_todo_path, [{"role": "user", "content": "hi"}], _todo_root,
+                   goal="Ship it", goal_status="active",
+                   todos=[{"content": "done step", "status": "done"},
+                          {"content": "current step", "status": "in_progress"},
+                          {"content": "next step", "status": "pending"},
+                          {"content": "   ", "status": "pending"},
+                          {"content": "bad state", "status": "banana"}])
+    _todo_rec = _sessions.load_record(_todo_path, _todo_root)
+    check("a reopened session restores what is done, current and pending",
+          [(t["status"], t["content"]) for t in _todo_rec.get("todos", [])]
+          == [("done", "done step"), ("in_progress", "current step"),
+              ("pending", "next step"), ("pending", "bad state")],
+          _todo_rec.get("todos"))
+    check("a session with no todos does not invent the key",
+          "todos" not in _sessions.load_record(
+              (lambda p: (_sessions.save(p, [{"role": "user", "content": "x"}], _todo_root), p)[1])(
+                  _sessions.new_path(_todo_root)), _todo_root))
+
+    # ---- capture contamination guard --------------------------------------------------------
+    # The CLI capture aborts if the real ~/.dgc changed while it ran. A live DGC elsewhere
+    # heartbeats its session metrics every ~121s and the capture takes ~4 minutes, so the guard
+    # used to make a release impossible while the founder had a panel open. It now forgives that
+    # one shape and nothing else.
+    import importlib.util as _cap_util
+    _cap_spec = _cap_util.spec_from_file_location(
+        "dgc_cli_capture", PROJECT / "scripts" / "render-real-cli-capture.py")
+    _cap = _cap_util.module_from_spec(_cap_spec); _cap_spec.loader.exec_module(_cap)
+    _changes = _cap.user_state_changes
+
+    _base = {".": ("dir",), "config.json": ("f", 10, 1.0, "aaa"),
+             "sessions/proj": ("dir", 0, 1.0, ""),
+             "sessions/proj/s1.json": ("f", 20, 1.0, "bbb"),
+             "sessions/proj/s1.metrics": ("f", 5, 1.0, "ccc")}
+
+    def _after(**edits):
+        state = dict(_base); state.update(edits); return state
+
+    check("an unrelated session heartbeat no longer aborts a capture",
+          _changes(_base, _after(**{"sessions/proj/s1.metrics": ("f", 6, 2.0, "ddd"),
+                                    "sessions/proj": ("dir", 0, 2.0, "")})) == [],
+          _changes(_base, _after(**{"sessions/proj/s1.metrics": ("f", 6, 2.0, "ddd"),
+                                    "sessions/proj": ("dir", 0, 2.0, "")})))
+
+    # Everything the guard exists for must still abort.
+    check("a rewritten session transcript still aborts",
+          _changes(_base, _after(**{"sessions/proj/s1.json": ("f", 99, 2.0, "zzz")}))
+          == ["sessions/proj/s1.json"])
+    check("a leaked session beside a heartbeat still aborts",
+          _changes(_base, _after(**{"sessions/proj/s1.metrics": ("f", 6, 2.0, "ddd"),
+                                    "sessions/proj": ("dir", 0, 2.0, ""),
+                                    "sessions/proj/s2.json": ("f", 3, 2.0, "new")}))
+          == ["sessions/proj", "sessions/proj/s2.json"],
+          _changes(_base, _after(**{"sessions/proj/s1.metrics": ("f", 6, 2.0, "ddd"),
+                                    "sessions/proj": ("dir", 0, 2.0, ""),
+                                    "sessions/proj/s2.json": ("f", 3, 2.0, "new")})))
+    check("a touched config still aborts",
+          _changes(_base, _after(**{"config.json": ("f", 11, 2.0, "eee")})) == ["config.json"])
+    check("a deleted file still aborts",
+          _changes(_base, {k: v for k, v in _base.items() if k != "sessions/proj/s1.json"})
+          == ["sessions/proj/s1.json"])
+    # The forgiveness is exactly one path shape, not "anything ending in .metrics".
+    check("a metrics file outside sessions/ still aborts",
+          _changes({"metrics": ("f", 1, 1.0, "a")}, {"metrics": ("f", 2, 2.0, "b")}) == ["metrics"])
+    check("a metrics directory at the session level still aborts",
+          _changes({"sessions/x.metrics": ("f", 1, 1.0, "a")},
+                   {"sessions/x.metrics": ("f", 2, 2.0, "b")}) == ["sessions/x.metrics"])
+
     # ---- browser tool ---------------------------------------------------------------------
     # The transport needs a real browser, so everything reachable without one is tested here and
     # the live path is exercised separately (see browser_live_tests).
@@ -10916,9 +11019,9 @@ def test_protocol_client():
         protocol = int(sys.argv[2])
         seq = 0
 
-        def emit(kind, **fields):
+        def emit(_event_type, /, **fields):
             global seq
-            value = {"type": kind, "seq": seq, **fields}
+            value = {"type": _event_type, "seq": seq, **fields}
             seq += 1
             sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
             sys.stdout.flush()
@@ -13014,13 +13117,13 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v9 carries tool images, and only as an array",
+    check("protocol v10 carries tool images, and only as an array",
           _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                            "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
           and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                                "images": "data:image/png;base64,AAAA"}) is not None)
-    check("protocol v9 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 9
+    check("protocol v10 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 10
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None

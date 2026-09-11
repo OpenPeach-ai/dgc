@@ -112,8 +112,30 @@ def user_state_snapshot(root: Path) -> dict[str, tuple]:
     return manifest
 
 
+# A live DGC anywhere else on this machine heartbeats its own session metrics every couple of
+# minutes, and a capture runs for longer than that, so an open panel used to make a release
+# impossible rather than merely unlucky. The capture drives DGC against an isolated config and
+# never writes the real tree, so someone else's heartbeat is not evidence of contamination -- and
+# ignoring it cannot hide one either: a leak writes that session's .json and .recall beside the
+# heartbeat, and those still abort.
+_SESSION_HEARTBEAT = re.compile(r"^sessions/[^/]+/[^/]+\.metrics$")
+
+
 def user_state_changes(before: dict[str, tuple], after: dict[str, tuple]) -> list[str]:
-    return [path for path in sorted(set(before) | set(after)) if before.get(path) != after.get(path)]
+    changed = [path for path in sorted(set(before) | set(after))
+               if before.get(path) != after.get(path)]
+    heartbeats = {path for path in changed if _SESSION_HEARTBEAT.match(path)}
+    if not heartbeats:
+        return changed
+    # Rewriting a heartbeat bumps its session directory's mtime too. Forgive that directory only
+    # when nothing else inside it moved, so a real leak sitting beside a heartbeat still aborts.
+    forgiven = set(heartbeats)
+    for path in heartbeats:
+        parent = path.rsplit("/", 1)[0]
+        if not [other for other in changed
+                if other.startswith(parent + "/") and other not in heartbeats]:
+            forgiven.add(parent)
+    return [path for path in changed if path not in forgiven]
 
 
 def isolated_config(fixture: Path, state_dir: Path, model: str, base_url: str):

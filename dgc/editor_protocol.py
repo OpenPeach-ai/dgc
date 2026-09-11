@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 9
+PROTOCOL_VERSION = 10
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -59,7 +59,10 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "goal": _O(), "context_size": _I(),
         "session_name": _S(False),
     },
-    "turn_start": {"turn_id": _S(), "prompt": _S()},
+    # ``kind`` lets the panel show a resumed goal as what it is instead of replaying the
+    # objective as though the user had just typed it.
+    "turn_start": {"turn_id": _S(), "prompt": _S(),
+                   "kind": _f("string", required=False, enum=("prompt", "resume"))},
     "turn_end": {
         "turn_id": _S(), "reason": _f("string", enum=("completed", "cancelled", "error")),
         "token_estimate": _I(),
@@ -359,6 +362,7 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "get_plan": {"request_id": _S(False)},
     "new_session": {"request_id": _S(False)},
     "fork_session": {"name": _S(False), "request_id": _S(False)},
+    "resume_goal": {"request_id": _S(False)},
     "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
     "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},

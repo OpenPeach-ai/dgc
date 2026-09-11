@@ -184,6 +184,16 @@ class ReportFilter:
         return pending
 
 
+# Resuming a standing goal used to re-submit the objective as a fresh user prompt, so the chat
+# filled with the text the user typed days ago and the model read it as a new request. The
+# objective already sits in the system prompt for as long as the goal stands; what the model
+# actually needs is to be told to carry on.
+RESUME_PROMPT = (
+    "Continue the standing goal from where the previous session stopped. Check the todos and the "
+    "most recent work before acting, and pick up the first unfinished step rather than starting "
+    "the objective again.")
+
+
 def review_markdown(snapshot: dict) -> str:
     text = (f"# Goal\n\n{snapshot.get('text', '')}\n\n"
             f"**Status:** {snapshot.get('status', 'none')} · "

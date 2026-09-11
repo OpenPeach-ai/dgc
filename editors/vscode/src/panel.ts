@@ -470,12 +470,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
     const be = this.ensureBackend();
     try {
-      await this.requestState(be, "goal", {
-        type: "set_goal", status: "active",
-      }, "goal_changed", 10000);
-      const accepted = be.send({
-        type: "prompt", text: objective, context: this.editorContext(),
-      });
+      // The backend owns resuming now: it reactivates the goal and continues the run. Sending the
+      // objective as a prompt used to replay days-old text into the chat as though the user had
+      // just typed it, and the model read it as a new request.
+      const accepted = be.send({ type: "resume_goal" });
       if (!accepted) { throw new Error("The backend did not accept the resumed goal turn."); }
       this.turnActive = true;
       this.post({ type: "goal_start_state", state: "started" });
@@ -3346,8 +3344,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   async newSession(): Promise<void> {
     const be = this.ensureBackend();
     try {
+      // The backend cancels a running turn before it resets, and an unwinding turn can take a
+      // few seconds, so this waits longer than a plain state mutation would.
       await this.requestState(
-        be, "session-new", { type: "new_session" }, "session", 5000);
+        be, "session-new", { type: "new_session" }, "session", 25000);
     } catch (err: any) {
       void vscode.window.showErrorMessage(err?.message || "DGC could not start a new session.");
     }
@@ -3623,6 +3623,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   <div id="cbox" data-mode="default">
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>
     <div id="cfooter">
+      <div class="cf-left">
       <button type="button" id="btn-add" class="fbtn" title="Attach a file (@-mention)" aria-label="Attach a file"><span class="codicon codicon-add" aria-hidden="true"></span></button>
       <button type="button" id="btn-cmd" class="fbtn" title="Commands (/)" aria-label="Open commands"><span class="codicon codicon-terminal" aria-hidden="true"></span></button>
       <div class="picker context-picker">
@@ -3638,18 +3639,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         </section>
       </div>
       <button type="button" id="btn-settings" class="fbtn" title="Settings" aria-label="Open settings"><span class="codicon codicon-settings-gear" aria-hidden="true"></span></button>
-      <span class="cspacer"></span>
-      <div class="picker">
-        <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-chip" aria-hidden="true"></span><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
-        <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
-      </div>
       <div class="picker">
         <button type="button" id="btn-mode" class="fbtn mode" title="Permission mode — Shift+Tab to cycle" aria-label="Permission mode: default" aria-haspopup="menu" aria-expanded="false"><span id="modeicon" class="codicon codicon-shield" aria-hidden="true"></span> <span id="modelabel">default</span></button>
         <div id="modemenu" class="cmenu" role="menu" aria-label="Permission mode" hidden></div>
       </div>
+      </div>
+      <div class="cf-right">
+      <div class="picker">
+        <button type="button" id="btn-model" class="fbtn mode model-control" title="Model and reasoning — click to change" aria-label="Change model and reasoning" aria-haspopup="menu" aria-expanded="false"><span class="model-copy"><span id="modelname">dgc</span><span id="effortname">off</span></span><span class="codicon codicon-chevron-up model-chevron" aria-hidden="true"></span></button>
+        <div id="modelmenu" class="cmenu" role="menu" aria-label="Model" hidden></div>
+      </div>
       <button type="button" id="queue-send" class="fbtn" title="Queue for the next turn — Alt+Enter" aria-label="Queue for next turn" hidden>Queue</button>
       <button type="button" id="stop-run" class="fbtn" title="Stop generation" aria-label="Stop generation" hidden><span class="codicon codicon-debug-stop" aria-hidden="true"></span></button>
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
+      </div>
     </div>
     <div id="followup-hint" hidden></div>
   </div>

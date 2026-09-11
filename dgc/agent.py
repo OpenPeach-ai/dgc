@@ -2243,6 +2243,7 @@ class Agent(GoalLifecycle):
                     name=self.session_name, goal=self.goal, goal_status=self.goal_status,
                     goal_elapsed_seconds=self.goal_elapsed_seconds(),
                     goal_details=self._goal_details,
+                    todos=list(getattr(self.ctx, "todos", []) or []),
                     usage=usage, activity=activity, timing=timing,
                     checkpoints=checkpoint_state, chat_changes=self.chat_changes.state(),
                     subscription_sessions=self.subscription_sessions,
@@ -2547,6 +2548,16 @@ class Agent(GoalLifecycle):
             if self.goal_status == "active":
                 self.goal_status = "paused"
                 record_transition(self._goal_details, "paused", "Session reopened; resume to continue the goal")
+            # A reopened session keeps its checklist: which steps are done, which is in progress,
+            # and what is still pending. Resuming a goal depends on it.
+            restored = record.get("todos")
+            self.ctx.todos = [
+                {"content": str(item.get("content", ""))[:500],
+                 "status": (str(item.get("status", "pending"))
+                            if str(item.get("status", "")) in ("pending", "in_progress", "done")
+                            else "pending")}
+                for item in (restored if isinstance(restored, list) else [])[:100]
+                if isinstance(item, dict) and str(item.get("content", "")).strip()]
             self._active_tool_intents.clear()
             self._active_mcp_tools.clear()
             self._mcp_query_text = ""

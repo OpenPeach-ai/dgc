@@ -44,9 +44,12 @@ _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 _MAX_MCP_LIST_BYTES = 1024 * 1024
 _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
+_NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
-    "set_model", "set_think", "new_session", "clear_session", "resume_session",
+    # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
+    # to abandon that turn, so its handler cancels and waits rather than refusing the request.
+    "set_model", "set_think", "clear_session", "resume_session",
     "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
@@ -158,7 +161,7 @@ def _validated_config_values(raw_values, subscription_keys) -> tuple[dict | None
     return values, None
 
 
-def _turn_payload_bytes(text, images, context) -> int:
+def _turn_payload_bytes(text, images, context, kind="prompt") -> int:
     """Approximate the retained decoded queue payload with exact UTF-8 JSON bytes."""
     try:
         return len(json.dumps([text, images, context], ensure_ascii=False,
@@ -447,7 +450,8 @@ class Backend:
         self._foreground_worker: threading.Thread | None = None
         self._turn_lock = threading.RLock()
         self._turn_n = 0
-        self._queue: list[tuple[str, object, object]] = []  # ordered (prompt, images, typed context)
+        # ordered (prompt, images, typed context[, kind]) -- steering splices 3-tuples in
+        self._queue: list[tuple] = []
         self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
 
@@ -508,6 +512,16 @@ class Backend:
             return int(config_get("context_size", 32768))
         return int(getattr(self.config, "data", {}).get("context_size", 32768))
 
+    def _await_idle(self, timeout: float) -> bool:
+        """Wait for the turn worker to clear itself. Polling is correct here: the worker drops its
+        own reference under the state lock, which is the only signal that it is safely done."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._busy():
+                return True
+            time.sleep(0.05)
+        return not self._busy()
+
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
         with lock:
@@ -525,7 +539,8 @@ class Backend:
             lock = self._turn_lock = threading.RLock()
         return lock
 
-    def _start_turn(self, text: str, images=None, context=None, *, delivery="queue", request_id="") -> tuple[str, int]:
+    def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
+                    request_id="", kind: str = "prompt") -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
         lock = self._turn_state_lock()
         with lock:
@@ -554,9 +569,9 @@ class Backend:
                         self.em.emit("prompt_accepted", request_id=identity, state="steered")
                         return "steered", len(self._queue)
                     steers.pop(identity, None)
-                self._queue.append((text, images, context))
+                self._queue.append((text, images, context, kind))
                 return "queued", len(self._queue)
-            self._queue.append((text, images, context))
+            self._queue.append((text, images, context, kind))
             worker = threading.Thread(target=self._run_turn_queue, daemon=True,
                                       name="dgc-headless-turns")
             self._worker = worker
@@ -619,7 +634,9 @@ class Backend:
                     if not self._queue:
                         self._worker = None
                         return
-                    text, images, context = self._queue.pop(0)
+                    item = self._queue.pop(0)
+                    text, images, context = item[0], item[1], item[2]
+                    turn_kind = item[3] if len(item) > 3 else "prompt"
                     self._turn_n += 1
                     tid = f"t{self._turn_n}"
                     # Clear only stale cancellation while dequeue is serialized. A concurrent
@@ -639,7 +656,7 @@ class Backend:
                     title = _prompt_thread_title(shown_prompt)
                     if title and name_session(title):
                         self.em.emit("session_named", name=title)
-                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt)
+                self.em.emit("turn_start", turn_id=tid, prompt=shown_prompt, kind=turn_kind)
                 eta_stop = self._start_eta_ticker(tid)
                 failed = False
                 try:
@@ -1896,7 +1913,41 @@ class Backend:
             self.em.emit("saved_plan", plan=plan or "", exists=bool(plan),
                          **_request_fields(request_id))
 
+        elif t == "resume_goal":
+            if not self.agent.goal:
+                self.em.emit("command_rejected", command=t, reason="no_goal",
+                             message="no standing goal to resume", **_request_fields(request_id))
+                return
+            if not self.agent.update_goal("active"):
+                self.em.emit("command_rejected", command=t, reason="rejected",
+                             message=getattr(self.agent, "_last_persist_error", "")
+                                     or "the standing goal could not be resumed",
+                             **_request_fields(request_id))
+                return
+            self._emit_goal(request_id)
+            from .goals import RESUME_PROMPT
+            state, count = self._start_turn(RESUME_PROMPT, delivery="queue",
+                                            request_id=request_id, kind="resume")
+            if state == "full":
+                self.em.emit("command_rejected", command=t, reason="queue_full",
+                             message="the turn queue is full", **_request_fields(request_id))
+            elif state == "queued":
+                self.em.emit("queued", count=count, text="")
         elif t == "new_session":
+            if self._busy():
+                # Stop the run and wait for the worker to observe it. Resetting under a live
+                # worker would let the old turn write into the new session.
+                with self._turn_state_lock():
+                    self.agent.cancelled.set()
+                    self._queue.clear()
+                for rid in self.pending.cancel_all(
+                        {"decision": "no", "choice": None, "action": "cancel"}):
+                    self.em.emit("request_expired", id=rid)
+                if not self._await_idle(_NEW_SESSION_CANCEL_TIMEOUT):
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message="the running turn did not stop in time; try again",
+                                 **_request_fields(request_id))
+                    return
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(self.config.project_root)
             self.em.emit("session", kind="new", message_count=0,

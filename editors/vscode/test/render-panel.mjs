@@ -49,6 +49,56 @@ await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: 
 await send({ type: "tool_result", call_id: "c2", name: "edit_file", output: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n", is_diff: true, diff: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n" });
 await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" }, summary: "tests/test_clamp.py" });
 await send({ type: "tool_result", call_id: "c3", name: "write_file", output: "wrote 9 lines" });
+if (process.argv.includes("--composer")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  // A realistic worst case: a long local model name, high effort, and auto mode.
+  await page.evaluate(() => {
+    window.postMessage({ type: "state", state: {
+      mode: "auto", model: "qwen3.8:27b-instruct-bf16", think: "xhigh",
+      cwd: "/home/x/project", session: "s1",
+    } }, "*");
+  });
+  await page.waitForTimeout(500);
+  for (const w of [360, 460, 720]) {
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.waitForTimeout(250);
+    const r = await page.evaluate(() => {
+      const f = document.getElementById("cfooter");
+      const send = document.getElementById("send") || document.getElementById("stop-run");
+      const fb = f.getBoundingClientRect(), sb = send.getBoundingClientRect();
+      return { overflow: f.scrollWidth - Math.round(fb.width),
+               rows: new Set([...f.children].map(k => Math.round(k.getBoundingClientRect().top))).size,
+               sendInside: sb.right <= fb.right + 1 && sb.left >= fb.left - 1 };
+    });
+    console.log(`WIDTH ${w}: overflow=${r.overflow}px rows=${r.rows} sendInsideBox=${r.sendInside}`);
+  }
+  await page.setViewportSize({ width: 460, height: 900 });
+  await page.waitForTimeout(250);
+  const diag = await page.evaluate(() => {
+    const pick = (el) => {
+      const cs = getComputedStyle(el);
+      return { id: el.id || el.className, display: cs.display, wrap: cs.flexWrap,
+               flex: cs.flex, minWidth: cs.minWidth, w: Math.round(el.getBoundingClientRect().width) };
+    };
+    const f = document.getElementById("cfooter");
+    return [pick(f), ...[...f.children].map(pick),
+            ...[...(f.querySelector(".cf-left")?.children || [])].map(pick)];
+  });
+  console.log("DIAG " + JSON.stringify(diag, null, 1));
+  const box = await page.evaluate(() => {
+    const f = document.getElementById("cfooter");
+    const kids = [...f.children].map(k => ({
+      id: k.id || k.className, w: Math.round(k.getBoundingClientRect().width),
+      left: Math.round(k.getBoundingClientRect().left),
+      right: Math.round(k.getBoundingClientRect().right),
+    }));
+    return { footer: Math.round(f.getBoundingClientRect().width),
+             scroll: f.scrollWidth, kids };
+  });
+  console.log(JSON.stringify(box, null, 1));
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--prose")) {
   const out = process.argv[2] || "/tmp/panel.png";
   await send({ type: "text_delta", text: [

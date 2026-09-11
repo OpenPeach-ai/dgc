@@ -215,10 +215,10 @@ class MCPContextTests(unittest.TestCase):
         backend = object.__new__(Backend)
         backend.agent, backend.config = agent, agent.config
         events, done = [], threading.Event()
-        def emit(kind, **fields):
-            event = {"type": kind, **fields}
+        def emit(_event_type, /, **fields):
+            event = {"type": _event_type, **fields}
             self.assertIsNone(event_error({"seq": 0, **event}))
-            if kind == "mcp_command_result":
+            if _event_type == "mcp_command_result":
                 self.assertFalse(backend._busy())
                 events.append(event)
                 done.set()
