@@ -4148,7 +4148,10 @@ class TUI:
                                   or "no standing goal to pause"))
             elif rest.lower() in ("resume", "active", "reactivate"):
                 if self.agent.update_goal("active"):
-                    self._submit(self.agent.goal, expand_mentions=False)
+                    # Not the objective: that is already in the system prompt, and replaying it
+                    # reads to the model as a brand-new request.
+                    from .goals import RESUME_PROMPT
+                    self._submit(RESUME_PROMPT, expand_mentions=False)
                 else:
                     self._flash(self.agent._last_persist_error or "no standing goal to resume")
             elif rest and rest.lower() not in ("review", "status"):

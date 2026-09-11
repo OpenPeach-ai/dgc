@@ -4,10 +4,22 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.36.0",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.0",
+      "status": "current",
+      "notes": [
+        "Resuming a standing goal continues the work instead of replaying it. The objective used to be re-submitted as a fresh prompt, so text you wrote days ago reappeared in the chat and the model read it as a new request. Every frontend now asks the backend to resume, and the backend reactivates the goal and tells the model to pick up the first unfinished step.",
+        "A reopened session keeps its checklist. Todos were held in memory only, so closing the editor lost what was done, what was in progress and what was still pending — exactly what a resumed goal needs. They are saved with the session now and restored with it.",
+        "Asking for a new chat while a turn is running starts one. It used to be refused outright; it now cancels the run, waits for it to actually stop, and then resets, so the abandoned turn cannot write into the new session.",
+        "Editor protocol v10 adds resume_goal and labels a resumed turn, so the panel can show what happened rather than inventing a user message."
+      ]
+    },
+    {
       "version": "0.35.0",
       "date": "2026-09-11",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.35.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "A browser tool, so the agent can look at a page that has to actually run — a deployed site, a local dev server, anything JavaScript builds. It opens a URL, reads the page as roles and names it can act on, finds elements, clicks and types with real input events, and reports console messages and failed network responses. It drives a Chrome you already have over the DevTools Protocol, so DGC still ships three dependencies and never downloads a browser.",
         "The page is read from the DOM rather than the accessibility tree. That is not a detail: content-visibility drops off-screen sections from the accessibility tree entirely, so a snapshot built the obvious way silently misses content that is plainly there — measured on this project's own changelog, where text present twice was reported zero times.",
@@ -277,10 +289,22 @@
   ],
   "extension": [
     {
+      "version": "0.21.0",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.0",
+      "status": "current",
+      "notes": [
+        "A quieter panel. Selection and focus were carrying 2px purple rails, filled accent blocks and 3px glows; they are structural now — a lifted surface for what is chosen, a firm border for what is focused — and a focused field borrows your editor's own focus colour instead of our brand purple. Purple is kept for the send button, links and live status.",
+        "The composer no longer breaks under a long model name. In auto mode the footer overflowed and carried the Send button outside the box; it is two zones now, with what the turn may do on the left and which model does it on the right, wrapping to a second row when it must.",
+        "The model selector lost its chip icon, and reasoning profiles are spelled out — Extra High, not Xhigh.",
+        "A resumed goal shows as a resumed goal, not as a prompt you never typed."
+      ]
+    },
+    {
       "version": "0.20.0",
       "date": "2026-09-11",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.35.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Screenshots appear in the conversation. A thumbnail under the answer expands in place with one click and opens full size with another, closing on Escape or a click away. The panel validates every image itself rather than trusting what the backend sent it.",
         "Editor protocol v9 adds tool_images, because a tool result is text and a screenshot is not. The image travels on its own event, correlated to the step that produced it.",

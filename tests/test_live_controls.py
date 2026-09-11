@@ -38,8 +38,8 @@ class LiveControlTests(unittest.TestCase):
         config.credential_warnings = ()
         config.permissions = {"allow": [], "ask": [], "deny": []}
         self.events, self.condition = [], threading.Condition()
-        def emit(kind, **fields):
-            event = {"type": kind, **fields}
+        def emit(_event_type, /, **fields):
+            event = {"type": _event_type, **fields}
             self.assertIsNone(event_error({"seq": 1, **event}), event)
             with self.condition:
                 self.events.append(event)

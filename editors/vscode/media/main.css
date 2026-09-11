@@ -20,6 +20,11 @@
   --accent:#7C5CFF; --accent-text:#A78BFA; --accent-fill:#7654F6;
   --accent-hover:#6A4BF0; --lav:#A78BFA;
   --accent-soft:rgba(124,92,255,.12);
+  /* Selection and focus are structural, not chromatic. Codex marks a chosen row by lifting its
+     surface and a focused field by firming its border; purple is reserved for the primary action,
+     links and live status. A 2px accent rail down every selected row read as decoration. */
+  --sel:var(--vscode-list-activeSelectionBackground, rgba(255,255,255,.06));
+  --ring:rgba(124,92,255,.30);
   --good:#5BCB8B; --good-soft:rgba(91,203,139,.1);
   --err:#EB7A83; --err-soft:rgba(235,122,131,.13);
   --sans: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
@@ -52,7 +57,7 @@
 html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
 button, input, select, textarea { font: inherit; }
 :where(button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px;
+  outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px;
 }
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important;
   padding: 0 !important; margin: -1px !important; overflow: hidden !important;
@@ -90,7 +95,7 @@ body {
 .role { display: none; }
 .msg.user { align-items: flex-end; }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
-.goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--accent); }
+.goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
 .text { white-space: normal; overflow-wrap: anywhere; line-height: 1.62; color: var(--text); font-family: var(--sans); }
 .text > :first-child, .surface-markdown > :first-child { margin-top: 0; }
 .text > :last-child, .surface-markdown > :last-child { margin-bottom: 0; }
@@ -244,7 +249,7 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .card .btns { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .card .feedback { box-sizing: border-box; width: 100%; min-height: var(--control); margin: 0 0 var(--sp-2); padding: var(--sp-1) var(--sp-2); resize: vertical; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--text); background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-md); transition: min-height .12s; }
 /* One line until you actually want to write in it — most approvals never need a note. */
-.card .feedback:focus { outline: none; min-height: 64px; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.card .feedback:focus { outline: none; min-height: 64px; border-color: var(--vscode-focusBorder, var(--accent)); }
 .card .mcp-form { display: grid; gap: var(--sp-2); }
 .card .mcp-field { display: grid; gap: var(--sp-1); }
 .card .mcp-field label { color: var(--text-strong); font: var(--w-med) var(--t-sm)/1.45 var(--sans); }
@@ -265,13 +270,13 @@ button.opt { display: flex; gap: var(--sp-2); align-items: baseline; width: 100%
 button.opt .n { flex: none; min-width: 14px; color: var(--muted); font: var(--w-bold) var(--t-xs)/1.45 var(--sans); }
 button.opt .ol { min-width: 0; overflow-wrap: anywhere; }
 button.opt:hover { border-color: var(--accent); background: var(--surface); }
-button.opt.rec { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+button.opt.rec { border-color: var(--border-strong); background: var(--sel); }
 button.opt.rec .n { color: var(--accent-text); }
 .card.resolved .opts { display: none; }
 .question-tabs { display: flex; gap: var(--sp-1); overflow-x: auto; margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--border); }
 .question-tab { flex: 0 0 auto; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: var(--sp-2); color: var(--muted); background: transparent; cursor: pointer; font: inherit; }
 .question-tab.active { color: var(--accent-text); border-bottom-color: var(--accent); }
-button.opt.selected { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+button.opt.selected { border-color: var(--accent); background: var(--sel); }
 .question-form button.opt.rec:not(.selected) { border-color: var(--border); background: var(--surface); box-shadow: none; }
 .question-hint { display: block; font-size: var(--t-xs); color: var(--muted); }
 .question-other { box-sizing: border-box; width: 100%; margin-top: var(--sp-2); resize: vertical; }
@@ -334,7 +339,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #attachments .chip .x:hover { color: var(--err); }
 
 #cbox { position: relative; z-index: 2; background: var(--surface2); border: 1px solid var(--border-strong); border-radius: var(--r-2xl); display: flex; flex-direction: column; box-shadow: 0 7px 24px rgba(0,0,0,.18); }
-#cbox:focus-within { border-color: rgba(167,139,250,.62); box-shadow: 0 0 0 1px rgba(124,92,255,.2); }
+#cbox:focus-within { border-color: var(--border-strong); }
 #cbox[data-mode="auto"] { border-color: var(--err); }
 #cbox[data-mode="auto"]:focus-within { border-color: var(--err); box-shadow: 0 0 0 3px var(--err-soft); }
 .cinput { min-height: 50px; display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-3) var(--sp-1); }
@@ -343,6 +348,19 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #input { flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--text); font: var(--w-reg) var(--t-base)/1.45 var(--sans); padding: 0; max-height: 200px; min-width: 0; }
 #input::placeholder { color: var(--faint); }
 #cfooter { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
+/* Two zones, the way Codex arranges a composer: what the turn will be allowed to do on the left,
+   which model will do it on the right, and Send pinned to the model group so it travels with it.
+   The row wraps rather than overflowing -- a long local model name used to push Send outside the
+   box entirely (measured: 474px of content in a 426px row). */
+#cfooter { flex-wrap: wrap; row-gap: var(--sp-1); }
+.cf-left, .cf-right { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.cf-left { flex: 0 1 auto; }
+.cf-right { flex: 1 1 250px; justify-content: flex-end; }
+.cf-left > *, .cf-right > * { flex: 0 0 auto; }
+.cf-right > .picker { flex: 0 1 auto; min-width: 0; }
+/* Send and Stop are never allowed to shrink or leave: the model name truncates instead. */
+#send, #stop-run, #queue-send { flex: 0 0 auto; }
+
 .cspacer { flex: 1; }
 .fbtn { height: var(--control); min-width: var(--control); border: none; background: transparent; color: var(--faint); border-radius: var(--r-md); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); padding: 0 var(--sp-2); font: var(--w-med) var(--t-sm)/1 var(--sans); transition: background .12s, color .12s; }
 .fbtn:hover { background: var(--surface2); color: var(--text); }
@@ -350,10 +368,13 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .fbtn.mode:hover { color: var(--text); }
 .fbtn.mode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fbtn .codicon { font-size: var(--t-lg); }
-.model-control { height: var(--control); max-width: min(230px, 45vw) !important; padding: 0 var(--sp-1) 0 var(--sp-2); gap: var(--sp-1); }
+.model-control { height: var(--control); max-width: 100%; min-width: 0; padding: 0 var(--sp-1) 0 var(--sp-2); gap: var(--sp-1); }
 .model-control .model-copy { min-width: 0; display: flex; align-items: center; gap: var(--sp-1); }
-.model-control #modelname { max-width: 145px; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); }
-.model-control #effortname { color: var(--faint); font: var(--w-med) var(--t-xs)/1 var(--sans); text-transform: capitalize; }
+.model-control #modelname { min-width: 0; color: var(--text); font: var(--w-med) var(--t-sm)/1 var(--sans); }
+/* The reasoning profile is the short half of the label, so it keeps its width and the model name
+   gives way first -- "qwen3.8:27b-instruct… xhigh" reads; "qwen3.8:27b-instruct… Xhi…" does not. */
+.model-control #effortname { flex: 0 0 auto; }
+.model-control #effortname { color: var(--faint); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 .model-control .model-chevron { color: var(--faint); font-size: var(--t-sm); }
 .model-control.ultra { color: var(--accent-text); background: var(--accent-soft); box-shadow: inset 0 -1px 0 var(--accent); }
 .model-control.ultra #effortname { color: var(--lav); }
@@ -373,8 +394,8 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .context-last { display: flex; align-items: flex-start; gap: var(--sp-2); margin-top: var(--sp-2); color: var(--muted); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
 .context-last .codicon { flex: none; margin-top: 0; color: var(--accent-text); }
 .context-detail { margin: var(--sp-1) 0 0 var(--sp-5); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.context-action { width: 100%; min-height: var(--control); margin-top: var(--sp-3); border: 1px solid rgba(124,92,255,.55); border-radius: var(--r-sm); color: var(--text-strong); background: var(--accent-soft); cursor: pointer; font: var(--w-semi) var(--t-xs)/1 var(--sans); }
-.context-action:hover:not(:disabled) { border-color: var(--accent); background: rgba(124,92,255,.2); }
+.context-action { width: 100%; min-height: var(--control); margin-top: var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); color: var(--text-strong); background: var(--surface2); cursor: pointer; font: var(--w-semi) var(--t-xs)/1 var(--sans); }
+.context-action:hover:not(:disabled) { border-color: var(--accent); background: var(--sel); }
 .context-action:disabled { cursor: wait; color: var(--faint); opacity: .75; }
 @keyframes context-pulse { 50% { opacity: .35; transform: scale(.88); } }
 .csend { height: var(--control); width: var(--control); margin-left: var(--sp-1); border: none; border-radius: var(--r-full); cursor: pointer; color: var(--faint); background: var(--surface2); display: inline-flex; align-items: center; justify-content: center; transition: background .12s, color .12s; }
@@ -441,7 +462,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .cmenu .mhead kbd { background: var(--code); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1 var(--mono); color: var(--muted); }
 .cmenu .mrow { display: flex; align-items: center; gap: var(--sp-2); width: calc(100% - 4px); margin: 0 0; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; cursor: pointer; font: var(--w-reg) var(--t-sm)/1.2 var(--sans); color: var(--text); }
 .cmenu .mrow:hover { background: var(--surface2); }
-.cmenu .mrow.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.cmenu .mrow.sel { background: var(--sel); }
 .cmenu .mrow .mi { width: 16px; text-align: center; color: var(--muted); }
 .cmenu .mrow.sel .mi { color: var(--accent-text); }
 .cmenu .mrow .md { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.2 var(--mono); margin-left: auto; text-align: right; }
@@ -452,6 +473,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 @media (max-width: 360px) {
   footer { padding-right: var(--sp-2); padding-left: var(--sp-2); }
   #cfooter { gap: 0; padding-right: var(--sp-1); padding-left: var(--sp-1); }
+
   #btn-settings, #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
   .model-control { max-width: 112px !important; }
   .model-control #modelname { max-width: 72px; }
@@ -486,7 +508,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #goal-editor-text { width: 100%; min-height: 150px; max-height: min(46vh, 360px); resize: vertical; padding: var(--sp-2);
   border: 1px solid var(--border-strong); border-radius: var(--r-md); outline: 0; background: var(--surface);
   color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); }
-#goal-editor-text:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+#goal-editor-text:focus { border-color: var(--vscode-focusBorder, var(--accent)); }
 .goal-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-3); }
 .goal-dialog-actions .act { border-radius: var(--r-md); }
 .goal-budget { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); color: var(--muted); }
@@ -499,7 +521,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .settings-nav { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); overflow-x: auto; border-bottom: 1px solid var(--border); }
 .set-tab { border: 0; border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--faint); background: transparent; cursor: pointer; font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; }
 .set-tab:hover { color: var(--text); background: var(--surface2); }
-.set-tab.active { color: var(--text-strong); background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.set-tab.active { color: var(--text-strong); background: var(--sel); box-shadow: inset 0 -1px 0 var(--accent); }
 .set-body { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-3) var(--sp-4); }
 .set-section { display: flex; flex-direction: column; gap: 0; }
 .set-group { margin-top: var(--sp-5); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border-strong); font: var(--w-bold) var(--t-xs)/1.2 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
@@ -513,7 +535,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
    last is what lets the control stay beside the label it belongs to. */
 #settings label > .set-hint { order: 3; flex: 1 0 100%; margin: 0; color: var(--faint); }
 #settings input, #settings select { min-height: var(--control); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: var(--sp-1) var(--sp-2); width: 100%; }
-#settings input:focus, #settings select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#settings input:focus, #settings select:focus { outline: none; border-color: var(--vscode-focusBorder, var(--accent)); }
 #settings input::placeholder { color: var(--faint); }
 .set-row { display: flex; gap: var(--sp-1); min-width: 0; }
 .set-note { margin: var(--sp-1) 0; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
@@ -537,7 +559,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .surface-name { padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; font: var(--w-semi) var(--t-sm)/1.2 var(--sans); }
 .surface-name:hover { color: var(--accent-text); }
 .surface-badge, .surface-state { margin-left: auto; flex: none; border: 1px solid var(--border-strong); border-radius: var(--r-2xl); padding: 0 var(--sp-2); color: var(--faint); font: var(--w-semi) var(--t-xs)/1.2 var(--sans); text-transform: uppercase; }
-.surface-state.ok, .surface-badge.allow { border-color: var(--accent); color: var(--accent-text); }
+.surface-state.ok, .surface-badge.allow { border-color: var(--good); color: var(--good); }
 .surface-state.err, .surface-badge.deny { border-color: var(--err); color: var(--err); }
 .surface-badge.ask { border-style: dashed; color: var(--muted); }
 .surface-meta { margin-top: var(--sp-2); color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--mono); overflow-wrap: anywhere; }
@@ -567,7 +589,7 @@ button.act.danger { color: var(--err); }
 .pop .pi { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); cursor: pointer; font: var(--w-med) var(--t-sm)/1.2 var(--sans); color: var(--text); }
 .pop .pi-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pop .pi-kind { color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); }
-.pop .pi.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.pop .pi.sel { background: var(--sel); }
 .pop .pd { grid-column: 1 / -1; color: var(--faint); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .invocation-chip { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 
@@ -582,7 +604,7 @@ pre.code .copy:hover { color: var(--text); border-color: var(--accent); }
 pre.code .copy:focus-visible { opacity: 1; }
 
 /* artifact ready card — propose opening a localhost preview */
-.artifact { margin: var(--sp-2) 0; padding: var(--sp-3) var(--sp-3); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: inset 3px 0 0 var(--accent); }
+.artifact { margin: var(--sp-2) 0; padding: var(--sp-3) var(--sp-3); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); }
 .artifact.stopping { box-shadow: inset 3px 0 0 var(--lav); }
 .artifact.stopped { opacity: .72; box-shadow: inset 3px 0 0 var(--faint); }
 .artifact .ahead { display: flex; align-items: center; gap: var(--sp-2); }
@@ -692,3 +714,11 @@ pre.code .copy:focus-visible { opacity: 1; }
   border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface);
 }
 #lightbox .lb-cap { font: var(--w-reg) var(--t-sm)/1.4 var(--sans); color: #ededf1; }
+
+/* A resumed goal reads as a quiet continuation marker, not a user message. */
+.resume-note {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) 0; color: var(--faint);
+  font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
+}
+.resume-note .codicon { font-size: var(--t-base); }

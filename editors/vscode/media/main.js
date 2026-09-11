@@ -189,9 +189,14 @@
     mm.querySelector(".model-summary")?.focus();
   }
 
+  // "xhigh" capitalised reads "Xhigh", which is not a thing. Spell the profiles out.
+  const EFFORT_LABEL = { off: "Off", low: "Low", medium: "Medium", high: "High",
+                         xhigh: "Extra High", max: "Max", default: "Default" };
+
   function updateModelControl() {
     const model = curModel || "dgc";
-    const effort = curUltra ? "Ultra" : (curSubscription && curThink === "off" ? "default" : curThink);
+    const raw = curUltra ? "Ultra" : (curSubscription && curThink === "off" ? "default" : curThink);
+    const effort = EFFORT_LABEL[raw] || raw;
     $("modelname").textContent = model;
     $("effortname").textContent = effort;
     $("btn-model").classList.toggle("ultra", curUltra);
@@ -628,10 +633,19 @@
     m.appendChild(el("div", "bubble", esc(body)));
     log.appendChild(m); settleBlock(m);
   }
-  function startTurn(prompt = "") {
+  function startTurn(prompt = "", kind = "prompt") {
     if (turn) endTurn("cancelled");
     speak("DGC is working");
-    echoPrompt(prompt);
+    // A resumed goal is not something the user just typed. Show it as what it is instead of
+    // echoing the objective back into the chat as a fresh prompt.
+    if (kind === "resume") {
+      const note = el("div", "resume-note");
+      note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
+        + '<span>Resumed the standing goal</span>';
+      log.appendChild(note);
+    } else {
+      echoPrompt(prompt);
+    }
     const block = el("div", "msg dgc"); block.appendChild(el("div", "role dgc", "DGC"));
     const act = el("div", "thinking", `<span class="spin">${MARK}</span> <span class="verb">working…</span> <span class="meta"></span>`);
     block.appendChild(act); log.appendChild(block);
@@ -1654,7 +1668,7 @@
         document.body.classList.toggle("hide-reasoning", ev.show_reasoning === false);
         if (!$("settings").hidden) fillSettings(ev);
         break;
-      case "turn_start": startTurn(ev.prompt); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
+      case "turn_start": startTurn(ev.prompt, ev.kind); setSending(true); if (queuedCount > 0) { queuedCount--; renderQueued(); } break;
       case "turn_eta": if (turn && typeof ev.label === "string") { turn.eta = ev.label.slice(0, 80); renderTurnMeta(); } break;
       case "handoff_started":
         startTurn(); setSending(true); speak("DGC is generating a handoff");

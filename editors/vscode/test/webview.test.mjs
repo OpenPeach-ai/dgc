@@ -898,6 +898,39 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("the composer keeps Send with the model group so a long model name cannot push it out", () => {
+  // A long local model name in auto mode used to overflow the footer by 48px and carry the Send
+  // button outside the box. The row is two zones now, and Send travels with the model group.
+  const { errors, doc } = makeDom();
+  const footer = doc.getElementById("cfooter");
+  assert.ok(footer, "the composer footer exists");
+  const left = footer.querySelector(".cf-left");
+  const right = footer.querySelector(".cf-right");
+  assert.ok(left && right, "the footer is split into two zones");
+
+  // Codex puts what the turn may do on the left and which model does it on the right.
+  assert.ok(left.contains(doc.getElementById("btn-mode")), "permission mode sits on the left");
+  assert.ok(left.contains(doc.getElementById("btn-add")), "attach sits on the left");
+  assert.ok(right.contains(doc.getElementById("btn-model")), "the model picker sits on the right");
+  assert.ok(right.contains(doc.getElementById("send")), "Send travels with the model group");
+  assert.ok(right.contains(doc.getElementById("stop-run")), "so does Stop");
+
+  assert.equal(doc.querySelector("#btn-model .codicon-chip"), null,
+               "the model selector carries no chip icon");
+  assert.deepEqual(errors, []);
+});
+
+test("reasoning profiles are spelled out rather than capitalised into nonsense", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "state", state: { mode: "auto", model: "qwen3.8:27b-instruct-bf16", think: "xhigh" } });
+  assert.equal(doc.getElementById("effortname").textContent, "Extra High",
+               "xhigh reads as Extra High, not Xhigh");
+  send({ type: "state", state: { mode: "default", model: "m", think: "off" } });
+  assert.equal(doc.getElementById("effortname").textContent, "Off");
+  assert.deepEqual(errors, []);
+});
+
 test("finished tool activity reads as a sentence, not a tally of function names", () => {
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });

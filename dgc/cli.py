@@ -848,7 +848,8 @@ class CLI:
                         self.ui.info("no standing goal to resume")
                 else:
                     self.agent._pending_images = None
-                    self._run_turn_live(self.agent.goal, getattr(self, "_followup_queue", []))
+                    from .goals import RESUME_PROMPT
+                    self._run_turn_live(RESUME_PROMPT, getattr(self, "_followup_queue", []))
             elif low in ("", "review", "status"):
                 if self.agent.goal:
                     from .goals import review_markdown

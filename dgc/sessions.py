@@ -378,12 +378,16 @@ def metrics_of(path, project_root) -> dict:
     return _load_metrics(path, project_root)
 
 
+TODO_STATUSES = ("pending", "in_progress", "done")
+
+
 def save(path: Path, messages: list, project_root, name: str | None = None,
          goal: str | None = None, goal_status: str | None = None,
          usage: dict | None = None, activity: dict | None = None,
          timing: dict | None = None,
          checkpoints: dict | None = None, *, goal_elapsed_seconds: float | None = None,
          goal_details: dict | None = None,
+         todos: list | None = None,
          subscription_sessions: dict | None = None,
          chat_changes: dict | None = None,
          goal_active_since: float | None = None, expected_revision: int | None = None,
@@ -404,6 +408,15 @@ def save(path: Path, messages: list, project_root, name: str | None = None,
                 "updated": time.time(), "messages": messages}
         if name:
             data["name"] = name
+        if todos:
+            # What is done, in progress and still pending. Without this a reopened session shows
+            # an empty checklist and a resumed goal has nothing to pick up from.
+            data["todos"] = [
+                {"content": str(item.get("content", ""))[:500],
+                 "status": (str(item.get("status", "pending"))
+                            if str(item.get("status", "")) in TODO_STATUSES else "pending")}
+                for item in todos[:100]
+                if isinstance(item, dict) and str(item.get("content", "")).strip()]
         if goal:
             data["goal"] = goal          # the standing /goal objective, restored on resume
             status = (goal_status if goal_status in ("active", "paused", "completed", "blocked")
