@@ -1008,6 +1008,89 @@ Everything is a row: what it is on the left, the control on the right, the expla
 - The panel reads your selection and the file you are in as typed context, not as text glued into
   the prompt.
 """.strip()),
+    ("Looking at a page", "drive a real browser to see a deployed or local site", """
+# Looking at a page
+
+`web_fetch` gets you an article's text. It cannot run JavaScript, log in, click anything, or tell
+you whether a page actually *rendered*. For that DGC drives a real browser.
+
+    you › open https://staging.example.com and tell me if the pricing table renders
+
+The agent earns a `browser` tool when your prompt is about a page that has to run — a deployed or
+locally served site, a screenshot, a console or network question, or clicking through a flow. It
+stays out of the way the rest of the time.
+
+## What it can do
+
+| Operation | What you get |
+| --- | --- |
+| `open` | Navigates, waits for the page to settle, returns the page structure |
+| `snapshot` | The current page as roles, names and refs — the model's main way of reading |
+| `find` | Elements matching text, with their refs |
+| `click` · `type` · `select` · `press` | Real input events, then a fresh snapshot |
+| `wait` | Blocks until text appears, capped at 30 seconds |
+| `console` | Console messages since load, with severity |
+| `requests` | Network responses: status, type, and what failed |
+| `screenshot` | A PNG saved under `.dgc/screenshots/`, shown to the model if it has vision |
+| `close` | Ends the browser session |
+
+A snapshot looks like this, and every `[e12]` is a handle the model can act on:
+
+    - heading level=1 "Sign in" [e1]
+    - form [e2]
+      - textbox "you@example.com" [e4]
+      - button "Continue" [e8]
+
+Refs change whenever the page does. After a click that navigates or re-renders, the tool hands
+back a fresh snapshot, and stale refs fail with a message telling the model to take a new one.
+
+## Screenshots and local models
+
+A screenshot is only useful if something can look at it. In the editor panel it appears in the
+conversation as a thumbnail: click once to expand it in place, once more to open it full size.
+
+Whether the *model* can see it is a separate question, and DGC checks rather than guesses. With a
+vision model the picture is attached for it to read; without one you get the file path and a nudge
+to use `snapshot` instead, which is more precise anyway. Check with `ollama show <model>` — look
+for `vision` under Capabilities.
+
+## Which browser
+
+DGC uses a Chrome or Chromium you already have. It looks at `browser_path` in
+`~/.dgc/config.json`, then `CHROME_PATH`, then Playwright's cache, then your PATH, then the usual
+install locations. **It never downloads a browser** — if there is none, it says so and tells you
+where to point it.
+
+Each session gets its own throwaway profile, so a page never sees your real cookies or logged-in
+sessions, and the profile is deleted when the session ends.
+
+## If the browser refuses to start
+
+On Ubuntu 23.10 and later, and on other distributions that restrict unprivileged user namespaces,
+Chromium cannot build its sandbox and will not start:
+
+    Chromium cannot start its sandbox on this system…
+
+Install an AppArmor profile for the browser, or set `browser_allow_unsandboxed: true` in
+`~/.dgc/config.json`. The second is a real trade: without the renderer sandbox, a page exploit is
+no longer contained. DGC will not make that choice for you.
+
+## Permissions
+
+Every navigation goes through the same permission gate as any other tool, under the name
+`Browser`. Rules are keyed on the URL, so you can allow a host and nothing else:
+
+    "allow": ["Browser(https://staging.example.com/*)"]
+
+There is deliberately no operation for running arbitrary JavaScript in the page. The snapshot is
+built by a fixed first-party script; a model cannot supply its own.
+
+## Untrusted by construction
+
+Everything the browser returns is web page content, and it comes back labelled as untrusted — the
+same treatment `web_fetch` gets. Text on a page is evidence about that page, never an instruction
+to DGC.
+"""),
     ("Turn ETA & notifications", "how long the turn still needs, and a ping when it is done", """
 # Turn ETA & notifications
 

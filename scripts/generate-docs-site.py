@@ -38,7 +38,7 @@ GROUPS: list[tuple[str, list[str]]] = [
                    "Standing goals", "Files pane", "In your editor",
                    "Turn ETA & notifications"]),
     ("Providers & models", ["Connect your model", "Subscriptions", "Thinking & reasoning"]),
-    ("Features", ["Artifacts", "MCP servers", "Lifecycle hooks", "Skills",
+    ("Features", ["Artifacts", "Looking at a page", "MCP servers", "Lifecycle hooks", "Skills",
                   "Multiple agents", "Training export", "Python code-action (power mode)"]),
     ("Reference", ["Configuration"]),
 ]

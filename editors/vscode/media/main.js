@@ -825,19 +825,39 @@
       const card = running.at(-1);
       summary.textContent = `${toolCopy(card.dataset.toolName).present} ${card.dataset.summary || ""}`.trim();
     } else {
-      const counts = { read: 0, edit: 0, command: 0, other: 0 };
+      // Say what happened in a sentence, the way a colleague would: "Read 5 files and searched
+      // code", not a tally of function names. Counts only where the number tells you something.
+      const counts = Object.create(null);
+      const bucket = {
+        read_file: "read", grep: "searched", glob: "searched", repo_map: "mapped",
+        code_intel: "mapped", write_file: "created", create_file: "created",
+        edit_file: "edited", apply_patch: "edited", multi_edit: "edited",
+        bash: "ran", browser: "looked", web_search: "web", web_fetch: "web",
+      };
       for (const card of cards) {
-        const name = canonicalTool(card.dataset.toolName);
-        const key = ["read_file", "glob", "repo_map", "grep"].includes(name) ? "read"
-          : ["write_file", "edit_file", "apply_patch"].includes(name) ? "edit"
-            : name === "bash" ? "command" : "other";
-        counts[key]++;
+        const key = bucket[canonicalTool(card.dataset.toolName)] || "other";
+        counts[key] = (counts[key] || 0) + 1;
       }
-      summary.textContent = [counts.read && "Explored files",
-        counts.edit && `Applied ${counts.edit} ${counts.edit === 1 ? "edit" : "edits"}`,
-        counts.command && `Ran ${counts.command} ${counts.command === 1 ? "command" : "commands"}`,
-        counts.other && `Used ${counts.other} ${counts.other === 1 ? "tool" : "tools"}`].filter(Boolean).join(" · ");
-      if (failures.length) summary.textContent += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
+      const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+      const phrases = [
+        counts.read && `read ${plural(counts.read, "file", "files")}`,
+        counts.edited && `edited ${plural(counts.edited, "file", "files")}`,
+        counts.created && `created ${plural(counts.created, "file", "files")}`,
+        counts.ran && `ran ${plural(counts.ran, "command", "commands")}`,
+        counts.searched && "searched code",
+        counts.mapped && "mapped the project",
+        counts.looked && `looked at ${plural(counts.looked, "page", "pages")}`,
+        counts.web && "searched the web",
+        counts.other && `used ${plural(counts.other, "tool", "tools")}`,
+      ].filter(Boolean);
+      let sentence = phrases.length > 1
+        ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
+        : (phrases[0] || "Worked");
+      sentence = sentence.charAt(0).toUpperCase() + sentence.slice(1);
+      if (failures.length) {
+        sentence += ` · ${failures.length} ${failures.length === 1 ? "issue" : "issues"}`;
+      }
+      summary.textContent = sentence;
     }
     if (failures.length) group.open = true;
   }
@@ -947,6 +967,56 @@
     return wrap;
   }
   //: Tools that change files on disk. Their diffs are what the end-of-turn summary counts.
+  // A screenshot is evidence, so it belongs in the transcript rather than behind a file path.
+  // Three states, the way Codex shows one: a thumbnail in the step, expanded in place, and a
+  // full-size viewer over the panel.
+  const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/;
+
+  function openLightbox(src, caption) {
+    document.getElementById("lightbox")?.remove();
+    const box = el("div"); box.id = "lightbox";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", caption || "Screenshot");
+    const img = el("img"); img.src = src; img.alt = caption || "Screenshot";
+    box.appendChild(img);
+    if (caption) { const cap = el("div", "lb-cap"); cap.textContent = caption; box.appendChild(cap); }
+    const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+    box.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(box);
+    box.focus?.();
+  }
+
+  function shotStrip(images, caption) {
+    const strip = el("div", "shots");
+    let added = 0;
+    for (const src of images) {
+      if (typeof src !== "string" || !IMAGE_DATA.test(src)) continue;   // never inject an unvetted URI
+      const shot = el("button", "shot");
+      shot.type = "button";
+      shot.title = "Click to enlarge · click again for full size";
+      const img = el("img");
+      img.src = src;
+      img.alt = caption || "Screenshot";
+      img.loading = "lazy";
+      shot.appendChild(img);
+      const label = el("span", "shot-cap");
+      label.textContent = caption || "Screenshot";
+      shot.appendChild(label);
+      shot.addEventListener("click", () => {
+        if (shot.classList.contains("wide")) { openLightbox(src, caption); return; }
+        shot.classList.add("wide");
+        shot.title = "Click for full size";
+        if (following && atBottom()) scroll();      // growing in place must not yank a reader back
+      });
+      strip.appendChild(shot);
+      added++;
+    }
+    return added ? strip : null;
+  }
+
   const EDIT_TOOLS = new Set(["edit_file", "write_file", "multi_edit", "apply_patch", "create_file"]);
   function recordEdit(path, additions = 0, deletions = 0) {
     const name = String(path || "").replace(/^[ab]\//, "").replace(/^\/+/, "").trim();
@@ -1657,6 +1727,18 @@
         c.querySelector(".badge").textContent = hasTotal
           ? Math.max(0, Math.min(100, Math.round(ev.progress / ev.total * 100))) + "%"
           : (numeric ? String(ev.progress) : "");
+        break;
+      }
+      case "tool_images": {
+        ensureTurn();
+        const strip = shotStrip(Array.isArray(ev.images) ? ev.images : [], String(ev.caption || ""));
+        if (strip) {
+          // A screenshot is evidence for the answer, not a detail of the step, so it goes in the
+          // conversation flow. Inside the tool group it would sit behind a collapsed disclosure
+          // and the reader would never know it existed.
+          appendTurnContent(strip);
+          if (stick || following) scroll(); else noteNewContent();
+        }
         break;
       }
       case "tool_result": {

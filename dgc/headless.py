@@ -276,6 +276,10 @@ class HeadlessUI:
         self.em.emit("tool_result", call_id=call_id, name=name, output=out,
                      is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
 
+    def tool_images(self, call_id: str | None, images: list, caption: str = "") -> None:
+        """Images a tool produced, for the panel to render beside its step."""
+        self.em.emit("tool_images", call_id=call_id, images=list(images), caption=caption)
+
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:
         self.em.emit("tool_denied", call_id=call_id, name=name, args=args, reason=reason)

@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.34.0">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.34.0 is out · branch a chat without losing the one you had <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.34.0 is out <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -72,7 +72,7 @@
     <h1>The harness, inside your editor.</h1>
     <p class="lede">Run DGC beside the code. Read structured answers, follow expandable tool activity, and review changes without leaving your workspace. Durable goals run on local, API and subscription routes with pause, resume and evidence review.</p>
     <div class="hero-actions"><a class="button button-primary" href="https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc">Install from Marketplace ↗</a><a class="button" href="/vscode/dgc.vsix">Download .vsix</a></div>
-    <div class="page-meta"><span class="status-pill live">extension 0.19.0</span><span class="status-pill">CLI v0.34.0 recommended</span><span class="status-pill">protocol v8 required</span></div>
+    <div class="page-meta"><span class="status-pill live">extension 0.20.0</span><span class="status-pill">CLI v0.34.0 recommended</span><span class="status-pill">protocol v9 required</span></div>
   </div>
 </header>
 
@@ -118,8 +118,8 @@
 
 <section class="section">
   <div class="container content-grid">
-    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Current release</div><h2>0.19.0 speaks typed protocol v8.</h2><p class="lede">Native DGC plans, permission decisions, tools, and images are correlated with the CLI backend instead of reconstructed from terminal text. Goal evidence, lifecycle controls and prompt acknowledgements stay typed across routes. Selected skills, saved drafts and shared plan/review workflows keep work moving between terminal and editor. Vendor CLIs retain ownership of their internal tools and permissions.</p></header>
-    <aside class="card reveal"><span class="micro">Extension 0.19.0</span><h3 style="margin-top:18px">A finished answer ends with what it changed: the files this turn touched, each with its counts and its diff, and Undo and Review. Undo puts those files back as they were before the turn and rewinds the conversation with them, identifying the turn by the prompt that opened its recovery point and refusing rather than guessing.</h3><p>Under it: copy the answer, rate it (kept in this workspace and sent nowhere), branch into a new chat, run the prompt again, or edit and resend. Requires CLI 0.34.0; editor protocol v8. · Scrolling up mid-turn no longer throws the view to the top. The transcript is a column flex layout, so a block whose rendering the browser skipped collapsed to nothing and the page got shorter under the scrollbar; an eight-turn chat reported 2,140px of scroll height for 5,169px of content. Blocks now hold their measured height, and a Latest pill floats over the end while you are away from it..</p><a class="button" href="/changelog#extension" style="margin-top:24px">Extension changelog →</a></aside>
+    <header class="section-copy reveal"><div class="eyebrow"><b>03</b> Current release</div><h2>0.20.0 speaks typed protocol v9.</h2><p class="lede">Native DGC plans, permission decisions, tools, and images are correlated with the CLI backend instead of reconstructed from terminal text. Goal evidence, lifecycle controls and prompt acknowledgements stay typed across routes. Selected skills, saved drafts and shared plan/review workflows keep work moving between terminal and editor. Vendor CLIs retain ownership of their internal tools and permissions.</p></header>
+    <aside class="card reveal"><span class="micro">Extension 0.20.0</span><h3 style="margin-top:18px">Screenshots appear in the conversation. A thumbnail under the answer expands in place with one click and opens full size with another, closing on Escape or a click away. The panel validates every image itself rather than trusting what the backend sent it.</h3><p>Editor protocol v9 adds tool_images, because a tool result is text and a screenshot is not. The image travels on its own event, correlated to the step that produced it. · Tool activity is summarised in plain English rather than by tool name..</p><a class="button" href="/changelog#extension" style="margin-top:24px">Extension changelog →</a></aside>
   </div>
 </section>
 

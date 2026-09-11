@@ -898,6 +898,86 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("finished tool activity reads as a sentence, not a tally of function names", () => {
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "fix it" });
+  const step = (id, name, args = {}) => {
+    event({ type: "tool_call", call_id: id, name, args, summary: "" });
+    event({ type: "tool_result", call_id: id, name, output: "ok", is_error: false, is_diff: false });
+  };
+  step("a", "read_file", { path: "one.py" });
+  step("b", "read_file", { path: "two.py" });
+  step("c", "read_file", { path: "three.py" });
+  step("d", "grep", { pattern: "clamp" });
+  const label = doc.querySelector(".tool-group-label");
+  assert.equal(label.textContent, "Read 3 files and searched code");
+
+  const second = makeDom();
+  const ev2 = ev => second.send({ type: "event", event: ev });
+  ev2({ type: "ready", capabilities: {} });
+  ev2({ type: "turn_start", turn_id: "t", prompt: "ship it" });
+  const step2 = (id, name) => {
+    ev2({ type: "tool_call", call_id: id, name, args: {}, summary: "" });
+    ev2({ type: "tool_result", call_id: id, name, output: "ok", is_error: false, is_diff: false });
+  };
+  step2("a", "edit_file");
+  step2("b", "bash");
+  assert.equal(second.doc.querySelector(".tool-group-label").textContent,
+               "Edited 1 file and ran 1 command", "singulars stay singular");
+  assert.deepEqual(errors, []);
+});
+
+test("a screenshot from a tool lands in the transcript, expands, and opens full size", () => {
+  // Protocol v9. A tool result is text, so a browser screenshot arrives on its own event and has
+  // to be visible where the step that took it sits -- not left as a file path the user must hunt.
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "check the deployed build" });
+  event({ type: "tool_start", call_id: "c1", name: "browser", args: { operation: "screenshot" } });
+  event({ type: "tool_result", call_id: "c1", name: "browser",
+          output: "screenshot of https://vibedgc.com saved", is_error: false, is_diff: false });
+  event({ type: "tool_images", call_id: "c1", caption: "browser screenshot",
+          images: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="] });
+
+  const shot = doc.querySelector(".shots .shot");
+  assert.ok(shot, "the screenshot is rendered in the transcript");
+  assert.equal(shot.querySelector("img").getAttribute("alt"), "browser screenshot",
+               "the image is labelled for a screen reader");
+  assert.match(shot.textContent, /browser screenshot/, "the caption names what it is");
+  assert.ok(!shot.classList.contains("wide"), "it starts as a thumbnail");
+
+  shot.click();
+  assert.ok(shot.classList.contains("wide"), "one click expands it in place");
+  assert.equal(doc.getElementById("lightbox"), null, "expanding in place is not the full viewer");
+
+  shot.click();
+  const box = doc.getElementById("lightbox");
+  assert.ok(box, "a second click opens it full size");
+  assert.equal(box.getAttribute("aria-modal"), "true", "the viewer is a modal dialog");
+  box.click();
+  assert.equal(doc.getElementById("lightbox"), null, "clicking the viewer closes it");
+  assert.deepEqual(errors, []);
+});
+
+test("an image the panel cannot vouch for is never injected", () => {
+  // The panel validates every data URI itself rather than trusting the backend that sent it.
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "check it" });
+  event({ type: "tool_images", call_id: "c1", caption: "nope", images: [
+    "javascript:alert(1)",
+    "https://example.com/tracker.png",
+    "data:text/html;base64,PHNjcmlwdD4=",
+    "data:image/svg+xml;base64,PHN2Zz4=",
+  ] });
+  assert.equal(doc.querySelector(".shots"), null, "nothing was rendered for any of them");
+  assert.deepEqual(errors, []);
+});
+
 test("the approval card shows what the step will do, and Deny carries the note back", () => {
   // Protocol v8. The card used to show raw JSON args and had no way to say why you refused,
   // so this exercises the rendered card rather than the source that builds it.

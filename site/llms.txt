@@ -27,6 +27,7 @@ DGC is a coding-agent harness for a local model, compatible API, or supported co
 - Subscriptions: https://docs.vibedgc.com/subscriptions
 - Thinking & reasoning: https://docs.vibedgc.com/thinking-reasoning
 - Artifacts: https://docs.vibedgc.com/artifacts
+- Looking at a page: https://docs.vibedgc.com/looking-at-a-page
 - MCP servers: https://docs.vibedgc.com/mcp-servers
 - Lifecycle hooks: https://docs.vibedgc.com/lifecycle-hooks
 - Skills: https://docs.vibedgc.com/skills

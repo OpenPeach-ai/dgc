@@ -29,7 +29,7 @@
 <body class="">
 <a class="skip-link" href="#content">Skip to content</a>
 <div class="announcement" data-announcement="0.34.0">
-  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.34.0 is out · branch a chat without losing the one you had <span aria-hidden="true">→</span></a>
+  <a href="https://vibedgc.com/changelog"><span class="status-dot" aria-hidden="true"></span>DGC v0.34.0 is out <span aria-hidden="true">→</span></a>
   <button type="button" data-dismiss-announcement aria-label="Dismiss release announcement">×</button>
 </div>
 <header class="site-header" data-site-header>
@@ -95,6 +95,7 @@
 <div class="grp">
 <div class="grp-h">Features</div>
 <a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="looking-at-a-page.html" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
 <a href="mcp-servers.html" aria-current="page" class="active" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>
@@ -143,7 +144,7 @@
 <p>Servers are stored in your config under <code>mcp_servers</code>, so they reconnect on the next launch. Treat every configured server command as a trusted executable: its process starts unsandboxed in the workspace, and DGC cannot mediate that process&#x27;s own filesystem or network activity through tool permissions or the workspace lease.</p>
 <p>Headless controllers can enumerate them with the typed <code>list_mcp_tools</code> command and invoke one exact returned route with <code>call_mcp_tool</code>. Calls still pass through permission requests, lifecycle hooks, the workspace lease, cancellation, progress/input consent, redaction, and output bounds.</p>
       <nav class="pager" aria-label="Pagination">
-<a class="prev" href="artifacts.html"><div class="k">← Previous</div><div class="t">Artifacts</div></a>
+<a class="prev" href="looking-at-a-page.html"><div class="k">← Previous</div><div class="t">Looking at a page</div></a>
 <a class="next" href="lifecycle-hooks.html"><div class="k">Next →</div><div class="t">Lifecycle hooks</div></a>
 </nav>
   </article>
@@ -179,6 +180,7 @@
 <div class="grp">
 <div class="grp-h">Features</div>
 <a href="artifacts.html" class="" data-title="Artifacts" data-desc="preview what the agent builds on a localhost URL">Artifacts</a>
+<a href="looking-at-a-page.html" class="" data-title="Looking at a page" data-desc="drive a real browser to see a deployed or local site">Looking at a page</a>
 <a href="mcp-servers.html" aria-current="page" class="active" data-title="MCP servers" data-desc="connect external tools over MCP">MCP servers</a>
 <a href="lifecycle-hooks.html" class="" data-title="Lifecycle hooks" data-desc="run observable commands at agent boundaries">Lifecycle hooks</a>
 <a href="skills.html" class="" data-title="Skills" data-desc="reusable instruction packages">Skills</a>

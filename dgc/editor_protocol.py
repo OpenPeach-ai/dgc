@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 8
+PROTOCOL_VERSION = 9
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -83,6 +83,11 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
     "tool_result": {
         "call_id": _NS(False), "name": _S(), "output": _S(), "is_error": _B(),
         "is_diff": _B(), "diff": _S(False),
+    },
+    # A tool result is text. A browser screenshot is not, so it rides its own event, correlated by
+    # call_id, and the panel renders it under the step that produced it.
+    "tool_images": {
+        "call_id": _NS(False), "images": _A(), "caption": _S(False),
     },
     "tool_denied": {
         "call_id": _NS(False), "name": _S(), "args": _O(), "reason": _S(),
