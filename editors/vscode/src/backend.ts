@@ -238,7 +238,11 @@ export class DgcBackend extends EventEmitter {
           const offered = ev.protocol_version as number;
           const fix = offered < DGC_PROTOCOL_VERSION
             ? `This DGC CLI is too old for this extension. Update it — run "DGC: Update CLI to Latest", or \`dgc update\` in a terminal — then run "DGC: Restart Backend".`
-            : `This DGC CLI is newer than this extension. Update the DGC extension (Extensions view → DGC → Update), then reload the window.`;
+            // "Use the Update button" is not always enough: an editor's extension gallery is a
+            // mirror that can lag a publish, and an uninstall leaves old copies on disk that the
+            // scanner may prefer. vibedgc.com/vscode/dgc.vsix is always the build that matches the
+            // CLI, so name it as the reliable route rather than the fallback.
+            : `This DGC CLI is newer than this extension. Update DGC in the Extensions view and reload the window — or, if no update is offered, install the matching build directly: download https://vibedgc.com/vscode/dgc.vsix and run "Extensions: Install from VSIX…".`;
           this.protocolFailure(
             `${fix} (the extension speaks editor protocol v${DGC_PROTOCOL_VERSION}; this CLI speaks v${offered}.)`,
             offered < DGC_PROTOCOL_VERSION,
