@@ -333,6 +333,11 @@ DEFAULTS: dict = {
     "search_provider": "duckduckgo",            # duckduckgo (keyless) | brave | tavily | searxng
     "search_api_key": "",                       # for brave / tavily
     "search_url": "",                           # for searxng (self-hosted base URL)
+    "browser_path": "",                         # explicit Chrome/Chromium; else CHROME_PATH, the
+                                                # Playwright cache, PATH, then the usual locations
+    "browser_allow_unsandboxed": False,         # run the browser with --no-sandbox where the distro
+                                                # blocks user namespaces; a page exploit is then
+                                                # no longer contained, so this stays opt-in
     "mcp_servers": {},                          # name -> {command, args, env} stdio MCP servers
     "disabled_skills": [],                     # skill names disabled across native/delegated clients
     "disabled_mcp_servers": [],                # lifecycle state separate from credential identity

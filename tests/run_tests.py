@@ -1360,6 +1360,76 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    # ---- browser tool ---------------------------------------------------------------------
+    # The transport needs a real browser, so everything reachable without one is tested here and
+    # the live path is exercised separately (see browser_live_tests).
+    from dgc import browser as _browser_mod
+    from dgc.tools import BROWSER_OPS as _BROWSER_OPS, take_pending_images as _take_images
+
+    check("browser operations cover reading and acting",
+          set(_BROWSER_OPS) == {"open", "snapshot", "find", "console", "requests", "screenshot",
+                                "wait", "click", "type", "press", "select", "close"},
+          _BROWSER_OPS)
+
+    _bad_op = execute("browser", {"operation": "evaluate"}, _output_ctx)
+    check("browser refuses an unknown operation", _bad_op.startswith("error: unknown operation"),
+          _bad_op)
+    check("browser exposes no javascript-evaluation operation",
+          not any("eval" in op or "script" in op for op in _BROWSER_OPS), _BROWSER_OPS)
+
+    _no_url = execute("browser", {"operation": "open", "url": ""}, _output_ctx)
+    check("browser open needs a url", _no_url == "error: open needs a url", _no_url)
+    for _scheme in ("file:///etc/passwd", "javascript:alert(1)", "data:text/html,<b>x"):
+        _rejected = execute("browser", {"operation": "open", "url": _scheme}, _output_ctx)
+        check(f"browser open rejects {_scheme.split(':')[0]}:",
+              _rejected == "error: open needs an http:// or https:// url", _rejected)
+
+    # A ref is ours, and it is inlined into a page expression, so its shape is a security boundary.
+    for _evil in ("e1\"]); alert(1); //", "'; drop", "e", "", "e1234567", "../e1"):
+        try:
+            _browser_mod.BrowserSession._locator(_evil)
+            _locator_ok = False
+        except _browser_mod.BrowserError:
+            _locator_ok = True
+        check(f"browser rejects the ref {_evil!r}", _locator_ok)
+    check("browser accepts a well-formed ref",
+          _browser_mod.BrowserSession._locator("e12") == 
+          "document.querySelector('[data-dgc-ref=\"e12\"]')",
+          _browser_mod.BrowserSession._locator("e12"))
+
+    check("browser discovery never downloads a browser",
+          "never downloads" in _browser_mod.INSTALL_HINT.lower(), _browser_mod.INSTALL_HINT)
+    try:
+        _browser_mod.discover_browser("/definitely/not/a/browser")
+        _missing_ok = False
+    except _browser_mod.BrowserError as _error:
+        _missing_ok = "does not exist" in str(_error)
+    check("browser_path that does not exist is named in the error", _missing_ok)
+
+    # Pixels are queued for the model only when the model can read them.
+    class _ShotCtx:
+        project_root = tmp
+        config = _output_ctx.config
+        tool_owner = "browser-vision-test"
+        cancelled = None
+        skills: dict = {}
+        todos: list = []
+        on_todo = None
+        vision = True
+    check("a vision model has images queued for it", _tools_bg._vision_available(_ShotCtx()))
+    _ShotCtx.vision = False
+    check("a text-only model has none queued", not _tools_bg._vision_available(_ShotCtx()))
+    check("draining an empty image queue is safe", _take_images("nobody-at-all") == [])
+
+    # The snapshot script must read the DOM, because the accessibility tree drops
+    # content-visibility sections (measured on vibedgc.com/changelog: 2 in textContent, 0 in either
+    # innerText or the CDP tree).
+    check("the snapshot script does not treat content-visibility as hidden",
+          "content-visibility" in _browser_mod._SNAPSHOT_JS
+          and "getFullAXTree" not in _browser_mod._SNAPSHOT_JS)
+    check("the snapshot script is bounded",
+          "MAX_NODES" in _browser_mod._SNAPSHOT_JS and _browser_mod.MAX_SNAPSHOT_NODES > 0)
+
     check("web fetch redacts before its character ceiling",
           _tool_secret not in _secret_fetch and _tool_secret[:16] not in _secret_fetch
           and "[REDACTED]" in _secret_fetch)
@@ -12944,8 +13014,13 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v8 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 8
+    check("protocol v9 carries tool images, and only as an array",
+          _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
+                           "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
+          and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
+                               "images": "data:image/png;base64,AAAA"}) is not None)
+    check("protocol v9 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 9
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None

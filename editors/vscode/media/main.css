@@ -659,3 +659,36 @@ pre.code .copy:focus-visible { opacity: 1; }
    moved the viewport — scrolling up mid-turn threw you to the top. `settled` is set by the script
    at the same moment it writes the measured `contain-intrinsic-size`. */
 .msg.settled { content-visibility: auto; }
+
+/* Tool-produced images: a compact strip under the step that made them, expanding in place, and a
+   full-size viewer over the panel. Same three states Codex gives a screenshot. */
+.shots { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-2) 0 var(--sp-3); }
+.shot {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); cursor: zoom-in; overflow: hidden;
+  max-width: 100%; text-align: left; color: inherit; font: inherit;
+}
+.shot:hover { border-color: var(--border-strong); }
+.shot:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.shot img { display: block; width: 148px; height: auto; max-height: 96px; object-fit: cover;
+            object-position: top center; }
+.shot .shot-cap {
+  padding: var(--sp-1) var(--sp-2);
+  font: var(--w-reg) var(--t-xs)/1.4 var(--sans); color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 148px;
+}
+.shot.wide { cursor: zoom-out; }
+.shot.wide img { width: 100%; max-width: 520px; max-height: none; object-fit: contain; }
+.shot.wide .shot-cap { max-width: none; }
+
+#lightbox {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: var(--sp-3);
+  padding: var(--sp-5); background: rgba(0, 0, 0, .82); cursor: zoom-out;
+}
+#lightbox img {
+  max-width: 100%; max-height: calc(100vh - 96px); object-fit: contain;
+  border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface);
+}
+#lightbox .lb-cap { font: var(--w-reg) var(--t-sm)/1.4 var(--sans); color: #ededf1; }

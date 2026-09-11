@@ -49,6 +49,41 @@ await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: 
 await send({ type: "tool_result", call_id: "c2", name: "edit_file", output: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n", is_diff: true, diff: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n" });
 await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" }, summary: "tests/test_clamp.py" });
 await send({ type: "tool_result", call_id: "c3", name: "write_file", output: "wrote 9 lines" });
+if (process.argv.includes("--prose")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  await send({ type: "text_delta", text: [
+    "## What I changed\n\n",
+    "The bounds were inverted, so `clamp(5, 0, 10)` returned `0`. Two edits:\n\n",
+    "1. `src/clamp.py` — swapped `min`/`max` so the value is pinned inside the range.\n",
+    "2. `tests/test_clamp.py` — a property test over 1,000 random triples.\n\n",
+    "> The old behaviour passed the existing test because it only ever checked the midpoint.\n\n",
+    "```python\ndef clamp(v, lo, hi):\n    return max(lo, min(hi, v))\n```\n\n",
+    "| case | before | after |\n| --- | --- | --- |\n",
+    "| `clamp(5, 0, 10)` | 0 | 5 |\n| `clamp(-1, 0, 10)` | 10 | 0 |\n\n",
+    "See the [contributing guide](https://vibedgc.com/docs) for the test conventions. ",
+    "**Both tests pass.**\n",
+  ].join("") });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
+if (process.argv.includes("--images")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  const { readFileSync } = await import("node:fs");
+  const uri = readFileSync(process.env.DGC_SHOT_B64, "utf8").trim();
+  await send({ type: "tool_call", call_id: "c4", name: "browser",
+               args: { operation: "screenshot" }, summary: "vibedgc.com/vscode" });
+  await send({ type: "tool_result", call_id: "c4", name: "browser",
+               output: "screenshot of https://vibedgc.com/vscode (122 KB) saved to .dgc/screenshots/page.png" });
+  await send({ type: "tool_images", call_id: "c4", caption: "vibedgc.com/vscode", images: [uri] });
+  await send({ type: "text_delta", text: "The page renders correctly: the hero, both install buttons and the version pills are all in place.\n" });
+  if (process.argv.includes("--expanded")) {
+    await page.evaluate(() => document.querySelector(".shot")?.click());
+  }
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--steps")) {
   const out = process.argv[2] || "/tmp/panel.png";
   await page.evaluate(() => {
