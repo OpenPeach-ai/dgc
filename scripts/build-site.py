@@ -225,12 +225,31 @@ def faq_html(context: dict[str, Any]) -> str:
     return "".join(result)
 
 
+# The changelog renders every release in one document, and a release adds an entry
+# to both lists. Past roughly 14.6 KB compressed the page no longer fits the initial
+# congestion window, so the simulated tablet/mobile Lighthouse profile charges it a
+# second network round trip: FCP and LCP each move out one 150 ms tier, and LCP
+# crosses its 2000 ms release budget. Detailed notes for the most recent releases and
+# a compact dated row for the rest keeps every release listed, dated, anchor-linkable
+# and linked to its own release page, while holding the page to a fixed size as the
+# release count grows.
+DETAILED_RELEASES = 8
+
+
 def release_rows(items: list[dict[str, Any]]) -> str:
     rows = []
-    for item in items:
-        notes = "".join(f"<li>{html.escape(note)}</li>" for note in item["notes"][:3])
-        url = item.get("url", "#")
-        rows.append(f'<article class="release reveal" id="release-{slug(item["version"])}"><div><a class="release-version" href="{html.escape(url, quote=True)}">{html.escape(item["version"])} ↗</a><time datetime="{item["date"]}">{item["date"]}</time></div><ul>{notes}</ul><span class="status-pill{" live" if item["status"] == "current" else ""}">{html.escape(item["status"])}</span></article>')
+    for index, item in enumerate(items):
+        url = html.escape(item.get("url", "#"), quote=True)
+        live = " live" if item["status"] == "current" else ""
+        head = f'<div><a class="release-version" href="{url}">{html.escape(item["version"])} ↗</a><time datetime="{item["date"]}">{item["date"]}</time></div>'
+        pill = f'<span class="status-pill{live}">{html.escape(item["status"])}</span>'
+        if index < DETAILED_RELEASES:
+            notes = "".join(f"<li>{html.escape(note)}</li>" for note in item["notes"][:3])
+            rows.append(f'<article class="release reveal" id="release-{slug(item["version"])}">{head}<ul>{notes}</ul>{pill}</article>')
+            continue
+        if index == DETAILED_RELEASES:
+            rows.append('<p class="release-earlier micro">Earlier releases</p>')
+        rows.append(f'<article class="release brief reveal" id="release-{slug(item["version"])}">{head}{pill}</article>')
     return "".join(rows)
 
 
