@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.3 — 2026-09-12
+
+- **A sharper icon.** The tile was a 128×128 raster of the full DGC lockup — the smallest size the marketplace accepts, so it was upscaled and soft on every high-DPI screen, and the wordmark inside it was unreadable at the ~40px the extension lists actually render. It is now the DGC mark alone, drawn from the vector source at 512×512.
+
 ## 0.22.2 — 2026-09-12
 
 - **DGC is now open source under the Apache License 2.0**, replacing PolyForm Noncommercial. Use it commercially, inside a company, on client work, with no separate agreement — and with an explicit grant of the patent rights contributors hold in the work.
