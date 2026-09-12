@@ -295,6 +295,7 @@
       "status": "current",
       "notes": [
         "A quieter panel. Selection and focus were carrying 2px purple rails, filled accent blocks and 3px glows; they are structural now — a lifted surface for what is chosen, a firm border for what is focused — and a focused field borrows your editor's own focus colour instead of our brand purple. Purple is kept for the send button, links and live status.",
+        "Editor protocol v10. The extension and the CLI negotiate on exact equality, so this build pairs with DGC 0.36.0; if your editor's marketplace has not caught up, https://vibedgc.com/vscode/dgc.vsix is always the build that matches.",
         "The composer no longer breaks under a long model name. In auto mode the footer overflowed and carried the Send button outside the box; it is two zones now, with what the turn may do on the left and which model does it on the right, wrapping to a second row when it must.",
         "The model selector lost its chip icon, and reasoning profiles are spelled out — Extra High, not Xhigh.",
         "A resumed goal shows as a resumed goal, not as a prompt you never typed."

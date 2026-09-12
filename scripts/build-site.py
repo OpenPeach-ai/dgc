@@ -236,7 +236,10 @@ def faq_html(context: dict[str, Any]) -> str:
 DETAILED_RELEASES = 8
 
 
-def release_rows(items: list[dict[str, Any]]) -> str:
+def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:
+    """`prefix` keeps the two lists' anchors apart. The CLI keeps the bare `release-` ids that
+    existing links point at; the extension list is namespaced, because the two version series
+    collide the moment the extension reaches a number the CLI has already shipped."""
     rows = []
     for index, item in enumerate(items):
         url = html.escape(item.get("url", "#"), quote=True)
@@ -245,11 +248,11 @@ def release_rows(items: list[dict[str, Any]]) -> str:
         pill = f'<span class="status-pill{live}">{html.escape(item["status"])}</span>'
         if index < DETAILED_RELEASES:
             notes = "".join(f"<li>{html.escape(note)}</li>" for note in item["notes"][:3])
-            rows.append(f'<article class="release reveal" id="release-{slug(item["version"])}">{head}<ul>{notes}</ul>{pill}</article>')
+            rows.append(f'<article class="release reveal" id="{prefix}-{slug(item["version"])}">{head}<ul>{notes}</ul>{pill}</article>')
             continue
         if index == DETAILED_RELEASES:
             rows.append('<p class="release-earlier micro">Earlier releases</p>')
-        rows.append(f'<article class="release brief reveal" id="release-{slug(item["version"])}">{head}{pill}</article>')
+        rows.append(f'<article class="release brief reveal" id="{prefix}-{slug(item["version"])}">{head}{pill}</article>')
     return "".join(rows)
 
 
@@ -373,7 +376,7 @@ def build_outputs() -> dict[str, str | bytes]:
     ctx.update({
         "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "FIG6": partial("fig6.html", ctx), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
-        "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"]),
+        "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"], prefix="release-ext"),
         "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": releases["extension"][0]["notes"][0], "EXT_NOTE_2": releases["extension"][0]["notes"][1], "EXT_NOTE_3": releases["extension"][0]["notes"][2],
     })
     pages: dict[str, tuple[str, str, str, str]] = {
