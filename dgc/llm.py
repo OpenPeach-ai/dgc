@@ -1265,6 +1265,10 @@ class LLMClient:
         _, metadata = self._cached_model_metadata()
         return _bounded_model_tokens(metadata.get("context_length"))
 
+    def _note_dropped_images(self, count: int) -> None:
+        """Record that images were withheld, so a frontend can tell the user once."""
+        self.dropped_images = getattr(self, "dropped_images", 0) + count
+
     def effective_context_size(self, configured: int | None = None) -> int:
         """Clamp a requested operating window to a discovered model maximum without expanding it."""
         requested = _bounded_model_tokens(
@@ -2489,8 +2493,25 @@ class LLMClient:
         ollama_messages = self._ollama_messages(messages)
         if (any(message.get("images") for message in ollama_messages)
                 and not self.vision_supported):
-            raise LLMError(
-                f"Ollama model {self.model!r} does not advertise vision input support")
+            # Refusing the turn stranded the run: the image stays in the conversation, so every
+            # later turn -- and every attempt to resume a standing goal -- re-sent it and failed
+            # the same way. An attachment this model cannot read is a fact to tell it about, not a
+            # reason to stop working. Drop the pixels from the request and say so in their place.
+            dropped = 0
+            for message in ollama_messages:
+                count = len(message.get("images") or ())
+                if not count:
+                    continue
+                dropped += count
+                message.pop("images", None)
+                note = (f"[{count} image{'s' if count > 1 else ''} were attached here, but "
+                        f"{self.model} cannot read images. Say so and ask for a description, or "
+                        "suggest switching to a vision-capable model. Do not pretend to have seen "
+                        "them.]")
+                existing = message.get("content")
+                message["content"] = f"{existing}\n\n{note}" if existing else note
+            if dropped:
+                self._note_dropped_images(dropped)
         payload: dict = {"model": self.model, "messages": ollama_messages,
                          "stream": True}
         if tools and self.tools_supported:

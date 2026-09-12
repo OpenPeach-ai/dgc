@@ -898,6 +898,28 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("the Agents tab offers the same provider preset the Models tab does", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "settings_open", providers: [
+    { id: "ollama", label: "Ollama (local)", url: "http://localhost:11434/v1", needsKey: false },
+    { id: "openai", label: "OpenAI", url: "https://api.openai.com/v1", needsKey: true },
+  ], models: [], section: "agents" });
+
+  const preset = doc.getElementById("s-subagent_provider");
+  assert.ok(preset, "the Agents tab has a provider preset");
+  assert.ok(preset.closest('[data-section="agents"]'), "and it lives on the Agents tab");
+  assert.deepEqual([...preset.options].map((o) => o.value), ["", "ollama", "openai"]);
+
+  preset.value = "ollama";
+  preset.onchange();
+  assert.equal(doc.getElementById("s-subagent_base_url").value, "http://localhost:11434/v1",
+               "choosing a preset fills the sub-agent host");
+  assert.equal(doc.getElementById("s-base_url").value, "",
+               "and never touches the main connection");
+  assert.deepEqual(errors, []);
+});
+
 test("a link says where it goes, without fetching anything to find out", () => {
   const { errors, send, doc } = makeDom();
   const event = ev => send({ type: "event", event: ev });

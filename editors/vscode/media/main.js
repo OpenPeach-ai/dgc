@@ -2558,6 +2558,11 @@
     settingsProviders = providers || [];
     $("s-provider").innerHTML = `<option value="">— pick a preset —</option>` +
       settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
+    const subPreset = $("s-subagent_provider");
+    if (subPreset) {
+      subPreset.innerHTML = '<option value="">choose a preset\u2026</option>'
+        + settingsProviders.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join("");
+    }
     $("s-models").innerHTML = (models || []).map((m) => `<option value="${esc(m)}"></option>`).join("");
     if (lastConfig) fillSettings(lastConfig);
     settingsReturnFocus = document.activeElement;
@@ -2617,6 +2622,15 @@
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
+  // The Agents tab needs the same shortcut the Models tab has: pick a provider, get its host.
+  // It fills only the sub-agent fields, and never touches the main connection.
+  $("s-subagent_provider").onchange = () => {
+    const preset = settingsProviders.find((x) => x.id === $("s-subagent_provider").value);
+    if (!preset) return;
+    $("s-subagent_base_url").value = preset.url;
+    $("s-subagent_api_mode").value = "auto";
+    if (!preset.needsKey && !$("s-subagent_api_key").value) $("s-subagent_api_key").value = "ollama";
+  };
   $("s-provider").onchange = () => {
     const p = settingsProviders.find((x) => x.id === $("s-provider").value);
     if (p) {
