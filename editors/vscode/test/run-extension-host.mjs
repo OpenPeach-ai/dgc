@@ -157,6 +157,22 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       send({ type: "turn_end", turn_id: "goal-turn", reason: "completed", token_estimate: 2 });
     }, 100);
   }
+  // The backend owns resuming: it reactivates the goal and continues the run itself, rather than
+  // the editor replaying the objective as a fresh prompt.
+  if (cmd.type === "resume_goal") {
+    goalPromptCount += 1;
+    activeGoalTurn = true;
+    send({ type: "goal_changed", goal: "host matrix", status: "active",
+           request_id: cmd.request_id });
+    send({ type: "turn_start", turn_id: "goal-turn", prompt: "Continue the standing goal.",
+           kind: "resume" });
+    send({ type: "text_delta", text: "Resuming." });
+    send({ type: "stream_end" });
+    // The turn ends on cancel, as the first goal turn does. Ending it on a timer instead races
+    // the editor's stop-then-edit sequence: a cancel arriving after the timer finds no active
+    // turn, emits no turn_end, and the editor waits for one that never comes.
+    return;
+  }
   if (cmd.type === "cancel" && activeGoalTurn) {
     activeGoalTurn = false;
     send({ type: "turn_end", turn_id: "goal-turn", reason: "cancelled", token_estimate: 2 });

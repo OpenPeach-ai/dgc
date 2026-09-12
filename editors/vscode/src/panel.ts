@@ -440,7 +440,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         ...(tokenBudget !== undefined ? { token_budget: tokenBudget } : {}),
       }, "goal_changed", 10000);
       this.post({ type: "goal_edit_state", state: "saved" });
-      if (resume) { await this.resumeGoal(); }
+      if (resume) { await this.resumeGoal(objective); }
     } catch (err: any) {
       this.post({ type: "goal_edit_state", state: "error",
                   error: err?.message || "DGC could not update the goal." });
@@ -460,8 +460,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async resumeGoal(): Promise<void> {
-    const objective = String(this.state.goal.text || "").trim();
+  // `known` is the objective the caller already has. Editing a goal awaits its own goal_changed
+  // reply, which can consume the event before the panel's state handler sees it, so re-reading
+  // this.state.goal here would sometimes find it stale and silently skip the resume.
+  private async resumeGoal(known?: string): Promise<void> {
+    const objective = String(known ?? this.state.goal.text ?? "").trim();
     if (!objective) { return; }
     if (this.turnActive) {
       this.post({ type: "goal_control_state", state: "error",
@@ -475,6 +478,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       // just typed it, and the model read it as a new request.
       const accepted = be.send({ type: "resume_goal" });
       if (!accepted) { throw new Error("The backend did not accept the resumed goal turn."); }
+      // The panel asked for this, so its own view reflects it immediately. Waiting for the
+      // backend's goal_changed to arrive would leave a window where the goal still reads
+      // "paused" here -- and an edit landing in that window would save the revision and then
+      // decline to continue, because it decides whether to resume from this very field.
+      this.state.goal = { ...this.state.goal, status: "active" };
       this.turnActive = true;
       this.post({ type: "goal_start_state", state: "started" });
     } catch (err: any) {
@@ -525,6 +533,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         finish(new Error("The DGC backend did not accept the stop request."));
       }
     });
+    // Resolving here means turn_end has arrived, so the turn is over by definition. The panel's
+    // own event handler also clears these, but it and the listener above observe the same event in
+    // an order we do not control -- and a caller that stops a turn in order to do something next
+    // must not find a stale "a turn is running" flag when it gets here.
+    this.turnActive = this.confirmedTurnActive = false;
   }
 
   private activeSubscription(): any | undefined {
