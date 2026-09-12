@@ -1360,6 +1360,54 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    # ---- Ollama cloud streams are labelled application/json ----------------------------------
+    # A local Ollama labels a stream application/x-ndjson; Ollama's cloud serves the same
+    # newline-delimited stream as application/json -- the same header it uses for a single object.
+    # Trusting the header parsed every cloud turn as one object: "Ollama response returned
+    # malformed JSON", which made every cloud model unusable.
+    from dgc import llm as _llm_mod
+
+    class _FakeOllamaResponse:
+        def __init__(self, body, ctype):
+            self.headers = {"Content-Type": ctype}
+            self._body = body.encode()
+            self.status_code, self.encoding = 200, "utf-8"
+
+        def iter_content(self, chunk_size=65536):
+            yield self._body
+
+        def close(self):
+            pass
+
+    _nd = ('{"model":"m","message":{"role":"assistant","content":"He"},"done":false}\n'
+           '{"model":"m","message":{"role":"assistant","content":"llo"},"done":false}\n'
+           '{"model":"m","message":{"role":"assistant","content":""},"done":true,'
+           '"done_reason":"stop","eval_count":3}\n')
+    _one = ('{"model":"m","message":{"role":"assistant","content":"Hello"},"done":true,'
+            '"done_reason":"stop"}')
+
+    def _consume(body, ctype):
+        client = _llm_mod.LLMClient.__new__(_llm_mod.LLMClient)
+        client.think_budget_chars = 0
+        chunks = []
+        outcome = client._consume_ollama(_FakeOllamaResponse(body, ctype),
+                                         lambda text: chunks.append(text), lambda text: None)
+        return "".join(chunks), outcome.finish_reason
+
+    check("a cloud ndjson stream mislabelled application/json is read as a stream",
+          _consume(_nd, "application/json") == ("Hello", "stop"),
+          _consume(_nd, "application/json"))
+    check("a local stream labelled x-ndjson still reads the same",
+          _consume(_nd, "application/x-ndjson") == ("Hello", "stop"))
+    check("a genuine single JSON object still reads as one object",
+          _consume(_one, "application/json") == ("Hello", "stop"))
+    try:
+        _consume("{not json at all", "application/json")
+        _bad_json_raised = False
+    except Exception as _exc:
+        _bad_json_raised = "malformed JSON" in str(_exc)
+    check("a body that is neither shape still fails loudly", _bad_json_raised)
+
     # ---- resuming a goal, and starting over mid-turn -----------------------------------------
     from dgc import editor_protocol as _EPR
     from dgc.goals import RESUME_PROMPT as _RESUME
