@@ -978,9 +978,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.sessionReady = false;
     const be = new DgcBackend(this.cwd(), cmd);
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
-    be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
-    be.on("exit", (code: number | null) => {
+    be.on("stderr", (line: string) => { this.backendLog.appendLine(line); this.post({ type: "stderr", line }); });
+    be.on("exit", (code: number | null, signal?: string | null) => {
       let recovering = false;
+      this.backendLog.appendLine(`[dgc serve exited: ${
+        signal ? `killed by ${signal}` : code === null ? "killed by an unreported signal" : `code ${code}`}]`);
       this.mcpUrls.clear();
       this.setReadyContext(false);
       if (this.backend === be) {
@@ -1000,7 +1002,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.backend = undefined;
         recovering = this.recoverBackend();
       }
-      this.post({ type: "backend_exit", code, recovering });
+      this.post({ type: "backend_exit", code, signal, recovering });
     });
     be.start();
     this.backend = be;
@@ -1024,7 +1026,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     if (this.backendRecoveries.length >= 3) {
       this.post({ type: "event", event: { type: "error", message:
         "DGC could not keep its backend running (three restarts in two minutes), so it stopped "
-        + "trying. Fix the cause, then run DGC: Restart Backend." } });
+        + "trying. Open the DGC Backend output channel to see why it exited, then run "
+        + "DGC: Restart Backend." } });
       return false;
     }
     this.backendRecoveries.push(now);
@@ -1395,6 +1398,14 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- webview -------------------------------------------------------------
+  /**
+   * The backend's stderr. It used to be posted to the webview, which has no handler for it, so
+   * every Python traceback `dgc serve` ever wrote was dropped on the floor -- a backend could die
+   * repeatedly and leave no evidence anywhere. It goes to an output channel now, where it persists
+   * across restarts and can be copied into a bug report.
+   */
+  private readonly backendLog = vscode.window.createOutputChannel("DGC Backend");
+
   /** Views whose listeners are already wired; re-resolving one must not double-register them. */
   private readonly adoptedViews = new WeakSet<vscode.WebviewView>();
 
@@ -3574,6 +3585,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this.backendLog.dispose();
     this.intentionalShutdown = true;                 // shutting down; do not respawn behind us
     if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }

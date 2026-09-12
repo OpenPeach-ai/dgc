@@ -3125,9 +3125,15 @@
       // goal reads active-and-running. With the backend gone nothing will ever say otherwise, so
       // it counted time against a dead process. Freeze it where it stopped.
       if (goalState.text) setGoalState({ ...goalState, running: false });
+      // `msg.code ?` hid the two cases that matter: 0 is falsy, so a clean stop and a process
+      // killed by a signal (code null) printed the same bare line, and neither could be told from
+      // the other when diagnosing a crash loop.
+      const why = msg.signal ? " (killed by " + msg.signal + ")"
+        : typeof msg.code === "number" ? " (code " + msg.code + ")"
+        : " (killed)";
       sysLine(msg.recovering
-        ? "dgc backend stopped\u2009\u2014\u2009reconnecting and picking the work back up"
-        : "dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true);
+        ? "dgc backend stopped" + why + "\u2009\u2014\u2009reconnecting and picking the work back up"
+        : "dgc backend exited" + why, true);
       setSending(false);
     }
   });

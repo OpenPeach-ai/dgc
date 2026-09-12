@@ -1397,6 +1397,67 @@ def unit_tests(tmp: Path):
           and _gate._config_unchanged("subagent_model", "")
           and not _gate._config_unchanged("context_size", 1048576))
 
+    # ---- the backend must never emit a frame that gets it killed -----------------------------
+    # The editor treats an over-ceiling frame as a protocol violation and shuts the backend down,
+    # so an oversized event is a way for the backend to kill itself. A screenshot is capped at 4MB
+    # of PNG, which is ~5.6MB once base64 and JSON-escaped, and a tool batch can queue several.
+    import io as _frame_io
+    from dgc.protocol import Emitter as _FrameEmitter
+    from dgc.editor_protocol import MAX_EVENT_BYTES as _MAX_FRAME
+    _frame_buf = _frame_io.StringIO()
+    _frame_em = _FrameEmitter(_frame_buf)
+    check("the emitter defaults to the protocol's own ceiling", _frame_em.max_event_bytes == _MAX_FRAME)
+    _small_em = _FrameEmitter(_frame_buf, max_event_bytes=2000)
+    _frame_buf.truncate(0); _frame_buf.seek(0)
+    _small_em.emit("tool_images", call_id="c1", caption="browser screenshot",
+                   images=["data:image/png;base64," + "A" * 9000])
+    _small_em.emit("text_delta", text="a normal event")
+    _frame_lines = [l for l in _frame_buf.getvalue().split("\n") if l]
+    _dropped = json.loads(_frame_lines[0])
+    _kept = json.loads(_frame_lines[1])
+    check("an over-ceiling frame is shrunk to fit, keeping which step it belonged to",
+          all(len(l.encode("utf-8")) <= 2000 for l in _frame_lines)
+          and _dropped["type"] == "tool_images" and _dropped["call_id"] == "c1"
+          and _dropped["images"] == [],
+          _dropped)
+    check("an ordinary event is written untouched",
+          _kept["type"] == "text_delta" and _kept["text"] == "a normal event")
+    # A frame that carries a correlation id is a QUESTION, not a notification: replacing it
+    # wholesale leaves the front-end nothing to answer and the worker waiting on an approval that
+    # can never arrive (a human review waits with no deadline). Shrink the payload, keep the
+    # envelope -- and keep each field's TYPE, or the replacement fails its own schema.
+    from dgc.editor_protocol import event_error as _ev_err
+    _ask_buf = _frame_io.StringIO()
+    _ask_em = _FrameEmitter(_ask_buf, validator=_ev_err, max_event_bytes=3000)
+    _ask_em.emit("permission_request", id="r7", call_id="c1", name="bash",
+                 args={"command": "y" * 9000}, command="y" * 9000,
+                 suggested_rule="bash:*", choices=[], summary="x" * 9000, diff="")
+    _ask = json.loads(_ask_buf.getvalue().strip())
+    check("an over-ceiling approval stays an approval the user can still answer",
+          _ask["type"] == "permission_request" and _ask["id"] == "r7"
+          and _ask["call_id"] == "c1" and _ask["suggested_rule"] == "bash:*",
+          _ask)
+    check("its bulky fields are replaced in kind, so the event still validates",
+          _ask["args"] == {} and _ask["choices"] == []
+          and "too large" in str(_ask["summary"])
+          and _ev_err(_ask) is None
+          and len(_ask_buf.getvalue().strip().encode("utf-8")) <= 3000)
+
+    # And the source splits a batch rather than relying on that backstop, so real screenshots are
+    # shown instead of dropped.
+    class _ShotEm:
+        def __init__(self): self.frames = []
+        def emit(self, _t, /, **f): self.frames.append(f)
+    _shot_ui = _headless_mod2.HeadlessUI.__new__(_headless_mod2.HeadlessUI)
+    _shot_ui.em = _ShotEm()
+    _one_mb = "data:image/png;base64," + "B" * 1_000_000
+    _headless_mod2.HeadlessUI.tool_images(_shot_ui, "c1", [_one_mb] * 8, "browser screenshot")
+    _sent = sum(len(f["images"]) for f in _shot_ui.em.frames)
+    _worst = max(sum(len(i) for i in f["images"]) for f in _shot_ui.em.frames)
+    check("a batch of screenshots is split into frames that fit, losing none",
+          _sent == 8 and len(_shot_ui.em.frames) > 1 and _worst < _MAX_FRAME,
+          (len(_shot_ui.em.frames), _sent, _worst))
+
     # ---- a standing goal survives a turn that stopped on its own -----------------------------
     # A goal is the instruction to work unattended. The loop guard ending the turn used to end the
     # goal too, leaving nothing running until a person pressed Resume -- which defeats the point.

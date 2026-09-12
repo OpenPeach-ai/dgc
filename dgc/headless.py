@@ -25,7 +25,7 @@ from .commands import (
     custom_command_names, discover_commands, editor_command_metadata, render_command,
 )
 from .config import Config, mcp_url_has_credentials
-from .editor_protocol import (MAX_COMMAND_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
+from .editor_protocol import (MAX_COMMAND_BYTES, MAX_EVENT_BYTES, MAX_SAFE_INTEGER, PROTOCOL_VERSION,
                               command_error, event_error)
 from .permissions import Rule, rule_for
 from .mcp_config import validate_mcp_spec as _mcp_spec, public_mcp_spec
@@ -291,8 +291,25 @@ class HeadlessUI:
                      is_error=tool_output_is_error(out), is_diff=is_diff, diff=diff)
 
     def tool_images(self, call_id: str | None, images: list, caption: str = "") -> None:
-        """Images a tool produced, for the panel to render beside its step."""
-        self.em.emit("tool_images", call_id=call_id, images=list(images), caption=caption)
+        """Images a tool produced, for the panel to render beside its step.
+
+        Sent in groups that fit one protocol frame. A screenshot is capped at 4MB of PNG, which is
+        about 5.6MB once base64 and JSON-escaped, and a tool batch can queue several -- so the
+        whole batch in one event could exceed the frame ceiling and be dropped. The panel appends
+        a strip per event, so splitting costs nothing and keeps every screenshot.
+        """
+        budget = int(MAX_EVENT_BYTES * 0.9)          # leave room for the envelope and escaping
+        batch: list = []
+        used = 0
+        for image in images:
+            cost = len(str(image).encode("utf-8")) + 8      # the quotes, comma and escaping slack
+            if batch and used + cost > budget:
+                self.em.emit("tool_images", call_id=call_id, images=batch, caption=caption)
+                batch, used = [], 0
+            batch.append(image)
+            used += cost
+        if batch:
+            self.em.emit("tool_images", call_id=call_id, images=batch, caption=caption)
 
     def tool_denied(self, name: str, args: dict, reason: str,
                     call_id: str | None = None) -> None:

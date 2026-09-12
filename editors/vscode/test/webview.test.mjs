@@ -2530,6 +2530,8 @@ test("the goal clock stops when the backend does", async () => {
   assert.equal(clock(), frozen, "it does not keep counting once the backend is gone");
   assert.match(doc.getElementById("log").textContent, /reconnecting and picking the work back up/,
     "and the line says the work is being recovered, not that it died");
+  assert.match(doc.getElementById("log").textContent, /\(code 0\)/,
+    "a clean stop says so, instead of hiding behind a falsy 0");
   assert.deepEqual(errors, []);
 });
 
@@ -2539,4 +2541,20 @@ test("an unrecoverable backend exit still says so plainly", () => {
   send({ type: "backend_exit", code: 1, recovering: false });
   assert.match(doc.getElementById("log").textContent, /dgc backend exited \(code 1\)/);
   assert.deepEqual(errors, []);
+});
+
+test("a killed backend is told apart from one that stopped cleanly", () => {
+  // `msg.code ?` collapsed the two: 0 is falsy, so a clean exit and a process killed by a signal
+  // printed the same bare line -- and a crash loop could not be told from a normal shutdown.
+  const clean = makeDom();
+  clean.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  clean.send({ type: "backend_exit", code: 0, signal: null, recovering: false });
+  assert.match(clean.doc.getElementById("log").textContent, /dgc backend exited \(code 0\)/);
+
+  const killed = makeDom();
+  killed.send({ type: "event", event: { type: "ready", capabilities: {} } });
+  killed.send({ type: "backend_exit", code: null, signal: "SIGKILL", recovering: false });
+  assert.match(killed.doc.getElementById("log").textContent,
+    /dgc backend exited \(killed by SIGKILL\)/, "the signal is named");
+  assert.deepEqual([...clean.errors, ...killed.errors], []);
 });

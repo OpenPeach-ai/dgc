@@ -30,6 +30,7 @@ globalThis.__DGC_TEST_VSCODE = {
     activeTextEditor: undefined,
     tabGroups: { all: [] },
     createStatusBarItem: () => statusBar,
+    createOutputChannel: () => ({ appendLine() {}, append() {}, show() {}, dispose() {} }),
     showWarningMessage: async (message) => {
       notices.warnings.push(String(message));
       return notices.warningResponses.shift();
@@ -1352,4 +1353,38 @@ test("a marker from a different chat does not resume this one", async () => {
   });
   await h.provider.resumeInterruptedGoal(h.be);
   assert.deepEqual(h.sent, []);
+});
+
+test("the backend's own words are kept where they can be read", async () => {
+  // stderr was posted to the webview, which has no handler for it, so every traceback dgc serve
+  // wrote was dropped. A backend could die repeatedly and leave no evidence anywhere.
+  const lines = [];
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const savedChannel = vs.window.createOutputChannel;
+  try {
+    vs.window.createOutputChannel = () => ({
+      appendLine: (l) => lines.push(l), append() {}, show() {}, dispose() {},
+    });
+    const provider = new DgcViewProvider({
+      extensionUri: { fsPath: "/ext" }, subscriptions: [],
+      globalState: { get() {}, async update() {} },
+      workspaceState: { get() {}, async update() {} },
+    });
+    provider.post = () => {};
+    const handlers = {};
+    const be = { ready: true, on(n, f) { handlers[n] = f; }, start() {}, dispose() {} };
+    provider.backend = be;
+    be.on("stderr", (line) => { provider.backendLog.appendLine(line); });
+    be.on("exit", () => { provider.backendLog.appendLine("[dgc serve exited: code 0]"); });
+
+    handlers.stderr('Traceback (most recent call last):\n  ValueError: invalid protocol event');
+    handlers.exit(0);
+    assert.ok(lines.some((l) => /ValueError: invalid protocol event/.test(l)),
+      "a backend traceback is retained");
+    assert.ok(lines.some((l) => /dgc serve exited/.test(l)),
+      "and the exit itself is recorded next to it");
+    provider.dispose();
+  } finally {
+    vs.window.createOutputChannel = savedChannel;
+  }
 });
