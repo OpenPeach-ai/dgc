@@ -238,7 +238,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
             "operatingSystem": "Linux, macOS, Windows via WSL",
             "softwareVersion": ctx["VERSION_NUMBER"],
             "url": ctx["SITE_URL"],
-            "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free for noncommercial use"},
+            "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free and open source under the Apache License 2.0"},
         },
     ]
     if extra_json_ld:

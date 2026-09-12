@@ -1224,3 +1224,132 @@ test("returning to the other copy of the chat adopts it instead of leaving a dea
     vs.Uri = savedUri;
   }
 });
+
+test("a backend that dies is replaced, and the corpse is never handed out again", () => {
+  // ensureBackend() returns this.backend whenever it is set, so leaving the dead child there made
+  // every later command write to a closed pipe: the panel could not recover without the user
+  // finding "DGC: Restart Backend". dgc serve is a plain child of the extension host, so an
+  // extension update or a window reload takes it down -- recovery has to be automatic.
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [],
+    globalState: { get() {}, async update() {} },
+    workspaceState: { get() {}, async update() {} },
+  });
+  provider.post = () => {};
+  provider.view = { visible: true };
+
+  const handlers = {};
+  const be = { ready: true, on(name, fn) { handlers[name] = fn; }, start() {}, dispose() {} };
+  provider.backend = be;
+  be.on("exit", (code) => {
+    if (provider.backend === be) { provider.backend = undefined; provider.recoverBackend(); }
+  });
+
+  handlers.exit(0);
+  assert.equal(provider.backend, undefined, "the dead backend is cleared immediately");
+  assert.notEqual(provider.recoveryTimer, undefined, "and a replacement is scheduled unprompted");
+  provider.dispose();
+  assert.equal(provider.recoveryTimer, undefined, "disposing cancels the pending restart");
+});
+
+test("a backend that cannot stay up is not respawned forever", async () => {
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [],
+    globalState: { get() {}, async update() {} },
+    workspaceState: { get() {}, async update() {} },
+  });
+  const posted = [];
+  provider.post = (m) => posted.push(m);
+  provider.view = { visible: true };
+  provider.backendRecoveries = [Date.now(), Date.now(), Date.now()];   // three already, in-window
+  provider.recoverBackend();
+  assert.equal(provider.recoveryTimer, undefined, "no fourth restart is scheduled");
+  const told = posted.find((m) => /could not keep its backend running/.test(m?.event?.message || ""));
+  assert.ok(told, "and the user is told, with the command that fixes it");
+  assert.match(told.event.message, /DGC: Restart Backend/);
+  provider.dispose();
+});
+
+test("a deliberate restart does not spend the crash-recovery budget", () => {
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [],
+    globalState: { get() {}, async update() {} },
+    workspaceState: { get() {}, async update() {} },
+  });
+  provider.post = () => {};
+  provider.backendRecoveries = [Date.now(), Date.now()];
+  provider.intentionalShutdown = true;
+  provider.recoverBackend();
+  assert.equal(provider.recoveryTimer, undefined, "an intentional teardown schedules nothing");
+  provider.dispose();
+});
+
+function recoveryProvider({ mark, goal } = {}) {
+  const stored = new Map();
+  const sent = [];
+  const provider = new DgcViewProvider({
+    extensionUri: { fsPath: "/ext" }, subscriptions: [],
+    globalState: { get() {}, async update() {} },
+    workspaceState: {
+      get: (key) => stored.get(key),
+      async update(key, value) { if (value === undefined) { stored.delete(key); } else { stored.set(key, value); } },
+    },
+  });
+  provider.post = () => {};
+  provider.currentSessionId = "chat-alpha";
+  provider.state = { model: "m", mode: "default", think: "off", ultra: false, baseUrl: "",
+                     goal: { text: "", status: "none", elapsed_seconds: 0 } };
+  const be = { ready: true, send: (c) => { sent.push(c); return true; }, dispose() {} };
+  provider.backend = be;
+  provider.ensureBackend = () => be;
+  provider.requestState = async () => ({ type: "status", goal });
+  // The marker is scoped to the workspace, so build it from the provider's own scope rather than
+  // guessing one -- a wrong scope would make every assertion below pass for the wrong reason.
+  if (mark) {
+    stored.set("dgc.goalPursuit.v1", { scope: provider.draftScope(), ...mark });
+  }
+  return { provider, be, sent, stored };
+}
+
+test("a goal interrupted by a dead backend picks itself back up", async () => {
+  // load_session demotes a restored active goal to paused, which is right when a person opens an
+  // old chat and wrong when the runner was killed under it seconds ago. The marker tells the two
+  // apart -- it exists only while a goal is genuinely being pursued.
+  const h = recoveryProvider({
+    mark: { id: "chat-alpha", at: Date.now() - 5000 },
+    goal: { text: "ship the release", status: "paused" },
+  });
+  await h.provider.resumeInterruptedGoal(h.be);
+  assert.deepEqual(h.sent, [{ type: "resume_goal" }], "the goal continues without a human click");
+  assert.equal(h.stored.get("dgc.goalPursuit.v1"), undefined, "the marker is one-shot");
+});
+
+test("reopening an old chat still waits for a human", async () => {
+  const h = recoveryProvider({
+    mark: { id: "chat-alpha", at: Date.now() - 60 * 60 * 1000 },   // an hour old
+    goal: { text: "ship the release", status: "paused" },
+  });
+  await h.provider.resumeInterruptedGoal(h.be);
+  assert.deepEqual(h.sent, [], "a stale marker is not an interruption");
+});
+
+test("a goal the user paused is never revived behind their back", async () => {
+  const h = recoveryProvider({ goal: { text: "ship the release", status: "paused" } });
+  await h.provider.resumeInterruptedGoal(h.be);          // no marker at all
+  assert.deepEqual(h.sent, [], "without a marker there is nothing to resume");
+
+  // And the marker is cleared the moment the goal stops being pursued.
+  const live = recoveryProvider({ mark: { id: "chat-alpha", at: Date.now() } });
+  live.provider.noteGoalPursuit(false);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(live.stored.get("dgc.goalPursuit.v1"), undefined);
+});
+
+test("a marker from a different chat does not resume this one", async () => {
+  const h = recoveryProvider({
+    mark: { id: "some-other-chat", at: Date.now() - 5000 },
+    goal: { text: "ship the release", status: "paused" },
+  });
+  await h.provider.resumeInterruptedGoal(h.be);
+  assert.deepEqual(h.sent, []);
+});

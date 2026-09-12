@@ -7,6 +7,10 @@ import { resolveDgcExecutable, userScopedString } from "./configuration";
 import { workspaceFile } from "./navigation";
 import { McpBrowserRequest, openMcpBrowser } from "./mcpAuth";
 
+/** Where the "a goal is being pursued" marker lives, and how long it stays believable. */
+const GOAL_PURSUIT_KEY = "dgc.goalPursuit.v1";
+const GOAL_PURSUIT_MAX_AGE_MS = 15 * 60 * 1000;
+
 const MODES = [
   { id: "default", label: "$(shield) default", detail: "ask before writes and shell commands" },
   { id: "acceptEdits", label: "$(edit) acceptEdits", detail: "auto-approve file edits, ask before shell commands" },
@@ -227,6 +231,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   private currentSessionId = "";
   private currentSessionName = "";
   private sessionRestoreCandidate = "";
+  /** Automatic backend restarts in the recent past, so a crash loop cannot spin forever. */
+  private backendRecoveries: number[] = [];
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Set while restart()/dispose() are tearing the backend down on purpose. */
+  private intentionalShutdown = false;
   private sessionRestoreStarted = false;
   private sessionRestoreFinished = false;
   private sessionRestoreRequestId?: string;
@@ -307,6 +316,56 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     this.nativeSettingsReady = false;
     be.completeHandshake();
     this.scheduleWorkspaceChanges(0);
+    void this.resumeInterruptedGoal(be);
+  }
+
+  /**
+   * Record (or clear) the fact that a goal is being pursued right now.
+   *
+   * This is the one piece of state that has to outlive the extension host, because the host dying
+   * is exactly the case it exists for. It is written to workspaceState rather than kept in memory
+   * for that reason.
+   */
+  private noteGoalPursuit(active: boolean): void {
+    if (active) {
+      if (!this.currentSessionId) { return; }
+      void this.context.workspaceState.update(GOAL_PURSUIT_KEY, {
+        scope: this.draftScope(), id: this.currentSessionId, at: Date.now(),
+      }).then(undefined, () => { /* losing the marker only costs an automatic resume */ });
+      return;
+    }
+    void this.context.workspaceState.update(GOAL_PURSUIT_KEY, undefined)
+      .then(undefined, () => { /* same */ });
+  }
+
+  /**
+   * Pick a goal back up after the backend was killed under it.
+   *
+   * `Agent.load_session` demotes a restored active goal to paused ("Session reopened; resume to
+   * continue the goal"), which is right when a person deliberately opens an old chat and wrong
+   * when the runner died seconds ago -- the goal exists so the work continues unattended. The
+   * marker tells those two apart: it is written only while a goal is actually being pursued, and
+   * cleared the moment the user pauses, completes or clears it. A stale marker is ignored, so
+   * reopening yesterday's chat still waits for a human.
+   */
+  private async resumeInterruptedGoal(be: DgcBackend): Promise<void> {
+    const mark = this.context.workspaceState.get<{ scope?: string; id?: string; at?: number }>(GOAL_PURSUIT_KEY);
+    if (!mark || mark.scope !== this.draftScope() || mark.id !== this.currentSessionId) { return; }
+    const age = Date.now() - Number(mark.at || 0);
+    await this.context.workspaceState.update(GOAL_PURSUIT_KEY, undefined);   // one shot, never a loop
+    if (!(age >= 0 && age < GOAL_PURSUIT_MAX_AGE_MS)) { return; }
+    let goal: any;
+    try {
+      const status: any = await this.requestState(
+        be, "goal-after-recovery", { type: "status" }, "status", 10000);
+      goal = status?.goal;
+    } catch { return; }                        // a backend that cannot answer cannot be resumed
+    if (this.backend !== be || !goal?.text || goal.status !== "paused") { return; }
+    this.post({ type: "event", event: { type: "info", message:
+      "DGC reconnected after its backend stopped, and is continuing the goal from where it left off." } });
+    try {
+      await this.resumeGoal(String(goal.text));
+    } catch { /* resumeGoal surfaces its own failure */ }
   }
 
   private nextRequestId(prefix: string): string {
@@ -933,6 +992,12 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.workspaceRootsDirty = true;
         this.initializingBackend = undefined;
         this.nativeSettingsReady = false;
+        // The dead child must not be handed out again. ensureBackend() returns `this.backend`
+        // whenever it is set, so leaving the corpse here meant every later command went to a
+        // closed pipe and the panel could never recover on its own -- the user had to find
+        // "DGC: Restart Backend" or reload the window.
+        this.backend = undefined;
+        this.recoverBackend();
       }
       this.post({ type: "backend_exit", code });
     });
@@ -941,14 +1006,57 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     return be;
   }
 
+  /**
+   * Come back after the backend dies, instead of leaving the panel pointed at nothing.
+   *
+   * `dgc serve` is a plain, non-detached child of the extension host with piped stdio, so it goes
+   * down with the host -- an extension update, a window reload, a host crash -- and it also exits
+   * by itself when stdin closes. None of that is preventable from here, but all of it is
+   * recoverable: the conversation and the goal live on disk, so a fresh backend can pick the work
+   * back up. Bounded on purpose: a backend that cannot start (missing CLI, bad `dgc.command`)
+   * must not be respawned forever.
+   */
+  private recoverBackend(): void {
+    if (this.intentionalShutdown) { return; }   // restart()/dispose() own their own lifecycle
+    const now = Date.now();
+    this.backendRecoveries = this.backendRecoveries.filter((at) => now - at < 120_000);
+    if (this.backendRecoveries.length >= 3) {
+      this.post({ type: "event", event: { type: "error", message:
+        "DGC could not keep its backend running (three restarts in two minutes), so it stopped "
+        + "trying. Fix the cause, then run DGC: Restart Backend." } });
+      return;
+    }
+    this.backendRecoveries.push(now);
+    const delay = Math.min(4000, 500 * 2 ** (this.backendRecoveries.length - 1));
+    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); }
+    const timer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      if (this.backend || !this.view) { return; }
+      try {
+        this.ensureBackend();
+      } catch { /* an untrusted workspace or missing executable already told the user */ }
+    }, delay);
+    // A pending retry is not a reason to keep a process alive; without this the timer holds the
+    // Node event loop open, which is wrong on its own and hangs the test runner after the last
+    // assertion has already passed.
+    timer.unref?.();
+    this.recoveryTimer = timer;
+  }
+
   restart(): void {
     this._installPrompted = false;      // a fresh start earns a fresh prompt if the CLI is still missing
     this._updatePrompted = false;
     this.setReadyContext(false);
     this.changesRefreshRevision++;
     this.workspaceChanges = [];
+    // A deliberate restart is not a crash: it must not spend the automatic-recovery budget, and
+    // the respawn below is the one that counts.
+    this.intentionalShutdown = true;
+    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
+    this.backendRecoveries = [];
     this.backend?.dispose();
     this.backend = undefined;
+    this.intentionalShutdown = false;
     this.mcpUrls.clear();
     this.turnActive = this.confirmedTurnActive = false;
     this.correlatedStateRequests = false;
@@ -1086,6 +1194,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
           elapsed_seconds: Number.isFinite(ev.elapsed_seconds)
             ? Math.max(0, Number(ev.elapsed_seconds)) : this.state.goal.elapsed_seconds,
         };
+        // Remember that a goal was genuinely being pursued, durably enough to survive the
+        // extension host restarting. Any other status is the user's own decision and clears it,
+        // so a goal somebody paused or finished is never revived behind their back.
+        this.noteGoalPursuit(this.state.goal.status === "active");
         this.postState();
         break;
       case "config":
@@ -3460,6 +3572,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this.intentionalShutdown = true;                 // shutting down; do not respawn behind us
+    if (this.recoveryTimer) { clearTimeout(this.recoveryTimer); this.recoveryTimer = undefined; }
     if (this.changesRefreshTimer) { clearTimeout(this.changesRefreshTimer); }
     this.changesRefreshDirty = false;
     this.changesRefreshRevision++;

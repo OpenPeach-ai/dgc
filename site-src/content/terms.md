@@ -10,7 +10,7 @@ These terms apply to your use of vibedgc.com and its downloads and documentation
 
 ## Software license
 
-DGC is source-available under the PolyForm Noncommercial License 1.0.0, copyright 2026 Mohit Kalra. The license permits qualifying noncommercial use, modification, and distribution subject to its terms. Commercial use—including selling DGC, offering it as a paid hosted service, or white-labeling it—requires a separate written license.
+DGC is open source under the Apache License 2.0, copyright 2026 Mohit Kalra. The license permits use, modification and distribution — commercial use included — subject to its terms, and grants the contributors’ patent rights in the work. It carries no warranty.
 
 The repository’s [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file is the controlling software license. Any plain-language summary on this site is informational and does not amend or replace it. This website does not accept commercial-use requests and no website interaction grants commercial-use rights.
 

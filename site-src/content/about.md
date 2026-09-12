@@ -13,7 +13,7 @@ DGC is local-first, not local-only. Point it at Ollama, llama.cpp, LM Studio, or
 
 The project is built and led by Mohit Kalra. DGC is an OpenPeach project, maintained in the `OpenPeach-ai/dgc` repository as a focused, independently installable coding tool. Its public materials do not claim an outside funding round or institutional backer; development is managed directly by the founder.
 
-DGC is source-available under the PolyForm Noncommercial 1.0.0 license. Personal, research, educational, charitable, public-interest, and other qualifying noncommercial uses are permitted under the license terms. Commercial use requires a separate agreement. The full [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file controls; the website summaries are there to make the starting point understandable, not to replace the license.
+DGC is open source under the Apache License 2.0 — free to use, modify and redistribute, for commercial work as much as for anything else, and with an explicit patent grant. The full [LICENSE](https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE) file controls; the summaries on this site exist to make the starting point understandable, not to replace it.
 
 ## Work on this
 

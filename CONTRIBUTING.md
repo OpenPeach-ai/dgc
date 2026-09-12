@@ -16,5 +16,5 @@ Security and correctness are release boundaries, not optional polish. New tools 
 canonical-path, failure-status, and transcript tests. Provider changes need request and streaming
 contract tests. UI changes should add a webview or protocol regression test where practical.
 
-DGC is licensed under PolyForm Noncommercial 1.0.0. By contributing, you agree that your contribution
-is distributed under that license.
+DGC is licensed under the Apache License 2.0. By contributing, you agree that your contribution
+is distributed under that license, including its patent grant.

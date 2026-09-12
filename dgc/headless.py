@@ -769,6 +769,17 @@ class Backend:
             self.ui.error(
                 f"the standing goal stopped {used + 1} times in a row and DGC has stopped "
                 "retrying. Look at the last error, then resume the goal when it is addressed.")
+            # Leaving it "active" was a lie the clock told: the goal card kept counting while
+            # nothing was running and nothing was going to run. Blocked is what this actually is,
+            # it stops the clock, and it carries the reason a person needs in the goal review.
+            update = getattr(self.agent, "update_goal", None)
+            if callable(update):
+                try:
+                    update("blocked", reason=reason or "DGC stopped retrying after repeated failures")
+                except Exception:
+                    pass
+                else:
+                    self._emit_goal()
             return False
         with self._turn_state_lock():
             if self._queue:                # real work is already waiting; it supersedes a retry

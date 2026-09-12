@@ -2,14 +2,16 @@ import {expect, test} from "@playwright/test";
 
 import {observeRuntime, settle} from "./support.mjs";
 
-test("pricing explains the commercial boundary without collecting enquiries", async ({page}) => {
+test("pricing states the licence and collects nothing", async ({page}) => {
   const runtime = observeRuntime(page);
   await page.goto("/pricing", {waitUntil: "domcontentloaded"});
   await settle(page);
 
   await expect(page.locator("form")).toHaveCount(0);
-  await expect(page.getByRole("heading", {name: "Not offered through this site."})).toBeVisible();
-  await expect(page.getByText("No sales or licensing enquiry form is operated here")).toBeVisible();
+  // Apache 2.0 removed the commercial boundary this page used to be built around: there is no
+  // separate licence to ask for, so the page has nothing to collect and says so by saying nothing.
+  await expect(page.getByRole("heading", {name: "Nothing changes at work."})).toBeVisible();
+  await expect(page.getByText("Commercial use included, no agreement needed")).toBeVisible();
   await expect(page.getByRole("link", {name: "Read the license ↗"})).toHaveAttribute(
     "href", "https://github.com/OpenPeach-ai/dgc/blob/main/LICENSE",
   );
