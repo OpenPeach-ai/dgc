@@ -7,6 +7,7 @@
   const queuedEl = $("queued");
   const MAX_IMAGE_FILES = 4, MAX_IMAGE_TOTAL_BYTES = 2 * 1024 * 1024;
   const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+  const PASTED_TEXT_LIMIT = 5000;   // characters; past this a paste becomes an attachment
   let pendingImageFiles = 0, pendingImageBytes = 0;
   let queuedCount = 0, customCommands = [], skillRows = [];
   let skillManagement = false;
@@ -2199,7 +2200,13 @@
   function submit(delivery = nativeSteering ? "steer" : "queue") {
     if (!sessionReady) { sysLine("DGC is reconnecting to this chat. Your draft is saved."); persistDraft(); return; }
     if (pendingImageFiles) { sysLine("Wait for the pasted images to finish loading before sending."); return; }
-    const text = input.value.trim();
+    // A folded paste is part of the message, not a side-channel: append it in chip order so the
+    // model receives exactly what was pasted.
+    const pastes = attachments.filter((a) => a.pasted);
+    const typed = input.value.trim();
+    const text = pastes.length
+      ? [typed, ...pastes.map((a) => a.pasted)].filter(Boolean).join("\n\n")
+      : typed;
     if (!text && !attachments.length) return;
     if (pendingPrompts.size >= 17) { sysLine("Wait for the pending messages to be acknowledged before sending another.", true); return; }
     const imgs = attachments.filter((a) => a.img).map((a) => a.data);
@@ -2244,11 +2251,31 @@
   function renderAtts() {
     atts.innerHTML = "";
     attachments.forEach((a, i) => {
-      const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}`), label = el("span", "chip-label"), remove = el("button", "x", "×");
-      label.textContent = a.label; label.title = a.label; remove.type = "button"; remove.title = "Remove this attachment";
-      remove.setAttribute("aria-label", `Remove attachment ${a.label}`);
+      const chip = el("span", `chip${a.skill || a.template ? " invocation-chip" : ""}${a.pasted ? " pasted-chip" : ""}`);
+      const label = el("span", "chip-label"), remove = el("button", "x", "\u00d7");
+      label.textContent = a.pasted ? `Pasted text · ${a.chars.toLocaleString()} chars` : a.label;
+      label.title = label.textContent; remove.type = "button"; remove.title = "Remove this attachment";
+      remove.setAttribute("aria-label", `Remove attachment ${label.textContent}`);
       remove.onclick = () => { attachments.splice(i, 1); renderAtts(); };
-      chip.appendChild(label); chip.appendChild(remove); atts.appendChild(chip);
+      chip.appendChild(label);
+      if (a.pasted) {
+        // The paste is not hidden, only folded away. One click puts it back where it was typed.
+        const show = el("button", "chip-action", "Show in text field");
+        show.type = "button";
+        show.title = "Put this text back into the composer";
+        show.onclick = () => {
+          const at = input.selectionStart ?? input.value.length;
+          input.value = input.value.slice(0, at) + a.pasted + input.value.slice(at);
+          input.selectionStart = input.selectionEnd = at + a.pasted.length;
+          attachments.splice(i, 1);
+          renderAtts();
+          input.focus();
+          input.style.height = "auto";
+          input.style.height = Math.min(input.scrollHeight, 160) + "px";
+        };
+        chip.appendChild(show);
+      }
+      chip.appendChild(remove); atts.appendChild(chip);
     });
     scheduleDraftSave();
     renderComposerControls();
@@ -2398,6 +2425,7 @@
   }
   input.addEventListener("paste", (e) => {                 // paste an image → attach for vision models
     const items = (e.clipboardData && e.clipboardData.items) || [];
+    let sawImage = false;
     for (const it of items) {
       if (it.type && it.type.indexOf("image/") === 0) {
         const file = it.getAsFile(); if (!file) continue;
@@ -2444,7 +2472,19 @@
         try { r.readAsDataURL(file); }
         catch { release(); sysLine("The pasted image could not be read.", true); }
         e.preventDefault();
+        sawImage = true;        // keep looping: a multi-image paste must see every item
       }
+    }
+    if (sawImage) return;
+    // A wall of pasted text buries the composer and hides the controls under it. Past this many
+    // characters it becomes an attachment instead, recoverable with one click. The threshold
+    // matches Codex's.
+    const pasted = e.clipboardData ? String(e.clipboardData.getData("text/plain") || "") : "";
+    if (pasted.length >= PASTED_TEXT_LIMIT && canAttach()) {
+      e.preventDefault();
+      attachments.push({ label: "Pasted text", pasted, chars: pasted.length });
+      renderAtts();
+      sysLine(`Attached ${pasted.length.toLocaleString()} characters of pasted text.`);
     }
   });
   send.onclick = () => { if (streaming && !hasComposerInput()) doStop(); else submit(); };
@@ -2460,13 +2500,66 @@
     if (e.key === "Escape") { e.preventDefault(); hideContextMenu(); $("btn-ctx").focus(); }
   });
   $("btn-mode").onclick = (e) => { e.stopPropagation(); toggleModeMenu(); };
-  $("btn-add").onclick = () => {                       // insert @ at the caret → file popover
+  // "+" is a menu, not a keystroke. It used to insert a literal "@", which meant the one control
+  // most likely to be clicked first did the least discoverable thing in the panel. The shape is
+  // Codex's -- a leading Add section -- but every item is a capability DGC already has, including
+  // two that were previously reachable only from a settings page.
+  function insertTrigger(ch) {
     input.focus();
-    const p = input.selectionStart;
-    input.value = input.value.slice(0, p) + "@" + input.value.slice(p);
-    input.selectionStart = input.selectionEnd = p + 1;
+    const at = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, at);
+    const prefix = before && !/\s$/.test(before) ? " " : "";
+    input.value = before + prefix + ch + input.value.slice(at);
+    input.selectionStart = input.selectionEnd = at + prefix.length + 1;
     onInput();
-  };
+  }
+  function hideAddMenu() {
+    $("addmenu").hidden = true; $("btn-add").setAttribute("aria-expanded", "false");
+  }
+  function addMenuItems() {
+    const items = [
+      { id: "files", icon: "file-directory", label: "Files and folders",
+        hint: "@", run: () => insertTrigger("@") },
+      { id: "skill", icon: "lightbulb", label: "Skills",
+        hint: "$", run: () => insertTrigger("$") },
+      { id: "command", icon: "terminal", label: "Commands",
+        hint: "/", run: () => insertTrigger("/") },
+    ];
+    if (mcpContextSupported) {
+      items.push({ id: "mcp", icon: "plug", label: "MCP context",
+                   hint: "resources, prompts",
+                   run: () => vscode.postMessage({ type: "slash", action: "mcp" }) });
+    }
+    items.push({ id: "goal", icon: "target", label: "Goal",
+                 hint: "keep pursuing", run: () => vscode.postMessage({ type: "slash", action: "goal" }) });
+    items.push({ id: "plan", icon: "checklist", label: "Plan mode",
+                 hint: curMode === "plan" ? "turn off" : "turn on",
+                 run: () => setMode(curMode === "plan" ? "default" : "plan") });
+    items.push({ id: "memory", icon: "bookmark", label: "Memory",
+                 hint: "what DGC remembers",
+                 run: () => vscode.postMessage({ type: "slash", action: "memory" }) });
+    return items;
+  }
+  function toggleAddMenu() {
+    const am = $("addmenu");
+    if (!am.hidden) { hideAddMenu(); return; }
+    hideModeMenu(); hideModelMenu(); hideContextMenu();
+    const items = addMenuItems();
+    am.innerHTML = '<div role="group" aria-label="Add">'
+      + '<div class="mhead" role="presentation"><span>Add</span></div>'
+      + items.map((it) => `<button type="button" role="menuitem" class="mrow" data-add="${it.id}">`
+          + `<span class="codicon codicon-${it.icon}" aria-hidden="true"></span>`
+          + `<span class="mrow-label">${esc(it.label)}</span>`
+          + `<span class="mrow-hint">${esc(it.hint)}</span></button>`).join("")
+      + "</div>";
+    am.querySelectorAll("[data-add]").forEach((row) => row.onclick = () => {
+      hideAddMenu();
+      items.find((it) => it.id === row.dataset.add)?.run();
+    });
+    am.hidden = false; $("btn-add").setAttribute("aria-expanded", "true");
+    am.querySelector("button")?.focus();
+  }
+  $("btn-add").onclick = toggleAddMenu;
   function openCommandMenu() {
     const caret = input.selectionEnd;
     const prefix = caret && !/\s/.test(input.value[caret - 1]) ? " /" : "/";

@@ -3660,12 +3660,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       </div>
     </section>
   </div>
-  <div id="attachments" aria-label="Attached context"></div>
   <div id="cbox" data-mode="default">
+    <div id="attachments" aria-label="Attached context"></div>
     <div class="cinput"><span class="pmark" aria-hidden="true">❯</span><textarea id="input" rows="1" placeholder="Ask DGC to build, fix or explain…" aria-label="Message DGC" aria-controls="pop" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"></textarea></div>
     <div id="cfooter">
       <div class="cf-left">
-      <button type="button" id="btn-add" class="fbtn" title="Attach a file (@-mention)" aria-label="Attach a file"><span class="codicon codicon-add" aria-hidden="true"></span></button>
+      <div class="picker add-picker">
+        <button type="button" id="btn-add" class="fbtn" title="Add files and more" aria-label="Add files and more" aria-haspopup="menu" aria-expanded="false"><span class="codicon codicon-add" aria-hidden="true"></span></button>
+        <div id="addmenu" class="cmenu" role="menu" aria-label="Add" hidden></div>
+      </div>
       <button type="button" id="btn-cmd" class="fbtn" title="Commands (/)" aria-label="Open commands"><span class="codicon codicon-terminal" aria-hidden="true"></span></button>
       <div class="picker context-picker">
         <button type="button" id="btn-ctx" class="fbtn" title="Context used — click for details" aria-label="Context used: 0 percent; open context details" aria-haspopup="dialog" aria-expanded="false"><span class="codicon codicon-pie-chart" aria-hidden="true"></span> <span id="ctx">0%</span></button>

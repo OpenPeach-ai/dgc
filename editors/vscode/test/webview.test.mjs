@@ -898,6 +898,61 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("a large paste becomes an attachment that can be put back", () => {
+  // A wall of pasted text buried the composer and pushed its controls off screen. Past the
+  // threshold it folds into a chip -- but it is still part of the message, and still recoverable.
+  const { dom, errors, posted, doc, send } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  const input = doc.getElementById("input");
+  const paste = (text) => {
+    const event = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData",
+      { value: { items: [], getData: () => text } });
+    input.dispatchEvent(event);
+    return event;
+  };
+
+  const small = paste("x".repeat(4999));
+  assert.equal(doc.querySelector(".pasted-chip"), null, "a normal paste is left alone");
+  assert.equal(small.defaultPrevented, false, "and still reaches the text field");
+
+  const big = "y".repeat(5000);
+  assert.equal(paste(big).defaultPrevented, true, "a large paste is intercepted");
+  const chip = doc.querySelector(".pasted-chip");
+  assert.ok(chip, "and becomes a chip");
+  assert.match(chip.textContent, /Pasted text · 5,000 chars/, "the chip says how much it holds");
+  assert.equal(input.value, "", "the wall of text never lands in the composer");
+
+  // It is part of the message: sending must carry it.
+  input.value = "explain this";
+  doc.getElementById("send").click();
+  const sent = posted.filter((m) => m.type === "prompt").at(-1);
+  assert.ok(sent, "the prompt was sent");
+  assert.ok(sent.text.startsWith("explain this"), "what was typed comes first");
+  assert.ok(sent.text.includes(big), "and the folded paste is included in full");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
+test("a folded paste can be put back into the text field", () => {
+  const { dom, errors, doc, send } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  const input = doc.getElementById("input");
+  const event = new dom.window.Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData",
+    { value: { items: [], getData: () => "z".repeat(6000) } });
+  input.dispatchEvent(event);
+
+  const restore = doc.querySelector(".pasted-chip .chip-action");
+  assert.ok(restore, "the chip offers a way back");
+  assert.equal(restore.textContent, "Show in text field");
+  restore.click();
+  assert.equal(input.value.length, 6000, "the text is back in the composer");
+  assert.equal(doc.querySelector(".pasted-chip"), null, "and the chip is gone");
+  assert.deepEqual(errors, []);
+  dom.window.close();
+});
+
 test("the Agents tab offers the same provider preset the Models tab does", () => {
   const { errors, send, doc } = makeDom();
   send({ type: "event", event: { type: "ready", capabilities: {} } });
@@ -2216,12 +2271,12 @@ test("every control says what it is, in the panel's own label rather than the op
   const settle = (ms) => new Promise((done) => dom.window.setTimeout(done, ms));
 
   const attach = doc.getElementById("btn-add");
-  assert.equal(attach.title, "Attach a file (@-mention)");
+  assert.equal(attach.title, "Add files and more");
   hover(attach);
   await settle(450);
   const tip = doc.getElementById("hover-tip");
   assert.equal(tip.hidden, false, "hovering a control shows its label");
-  assert.equal(tip.textContent, "Attach a file (@-mention)");
+  assert.equal(tip.textContent, "Add files and more");
   assert.equal(attach.hasAttribute("title"), false,
     "the operating system's tooltip is lifted off, so a control never explains itself twice");
 
@@ -2229,7 +2284,7 @@ test("every control says what it is, in the panel's own label rather than the op
   const commands = doc.getElementById("btn-cmd");
   hover(commands);
   await settle(20);
-  assert.equal(attach.title, "Attach a file (@-mention)", "the title returns when the pointer leaves");
+  assert.equal(attach.title, "Add files and more", "the title returns when the pointer leaves");
   assert.equal(tip.textContent, "Commands (/)", "a neighbouring control does not make you wait again");
 
   doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));

@@ -99,8 +99,13 @@ def expand_workflow_prompt(text: str, expand) -> str:
     return expand(text)
 
 
-STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were working. Read it and adjust "
-                   "course now if it changes anything:\n")
+# Telling a model to "adjust course" left the user with no sign it had been read: the turn simply
+# carried on and they could not tell whether the interjection had landed. Ask for one sentence of
+# acknowledgement first -- a local model in particular does what it is told and little else.
+STEERING_PREFIX = ("<user-interjection>\nThe user sent this WHILE you were working. Before your "
+                   "next tool call, say in one short sentence how you are handling it -- changing "
+                   "course now, doing it after the current step, or why it does not apply -- then "
+                   "carry on:\n")
 STEERING_SUFFIX = "\n</user-interjection>"
 
 
