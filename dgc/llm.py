@@ -270,6 +270,48 @@ def _error_body(response, limit: int = 600) -> str:
         _close_response(response)
 
 
+def _bounded_body_text(response, maximum: int, label: str) -> str | None:
+    """Read one bounded response body as text, without deciding what shape it is.
+
+    Returns None when the response exposes no body to read (an injected double with only
+    ``json()``), so the caller can take the object path instead. Every path that consumes or
+    rejects the response releases it, exactly as the JSON reader does.
+    """
+    raw_length = str((getattr(response, "headers", {}) or {}).get("Content-Length") or "")
+    if raw_length:
+        try:
+            declared = int(raw_length)
+        except (TypeError, ValueError):
+            _close_response(response)
+            raise LLMError(f"{label} returned an invalid Content-Length") from None
+        if declared < 0 or declared > maximum:
+            _close_response(response)
+            raise LLMError(f"{label} exceeded {maximum} bytes")
+    iterator = getattr(response, "iter_content", None)
+    if callable(iterator):
+        try:
+            body = bytearray()
+            for chunk in iterator(chunk_size=65_536):
+                if not chunk:
+                    continue
+                body.extend(chunk)
+                if len(body) > maximum:
+                    raise LLMError(f"{label} exceeded {maximum} bytes")
+            try:
+                return bytes(body).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise LLMError(f"{label} returned malformed JSON") from exc
+        finally:
+            _close_response(response)
+    text = getattr(response, "text", None)
+    if not isinstance(text, str):
+        return None                     # no body here; the caller uses the object path
+    if len(text.encode("utf-8", "replace")) > maximum:
+        _close_response(response)
+        raise LLMError(f"{label} exceeded {maximum} bytes")
+    return text
+
+
 def _bounded_json_response(response, maximum: int, label: str,
                            *, deadline: float | None = None):
     """Decode one streamed JSON response without trusting its declared or actual body size."""
@@ -2312,14 +2354,37 @@ class LLMClient:
         try:
             ctype = r.headers.get("Content-Type", "").lower()
             if "application/json" in ctype and "ndjson" not in ctype:
+                # The declared type does not settle this. A local Ollama labels a stream
+                # `application/x-ndjson`, but Ollama's cloud serves the same newline-delimited
+                # stream as `application/json` -- the identical header it uses for a single
+                # object -- so trusting the header parsed every cloud turn as one object and
+                # failed with "malformed JSON". This request always asks for `stream: true`, so
+                # read the body once and let its shape decide.
+                text = _bounded_body_text(r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")
+                if text is None:
+                    frames = [_bounded_json_response(
+                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")]
+                    text = ""
                 try:
-                    obj = _bounded_json_response(
-                        r, _MAX_OLLAMA_JSON_BYTES, "Ollama response")
-                except (ValueError, RecursionError) as exc:
-                    raise LLMError("Ollama emitted malformed JSON") from exc
-                if not isinstance(obj, dict):
-                    raise LLMError("Ollama emitted a non-object JSON response")
-                consume(obj)
+                    frames = frames if text == "" else [json.loads(text)]
+                except (ValueError, RecursionError):
+                    frames = []
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            frames.append(json.loads(line))
+                        except (ValueError, RecursionError) as exc:
+                            raise LLMError("Ollama emitted malformed JSON") from exc
+                    if not frames:
+                        raise LLMError("Ollama emitted malformed JSON")
+                for frame in frames:
+                    if not isinstance(frame, dict):
+                        raise LLMError("Ollama emitted a non-object JSON response")
+                    consume(frame)
+                    if cancel is not None and cancel.is_set():
+                        break
             else:
                 r.encoding = "utf-8"
                 lines = iter(_bounded_stream_lines(
