@@ -4,10 +4,20 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.36.1",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.1",
+      "status": "current",
+      "notes": [
+        "Ollama cloud models work again. Selecting one and taking a turn failed with “Ollama response returned malformed JSON”, which made every cloud model unusable. A local Ollama labels a streaming response application/x-ndjson; the cloud serves the same newline-delimited stream as application/json — the identical header it uses for a single object — so the header cannot decide the shape. The body is read once and its shape decides; a body that is genuinely malformed still fails loudly.",
+        "A resumed chat no longer opens with a summary you never wrote. Compaction hands the model its own history back as a user message and an acknowledgement, which is how a long run stays inside its window — but the editor rendered those as chat, so a resumed goal looked as though it had restarted. They are one quiet marker now, with the summary behind a disclosure, which is also the honest reason scrolling up stops where it does."
+      ]
+    },
+    {
       "version": "0.36.0",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "Resuming a standing goal continues the work instead of replaying it. The objective used to be re-submitted as a fresh prompt, so text you wrote days ago reappeared in the chat and the model read it as a new request. Every frontend now asks the backend to resume, and the backend reactivates the goal and tells the model to pick up the first unfinished step.",
         "A reopened session keeps its checklist. Todos were held in memory only, so closing the editor lost what was done, what was in progress and what was still pending — exactly what a resumed goal needs. They are saved with the session now and restored with it.",
@@ -289,10 +299,20 @@
   ],
   "extension": [
     {
+      "version": "0.21.1",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.1",
+      "status": "current",
+      "notes": [
+        "A compacted conversation shows as “Earlier conversation summarised to keep it in context” rather than as a message nobody sent and an answer nobody gave. The summary is still there, behind a disclosure.",
+        "Editor protocol v10, unchanged from 0.21.0; this build pairs with DGC 0.36.1."
+      ]
+    },
+    {
       "version": "0.21.0",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.0",
-      "status": "current",
+      "status": "shipped",
       "notes": [
         "A quieter panel. Selection and focus were carrying 2px purple rails, filled accent blocks and 3px glows; they are structural now — a lifted surface for what is chosen, a firm border for what is focused — and a focused field borrows your editor's own focus colour instead of our brand purple. Purple is kept for the send button, links and live status.",
         "Editor protocol v10. The extension and the CLI negotiate on exact equality, so this build pairs with DGC 0.36.0; if your editor's marketplace has not caught up, https://vibedgc.com/vscode/dgc.vsix is always the build that matches.",
