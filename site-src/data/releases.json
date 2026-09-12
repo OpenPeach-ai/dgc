@@ -322,10 +322,20 @@
   ],
   "extension": [
     {
-      "version": "0.22.2",
+      "version": "0.22.3",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
       "status": "current",
+      "notes": [
+        "A sharper icon: the tile was a 128\u00d7128 raster of the full lockup \u2014 the smallest size the marketplace accepts, so it upscaled and softened on every high-DPI screen, and the wordmark was unreadable at the size extension lists actually render. It is now the DGC mark alone, drawn from the vector source at 512\u00d7512.",
+        "Pairs with DGC 0.37.1; editor protocol v11 unchanged."
+      ]
+    },
+    {
+      "version": "0.22.2",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
+      "status": "past",
       "notes": [
         "The panel recovers on its own when its backend dies. dgc serve is a plain child of the extension host, so an extension update or a window reload takes it down \u2014 and the panel kept pointing at the dead process until someone found DGC: Restart Backend. It now starts a replacement itself, bounded to three restarts in two minutes.",
         "A goal interrupted by that death picks itself back up, while a goal you paused yourself is never revived behind your back.",
