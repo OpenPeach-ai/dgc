@@ -543,7 +543,7 @@
     "markdown-it": "15.0.1",
     "mermaid": "^12.0.0",
     "ovsx": "1.1.1",
-    "typescript": "^5.4.0"
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "lodash-es": "^4.18.1"
