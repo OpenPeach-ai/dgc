@@ -310,27 +310,37 @@ async function run() {
     && item.eventType === "turn_end").length > turnsBeforeGoal);
   const turnsBeforeResume = posted().filter((item) => item.type === "event"
     && item.eventType === "turn_end").length;
+  // Resuming used to re-send the objective as a fresh prompt, so text written days earlier
+  // reappeared in the chat and the model read it as a new request. The backend owns resuming now.
+  const promptsBeforeResume = backendCommands(backendLogPath).filter((command) =>
+    command.type === "prompt" && command.text === "host matrix").length;
   await testApi.testOnlyWebviewMessage(testToken, { type: "resumeGoal" });
-  await waitFor(() => backendCommands(backendLogPath).filter((command) =>
-    command.type === "prompt" && command.text === "host matrix").length > initialGoalPrompts);
-  const resumed = backendCommands(backendLogPath);
-  const resumeSetIndex = resumed.findLastIndex((command) => command.type === "set_goal"
-    && command.status === "active");
-  const resumePromptIndex = resumed.findLastIndex((command) => command.type === "prompt"
-    && command.text === "host matrix");
-  assert.ok(resumeSetIndex !== -1 && resumePromptIndex > resumeSetIndex,
-    "the goal play control must reactivate the tagged goal before resuming its agent turn");
-  await waitFor(() => posted().filter((item) => item.type === "event"
-    && item.eventType === "turn_end").length > turnsBeforeResume);
+  await waitFor(() => backendCommands(backendLogPath).some((command) =>
+    command.type === "resume_goal"));
+  assert.equal(backendCommands(backendLogPath).filter((command) =>
+    command.type === "prompt" && command.text === "host matrix").length, promptsBeforeResume,
+  "resuming a goal must not replay the objective as a user prompt");
+  // Editing an active goal saves the revised objective and carries on with it. The revision is
+  // in the system prompt from the moment set_goal lands, so replaying it as a user message would
+  // duplicate it -- the same reason resuming no longer does.
   const promptsBeforeEdit = backendCommands(backendLogPath)
     .filter((command) => command.type === "prompt").length;
+  const resumesBeforeEdit = backendCommands(backendLogPath)
+    .filter((command) => command.type === "resume_goal").length;
   await testApi.testOnlyWebviewMessage(testToken,
     { type: "updateGoal", text: "host matrix refined" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "set_goal" && command.text === "host matrix refined"));
-  await waitFor(() => backendCommands(backendLogPath).filter((command) => command.type === "prompt").length > promptsBeforeEdit);
-  assert.equal(backendCommands(backendLogPath).filter((command) => command.type === "prompt").at(-1).text,
-    "host matrix refined", "editing an active goal must continue using the saved revised objective");
+  await waitFor(() => backendCommands(backendLogPath)
+    .filter((command) => command.type === "resume_goal").length > resumesBeforeEdit);
+  const edited = backendCommands(backendLogPath);
+  const editSetIndex = edited.findLastIndex((command) => command.type === "set_goal"
+    && command.text === "host matrix refined");
+  const editResumeIndex = edited.findLastIndex((command) => command.type === "resume_goal");
+  assert.ok(editResumeIndex > editSetIndex,
+    "editing an active goal must save the revision before continuing the run");
+  assert.equal(edited.filter((command) => command.type === "prompt").length, promptsBeforeEdit,
+    "editing an active goal must not replay the objective as a user prompt");
   await testApi.testOnlyWebviewMessage(testToken, { type: "clearGoal" });
   await waitFor(() => backendCommands(backendLogPath).some((command) =>
     command.type === "set_goal" && command.text === "" && command.status === "none"));
