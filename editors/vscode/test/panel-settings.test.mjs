@@ -1135,3 +1135,92 @@ test("files dropped into the chat attach as mentions, and non-file drops are ign
     Object.assign(vs, saved);
   }
 });
+
+test("saving an unrelated setting does not ask to move the model route", async () => {
+  // The settings form posts every field, so base_url/api_key/model arrive on every Save whether or
+  // not they were touched. Sending set_model on presence meant raising the context window during a
+  // run was refused by the backend -- set_model is a busy mutation, and rightly so.
+  const { provider, timeline, commands } = harness();
+  await provider.saveSettings(settings({
+    model: "native-model", base_url: "https://old.invalid/v1", context_size: 1048576,
+  }));
+
+  assert.deepEqual(requestTypes(timeline), ["set_config"],
+    "an unchanged route must not be re-sent");
+  assert.equal(commands[0].values.context_size, 1048576,
+    "and the setting the user actually moved is applied");
+  assert.deepEqual(notices.errors, []);
+});
+
+test("a model the user really changed still moves the route", async () => {
+  const { provider, timeline, commands } = harness();
+  await provider.saveSettings(settings({
+    model: "a-different-model", base_url: "https://old.invalid/v1",
+  }));
+
+  assert.deepEqual(requestTypes(timeline), ["set_config", "set_model"]);
+  assert.equal(commands.at(-1).model, "a-different-model");
+  assert.deepEqual(notices.errors, []);
+});
+
+test("a new endpoint or a new key still moves the route", async () => {
+  const moved = harness();
+  await moved.provider.saveSettings(settings({
+    model: "native-model", base_url: "https://elsewhere.invalid/v1",
+  }));
+  assert.ok(requestTypes(moved.timeline).includes("set_model"), "a changed host is a route change");
+
+  const rekeyed = harness();
+  await rekeyed.provider.saveSettings(settings({
+    model: "native-model", base_url: "https://old.invalid/v1", api_key: "a-new-secret",
+  }));
+  assert.ok(requestTypes(rekeyed.timeline).includes("set_model"), "a new key is a route change");
+});
+
+test("returning to the other copy of the chat adopts it instead of leaving a dead notice", () => {
+  // VS Code keeps both copies alive and resolves a view only once, so the twin stamped with the
+  // "moved" notice used to sit on that dead end forever -- including when it was the only chat on
+  // screen. Whichever copy the user looks at has to become the live one.
+  const vs = globalThis.__DGC_TEST_VSCODE;
+  const savedUri = vs.Uri;
+  try {
+    vs.Uri = { joinPath: (...parts) => ({ fsPath: parts.map(String).join("/") }) };
+    const provider = new DgcViewProvider({
+      extensionUri: { fsPath: "/ext" }, subscriptions: [],
+      globalState: { get() {}, async update() {} },
+      workspaceState: { get() {}, async update() {} },
+    });
+    provider.ensureBackend = () => ({ ready: true, request: async () => ({}) });
+    const makeView = (viewType) => {
+      const onVisible = [];
+      return {
+        viewType, visible: true, show() {},
+        webview: {
+          options: {}, html: "", cspSource: "vscode-webview:",
+          asWebviewUri: (uri) => ({ toString: () => String(uri.fsPath) }),
+          onDidReceiveMessage() {},
+        },
+        onDidChangeVisibility(fn) { onVisible.push(fn); },
+        becomeVisible() { this.visible = true; onVisible.forEach((fn) => fn()); },
+      };
+    };
+    const activity = makeView("dgc.chat");
+    const secondary = makeView("dgc.chatSecondary");
+
+    provider.resolveWebviewView(activity);
+    assert.match(activity.webview.html, /id="input"/, "the first copy is the real chat");
+
+    provider.resolveWebviewView(secondary);
+    assert.match(activity.webview.html, /stays out of the way/,
+      "the copy left behind says where the conversation went");
+
+    secondary.visible = false;
+    activity.becomeVisible();
+    assert.match(activity.webview.html, /id="input"/,
+      "coming back to it makes it the chat again");
+    assert.match(secondary.webview.html, /stays out of the way/,
+      "and the one now left behind carries the notice");
+  } finally {
+    vs.Uri = savedUri;
+  }
+});

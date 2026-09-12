@@ -2489,3 +2489,14 @@ test("the Extensions tab is not a one-way door", () => {
   assert.equal(back.section, "extensions", "and lands on the tab it came from");
   assert.deepEqual(errors, []);
 });
+
+test("a selected control is a filled pill, not a pill with a bar under it", () => {
+  // An accent underline beneath an already-tinted background reads as a second, heavier element
+  // rather than as emphasis. Selection is carried by the fill alone.
+  assert.doesNotMatch(mainCss, /box-shadow:\s*inset 0 -\d+px 0 var\(--accent\)/,
+    "no accent underline under a selected control");
+  assert.match(mainCss, /\.set-tab\.active \{[^}]*background: var\(--sel\)/,
+    "the active settings tab is still marked, by its fill");
+  assert.match(mainCss, /\.model-control\.ultra \{[^}]*background: var\(--accent-soft\)/,
+    "and so is the ultra model control");
+});

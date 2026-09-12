@@ -312,10 +312,22 @@
   ],
   "extension": [
     {
-      "version": "0.22.0",
+      "version": "0.22.1",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
       "status": "current",
+      "notes": [
+        "Saving a setting while a turn runs no longer fails on a setting you did not touch: the form posts every field, so DGC asked to move the model route on every Save \u2014 which the CLI refuses mid-turn. Raising the context window during a run reported a model error and looked like it had not applied.",
+        "A selected settings tab and the Ultra model control are a filled pill with nothing under them; the accent line beneath a tinted background read as a second, heavier element.",
+        "Opening the chat in the secondary side bar no longer leaves the activity-bar copy stuck on \u201cDGC is open in the secondary side bar\u201d \u2014 whichever copy you look at becomes the live chat.",
+        "Pairs with DGC 0.37.0; editor protocol v11 unchanged."
+      ]
+    },
+    {
+      "version": "0.22.0",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
+      "status": "past",
       "notes": [
         "Diagrams render: a mermaid fence becomes the diagram it describes, in the panel's own colours, with the source kept behind a Show source toggle. One the parser rejects keeps its code block rather than being replaced by an error graphic.",
         "The permission-mode menu is no longer cut off by the left edge of the panel \u2014 menus anchor to the composer instead of to the button that opens them, so the panel's gutters bound them at every width.",
