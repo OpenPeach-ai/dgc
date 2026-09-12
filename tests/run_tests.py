@@ -1446,6 +1446,51 @@ def unit_tests(tmp: Path):
     check("the restart instruction is bounded and never empty",
           len(_auto_prompt("x" * 5000)) < 1200 and bool(_auto_prompt("").strip()))
 
+    # Drive the real turn worker, not just the decision helper: the restart has to be enqueued
+    # before the worker retires itself, or the follow-up is stranded with nothing to run it.
+    class _AutoEm:
+        def __init__(self): self.events = []
+        def emit(self, _event_type, /, **fields): self.events.append({"type": _event_type, **fields})
+    class _AutoCfg:
+        data = {}
+        def get(self, key, default=None): return self.data.get(key, default)
+    class _AutoAgent:
+        goal = "ship the release"; goal_status = "active"
+        def __init__(self):
+            self.cancelled = _resume_th.Event(); self.prompts = []
+            self._last_turn_error = ""; self._pending_images = None
+            self.session_name = "named"; self.config = _AutoCfg()
+        def run_turn(self, text, reset_cancel=False):
+            self.prompts.append(text)
+            if len(self.prompts) == 1:
+                self._last_turn_error = ("stopped — the model called read_file with identical "
+                                         "arguments 6 times without using the result.")
+                return False
+            return True
+        def estimate_tokens(self): return 11
+    _auto_be = object.__new__(_headless_mod2.Backend)
+    _auto_be.em = _AutoEm(); _auto_be.ui = _ResumeUI(); _auto_be.agent = _AutoAgent()
+    _auto_be.config = _AutoCfg()
+    _auto_be._worker = None; _auto_be._foreground_worker = None
+    _auto_be._queue = []; _auto_be._turn_lock = _resume_th.RLock()
+    _auto_be._turn_n = 0; _auto_be._goal_auto_resumes = 0; _auto_be._steer_payloads = {}
+    _auto_be._start_eta_ticker = lambda tid: _resume_th.Event()
+    _auto_be._finish_steering = lambda *a, **k: None
+    _auto_be._emit_context = lambda *a, **k: None
+    _auto_be._queue.append(("do the work", None, None, "prompt"))
+    _auto_be._worker = _resume_th.current_thread()
+    _auto_be._run_turn_queue()
+    _auto_kinds = [(e["type"], e.get("kind") or e.get("reason"))
+                   for e in _auto_be.em.events if e["type"] in ("turn_start", "turn_end")]
+    check("a failed goal turn is followed by an automatic resume turn, in order",
+          _auto_kinds == [("turn_start", "prompt"), ("turn_end", "error"),
+                          ("turn_start", "resume"), ("turn_end", "completed")],
+          _auto_kinds)
+    check("the resume turn actually reaches the model with the failure in it",
+          len(_auto_be.agent.prompts) == 2 and "read_file" in _auto_be.agent.prompts[1])
+    check("a completed resume clears the retry budget", _auto_be._goal_auto_resumes == 0)
+    check("the worker retires once the resumed turn finishes", _auto_be._worker is None)
+
     # ---- a blocked repeat hands back what it already had --------------------------------------
     # Refusing a repeat with "you already got the same result" is useless when the result is no
     # longer in the model's context: compaction can drop it mid-turn, re-reading is then rational,
