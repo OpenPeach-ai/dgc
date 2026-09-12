@@ -36,6 +36,7 @@ from .goals import GoalLifecycle, STATUSES as GOAL_STATUSES, clean_details, clea
 
 _LOOP_SOFT = 3          # identical (name,args) calls before we refuse + warn the model
 _LOOP_HARD = 6          # identical calls before we abort the turn outright
+_LOOP_REPLAY_CHARS = 4000   # of a repeated call's earlier result, handed back so it can move on
 _FAIL_SOFT = 4          # consecutive failing bash runs (no success) before we nudge a rethink
 _FAIL_HARD = 7          # consecutive failing bash runs before we abort the turn (grind guard)
 _VERIFY_CYCLE_SOFT = 3  # failed test cycles across landed edits before one coherent-solution nudge
@@ -2748,6 +2749,7 @@ class Agent(GoalLifecycle):
         configured_turn_limit = int(self.config.get("max_turns", 0) or 0)
         max_turns: int | None = configured_turn_limit if configured_turn_limit > 0 else None
         sig_count: dict = {}        # (name, args) → times seen this turn — doom-loop detection
+        sig_outputs: dict = {}      # (name, args) → its result, to hand back to a looping model
         fail_streak = 0             # consecutive non-zero bash exits (no success) — grind guard
         fail_nudged = False
         verify_fail_cycles = 0      # recognized failing tests persist across micro-edits
@@ -3394,11 +3396,21 @@ class Agent(GoalLifecycle):
                         "Try a more capable model for this step, or give it a narrower "
                         "instruction; repeating the same prompt will loop again.")
                 if seen > _LOOP_SOFT:           # refuse the repeat and tell the model it's looping
+                    # Telling a model it "already got the same result" is useless if the result is
+                    # no longer in its context -- compaction can drop it mid-turn, at which point
+                    # re-reading is the rational thing to do and refusing it deadlocks the turn
+                    # until the hard limit kills it. Hand back what it asked for, and say it was a
+                    # repeat. The model gets unstuck; the loop still cannot spin forever.
+                    cached = sig_outputs.get(sig)
                     out = (f"{LOOP_GUARD_PREFIX}you have already made this exact tool call "
-                           f"{seen - 1} times with identical arguments and got the same result. "
-                           "Do NOT call it again. Take a different approach, or if the task is "
+                           f"{seen - 1} times with identical arguments. Do NOT call it again. "
+                           "Use the result below, take a different approach, or if the task is "
                            "done, give your final answer.")
-                    self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call")
+                    if cached:
+                        out += ("\n\nThe result you already received, repeated once so you have "
+                                f"it:\n{cached[:_LOOP_REPLAY_CHARS]}")
+                    self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call"
+                                 + (" and returned its earlier result" if cached else ""))
                 else:
                     if call_index in parallel_tasks:
                         task_outcome = parallel_tasks[call_index]
@@ -3410,6 +3422,8 @@ class Agent(GoalLifecycle):
                             self._last_task_integrated = False
                         out = self._handle_call(call)
                         task_integrated = call.name == "task" and self._last_task_integrated
+                    if call.name not in _LOOP_EXEMPT_CALLS and isinstance(out, str):
+                        sig_outputs[sig] = out          # so a repeat can be answered, not refused
                 out = self._safe_text(out)
                 if call.name != "update_goal":
                     self._pending_goal_report = None

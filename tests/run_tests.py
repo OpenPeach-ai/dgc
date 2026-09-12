@@ -1364,6 +1364,29 @@ def unit_tests(tmp: Path):
     from dgc import headless as _headless_mod2
     from dgc import sessions as _sessions_rec
 
+    # ---- a setting that only shapes the next request may change mid-turn ---------------------
+    from dgc.headless import _BUSY_MUTATIONS as _BUSY_LIVE
+    from dgc.headless import _LIVE_SAFE_CONFIG_KEYS as _LIVE_SAFE
+    check("raising the context window no longer requires abandoning the turn",
+          "context_size" in _LIVE_SAFE and "set_config" not in _BUSY_LIVE)
+    check("changing the execution route still waits for the turn to end",
+          not ({"model", "base_url", "api_key", "api_mode", "subscription_engine", "sandbox",
+                "tool_profile"} & _LIVE_SAFE),
+          sorted({"model", "base_url", "subscription_engine", "sandbox"} & _LIVE_SAFE))
+
+    # ---- a blocked repeat hands back what it already had --------------------------------------
+    # Refusing a repeat with "you already got the same result" is useless when the result is no
+    # longer in the model's context: compaction can drop it mid-turn, re-reading is then rational,
+    # and refusing deadlocks the turn until the hard limit kills it.
+    _agent_src = (PROJECT / "dgc" / "agent.py").read_text(encoding="utf-8")
+    check("the loop guard caches each result against its signature",
+          "sig_outputs[sig] = out" in _agent_src)
+    check("and replays it when it refuses a repeat",
+          "cached = sig_outputs.get(sig)" in _agent_src
+          and "repeated once so you have" in _agent_src)
+    check("the replay is bounded",
+          "_LOOP_REPLAY_CHARS" in _agent_src and "cached[:_LOOP_REPLAY_CHARS]" in _agent_src)
+
     # ---- compaction hides turns; the archive keeps them --------------------------------------
     # DGC runs locally and archives everything compaction folds away, so "Show earlier messages"
     # should keep working past the summary marker instead of stopping at it.
@@ -1534,8 +1557,11 @@ def unit_tests(tmp: Path):
 
     # Asking for a new chat mid-turn is a decision to abandon that turn, not a mistake.
     check("new_session is no longer refused while a turn runs", "new_session" not in _BUSY)
+    # set_config is deliberately absent: it is gated per key instead, so a setting that only
+    # shapes the next request can change without abandoning the turn. See the live-safe check.
     check("the commands that really cannot run mid-turn still cannot",
-          {"rewind", "compact", "resume_session", "set_config"} <= _BUSY)
+          {"rewind", "compact", "resume_session", "set_model"} <= _BUSY
+          and "set_config" not in _BUSY)
 
     from dgc import sessions as _sessions
     # A reopened session keeps its checklist: resuming a goal tells the model to pick up the

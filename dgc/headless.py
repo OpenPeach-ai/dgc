@@ -44,13 +44,24 @@ _MAX_MCP_ARGUMENT_BYTES = 1024 * 1024
 _MAX_MCP_LIST_BYTES = 1024 * 1024
 _MAX_MCP_LIST_LIMIT = 100
 _MAX_MCP_SERVERS = 64
+# Settings that only shape the next request, so changing them mid-turn cannot disturb the one in
+# flight. Anything that moves the execution route -- provider, model, sandbox, delegation -- is
+# deliberately absent and still waits for the turn to end.
+_LIVE_SAFE_CONFIG_KEYS = frozenset({
+    "context_size", "show_reasoning", "preserve_thinking", "suggest", "plan_artifact",
+    "artifact_autostart", "artifact_in_plan", "notes", "notes_max_rows", "compact_threshold",
+    "capability_cache_ttl_s", "search_provider", "search_url",
+})
 _NEW_SESSION_CANCEL_TIMEOUT = 20.0      # a cancelled turn unwinds in well under this
 _MCP_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
 _BUSY_MUTATIONS = {
     # `new_session` is deliberately absent: asking for a new chat while a turn runs is a decision
     # to abandon that turn, so its handler cancels and waits rather than refusing the request.
+    # `set_config` is not here: a setting that only shapes the NEXT request is safe to change while
+    # a turn runs, and refusing all of them meant a user could not raise the context window without
+    # abandoning the work that made them want to. The handler gates the unsafe keys itself.
     "set_model", "set_think", "clear_session", "resume_session",
-    "delete_session", "rewind", "compact", "set_config", "set_workspace_roots", "set_goal", "start_goal",
+    "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
     "add_permission_rule", "remove_permission_rule", "add_memory",
@@ -2144,6 +2155,13 @@ class Backend:
             self._emit_artifacts(request_id)
         elif t == "set_config":
             from .subscriptions import ENGINE_KEYS as _sub_keys
+            if self._busy():
+                unsafe = sorted(set(dict(cmd.get("values") or {})) - _LIVE_SAFE_CONFIG_KEYS)
+                if unsafe:
+                    self.em.emit("command_rejected", command=t, reason="turn_in_progress",
+                                 message=f"{unsafe[0]} cannot change while a turn is running; "
+                                         "cancel or wait", **_request_fields(request_id))
+                    return
             values, problem = _validated_config_values(cmd.get("values"), _sub_keys)
             if problem or values is None:
                 self.em.emit("command_rejected", command=t, reason="invalid_config_value",
