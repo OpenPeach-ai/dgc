@@ -1281,6 +1281,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
   }
 
   // ---- webview -------------------------------------------------------------
+  /** Views whose listeners are already wired; re-resolving one must not double-register them. */
+  private readonly adoptedViews = new WeakSet<vscode.WebviewView>();
+
   resolveWebviewView(view: vscode.WebviewView): void {
     const previous = this.view;
     if (previous && previous !== view) {
@@ -1300,10 +1303,20 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         vscode.Uri.joinPath(this.context.extensionUri, "dist")],
     };
     view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((msg) => {
-      void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
-        err?.message || "DGC could not process that editor request."));
-    });
+    // VS Code keeps both copies alive (retainContextWhenHidden), and it does not resolve a view a
+    // second time -- so the twin that was stamped with the "moved" notice would sit on that dead
+    // end forever, even once the user came back to it and it was the only chat on screen. Adopt
+    // whichever copy the user is actually looking at.
+    if (!this.adoptedViews.has(view)) {
+      this.adoptedViews.add(view);
+      view.onDidChangeVisibility(() => {
+        if (view.visible && this.view !== view) { this.resolveWebviewView(view); }
+      });
+      view.webview.onDidReceiveMessage((msg) => {
+        void this.onMessage(msg).catch((err: any) => vscode.window.showErrorMessage(
+          err?.message || "DGC could not process that editor request."));
+      });
+    }
     if (vscode.workspace.isTrusted === false) {
       void vscode.window.showWarningMessage(
         "DGC is disabled in Restricted Mode. Trust this workspace before starting the coding agent.");
@@ -2981,7 +2994,16 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         appliedStages.push("configuration");
       };
       const saveNativeModel = async (): Promise<void> => {
-        if (!(v.base_url || v.api_key || v.model)) { return; }
+        // The settings form posts every field, so base_url/api_key/model are almost always
+        // PRESENT even when the user touched none of them. Sending set_model on presence meant
+        // every Save asked to move the execution route -- which the backend rightly refuses
+        // while a turn is running, so saving an unrelated setting mid-run failed on a model that
+        // had not changed. Send it only when the native route actually differs.
+        const currentModel = String(this.routeState.nativeModel || this.state.model || "");
+        const routeChanged = baseChanged
+          || Boolean(apiKey)
+          || (Boolean(v.model) && String(v.model) !== currentModel);
+        if (!routeChanged) { return; }
         await this.requestState(be, "model-save", {
           type: "set_model", route: "native", base_url: effectiveBase,
           api_key: apiKey, clear_stored_api_key: baseChanged,

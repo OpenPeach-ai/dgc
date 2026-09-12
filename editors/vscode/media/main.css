@@ -479,7 +479,9 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .model-control #effortname { flex: 0 0 auto; }
 .model-control #effortname { color: var(--faint); font: var(--w-med) var(--t-xs)/1 var(--sans); }
 .model-control .model-chevron { color: var(--faint); font-size: var(--t-sm); }
-.model-control.ultra { color: var(--accent-text); background: var(--accent-soft); box-shadow: inset 0 -1px 0 var(--accent); }
+/* Selected state is the filled pill, nothing under it. An accent underline beneath a tinted
+   background reads as a second, heavier element rather than as emphasis. */
+.model-control.ultra { color: var(--accent-text); background: var(--accent-soft); }
 .model-control.ultra #effortname { color: var(--lav); }
 #btn-ctx.warn { color: var(--err-text); }
 #btn-ctx.busy .codicon { color: var(--lav); animation: context-pulse 1.1s ease-in-out infinite; }
@@ -645,7 +647,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .settings-nav { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-2); overflow-x: auto; border-bottom: 1px solid var(--border); }
 .set-tab { border: 0; border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); color: var(--faint); background: transparent; cursor: pointer; font: var(--w-med) var(--t-xs)/1 var(--sans); white-space: nowrap; }
 .set-tab:hover { color: var(--text); background: var(--surface2); }
-.set-tab.active { color: var(--text-strong); background: var(--sel); box-shadow: inset 0 -1px 0 var(--accent); }
+.set-tab.active { color: var(--text-strong); background: var(--sel); }
 .set-body { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-3) var(--sp-4); }
 .set-section { display: flex; flex-direction: column; gap: 0; }
 .set-group { margin-top: var(--sp-5); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--border-strong); font: var(--w-bold) var(--t-xs)/1.2 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }

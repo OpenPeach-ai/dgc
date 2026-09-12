@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.22.1 — 2026-09-12
+
+- **Saving a setting mid-run no longer fails on one you did not touch.** The settings form posts every field, so `base_url`, `api_key` and `model` arrived on every Save whether or not you changed them — and DGC asked to move the model route each time, which the CLI rightly refuses while a turn is running. Raising the context window during a run reported a model error and looked like it had not applied. The route is now only re-sent when it actually differs.
+- **A selected control is a filled pill, with nothing under it.** The active settings tab and the Ultra model control each drew an accent line beneath an already-tinted background, which reads as a second, heavier element rather than as emphasis.
+- **Coming back to the other copy of the chat works.** Opening DGC in the secondary side bar left the activity-bar copy showing "DGC is open in the secondary side bar" permanently — VS Code keeps both alive and resolves a view only once, so that notice never cleared, even when it was the only chat on screen. Whichever copy you look at now becomes the live chat.
+- Pairs with DGC CLI 0.37.0; editor protocol v11 is unchanged, so this is not a lockstep upgrade.
+
 ## 0.22.0 — 2026-09-12
 
 - **Diagrams render.** A ```mermaid fence in an answer becomes the diagram it describes, drawn in the panel's own colours and type, with the source kept underneath behind **Show source** so Copy still gives you the markup. A diagram the parser rejects keeps its code block instead of being replaced by an error graphic — a diagram that will not draw must not delete the text the model wrote. The renderer is fetched the first time a diagram appears, so a panel that never shows one never loads it.
