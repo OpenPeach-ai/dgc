@@ -1594,6 +1594,17 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       case "pickThink":
         this.setThinking();
         break;
+      case "getRecall": {
+        // Everything compaction folded away is archived beside the session. Forward the request;
+        // the backend pages backwards through it and answers with a `recall` event.
+        const be = this.backend;
+        if (be) {
+          const before = Number(msg.before);
+          be.send({ type: "get_recall", limit: 50,
+                    ...(Number.isSafeInteger(before) && before >= 0 ? { before } : {}) });
+        }
+        break;
+      }
       case "reqFiles":
         this.sendFiles();
         break;

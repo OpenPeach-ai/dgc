@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 10
+PROTOCOL_VERSION = 11
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -255,6 +255,8 @@ EVENT_FIELDS: dict[str, dict[str, dict]] = {
         "request_id": _S(False),
     },
     "history": {"items": _A(), "request_id": _S(False)},
+    "recall": {"items": _A(), "before": _I(), "more": _B(), "total": _I(),
+               "request_id": _S(False)},
     "sessions": {"items": _A(), "deleted": _B(False), "request_id": _S(False)},
     "checkpoints": {"items": _A(), "request_id": _S(False)},
     "rewound": {"ok": _B(), "files_restored": _I(), "request_id": _S(False)},
@@ -363,6 +365,10 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "new_session": {"request_id": _S(False)},
     "fork_session": {"name": _S(False), "request_id": _S(False)},
     "resume_goal": {"request_id": _S(False)},
+    # Turns compaction folded away are archived beside the session. The panel pages back into
+    # that archive so "Show earlier messages" keeps working past the summary marker, instead of
+    # stopping at it with the rest of the conversation sitting unread on disk.
+    "get_recall": {"before": _I(False), "limit": _I(False), "request_id": _S(False)},
     "name_session": {"name": _S(), "request_id": _S(False)},
     "clear_session": {"request_id": _S(False)},
     "resume_session": {"path": _NS(False), "latest": _B(False), "request_id": _S(False)},

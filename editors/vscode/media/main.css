@@ -798,3 +798,7 @@ pre.code .copy:focus-visible { opacity: 1; }
   font: var(--w-reg) var(--t-xs)/1.5 var(--mono); color: var(--text-2);
   white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
 }
+
+/* Turns recovered from the archive: readable, and visibly older than the live conversation. */
+.msg.archived { opacity: .82; }
+.msg.archived .bubble { background: var(--surface); }

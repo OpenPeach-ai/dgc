@@ -59,7 +59,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "prompt", "start_goal",
     "get_workspace_changes", "get_workspace_change", "get_chat_changes", "get_chat_change",
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
-    "get_plan", "new_session", "clear_session", "resume_session", "list_sessions",
+    "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
     "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
@@ -1190,11 +1190,19 @@ class Backend:
         # bubbles made a resumed goal look like it had restarted the conversation. Collapse the
         # pair into one marker the panel can show quietly, with the summary behind it.
         from .agent import _COMPACT_ACK, _COMPACT_PREFIX
+        from .goals import RESUME_PROMPT
         skip_next_ack = False
         for m in self.agent.messages:
             role = m.get("role")
             content = m.get("content")
             if role == "system":
+                continue
+            # The resume instruction is written to the transcript as a user turn so the model
+            # receives it, but the user did not type it. Live turns already render it as a marker
+            # via turn_start kind=resume; replaying history has to say the same thing, or
+            # reopening a resumed session shows a prompt nobody sent.
+            if role == "user" and isinstance(content, str) and content.strip() == RESUME_PROMPT:
+                items.append({"role": "resume", "text": "Resumed the standing goal"})
                 continue
             if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
                 items.append({"role": "compaction",
@@ -2034,6 +2042,39 @@ class Backend:
                              **_request_fields(request_id))
         elif t == "get_history":
             self.em.emit("history", items=self._history(), request_id=cmd["request_id"])
+
+        elif t == "get_recall":
+            # Compaction folds older turns into a summary and drops them from the live message
+            # list, but DGC runs locally and keeps them beside the session. Page backwards through
+            # that archive so the transcript can be scrolled past the summary marker.
+            rows = sessions_mod.load_recall(self.agent.session_file, self.config.project_root) \
+                if self.agent.session_file else []
+            total = len(rows)
+            try:
+                limit = int(cmd.get("limit") or 50)
+            except (TypeError, ValueError):
+                limit = 50
+            limit = max(1, min(limit, 200))
+            try:
+                before = int(cmd.get("before")) if cmd.get("before") is not None else total
+            except (TypeError, ValueError):
+                before = total
+            before = max(0, min(before, total))
+            start = max(0, before - limit)
+            items = []
+            for row in rows[start:before]:
+                who = str(row.get("who") or "")
+                body = str(row.get("body") or "")
+                if not body.strip():
+                    continue
+                items.append({
+                    "role": "user" if who == "user" else "assistant",
+                    "text": body[:20_000],
+                    "tools": [t for t in str(row.get("tools") or "").split(",") if t][:16],
+                    "archived": True,
+                })
+            self.em.emit("recall", items=items, before=start, more=start > 0, total=total,
+                         **_request_fields(request_id))
 
         elif t == "list_sessions":
             items = [{"path": str(p), "when": sessions_mod.when(ts), "preview": pv, "count": c,

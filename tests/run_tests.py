@@ -1360,6 +1360,54 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    import types as _types
+    from dgc import headless as _headless_mod2
+    from dgc import sessions as _sessions_rec
+
+    # ---- compaction hides turns; the archive keeps them --------------------------------------
+    # DGC runs locally and archives everything compaction folds away, so "Show earlier messages"
+    # should keep working past the summary marker instead of stopping at it.
+    _rec_root = tmp / "recall-project"
+    _rec_root.mkdir(parents=True, exist_ok=True)
+    _rec_path = _sessions_rec.new_path(_rec_root)
+    _sessions_rec.save(_rec_path, [{"role": "user", "content": "live"}], _rec_root)
+    _sessions_rec.save_recall(_rec_path, _rec_root, [
+        {"gen": 1, "cp": 1, "who": "user" if i % 2 == 0 else "assistant",
+         "body": f"archived turn {i}", "tools": ""} for i in range(12)])
+
+    class _RecallBackend:
+        pass
+
+    _rb = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
+    _rb.agent = _types.SimpleNamespace(session_file=_rec_path, messages=[])
+    _rb.config = _types.SimpleNamespace(project_root=_rec_root)
+    _rec_events = []
+    _rb.em = _types.SimpleNamespace(emit=lambda _t, /, **f: _rec_events.append((_t, f)))
+
+    _rb.dispatch({"type": "get_recall", "limit": 5})
+    _kind, _first = _rec_events[-1]
+    check("the archive is paged newest-last, a window at a time",
+          _kind == "recall" and len(_first["items"]) == 5 and _first["total"] == 12
+          and _first["before"] == 7 and _first["more"] is True,
+          (_kind, _first.get("before"), _first.get("total")))
+    check("the newest archived rows come back first",
+          _first["items"][-1]["text"] == "archived turn 11", _first["items"][-1]["text"])
+
+    _rb.dispatch({"type": "get_recall", "limit": 5, "before": _first["before"]})
+    _, _second = _rec_events[-1]
+    check("paging walks backwards without repeating a row",
+          _second["before"] == 2 and _second["items"][-1]["text"] == "archived turn 6")
+
+    _rb.dispatch({"type": "get_recall", "limit": 50, "before": _second["before"]})
+    _, _last = _rec_events[-1]
+    check("the archive reports when it is exhausted",
+          _last["more"] is False and _last["before"] == 0)
+
+    _rb.dispatch({"type": "get_recall", "limit": 99999, "before": -5})
+    _, _clamped = _rec_events[-1]
+    check("a hostile page request is clamped, not obeyed",
+          _clamped["before"] == 0 and len(_clamped["items"]) == 0)
+
     # ---- the loop guard's prefix crosses a language boundary ---------------------------------
     # The panel keys off this literal to say "blocked, repeated call" instead of "Ran · failed".
     # Python and JavaScript cannot share a constant, so pin them together here.
@@ -1379,11 +1427,15 @@ def unit_tests(tmp: Path):
     from dgc import headless as _headless_mod
     from dgc.agent import _COMPACT_ACK as _CACK, _COMPACT_PREFIX as _CPRE
 
+    from dgc.goals import RESUME_PROMPT as _RESUME_P
+
     class _HistoryAgent:
         messages = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": f"{_CPRE}\nGoal: ship it.\nProgress: transport done."},
             {"role": "assistant", "content": _CACK},
+            {"role": "user", "content": _RESUME_P},
+            {"role": "assistant", "content": "Picking up the first unfinished step."},
             {"role": "user", "content": "carry on"},
             {"role": "assistant", "content": "Continuing."},
         ]
@@ -1392,8 +1444,15 @@ def unit_tests(tmp: Path):
     _hist_backend.agent = _HistoryAgent()
     _hist_items = _hist_backend._history()
     check("a compacted transcript reports one marker, not a user message",
-          [i["role"] for i in _hist_items] == ["compaction", "user", "assistant"],
+          [i["role"] for i in _hist_items]
+          == ["compaction", "resume", "assistant", "user", "assistant"],
           [i["role"] for i in _hist_items])
+    # The resume instruction is written to the transcript so the model receives it, but the user
+    # never typed it. Reopening a resumed session must not show it as a prompt they sent.
+    check("the resume instruction is a marker in history, not a prompt the user sent",
+          _hist_items[1] == {"role": "resume", "text": "Resumed the standing goal"}
+          and all(_RESUME_P not in str(i.get("text", "")) for i in _hist_items),
+          _hist_items[1])
     check("the marker keeps the summary without the internal prefix",
           _hist_items[0]["text"].startswith("Goal: ship it.")
           and _CPRE not in _hist_items[0]["text"], _hist_items[0]["text"][:60])
@@ -12247,9 +12306,18 @@ def test_recall_archive_is_display_only():
 
     only = [path for path in _Path("dgc").rglob("*.py")
             if "load_recall" in path.read_text(encoding="utf-8", errors="replace")]
-    check("only the store and the transcript may read the archive",
-          {path.name for path in only} == {"sessions.py", "tui.py"},
+    # The boundary is that archived turns are shown to the human and never fed back to the model.
+    # tui.py is the terminal's transcript surface; headless.py is the editor panel's, and reads it
+    # only to emit a `recall` display event. The invariant is asserted directly below.
+    check("only the store and the two transcript surfaces may read the archive",
+          {path.name for path in only} == {"sessions.py", "tui.py", "headless.py"},
           sorted(path.as_posix() for path in only))
+    _recall_handler = _Path("dgc/headless.py").read_text(encoding="utf-8").split(
+        'elif t == "get_recall":')[1].split("elif t ==")[0]
+    check("the archive is emitted for display and never appended to the model's messages",
+          "self.em.emit(\"recall\"" in _recall_handler
+          and "messages" not in _recall_handler
+          and "agent.messages" not in _recall_handler)
 
     agent = SimpleNamespace(
         session_file=session, session_root=root,
@@ -13205,13 +13273,13 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v10 carries tool images, and only as an array",
+    check("protocol v11 carries tool images, and only as an array",
           _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                            "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
           and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                                "images": "data:image/png;base64,AAAA"}) is not None)
-    check("protocol v10 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 10
+    check("protocol v11 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 11
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None

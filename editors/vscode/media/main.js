@@ -679,12 +679,16 @@
     });
     clearInterval(turn.timer);
     const lastText = [...turn.block.querySelectorAll(".text")].at(-1);
-    if (lastText && !lastText.classList.contains("commentary") && reason === "completed") {
-      lastText.classList.add("final");
+    if (lastText && !lastText.classList.contains("commentary")) {
+      const complete = reason === "completed";
+      if (complete) lastText.classList.add("final");   // unfinished prose is not a final answer
       // What this turn changed, then what you can do about it — the two things a reader wants
-      // at the end of an answer, in that order.
-      const summary = turnSummaryCard(turn.edits, turn.prompt);
-      const actions = responseActions(lastText, turn.prompt);
+      // at the end of an answer, in that order. A stopped or failed turn gets the actions too:
+      // a partial answer is exactly the one a reader wants to copy or retry, and denying Copy
+      // there was the opposite of helpful. The change summary stays gated on completion, because
+      // a turn that did not finish has not finished changing things.
+      const summary = complete ? turnSummaryCard(turn.edits, turn.prompt) : null;
+      const actions = responseActions(lastText, turn.prompt, !complete);
       lastText.after(actions);
       if (summary) lastText.after(summary);
       // The work summary separates the collapsed activity from the final response.
@@ -739,19 +743,25 @@
     return card;
   }
   //: One rating per response, kept in this workspace and sent nowhere.
-  function responseActions(textEl, prompt) {
+  // `partial` is a turn that stopped or failed. Its prose is not an answer and must not be styled
+  // as one, but it is exactly the text a reader wants to keep or try again — so Copy and Retry
+  // stay, and rating something half-written does not.
+  function responseActions(textEl, prompt, partial = false) {
     const actions = el("div", "response-actions");
+    if (partial) actions.classList.add("partial");
     const add = (act, icon, label) => {
       const b = el("button", `ract ract-${act}`, `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`);
       b.type = "button"; b.title = label; b.setAttribute("aria-label", label); b.dataset.act = act;
       actions.appendChild(b); return b;
     };
-    add("copy", "copy", "Copy response");
-    add("up", "thumbsup", "Good response \u2014 kept in this workspace, sent nowhere");
-    add("down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere");
-    add("branch", "git-branch", "Branch into a new chat from here");
+    add("copy", "copy", partial ? "Copy what was written" : "Copy response");
+    if (!partial) {
+      add("up", "thumbsup", "Good response \u2014 kept in this workspace, sent nowhere");
+      add("down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere");
+      add("branch", "git-branch", "Branch into a new chat from here");
+    }
     add("retry", "refresh", "Run this prompt again");
-    add("edit", "edit", "Edit this prompt and send it again");
+    if (!partial) add("edit", "edit", "Edit this prompt and send it again");
     const body = () => textEl._markdown || textEl.textContent;
     actions.onclick = (event) => {
       const button = event.target.closest("[data-act]");
@@ -1654,6 +1664,7 @@
         break;
       }
       case "history": renderHistory(ev.items || []); break;
+      case "recall": renderHistory._absorbRecall?.(ev); break;
       case "rewound":
         if (ev.ok) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
@@ -2672,8 +2683,10 @@
     let cursor = items.length;
     function page() {
       const frag = document.createDocumentFragment(), start = Math.max(0, cursor - 50);
+      let lastUserPrompt = "";       // what each restored answer was replying to
       items.slice(start, cursor).forEach((it) => {
       if (it.role === "user") {
+        lastUserPrompt = String(it.text || "");
         const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
       } else if (it.role === "compaction") {
@@ -2686,13 +2699,22 @@
         body.textContent = String(it.text || "").slice(0, 20000);
         note.appendChild(body);
         frag.appendChild(note);
+      } else if (it.role === "resume") {
+        const note = el("div", "resume-note hist");
+        note.innerHTML = '<span class="codicon codicon-debug-continue" aria-hidden="true"></span>'
+          + `<span>${esc(it.text || "Resumed the standing goal")}</span>`;
+        frag.appendChild(note);
       } else if (it.role === "notice") {
         frag.appendChild(el("div", "sys hist", esc(it.text)));
       } else {
         const m = el("div", "msg dgc hist"); m.appendChild(el("div", "role dgc", "DGC"));
         if (it.text) {
-          const text = el("div", it.commentary || it.tools?.length ? "text commentary" : "text final", md(it.text));
+          const commentary = it.commentary || it.tools?.length;
+          const text = el("div", commentary ? "text commentary" : "text final", md(it.text));
           text._markdown = it.text; m.appendChild(text);
+          // A restored answer is still an answer. Reloading the window used to strip Copy, rate,
+          // branch and retry from everything above the fold, which read as the panel losing them.
+          if (!commentary) m.appendChild(responseActions(text, lastUserPrompt));
         }
         if (it.tools?.length) {
           const group = el("details", "tool-group history-tools");
@@ -2716,11 +2738,61 @@
       });
       const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
       const landed = [...frag.children];
-      older.after(frag); cursor = start; older.hidden = cursor === 0;
+      older.after(frag); cursor = start;
       landed.forEach(settleBlock);
       log.scrollTop = oldTop + log.scrollHeight - oldHeight;
+      // Past the live messages there is still the archive of everything compaction folded away.
+      // DGC keeps it on disk beside the session, so "Show earlier messages" keeps working rather
+      // than stopping at the summary with the rest of the conversation sitting unread.
+      if (cursor === 0) {
+        if (recallCursor === null || recallCursor > 0) askForRecall();
+        else older.hidden = true;
+      }
     }
-    older.type = "button"; older.onclick = page;
+
+    let recallCursor = null;         // null = not asked yet; 0 = the archive is exhausted
+    let recallPending = false;
+    function askForRecall() {
+      if (recallPending) return;
+      recallPending = true;
+      older.textContent = "Loading earlier messages\u2026";
+      older.disabled = true;
+      vscode.postMessage({ type: "getRecall",
+                           before: recallCursor === null ? undefined : recallCursor });
+    }
+    renderHistory._absorbRecall = (ev) => {
+      recallPending = false;
+      older.disabled = false;
+      older.textContent = "Show earlier messages";
+      recallCursor = Number(ev.before) || 0;
+      const rows = Array.isArray(ev.items) ? ev.items : [];
+      const frag = document.createDocumentFragment();
+      for (const it of rows) {
+        if (it.role === "user") {
+          const m = el("div", "msg user hist archived");
+          m.appendChild(el("div", "role", "you"));
+          m.appendChild(el("div", "bubble", esc(it.text)));
+          frag.appendChild(m);
+        } else {
+          const m = el("div", "msg dgc hist archived");
+          m.appendChild(el("div", "role dgc", "DGC"));
+          const text = el("div", "text", md(String(it.text || "")));
+          text._markdown = it.text;
+          m.appendChild(text);
+          frag.appendChild(m);
+        }
+      }
+      if (rows.length) {
+        const oldHeight = log.scrollHeight, oldTop = log.scrollTop;
+        const landed = [...frag.children];
+        older.after(frag);
+        landed.forEach(settleBlock);
+        log.scrollTop = oldTop + log.scrollHeight - oldHeight;
+      }
+      older.hidden = !ev.more;
+    };
+    older.type = "button";
+    older.onclick = () => { if (cursor > 0) page(); else askForRecall(); };
     log.insertBefore(history, log.firstChild);   // history above any live user prompt / streaming turn
     page();
     scroll();
