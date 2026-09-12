@@ -236,6 +236,22 @@ def faq_html(context: dict[str, Any]) -> str:
 DETAILED_RELEASES = 8
 
 
+def _ext_notes(releases: dict) -> list[str]:
+    """The current extension release's notes. A release with none is a release nobody can read."""
+    notes = [str(n).strip() for n in releases["extension"][0].get("notes", []) if str(n).strip()]
+    if not notes:
+        raise SystemExit("the current extension release has no notes; the /vscode card needs at "
+                         "least one")
+    return notes
+
+
+def _ext_note_rest(releases: dict) -> str:
+    """Everything after the headline note, joined. Previously the page demanded exactly three and
+    a shorter release died on an IndexError deep inside the template context."""
+    rest = _ext_notes(releases)[1:]
+    return " · ".join(rest) + "." if rest else ""
+
+
 def release_rows(items: list[dict[str, Any]], prefix: str = "release") -> str:
     """`prefix` keeps the two lists' anchors apart. The CLI keeps the bare `release-` ids that
     existing links point at; the extension list is namespaced, because the two version series
@@ -377,7 +393,7 @@ def build_outputs() -> dict[str, str | bytes]:
         "FIG1": partial("fig1.html", ctx), "FIG2": partial("fig2.html"), "FIG3": partial("fig3.html", ctx), "FIG4": figure4(bench), "FIG5": partial("fig5.html"), "FIG6": partial("fig6.html", ctx), "TERMINAL": partial("terminal.html", ctx),
         "LANGUAGE_GRID": language_grid(bench), "EVIDENCE_ROWS": evidence_rows(bench), "FAQ": faq_html(ctx),
         "RELEASE_COUNT": releases.get("cli_releases_last_14_days", 13), "CLI_RELEASES": release_rows(releases["cli"]), "EXT_RELEASES": release_rows(releases["extension"], prefix="release-ext"),
-        "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": releases["extension"][0]["notes"][0], "EXT_NOTE_2": releases["extension"][0]["notes"][1], "EXT_NOTE_3": releases["extension"][0]["notes"][2],
+        "EXT_VERSION": releases["extension"][0]["version"], "PROTOCOL_VERSION": protocol_match.group(1), "EXT_NOTE_1": _ext_notes(releases)[0], "EXT_NOTE_REST": _ext_note_rest(releases),
     })
     pages: dict[str, tuple[str, str, str, str]] = {
         "index.html": ("Vibe DGC — a coding agent for the models you run", "A native coding-agent loop for local and API models, plus supported official-CLI subscriptions—in your terminal and editor.", page_template("index.html", ctx), "/og-card.png"),
