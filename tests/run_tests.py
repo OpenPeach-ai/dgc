@@ -1360,6 +1360,18 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    # ---- the loop guard's prefix crosses a language boundary ---------------------------------
+    # The panel keys off this literal to say "blocked, repeated call" instead of "Ran · failed".
+    # Python and JavaScript cannot share a constant, so pin them together here.
+    from dgc import ui as _ui_check
+    from dgc.agent import LOOP_GUARD_PREFIX as _LOOP_PREFIX
+    _panel_js = (PROJECT / "editors" / "vscode" / "media" / "main.js").read_text(encoding="utf-8")
+    check("the loop guard prefix is what the panel matches on",
+          _LOOP_PREFIX.startswith("error: repeated tool call blocked")
+          and "error: repeated tool call blocked" in _panel_js, _LOOP_PREFIX)
+    check("a blocked repeat still reads as an error to the model",
+          _ui_check.tool_output_is_error(_LOOP_PREFIX + "you already did this"))
+
     # ---- a compacted transcript is not conversation ------------------------------------------
     # Compaction hands the model its own history back as a user message plus an assistant
     # acknowledgement. The editor renders _history(), so those appeared as a message the user

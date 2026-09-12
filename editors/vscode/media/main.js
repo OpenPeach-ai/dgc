@@ -154,6 +154,11 @@
       slider.parentElement.style.setProperty("--effort", `${Number(slider.value) / (profiles.length - 1) * 100}%`);
       slider.setAttribute("aria-valuetext", effortLabel(value));
       card.querySelector("output").textContent = effortLabel(value);
+      // Acknowledge the step. Restarting the class is what replays the keyframe.
+      const control = slider.parentElement;
+      control.classList.remove("bumped");
+      void control.offsetWidth;
+      control.classList.add("bumped");
     };
     slider.onchange = () => {
       vscode.postMessage({ type: "setReasoningProfile", level: slider.dataset.profiles.split(",")[Number(slider.value)] });
@@ -903,7 +908,8 @@
       verb.textContent = value === "running" ? copy.present
         : value === "completed" ? copy.past
           : value === "failed" ? `${copy.past} · failed`
-            : value === "denied" ? `${copy.present} · denied`
+            : value === "blocked" ? `${copy.past} · blocked, repeated call`
+              : value === "denied" ? `${copy.present} · denied`
               : value === "stopped" ? `${copy.present} · stopped` : copy.past;
     }
     if (value !== "running") {
@@ -1337,6 +1343,8 @@
   };
   let surfaceKind = "", surfaceReturnFocus = null, surfaceRows = [], mcpRows = [], mcpTools = [];
   const surfaceBody = $("surface-body"), surfaceSearch = $("surface-search");
+  let surfaceReturnSection = "";   // the settings tab a surface was opened from, if any
+
   function openSurface(kind) {
     if (!SURFACE_META[kind]) return;
     surfaceKind = kind;
@@ -1350,6 +1358,13 @@
   }
   function closeSurface() {
     $("surface").hidden = true; surfaceKind = "";
+    if (surfaceReturnSection) {
+      const section = surfaceReturnSection;
+      surfaceReturnSection = "";
+      surfaceReturnFocus = null;
+      vscode.postMessage({ type: "openSettings", section });
+      return;
+    }
     const target = surfaceReturnFocus && typeof surfaceReturnFocus.focus === "function"
       ? surfaceReturnFocus : input;
     surfaceReturnFocus = null; target.focus();
@@ -1764,7 +1779,13 @@
         const key = ev.call_id || ev.name;
         const c = turn._tools[key] || (turn._tools[key] = toolCard({ name: ev.name }));
         c.querySelector(".dot").className = "dot " + (ev.is_error ? "err" : "ok");
-        setToolStatus(c, ev.is_error ? "failed" : "completed");
+        // (status is refined just below; a blocked repeat is not an error of the command)
+        // A repeat the loop guard refused never ran, so reporting it as a failed command sends
+        // the user hunting for a problem in their code. Keep it an error for the model; say what
+        // actually happened here. The prefix is agent.LOOP_GUARD_PREFIX; a test pins them together.
+        const blocked = ev.is_error
+          && String(ev.output || "").startsWith("error: repeated tool call blocked");
+        setToolStatus(c, blocked ? "blocked" : (ev.is_error ? "failed" : "completed"));
         if (ev.is_error) {
           c.classList.add("open"); c.querySelector(".tool-toggle").setAttribute("aria-expanded", "true");
         }
@@ -2497,6 +2518,7 @@
     if (subscriptionSelect) subscriptionSelect.dataset.loadedValue = map.subscription_engine;
     updateSubscriptionFields();
     renderSubscriptionStatus(cfg);
+    syncContextPreset(cfg.context_size);
   }
   function updateSubscriptionFields() {
     const engine = $("s-subscription_engine")?.value || "";
@@ -2548,11 +2570,38 @@
       ? settingsReturnFocus : $("btn-settings");
     settingsReturnFocus = null; target.focus();
   }
+  // Context size: a menu of the sizes people actually use, with Custom for anything else. The
+  // number input stays the single source of truth, so collectSettings() is unchanged.
+  function syncContextPreset(value) {
+    const preset = $("s-context_preset") || $("s-context_size_preset");
+    const custom = $("s-context_size");
+    if (!preset || !custom) return;
+    const known = [...preset.options].some((o) => o.value === String(value || ""));
+    if (value && known) {
+      preset.value = String(value);
+      custom.hidden = true;
+    } else {
+      preset.value = "custom";
+      custom.hidden = false;
+    }
+  }
+
   function collectSettings() {
     const v = {};
     SET_FIELDS.forEach((k) => { const el = $("s-" + k); if (el) v[k] = el.value.trim(); });
     SET_BOOLEAN_FIELDS.forEach((key) => { v[key] = v[key] !== "false"; });
     return v;
+  }
+  {
+    const preset = $("s-context_size_preset");
+    if (preset) {
+      preset.onchange = () => {
+        const custom = $("s-context_size");
+        if (preset.value === "custom") { custom.hidden = false; custom.focus(); return; }
+        custom.value = preset.value;
+        custom.hidden = true;
+      };
+    }
   }
   $("btn-settings").onclick = () => vscode.postMessage({ type: "openSettings" });
   $("set-close").onclick = closeSettings;
@@ -2590,6 +2639,9 @@
   };
   document.querySelectorAll(".set-tab").forEach((button) => button.onclick = () => showSettingsSection(button.dataset.section));
   document.querySelectorAll("[data-open-surface]").forEach((button) => button.onclick = () => {
+    // Settings has to close for the surface to take the panel, so remember where we came from
+    // and put it back on the way out. Without this the Extensions tab was a one-way door.
+    surfaceReturnSection = button.closest(".set-section")?.dataset.section || "extensions";
     closeSettings(); vscode.postMessage({ type: "slash", action: button.dataset.openSurface });
   });
 
