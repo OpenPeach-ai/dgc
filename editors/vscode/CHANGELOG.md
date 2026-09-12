@@ -2,6 +2,14 @@
 
 ## 0.22.3 — 2026-09-12
 
+- **When the backend dies, you can now find out why.** The extension forwarded `dgc serve`'s stderr to a webview message type that nothing handled, so every Python traceback it ever wrote was silently discarded — a backend could die repeatedly and leave no evidence anywhere. It goes to a **DGC Backend** output channel now, alongside the exit reason.
+- **A killed backend is told apart from one that stopped cleanly.** The exit line collapsed both, because exit code `0` is falsy in JavaScript and the signal was thrown away entirely. It now names the code or the signal.
+- **The goal clock stops when the backend does**, instead of counting wall-clock time against a dead process.
+- **A sharper icon:** the tile was a 128×128 raster of the full lockup — the smallest size the marketplace accepts, upscaled and soft on every high-DPI screen, with a wordmark unreadable at the ~40px extension lists actually render. It is now the DGC mark alone, from the vector source at 512×512.
+- Pairs with DGC CLI 0.37.2; editor protocol v11 unchanged.
+
+## 0.22.3 — 2026-09-12
+
 - **A sharper icon.** The tile was a 128×128 raster of the full DGC lockup — the smallest size the marketplace accepts, so it was upscaled and soft on every high-DPI screen, and the wordmark inside it was unreadable at the ~40px the extension lists actually render. It is now the DGC mark alone, drawn from the vector source at 512×512.
 
 ## 0.22.2 — 2026-09-12

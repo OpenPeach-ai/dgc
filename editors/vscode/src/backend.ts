@@ -151,7 +151,10 @@ export class DgcBackend extends EventEmitter {
       this.rejectPending("the backend failed before queued commands could run");
       this.launchError(err);
     });
-    child.on("exit", (code) => {
+    // The SIGNAL matters as much as the code: Node reports (code=null, signal="SIGKILL") for a
+    // killed process, and reporting only the code made a crash indistinguishable from a clean
+    // exit(0) -- both surfaced as "dgc backend exited" with nothing after it.
+    child.on("exit", (code, signal) => {
       if (this.proc !== child) {
         return;
       }
@@ -166,7 +169,7 @@ export class DgcBackend extends EventEmitter {
       if (!this.stopping) {
         this.rejectPending("the backend exited before queued commands could run");
       }
-      this.emit("exit", code);
+      this.emit("exit", code, signal);
     });
   }
 

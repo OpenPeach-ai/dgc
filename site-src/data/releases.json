@@ -4,10 +4,20 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.37.2",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.2",
+      "status": "current",
+      "notes": [
+        "The backend can no longer emit a frame that gets it killed. A protocol event larger than the 4MB ceiling is refused by the editor as a protocol violation, and nothing measured the WIRE size before sending: a screenshot is capped at 4MB of PNG, which is about 5.6MB once base64 and JSON-escaped, so any screenshot over 3MB breached it. Frames are now bounded at the writer, and a batch of screenshots is split into frames that fit rather than sent as one oversized event.",
+        "An event too large to send keeps its envelope instead of being replaced wholesale. A frame carrying a correlation id is a question, not a notification \u2014 replacing an approval request with a generic error left the editor nothing to answer and the turn waiting on a decision that could never arrive."
+      ]
+    },
+    {
       "version": "0.37.1",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
-      "status": "current",
+      "status": "past",
       "notes": [
         "DGC is now open source under the Apache License 2.0, replacing PolyForm Noncommercial. It may be used commercially, inside a company and on client work with no separate agreement, and the licence grants the patent rights contributors hold in the work. Its obligations are the ordinary ones: keep the licence and copyright notice with copies, and state significant changes.",
         "A standing goal that DGC has stopped retrying is marked blocked rather than left active. Leaving it active was a lie the clock told \u2014 the goal card kept counting while nothing was running and nothing was going to run. Blocked stops the clock and carries the reason into the goal review."
@@ -324,8 +334,20 @@
     {
       "version": "0.22.3",
       "date": "2026-09-12",
-      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.2",
       "status": "current",
+      "notes": [
+        "When the backend dies you can now find out why: its stderr was forwarded to a webview message type nothing handled, so every traceback was silently discarded. It goes to a DGC Backend output channel now, with the exit code or signal beside it.",
+        "A killed backend is distinguished from one that stopped cleanly \u2014 the line collapsed both, because exit code 0 is falsy and the signal was thrown away.",
+        "The goal clock stops when the backend does, instead of counting against a dead process.",
+        "A sharper icon, drawn from the vector mark at 512x512 instead of a 128x128 raster of the full lockup."
+      ]
+    },
+    {
+      "version": "0.22.3",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
+      "status": "past",
       "notes": [
         "A sharper icon: the tile was a 128\u00d7128 raster of the full lockup \u2014 the smallest size the marketplace accepts, so it upscaled and softened on every high-DPI screen, and the wordmark was unreadable at the size extension lists actually render. It is now the DGC mark alone, drawn from the vector source at 512\u00d7512.",
         "Pairs with DGC 0.37.1; editor protocol v11 unchanged."
