@@ -980,6 +980,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     be.on("event", (ev: DgcEvent) => this.onEvent(ev));
     be.on("stderr", (line: string) => this.post({ type: "stderr", line }));
     be.on("exit", (code: number | null) => {
+      let recovering = false;
       this.mcpUrls.clear();
       this.setReadyContext(false);
       if (this.backend === be) {
@@ -997,9 +998,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         // closed pipe and the panel could never recover on its own -- the user had to find
         // "DGC: Restart Backend" or reload the window.
         this.backend = undefined;
-        this.recoverBackend();
+        recovering = this.recoverBackend();
       }
-      this.post({ type: "backend_exit", code });
+      this.post({ type: "backend_exit", code, recovering });
     });
     be.start();
     this.backend = be;
@@ -1016,15 +1017,15 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
    * back up. Bounded on purpose: a backend that cannot start (missing CLI, bad `dgc.command`)
    * must not be respawned forever.
    */
-  private recoverBackend(): void {
-    if (this.intentionalShutdown) { return; }   // restart()/dispose() own their own lifecycle
+  private recoverBackend(): boolean {
+    if (this.intentionalShutdown) { return false; }   // restart()/dispose() own their own lifecycle
     const now = Date.now();
     this.backendRecoveries = this.backendRecoveries.filter((at) => now - at < 120_000);
     if (this.backendRecoveries.length >= 3) {
       this.post({ type: "event", event: { type: "error", message:
         "DGC could not keep its backend running (three restarts in two minutes), so it stopped "
         + "trying. Fix the cause, then run DGC: Restart Backend." } });
-      return;
+      return false;
     }
     this.backendRecoveries.push(now);
     const delay = Math.min(4000, 500 * 2 ** (this.backendRecoveries.length - 1));
@@ -1041,6 +1042,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     // assertion has already passed.
     timer.unref?.();
     this.recoveryTimer = timer;
+    return true;
   }
 
   restart(): void {
