@@ -2610,6 +2610,16 @@
       if (it.role === "user") {
         const m = el("div", "msg user hist"); m.appendChild(el("div", "role", "you"));
         m.appendChild(el("div", "bubble", esc(it.text))); frag.appendChild(m);
+      } else if (it.role === "compaction") {
+        // Earlier turns were summarised so the run could keep going. Say so plainly; the summary
+        // is the model's own context, available on request rather than pasted into the chat.
+        const note = el("details", "compaction hist");
+        note.innerHTML = '<summary><span class="codicon codicon-fold" aria-hidden="true"></span>'
+          + "<span>Earlier conversation summarised to keep it in context</span></summary>";
+        const body = el("pre", "compaction-body");
+        body.textContent = String(it.text || "").slice(0, 20000);
+        note.appendChild(body);
+        frag.appendChild(note);
       } else if (it.role === "notice") {
         frag.appendChild(el("div", "sys hist", esc(it.text)));
       } else {

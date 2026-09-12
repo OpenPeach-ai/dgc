@@ -1184,11 +1184,27 @@ class Backend:
         """A display transcript of the current conversation (for resuming in a UI)."""
         items = []
         calls = {}
+        # Compaction rewrites the transcript as a user message carrying the summary followed by an
+        # assistant message accepting it. That is how the model is given its own history back, but
+        # it is not something the user said or the agent answered, and showing it as two chat
+        # bubbles made a resumed goal look like it had restarted the conversation. Collapse the
+        # pair into one marker the panel can show quietly, with the summary behind it.
+        from .agent import _COMPACT_ACK, _COMPACT_PREFIX
+        skip_next_ack = False
         for m in self.agent.messages:
             role = m.get("role")
             content = m.get("content")
             if role == "system":
                 continue
+            if role == "user" and isinstance(content, str) and content.startswith(_COMPACT_PREFIX):
+                items.append({"role": "compaction",
+                              "text": content[len(_COMPACT_PREFIX):].strip()[:20_000]})
+                skip_next_ack = True
+                continue
+            if skip_next_ack:
+                skip_next_ack = False
+                if role == "assistant" and content == _COMPACT_ACK and not m.get("tool_calls"):
+                    continue
             if role == "user":
                 from .workflows import display_prompt
                 if isinstance(content, list):

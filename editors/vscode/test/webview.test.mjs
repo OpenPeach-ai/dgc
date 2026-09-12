@@ -898,6 +898,33 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("a compacted conversation reads as a marker, not as messages nobody sent", () => {
+  // Compaction hands the model its own history back as a user message plus an assistant
+  // acknowledgement. Rendering those as chat made a resumed goal look like it had restarted:
+  // the summary appeared as something the user typed, answered by "Understood — I have the
+  // context summary and will continue from it."
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "event", event: { type: "history", items: [
+    { role: "compaction", text: "Goal: ship the browser tool.\nProgress: transport done." },
+    { role: "user", text: "carry on" },
+  ] } });
+
+  const marker = doc.querySelector(".compaction");
+  assert.ok(marker, "the compaction is shown as a marker");
+  assert.match(marker.textContent, /Earlier conversation summarised/,
+               "it says what happened in the user's terms");
+  assert.equal(marker.tagName.toLowerCase(), "details", "the summary is behind a disclosure");
+  assert.match(marker.querySelector(".compaction-body").textContent, /ship the browser tool/,
+               "the summary is still available on request");
+
+  const bubbles = [...doc.querySelectorAll(".msg.user .bubble")].map((b) => b.textContent);
+  assert.deepEqual(bubbles, ["carry on"], "the summary is not shown as a user message");
+  assert.doesNotMatch(doc.body.textContent, /Understood — I have the context summary/,
+                      "nor is the acknowledgement shown as an answer");
+  assert.deepEqual(errors, []);
+});
+
 test("the composer keeps Send with the model group so a long model name cannot push it out", () => {
   // A long local model name in auto mode used to overflow the footer by 48px and carry the Send
   // button outside the box. The row is two zones now, and Send travels with the model group.
