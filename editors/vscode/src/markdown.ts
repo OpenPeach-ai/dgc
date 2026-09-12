@@ -44,6 +44,27 @@ export function linkTarget(value: string): LinkTarget | undefined {
     ...(line && Number.isSafeInteger(line) ? { line } : {}) } : undefined;
 }
 
+// Which source a link points at, for the mark shown beside it. Bundled icons only: fetching a
+// favicon would mean a network request per link, which the panel's CSP forbids and which would
+// leak every URL a model mentions to whoever hosts it.
+const LINK_SOURCES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(^|\.)github\.com$/i, "github"],
+  [/(^|\.)gitlab\.com$/i, "gitlab"],
+  [/(^|\.)vibedgc\.com$/i, "dgc"],
+  [/(^|\.)marketplace\.visualstudio\.com$/i, "marketplace"],
+  [/(^|\.)open-vsx\.org$/i, "openvsx"],
+  [/(^|\.)npmjs\.com$/i, "npm"],
+  [/(^|\.)stackoverflow\.com$/i, "stackoverflow"],
+];
+
+export function linkSource(target: string): string {
+  try {
+    const host = new URL(target).hostname;
+    for (const [pattern, name] of LINK_SOURCES) { if (pattern.test(host)) return name; }
+    return "web";
+  } catch { return "web"; }
+}
+
 // markdown-it's default URL policy is an additional parser boundary. Our policy permits only
 // HTTP(S) and file paths, including drive-letter paths for remote Windows workspaces.
 parser.validateLink = (value: string) => !!linkTarget(value);
@@ -51,7 +72,9 @@ parser.renderer.rules.link_open = (tokens, index) => {
   const target = linkTarget(String(tokens[index].attrGet("href") || ""));
   if (!target) return "<span>";
   const location = target.line ? ` data-line="${target.line}"` : "";
-  return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location} title="${escape(target.target)}">`;
+  const source = target.kind === "external"
+    ? ` data-link-source="${linkSource(target.target)}"` : "";
+  return `<button type="button" class="md-link" data-link-kind="${target.kind}" data-target="${escape(target.target)}"${location}${source} title="${escape(target.target)}">`;
 };
 parser.renderer.rules.link_close = () => "</button>";
 parser.renderer.rules.image = (tokens, index) => {

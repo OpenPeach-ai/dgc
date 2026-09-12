@@ -438,6 +438,12 @@ def _assistant_content_with_thinking(result, preserve_thinking: bool) -> str:
         return "<think>\n" + result.thinking.strip() + "\n</think>\n" + content
     return content
 
+# A blocked repeat is not a failed command -- it never ran. The editor keys off this exact prefix
+# to say so, instead of reporting "Ran · failed" for a call DGC declined to make. A test asserts
+# the panel still carries the same literal, so the two cannot drift apart silently.
+LOOP_GUARD_PREFIX = "error: repeated tool call blocked — "
+
+
 COMPACT_THRESHOLD = 0.85  # fraction of context_size (override per-config with compact_threshold)
 KEEP_RECENT = 6           # messages preserved verbatim on compaction
 _COMPACT_MAX_TOKENS = 3500   # room for the Goal/Progress/Critical schema (exact signatures, paths, failing-test names)
@@ -3378,13 +3384,19 @@ class Agent(GoalLifecycle):
                 task_integrated = False
                 if seen > _LOOP_HARD:
                     flush_text_results()
+                    # Say which call, and what to do about it. "The model is stuck" reads as a
+                    # DGC fault and leaves the user with no next step; the fix is almost always a
+                    # different model or a narrower instruction, not a retry of the same thing.
                     return self._fail_turn(
-                        "stopped — the model is stuck repeating the same tool call")
+                        f"stopped — the model called {call.name} with identical arguments "
+                        f"{seen - 1} times without using the result. It is looping, not working. "
+                        "Try a more capable model for this step, or give it a narrower "
+                        "instruction; repeating the same prompt will loop again.")
                 if seen > _LOOP_SOFT:           # refuse the repeat and tell the model it's looping
-                    out = ("error: you have already made this exact tool call "
+                    out = (f"{LOOP_GUARD_PREFIX}you have already made this exact tool call "
                            f"{seen - 1} times with identical arguments and got the same result. "
-                           "This is a loop — do NOT call it again. Take a different approach, or if "
-                           "the task is done, give your final answer.")
+                           "Do NOT call it again. Take a different approach, or if the task is "
+                           "done, give your final answer.")
                     self.ui.info(f"↻ loop guard: blocked a repeated {call.name} call")
                 else:
                     if call_index in parallel_tasks:

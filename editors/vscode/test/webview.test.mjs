@@ -898,6 +898,55 @@ test("live composer steers with Enter, queues with Alt+Enter and retains a separ
   assert.deepEqual(errors, []);
 });
 
+test("a link says where it goes, without fetching anything to find out", () => {
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "release it" });
+  event({ type: "text_delta", text:
+    "Shipped to [GitHub](https://github.com/OpenPeach-ai/dgc), [vibedgc.com](https://vibedgc.com), "
+    + "[Marketplace](https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc), "
+    + "[Open VSX](https://open-vsx.org/extension/vibedgc/dgc), [docs](https://example.com/x) "
+    + "and [src/clamp.py](src/clamp.py)." });
+  event({ type: "stream_end" });
+
+  const sources = [...doc.querySelectorAll(".md-link")]
+    .map((a) => a.dataset.linkSource || `file:${a.dataset.linkKind}`);
+  assert.deepEqual(sources,
+    ["github", "dgc", "marketplace", "openvsx", "web", "file:file"],
+    "each link is classified by where it points");
+
+  // A favicon fetch would leak every URL a model mentions to whoever hosts it, and the panel's
+  // CSP forbids it. The marks must come from the bundled icon font only.
+  assert.equal(doc.querySelector(".md-link img"), null, "no image is fetched for a link mark");
+  assert.doesNotMatch(doc.body.innerHTML, /favicon|google\.com\/s2/, "no favicon service is used");
+  assert.deepEqual(errors, []);
+});
+
+test("a repeat the loop guard refused does not read as a failed command", () => {
+  // DGC blocks a model that repeats an identical call. Reporting that as "Ran · failed" sent the
+  // user hunting for a problem in their own command, when the command never ran at all.
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "build it" });
+
+  event({ type: "tool_call", call_id: "a", name: "bash", args: { command: "npm test" } });
+  event({ type: "tool_result", call_id: "a", name: "bash", is_error: true, is_diff: false,
+          output: "error: repeated tool call blocked — you have already made this exact tool "
+                + "call 3 times with identical arguments and got the same result." });
+  event({ type: "tool_call", call_id: "b", name: "bash", args: { command: "npm run lint" } });
+  event({ type: "tool_result", call_id: "b", name: "bash", is_error: true, is_diff: false,
+          output: "exit code: 1\nlint failed" });
+
+  const cards = [...doc.querySelectorAll(".tool")];
+  assert.equal(cards[0].dataset.status, "blocked", "a refused repeat is blocked, not failed");
+  assert.match(cards[0].querySelector(".verb").textContent, /blocked, repeated call/);
+  assert.equal(cards[1].dataset.status, "failed", "a command that really failed still fails");
+  assert.match(cards[1].querySelector(".verb").textContent, /Ran · failed/);
+  assert.deepEqual(errors, []);
+});
+
 test("a compacted conversation reads as a marker, not as messages nobody sent", () => {
   // Compaction hands the model its own history back as a user message plus an assistant
   // acknowledgement. Rendering those as chat made a resumed goal look like it had restarted:
@@ -1831,7 +1880,7 @@ test("feature browsers manage MCP, docs, permissions, memory, and settings witho
 test("webview palette meets text contrast and forced-colors keeps state non-color-only", () => {
   const backgrounds = ["--fallback-bg", "--fallback-surface", "--fallback-surface2", "--fallback-code"];
   for (const foreground of ["--fallback-text", "--fallback-text-strong", "--fallback-muted",
-    "--fallback-faint", "--accent-text", "--err"]) {
+    "--fallback-faint", "--accent-text", "--err-text"]) {
     for (const background of backgrounds) {
       const ratio = contrastRatio(rootHex(foreground), rootHex(background));
       assert.ok(ratio >= 4.5,
@@ -1840,6 +1889,11 @@ test("webview palette meets text contrast and forced-colors keeps state non-colo
   }
   assert.ok(contrastRatio("#FFFFFF", rootHex("--accent-fill")) >= 4.5,
     "white text on the primary accent fill must meet normal-text contrast");
+  // --err paints borders, fills and dots, where the exact brand colour is what matters, and is
+  // deliberately allowed to sit below text contrast. Text must use --err-text, which is checked
+  // above; this keeps the split from quietly collapsing back.
+  assert.doesNotMatch(mainCss, /(?<!-)color:\s*var\(--err\)/,
+    "--err must not be used as a text colour; --err-text exists for that");
   assert.match(mainCss, /--bg:\s*var\(--vscode-sideBar-background/,
     "the extension shell must inherit Cursor/VS Code's sidebar background");
   assert.match(mainCss, /--surface:\s*var\(--vscode-editor-background/,

@@ -1582,7 +1582,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         void this.compactContext();
         break;
       case "openSettings":
-        this.openSettings();
+        // A surface opened from a settings tab asks to be put back on that tab when it closes.
+        this.openSettings(typeof msg.section === "string" ? msg.section : "general");
         break;
       case "saveSettings":
         await this.saveSettings(msg.values || {});
@@ -3568,8 +3569,22 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <select id="s-think"><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option></select></label>
     <label>DGC Ultra <span class="set-hint">deepest reasoning + proactive bounded sub-agents; never changes permissions</span>
       <select id="s-ultra_mode"><option value="false">off</option><option value="true">on</option></select></label>
-    <label>Context size (tokens)
-      <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"></label>
+    <label>Context size (tokens) <span class="set-hint">DGC uses the smaller of this and the model\u2019s own maximum, and compacts near 85% of it. Ollama cloud models ignore the request server-side, so this governs when DGC compacts rather than what the server accepts.</span>
+      <div class="set-row">
+        <select id="s-context_size_preset" aria-label="Context size preset">
+          <option value="8192">8K &middot; 8,192</option>
+          <option value="16384">16K &middot; 16,384</option>
+          <option value="32768">32K &middot; 32,768</option>
+          <option value="65536">64K &middot; 65,536</option>
+          <option value="131072">128K &middot; 131,072</option>
+          <option value="262144">256K &middot; 262,144</option>
+          <option value="524288">512K &middot; 524,288</option>
+          <option value="1048576">1M &middot; 1,048,576</option>
+          <option value="custom">Custom\u2026</option>
+        </select>
+        <input id="s-context_size" type="number" min="2048" step="1024" placeholder="32768"
+               aria-label="Custom context size in tokens" hidden>
+      </div></label>
     <label>Show model thinking
       <select id="s-show_reasoning"><option value="true">shown in a collapsed block</option><option value="false">hidden</option></select></label>
     <label>Prompt suggestions
@@ -3667,8 +3682,8 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
       <button type="button" id="send" class="csend" data-mode="default" title="Send" aria-label="Send message"><span class="codicon codicon-arrow-up" aria-hidden="true"></span></button>
       </div>
     </div>
-    <div id="followup-hint" hidden></div>
   </div>
+  <div id="followup-hint" hidden></div>
 </footer>
 <script nonce="${nonce}" src="${markdown}"></script>
 <script nonce="${nonce}" src="${js}"></script>
