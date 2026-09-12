@@ -61,45 +61,45 @@
       "real_plan_button_click": true,
       "visible_editor_matches_diff": true,
       "source_unchanged_through_current_head": true,
-      "duration_seconds": 30.766,
+      "duration_seconds": 30.8,
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.22.1",
-      "packaged_extension_source_commit": "f54b889bd26748a793e6dba49f4f0d8130319301",
-      "extension_vsix_sha256": "1842a3b7e9346b26d52ed080b71383e719d174c50d7ce007c2880aff00cc5039",
+      "extension_version": "0.22.2",
+      "packaged_extension_source_commit": "09c2e69c0a7ccce44a4ed11c0c0c2bd26ffd0e2c",
+      "extension_vsix_sha256": "a410a91f9de692fa61905edf5a4d67e2050a4757ad4f55dc3384348e21b00c2d",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "5c167e5085b8ecab73d49a187a19bbf05ecdeb7e25199134436fc42989d52dac",
-          "bytes": 1492624,
+          "sha256": "0f74a97b1bd9b10969d4c10e37942b68288864a9d5c4cd6a5cad33b720ae94ab",
+          "bytes": 1515489,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.766
+          "duration_seconds": 30.8
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "6fc4ddfcc1e21b8000034c657f0746ec5a30aaeac87e3165cf1eafbb4c8bdcc7",
-          "bytes": 507834,
+          "sha256": "a1e7e8d8cba725fae1e446a74d733b895d9579ed005e560b5c5bc2e79c8ad8c6",
+          "bytes": 516641,
           "codec": "h264",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.766667
+          "duration_seconds": 30.8
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "ef0f36546e8d480cc4a419670771aaa4a211d810d1405898663291fafe1fac6a",
-          "bytes": 150931,
+          "sha256": "b58f0a6912d9c2161d081f0258eec02ee95006617543345f59a3e0dd40c77214",
+          "bytes": 150943,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "58aea097d68f0e581428057df42780c548ee293de5135a45c05af3e6e54630c6",
-          "bytes": 37829,
+          "sha256": "376d002644e21d1becea83c43eac8a619d760557da95793d2c6988db2614bd21",
+          "bytes": 37833,
           "codec": "mjpeg",
           "width": 720,
           "height": 450
