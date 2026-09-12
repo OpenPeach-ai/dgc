@@ -415,7 +415,7 @@ test("backend rejects incompatible protocol versions and never releases queued c
   // Equality is deliberate, so the message must name the side to update: a newer CLI than the
   // extension means the EXTENSION is behind. "protocol mismatch" alone strands whoever updated
   // one half first, which is everyone for a while after a protocol bump.
-  assert.match(failure.message, /Update the DGC extension/);
+  assert.match(failure.message, /vibedgc\.com\/vscode\/dgc\.vsix/);
   assert.match(failure.message, /v10/);
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(backend.ready, false);
