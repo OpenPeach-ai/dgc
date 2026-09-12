@@ -16,7 +16,7 @@
       "duration_label": "0:48",
       "provenance": "Actual current DGC 0.36.1 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
-      "time_compression": 1.0,
+      "time_compression": 1,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
@@ -61,45 +61,45 @@
       "real_plan_button_click": true,
       "visible_editor_matches_diff": true,
       "source_unchanged_through_current_head": true,
-      "duration_seconds": 30.833,
+      "duration_seconds": 30.733,
       "duration_label": "0:31",
       "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.21.1",
-      "packaged_extension_source_commit": "753c12ce09f6ca291215133d40b8a59bda2b52cb",
-      "extension_vsix_sha256": "b833a5a1b634bc238e0acd7ba6276b5bda819efab371b4a8db6d1d2e5f2d0324",
+      "extension_version": "0.22.0",
+      "packaged_extension_source_commit": "217c097b823bbabf0bd993e9e37037be23e7a8dd",
+      "extension_vsix_sha256": "9994c519a83364bf0b642f422aff3a368a57de665146aefed0ba3cc7a115d58b",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "34972bb9a28ac658cc37bffef5fe706f99c84e06012c9029c44321914f7208b1",
-          "bytes": 1481657,
+          "sha256": "d110c6200d3d6b9927083985f8689a1f67801a02d8d6f2f980daca27983a2c6b",
+          "bytes": 1502659,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.833
+          "duration_seconds": 30.733
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "ed523c8b8db7ef7b6717c1e4a6eb19c16e65d3705762bbc2271d856d0694241d",
-          "bytes": 496393,
+          "sha256": "26e4c83d537f67c63b28bb2d910f69e77b56914d0129fe2d09048231ea205691",
+          "bytes": 508340,
           "codec": "h264",
           "width": 1440,
           "height": 900,
-          "duration_seconds": 30.833333
+          "duration_seconds": 30.733333
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "9089c96a3bd326c9a33957de2517675e6738eaa558cde802e5fff18ebea64474",
-          "bytes": 147444,
+          "sha256": "4f1a7fa766cba2f6520ba32c31f91e930cdcc5b7ad92dc3a99fc30c40f3df5cf",
+          "bytes": 150950,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "de06ec4ae8b7f46fac64d73ed7fe09b7b4c8e7bc9004b8291d79df078e1bf64d",
-          "bytes": 38153,
+          "sha256": "c106086def2a7a22e17f56c4ebc2479ad1da7ed8310d973b39361fdfe9953787",
+          "bytes": 37825,
           "codec": "mjpeg",
           "width": 720,
           "height": 450
@@ -142,7 +142,7 @@
       "duration_label": "0:48",
       "provenance": "Actual DGC 0.36.1 full-screen TUI · real local Ollama run · qwen3.8:27b-q4km · the same disposable controlled fixture and one-line code edit as the CLI capture · /files opened and driven by real keystrokes while the turn ran · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · the in-page animation replays the terminal's actual cells captured live from the same session; the controls dialog holds its screen recording · no user config or session persisted.",
       "model_route": "local Ollama · qwen3.8:27b-q4km",
-      "time_compression": 1.0,
+      "time_compression": 1,
       "dgc_version": "0.36.1",
       "files": {
         "webm": {
