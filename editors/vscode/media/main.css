@@ -722,3 +722,18 @@ pre.code .copy:focus-visible { opacity: 1; }
   font: var(--w-reg) var(--t-sm)/1.45 var(--sans);
 }
 .resume-note .codicon { font-size: var(--t-base); }
+
+/* Earlier turns folded into a summary: a marker in the flow, the summary itself only on request. */
+.compaction { margin: var(--sp-2) 0; color: var(--faint); }
+.compaction > summary {
+  display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;
+  padding: var(--sp-1) 0; font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--faint);
+}
+.compaction > summary:hover { color: var(--text); }
+.compaction > summary::-webkit-details-marker { display: none; }
+.compaction-body {
+  margin: var(--sp-1) 0 0; padding: var(--sp-2) var(--sp-3);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm);
+  font: var(--w-reg) var(--t-xs)/1.5 var(--mono); color: var(--text-2);
+  white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
+}

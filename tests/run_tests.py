@@ -1360,6 +1360,34 @@ def unit_tests(tmp: Path):
         _secret_fetch = execute("web_fetch", {"url": "https://example.com"}, _output_ctx)
     finally:
         _tools_bg._fetch_public_text = _old_fetch
+    # ---- a compacted transcript is not conversation ------------------------------------------
+    # Compaction hands the model its own history back as a user message plus an assistant
+    # acknowledgement. The editor renders _history(), so those appeared as a message the user
+    # never sent and an answer the agent never gave -- which made a resumed goal look restarted.
+    from dgc import headless as _headless_mod
+    from dgc.agent import _COMPACT_ACK as _CACK, _COMPACT_PREFIX as _CPRE
+
+    class _HistoryAgent:
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": f"{_CPRE}\nGoal: ship it.\nProgress: transport done."},
+            {"role": "assistant", "content": _CACK},
+            {"role": "user", "content": "carry on"},
+            {"role": "assistant", "content": "Continuing."},
+        ]
+
+    _hist_backend = _headless_mod.Backend.__new__(_headless_mod.Backend)
+    _hist_backend.agent = _HistoryAgent()
+    _hist_items = _hist_backend._history()
+    check("a compacted transcript reports one marker, not a user message",
+          [i["role"] for i in _hist_items] == ["compaction", "user", "assistant"],
+          [i["role"] for i in _hist_items])
+    check("the marker keeps the summary without the internal prefix",
+          _hist_items[0]["text"].startswith("Goal: ship it.")
+          and _CPRE not in _hist_items[0]["text"], _hist_items[0]["text"][:60])
+    check("the acknowledgement nobody wrote is not reported as an answer",
+          all(_CACK not in str(i.get("text", "")) for i in _hist_items))
+
     # ---- Ollama cloud streams are labelled application/json ----------------------------------
     # A local Ollama labels a stream application/x-ndjson; Ollama's cloud serves the same
     # newline-delimited stream as application/json -- the same header it uses for a single object.
