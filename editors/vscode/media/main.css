@@ -31,6 +31,11 @@
      4.5:1 on every panel surface, because #768A00 reads 3.74:1 on --surface2 and the webview
      contrast test rightly refuses it. */
   --err:#768A00; --err-text:#839900; --err-soft:rgba(118,138,0,.16);
+  /* Diff polarity is not an error state. Removed lines rode on --err, so turning that
+     olive for auto mode made every −120 line count read as an addition. Red means removed
+     everywhere, so it gets its own token: --del paints the gutter rail and row fill where
+     the hue is the signal, --del-text clears 4.5:1 on all four panel surfaces. */
+  --del:#E5484D; --del-text:#F0747E; --del-soft:rgba(229,72,77,.14);
   --sans: var(--vscode-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace);
 
@@ -110,7 +115,10 @@ body {
 #log { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
   overscroll-behavior: contain; overflow-anchor: none; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
 .msg { flex: none; display: flex; flex-direction: column; gap: var(--sp-1); }
-.role { display: none; }
+/* Visually redundant -- the layout already says who spoke -- but a screen reader has no layout,
+   and without this every message in the transcript is unattributed. */
+.role { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
 .msg.user { align-items: flex-end; }
 .user .bubble { max-width: 92%; background: var(--surface2); border: 0; border-radius: var(--r-2xl); padding: var(--sp-2) var(--sp-3); white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .goal-prompt .bubble { box-shadow: inset 2px 0 0 var(--border-strong); }
@@ -121,7 +129,32 @@ body {
 .text :is(ul, ol), .surface-markdown :is(ul, ol) { margin: var(--sp-2) 0 var(--sp-3); padding-left: var(--sp-6); }
 .text li + li, .surface-markdown li + li { margin-top: var(--sp-1); }
 .text li > p { margin-bottom: var(--sp-1); }
-.text :is(h1, h2, h3, h4, h5, h6), .surface-markdown :is(h1, h2, h3, h4, h5, h6) { font-size: 1.08em; font-weight: var(--w-semi); margin: var(--sp-4) 0 var(--sp-2); line-height: 1.4; color: var(--text-strong); }
+/* Codex's heading scale, ported verbatim: h1 1.5x, h2 1.25x, h3 1.125x, h4-h6 at body size, with
+   spacing derived from a quarter of the body size. Every heading previously rendered at 1.08em, so
+   a multi-section answer had no visible outline -- an h2 and an h4 were indistinguishable. */
+.text, .surface-markdown { --md-size: 1em; --md-space: calc(var(--md-size) / 4); }
+.text :is(h1, h2, h3, h4, h5, h6), .surface-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: var(--w-semi); color: var(--text-strong); text-wrap: balance;
+}
+.text h1, .surface-markdown h1 {
+  font-size: calc(var(--md-size) * 1.5); line-height: calc(var(--md-space) * 8);
+  margin: 0 0 calc(var(--md-space) * 2);
+}
+.text h2, .surface-markdown h2 {
+  font-size: calc(var(--md-size) * 1.25); line-height: calc(var(--md-space) * 7);
+  margin: calc(var(--md-space) * 4) 0 var(--md-space);
+}
+.text h3, .surface-markdown h3 {
+  font-size: calc(var(--md-size) * 1.125); line-height: calc(var(--md-space) * 7);
+  margin: calc(var(--md-space) * 4) 0 var(--md-space);
+}
+.text h4, .surface-markdown h4 {
+  font-size: var(--md-size); line-height: calc(var(--md-space) * 6);
+  margin: calc(var(--md-space) * 4) 0 0;
+}
+.text :is(h5, h6), .surface-markdown :is(h5, h6) {
+  font-size: var(--md-size); line-height: 1.62; margin: 0;
+}
 .text blockquote, .surface-markdown blockquote { margin: var(--sp-3) 0; padding-left: var(--sp-3); border-left: 2px solid var(--border-strong); color: var(--muted); }
 .text hr, .surface-markdown hr { border: 0; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
 .md-link { display: inline; border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; text-align: inherit; overflow-wrap: anywhere; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
@@ -171,8 +204,6 @@ body {
 .code-language { display: block; color: var(--muted); font: var(--t-xs)/1.45 var(--mono); margin-bottom: var(--sp-3); user-select: none; }
 .text b { font-weight: var(--w-bold); color: var(--text-strong); } .text i { font-style: italic; }
 .text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: var(--r-sm); }
-.text .md-heading { display: inline-block; margin-top: var(--sp-1); }
-.text .md-h1, .text .md-h2 { font-size: 1.08em; }
 /* What the model says between tool groups is the thread a reader follows through the turn --
    "let me read the remaining core files, and why" is a real answer, not an aside. It used to
    be dimmed and a step smaller, which read as unimportant. Same colour and size as any other
@@ -183,9 +214,6 @@ body {
 .md-table { width: 100%; border-collapse: collapse; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); white-space: normal; }
 .md-table th, .md-table td { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .md-table th { background: var(--surface2); color: var(--text-strong); font-weight: var(--w-bold); }
-.md-table .align-left { text-align: left; }
-.md-table .align-center { text-align: center; }
-.md-table .align-right { text-align: right; }
 
 /* thinking / reasoning */
 .thinking { font: var(--w-reg) var(--t-sm)/1.45 var(--sans); color: var(--muted); display: flex; align-items: center; gap: var(--sp-2); }
@@ -273,7 +301,7 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .diff .dhead .f { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .diff .diff-stat { flex: none; font-weight: var(--w-bold); }
 .diff .add-stat { color: var(--good); }
-.diff .del-stat { color: var(--err-text); }
+.diff .del-stat { color: var(--del-text); }
 .diff .diff-action { color: var(--faint); font-size: var(--t-xs); font-weight: var(--w-reg); }
 .diff pre { display: none; margin: 0; max-height: 320px; overflow: auto; padding: var(--sp-1) 0; font: var(--w-reg) var(--t-xs)/1.6 var(--mono); }
 .diff.open pre { display: block; }
@@ -281,9 +309,21 @@ body.hide-reasoning .disclosure, body.hide-reasoning .reasoning { display: none 
 .diff .ln { display: inline-block; width: 35px; padding-right: var(--sp-2); text-align: right; color: var(--faint); user-select: none; flex: none; }
 .diff .dc { display: inline-block; white-space: pre; }
 .diff .add { color: var(--text-strong); background: var(--good-soft); box-shadow: inset 2px 0 0 var(--good); }
-.diff .del { color: var(--text); background: var(--err-soft); box-shadow: inset 2px 0 0 var(--err); }
+.diff .del { color: var(--text); background: var(--del-soft); box-shadow: inset 2px 0 0 var(--del); }
 .diff .hh { color: var(--faint); opacity: .8; }
 .diff .ctx { color: var(--faint); }
+
+/* A rendered diagram is a figure, not a code block: it gets the panel's surface and its own
+   horizontal scroll, so a wide flowchart never widens the transcript. The source fence stays
+   underneath, collapsed, because Copy is the one thing a reader still wants from it. */
+.mermaid-figure { margin: var(--sp-3) 0; padding: var(--sp-3); border: 1px solid var(--border);
+  border-radius: var(--r-lg); background: var(--surface); }
+/* A diagram is capped the way a long fence is: one of them must not push the answer it
+   illustrates off the screen. Past the cap it scrolls in place rather than being cut. */
+.mermaid-art { overflow: auto; max-height: 60vh; text-align: center; }
+.mermaid-art svg { max-width: 100%; height: auto; }
+.mermaid-bar { display: flex; justify-content: flex-end; margin-top: var(--sp-2); }
+.mermaid-figure pre.code { margin: var(--sp-2) 0 0; }
 
 /* decision cards use shape and hierarchy first; DGC purple is reserved for the primary action. */
 .card { border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-3); background: var(--surface); box-shadow: none; }
@@ -364,7 +404,7 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-text-action:hover { color: var(--text-strong); }
 #workspace-changes { align-self: flex-end; min-height: 20px; font-size: var(--t-xs); }
 .change-add { color: var(--good); font-variant-numeric: tabular-nums; }
-.change-del { color: var(--err-text); font-variant-numeric: tabular-nums; }
+.change-del { color: var(--del-text); font-variant-numeric: tabular-nums; }
 #goalbar[data-status="active"] .goal-icon { color: var(--accent-text); }
 #goalbar[data-status="paused"] .goal-icon, #goalbar[data-status="completed"] .goal-icon { color: var(--faint); }
 #goalbar[data-status="blocked"] .goal-icon { color: var(--err-text); }
@@ -390,7 +430,6 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 #attachments .chip-action:hover { color: var(--text); }
 #attachments .pasted-chip { gap: var(--sp-2); }
 /* The Add menu opens upward from the composer, like the model and mode pickers beside it. */
-.add-picker { position: relative; }
 #addmenu { min-width: 232px; }
 #addmenu .mrow { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
 #addmenu .mrow-label { flex: 1 1 auto; min-width: 0; text-align: left;
@@ -501,9 +540,16 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 @media (prefers-reduced-motion: no-preference) { .tip { animation: tip-in .1s ease-out; } }
 @keyframes tip-in { from { opacity: 0; transform: translateY(2px); } }
 
-/* mode / model picker menus (open upward) */
-.picker { position: relative; }
-.cmenu { position: absolute; bottom: 100%; right: 0; margin-bottom: var(--sp-2);
+/* mode / model picker menus (open upward)
+   Every menu anchors to the composer box, not to the button that opens it. The mode and context
+   triggers sit only ~100px from the left edge, so a 310px card anchored to its own trigger grew
+   straight off whichever panel edge it reached first -- the mode menu was cut off on the left in
+   an ordinary sidebar width. Anchoring to #cbox means a menu is clamped by the composer's own
+   gutters at every panel width, so the offset hacks the narrow breakpoint used are gone. */
+.picker { position: static; }
+.cf-left .cmenu { left: 0; }
+.cf-right .cmenu { right: 0; }
+.cmenu { position: absolute; bottom: 100%; margin-bottom: var(--sp-2);
   width: min(310px, calc(100vw - 20px)); min-width: min(280px, calc(100vw - 20px));
   max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; padding: var(--sp-1);
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg);
@@ -560,11 +606,6 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
   #btn-settings, #btn-ctx span:not(.codicon), #btn-mode #modelabel { display: none; }
   .model-control { max-width: 112px !important; }
   .model-control #modelname { max-width: 72px; }
-  .cmenu { right: -35px; }
-  #modelmenu { right: -70px; }
-  /* The context trigger follows two 28px controls. Anchor its wide detail card back to the
-     viewport gutter so the right border remains visible even in a 300px Cursor sidebar. */
-  .cmenu.context-menu { right: auto; left: -60px; }
 }
 
 /* settings and feature-management overlays */
@@ -682,6 +723,22 @@ button.link { font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; bac
 button.link:hover { border-color: var(--accent); color: var(--text); }
 pre.code { position: relative; background: var(--code); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); margin: var(--sp-2) 0; overflow-x: auto; font: var(--w-reg) var(--t-sm)/1.6 var(--mono); color: var(--text); white-space: pre; }
 pre.code code { display: block; padding: 0; background: transparent; font-size: inherit; white-space: pre; }
+/* One 400-line fence used to bury the answer and push the response actions off screen. Collapse
+   past a readable height, with the expander saying how much is hidden. */
+pre.code.foldable { max-height: 22em; overflow: hidden; }
+pre.code.foldable.open { max-height: none; }
+pre.code.foldable::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4em; pointer-events: none;
+  background: linear-gradient(transparent, var(--code));
+}
+pre.code.foldable.open::after { content: none; }
+pre.code .fold {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  font: var(--w-med) var(--t-xs)/1 var(--sans); cursor: pointer; z-index: 1;
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: var(--r-full); padding: var(--sp-1) var(--sp-3);
+}
+pre.code .fold:hover { border-color: var(--accent); }
 pre.code .copy { position: absolute; top: 6px; right: 6px; font: var(--w-reg) var(--t-xs)/1 var(--sans); cursor: pointer; background: var(--surface2); color: var(--muted); border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); opacity: 0; }
 pre.code:hover .copy { opacity: 1; }
 pre.code .copy:hover { color: var(--text); border-color: var(--accent); }
@@ -716,6 +773,7 @@ pre.code .copy:focus-visible { opacity: 1; }
     --accent-hover:Highlight; --lav:LinkText;
     --accent-soft:transparent; --good:CanvasText; --good-soft:transparent;
     --err:CanvasText; --err-text:CanvasText; --err-soft:transparent;
+    --del:CanvasText; --del-text:CanvasText; --del-soft:transparent;
   }
   *, *::before, *::after { box-shadow: none !important; text-shadow: none !important; }
   :where(button, input, select, textarea, [tabindex]):focus-visible {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.0 — 2026-09-12
+
+- **Diagrams render.** A ```mermaid fence in an answer becomes the diagram it describes, drawn in the panel's own colours and type, with the source kept underneath behind **Show source** so Copy still gives you the markup. A diagram the parser rejects keeps its code block instead of being replaced by an error graphic — a diagram that will not draw must not delete the text the model wrote. The renderer is fetched the first time a diagram appears, so a panel that never shows one never loads it.
+- **The mode menu is no longer cut off.** Every picker menu was anchored to the button that opened it, and the mode and context triggers sit about 100px from the left edge — so their 310px cards grew straight off the side of the panel. At a 460px sidebar the permission menu started 44px past the left edge. Menus now anchor to the composer, so the panel's own gutters bound them at every width.
+- **Removed lines are red again.** Auto mode's colour moved to olive and diff polarity was riding on the same token, so every deletion count — the `−12` on a changed file, the `-` gutter in a diff — turned green, the one colour that means the opposite of what it is saying. Deletions now have their own colour, independent of what error and auto mode look like.
+- Long code fences fold past 24 lines, headings follow a real type scale rather than three sizes of bold, and rating an answer now tells a screen reader whether the rating is applied and that pressing again removes it.
+- Editor protocol v11 — requires DGC CLI 0.37.0. An older CLI is refused at connect with the version to update to.
+
 ## 0.19.0 — 2026-09-11
 
 - **A finished answer now ends with what it changed.** The files this turn touched, each with its additions and deletions and its own diff, and two actions: **Review** opens every change this chat has made, and **Undo** puts those files back as they were before the turn and rewinds the conversation with them. Undo identifies the turn by the prompt that opened its recovery point and refuses rather than guessing, because an undo that guesses loses work you did not ask it to.

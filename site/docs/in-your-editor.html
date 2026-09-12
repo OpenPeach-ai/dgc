@@ -128,6 +128,13 @@
 <li>The row underneath holds the model, the reasoning effort and the permission mode. Every control says what it does when you hover or focus it.</li>
 <li>Scrolling back through a long run puts a <strong>Latest</strong> pill over the end of the transcript; it turns purple and reads <strong>New</strong> when the model has written something you have not seen.</li>
 </ul>
+<div class="heading-row h2-row"><h2 id="what-an-answer-can-show">What an answer can show</h2><a class="anchor" href="#what-an-answer-can-show" aria-label="Link to this section">#</a></div>
+<ul>
+<li><strong>Diagrams.</strong> A ```mermaid fence renders as the diagram it describes, drawn in the panel&#x27;s own colours and type. The source stays underneath behind <strong>Show source</strong>, so Copy still gives you the markup. A diagram DGC cannot parse keeps its code block rather than being replaced by an error, because a diagram that will not draw must not delete the text around it.</li>
+<li><strong>Code</strong>, syntax-highlighted, with a Copy button. A fence longer than 24 lines folds, so one long file cannot push the answer off the screen.</li>
+<li><strong>Tables</strong>, also with a Copy button, which gives you the model&#x27;s Markdown rather than the rendered DOM.</li>
+<li><strong>Links</strong>, marked with where they point — GitHub, the Marketplace, a docs site, a file in this workspace. A file link opens it at the right line. Nothing is fetched to work this out, so a URL a model mentions is never disclosed to anyone by the act of rendering it.</li>
+</ul>
 <div class="heading-row h2-row"><h2 id="when-a-turn-finishes">When a turn finishes</h2><a class="anchor" href="#when-a-turn-finishes" aria-label="Link to this section">#</a></div>
 <p>DGC ends an answer with what it changed and what you can do about it.</p>
 <ul>
@@ -155,6 +162,7 @@
   </article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#install" data-id="install" class="lvl2">Install</a>
 <a href="#the-composer" data-id="the-composer" class="lvl2">The composer</a>
+<a href="#what-an-answer-can-show" data-id="what-an-answer-can-show" class="lvl2">What an answer can show</a>
 <a href="#when-a-turn-finishes" data-id="when-a-turn-finishes" class="lvl2">When a turn finishes</a>
 <a href="#approving-work" data-id="approving-work" class="lvl2">Approving work</a>
 <a href="#settings" data-id="settings" class="lvl2">Settings</a>

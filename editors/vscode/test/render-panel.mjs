@@ -116,6 +116,76 @@ if (process.argv.includes("--composer")) {
   await page.screenshot({ path: out, fullPage: false });
   console.log("shot:", out); await browser.close(); process.exit(0);
 }
+if (process.argv.includes("--menus")) {
+  // Every picker menu, at every width the panel is actually docked at, checked against the
+  // viewport it has to fit inside. The mode menu used to be cut off on the left because it was
+  // anchored to its own trigger, which sits ~100px in; this is the check that catches that.
+  const out = process.argv[2] || "/tmp/menus.png";
+  const triggers = [["#btn-add", "#addmenu"], ["#btn-ctx", "#ctxmenu"],
+                    ["#btn-mode", "#modemenu"], ["#btn-model", "#modelmenu"]];
+  let bad = 0;
+  for (const w of [300, 360, 460, 720]) {
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.waitForTimeout(150);
+    for (const [button, menu] of triggers) {
+      await page.click(button);
+      await page.waitForTimeout(120);
+      const r = await page.evaluate(([m, width]) => {
+        const node = document.querySelector(m);
+        if (!node || node.hidden) { return null; }
+        const b = node.getBoundingClientRect();
+        return { left: Math.round(b.left), right: Math.round(b.right),
+                 top: Math.round(b.top), width: Math.round(b.width), viewport: width };
+      }, [menu, w]);
+      if (!r) { console.log(`WIDTH ${w} ${menu}: did not open`); bad++; continue; }
+      const cutLeft = r.left < 0, cutRight = r.right > w, cutTop = r.top < 0;
+      const verdict = cutLeft || cutRight || cutTop
+        ? `CUT${cutLeft ? " left" : ""}${cutRight ? " right" : ""}${cutTop ? " top" : ""}` : "ok";
+      if (verdict !== "ok") { bad++; }
+      console.log(`WIDTH ${w} ${menu}: left=${r.left} right=${r.right} top=${r.top} w=${r.width} -> ${verdict}`);
+      await page.click(button);
+      await page.waitForTimeout(80);
+    }
+  }
+  await page.setViewportSize({ width: 460, height: 900 });
+  await page.click("#btn-mode");
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out, bad ? `FAIL (${bad} clipped)` : "PASS");
+  await browser.close(); process.exit(bad ? 1 : 0);
+}
+if (process.argv.includes("--mermaid")) {
+  // Mermaid is loaded on demand from dist/, so this serves the real built bundle the way the
+  // webview fetches it and then checks that a fence actually became an SVG.
+  const out = process.argv[2] || "/tmp/mermaid.png";
+  const bundle = readFileSync(here + "/../dist/mermaid.js", "utf8");
+  await page.route("https://dgc.test/mermaid.js", (route) =>
+    route.fulfill({ contentType: "text/javascript", body: bundle }));
+  await page.evaluate(() => { document.body.dataset.mermaidSrc = "https://dgc.test/mermaid.js"; });
+  await send({ type: "text_delta", text:
+    "\n\nHere is the release flow:\n\n```mermaid\nflowchart TD\n"
+    + "  A[source commit] --> B[tag]\n  B --> C[build-release]\n  C --> D[promote]\n"
+    + "  D --> E{site gate}\n  E -->|pass| F[publish]\n  E -->|fail| C\n```\n\n"
+    + "And a bad one:\n\n```mermaid\nthis is not a diagram {{{\n```\n" });
+  await send({ type: "stream_end" });
+  await page.waitForTimeout(2500);
+  const r = await page.evaluate(() => {
+    const fences = [...document.querySelectorAll('pre.code[data-language="mermaid"]')];
+    return {
+      fences: fences.length,
+      states: fences.map((f) => f.dataset.mermaid),
+      svgs: document.querySelectorAll(".mermaid-figure svg").length,
+      nodeText: [...document.querySelectorAll(".mermaid-figure svg text")].map((t) => t.textContent).slice(0, 8),
+      sourceKept: fences.every((f) => /flowchart|not a diagram/.test(f.textContent)),
+      toggles: document.querySelectorAll(".mermaid-bar .fold").length,
+    };
+  });
+  console.log(JSON.stringify(r, null, 1));
+  const ok = r.svgs === 1 && r.states.includes("done") && r.states.includes("failed") && r.sourceKept;
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
+}
 if (process.argv.includes("--prose")) {
   const out = process.argv[2] || "/tmp/panel.png";
   await send({ type: "text_delta", text: [

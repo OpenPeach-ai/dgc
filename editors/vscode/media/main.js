@@ -747,6 +747,122 @@
   // `partial` is a turn that stopped or failed. Its prose is not an answer and must not be styled
   // as one, but it is exactly the text a reader wants to keep or try again — so Copy and Retry
   // stay, and rating something half-written does not.
+  // A fence longer than this buries the answer and pushes the response actions off screen.
+  const CODE_FOLD_LINES = 24;
+  // ---- mermaid diagrams ----
+  // The runtime is ~5MB, so it is fetched the first time a diagram actually appears and never by
+  // a panel that shows none. Two deliberate choices: the source is model output, so rendering
+  // stays at mermaid's "strict" security level (no click bindings, no raw HTML in labels); and a
+  // block that fails to parse keeps its original fence, because a broken diagram must not delete
+  // the text the model wrote. The fence is kept either way behind a Show source toggle, so the
+  // Copy button a reader expects on a code block never disappears.
+  const SCRIPT_NONCE = (document.currentScript && document.currentScript.nonce) || "";
+  let mermaidReady = null;
+  function loadMermaid() {
+    if (mermaidReady) return mermaidReady;
+    const src = (document.body && document.body.dataset && document.body.dataset.mermaidSrc) || "";
+    if (!src) return (mermaidReady = Promise.resolve(null));
+    mermaidReady = new Promise((resolve) => {
+      const tag = document.createElement("script");
+      if (SCRIPT_NONCE) tag.nonce = SCRIPT_NONCE;   // the panel CSP admits scripts by nonce only
+      tag.src = src;
+      tag.onload = () => resolve(window.mermaid || null);
+      tag.onerror = () => resolve(null);
+      document.head.appendChild(tag);
+    }).then((lib) => {
+      if (!lib) return null;
+      // Diagrams are read against the panel's own surfaces, so the theme comes from the same
+      // tokens every other block uses rather than mermaid's stock palette.
+      const token = (name, fallback) =>
+        (getComputedStyle(document.documentElement).getPropertyValue(name) || "").trim() || fallback;
+      try {
+        lib.initialize({
+          startOnLoad: false, securityLevel: "strict", theme: "base",
+          // Without this, a diagram mermaid cannot parse is answered by appending a full-width
+          // "Syntax error" bomb graphic to document.body -- outside the transcript, outside the
+          // panel's layout, and impossible to dismiss. DGC handles the failure itself instead.
+          suppressErrorRendering: true,
+          fontFamily: token("--sans", "system-ui"), fontSize: 13,
+          themeVariables: {
+            background: token("--surface", "#202021"),
+            primaryColor: token("--surface2", "#29292B"),
+            primaryTextColor: token("--text", "#d4d4d6"),
+            primaryBorderColor: token("--border-strong", "#3A3A3D"),
+            secondaryColor: token("--code", "#151516"),
+            tertiaryColor: token("--code", "#151516"),
+            lineColor: token("--muted", "#9a9aa0"),
+            textColor: token("--text", "#d4d4d6"),
+          },
+        });
+      } catch { return null; }
+      return lib;
+    });
+    return mermaidReady;
+  }
+  let mermaidSeq = 0;
+  function renderMermaid(root) {
+    const blocks = [...root.querySelectorAll('pre.code[data-language="mermaid"]:not([data-mermaid])')];
+    if (!blocks.length) return;
+    blocks.forEach((pre) => { pre.dataset.mermaid = "pending"; });
+    loadMermaid().then((lib) => {
+      if (!lib) { blocks.forEach((pre) => { pre.dataset.mermaid = "unavailable"; }); return; }
+      blocks.forEach((pre) => drawMermaid(lib, pre));
+    });
+  }
+  async function drawMermaid(lib, pre) {
+    const code = pre.querySelector("code");
+    const source = code ? code.textContent : "";
+    if (!source.trim()) { pre.dataset.mermaid = "empty"; return; }
+    let svg = "";
+    try {
+      // parse() first: it validates without touching the DOM, so an invalid diagram costs
+      // nothing and never reaches the renderer.
+      if (await lib.parse(source, { suppressErrors: true }) === false) {
+        pre.dataset.mermaid = "failed"; return;
+      }
+      ({ svg } = await lib.render(`dgc-mermaid-${++mermaidSeq}`, source));
+    } catch { pre.dataset.mermaid = "failed"; return; }
+    if (!pre.parentNode) return;
+    const figure = el("figure", "mermaid-figure");
+    const art = el("div", "mermaid-art");
+    art.innerHTML = svg;                       // mermaid sanitises at securityLevel "strict"
+    const bar = el("figcaption", "mermaid-bar");
+    const toggle = el("button", "fold", "Show source");
+    toggle.type = "button";
+    toggle.onclick = () => {
+      pre.hidden = !pre.hidden;
+      toggle.textContent = pre.hidden ? "Show source" : "Hide source";
+    };
+    bar.appendChild(toggle);
+    pre.replaceWith(figure);
+    pre.hidden = true;
+    figure.append(art, bar, pre);
+    pre.dataset.mermaid = "done";
+  }
+
+  // Everything that has to happen to rendered markdown after it lands in the DOM.
+  function enrichMarkdown(root) {
+    if (!root) return;
+    foldLongCode(root);
+    renderMermaid(root);
+  }
+  function foldLongCode(root) {
+    root.querySelectorAll("pre.code:not([data-folded])").forEach((pre) => {
+      pre.dataset.folded = "1";
+      const code = pre.querySelector("code");
+      const lines = code ? code.textContent.split("\n").length : 0;
+      if (lines <= CODE_FOLD_LINES) return;
+      pre.classList.add("foldable");
+      const fold = el("button", "fold", `See all ${lines} lines`);
+      fold.type = "button";
+      fold.onclick = () => {
+        const open = pre.classList.toggle("open");
+        fold.textContent = open ? "Hide lines" : `See all ${lines} lines`;
+      };
+      pre.appendChild(fold);
+    });
+  }
+
   function responseActions(textEl, prompt, partial = false) {
     const actions = el("div", "response-actions");
     if (partial) actions.classList.add("partial");
@@ -757,8 +873,14 @@
     };
     add("copy", "copy", partial ? "Copy what was written" : "Copy response");
     if (!partial) {
-      add("up", "thumbsup", "Good response \u2014 kept in this workspace, sent nowhere");
-      add("down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere");
+      // Ratings are toggles, so they carry aria-pressed: without it a screen reader announces
+      // "Good response, button" whether or not the rating is already applied, and gives no hint
+      // that pressing again removes it. The visual `.on` class is the same state, seen.
+      for (const [act, icon, label] of [
+        ["up", "thumbsup", "Good response \u2014 kept in this workspace, sent nowhere"],
+        ["down", "thumbsdown", "Poor response \u2014 kept in this workspace, sent nowhere"]]) {
+        add(act, icon, label).setAttribute("aria-pressed", "false");
+      }
       add("branch", "git-branch", "Branch into a new chat from here");
     }
     add("retry", "refresh", "Run this prompt again");
@@ -771,8 +893,10 @@
       if (act === "copy") { vscode.postMessage({ type: "copy", text: body() }); flashAction(button, "check"); return; }
       if (act === "up" || act === "down") {
         const on = button.classList.contains("on");
-        actions.querySelectorAll(".ract-up, .ract-down").forEach((b) => b.classList.remove("on"));
-        if (!on) button.classList.add("on");
+        actions.querySelectorAll(".ract-up, .ract-down").forEach((b) => {
+          b.classList.remove("on"); b.setAttribute("aria-pressed", "false");
+        });
+        if (!on) { button.classList.add("on"); button.setAttribute("aria-pressed", "true"); }
         vscode.postMessage({ type: "rateResponse", rating: on ? "none" : act, prompt: String(prompt || "") });
         return;
       }
@@ -823,6 +947,7 @@
     if (turn.textEl && turn._buf) {
       turn.textEl._markdown = turn._buf;
       turn.textEl.innerHTML = md(turn._buf); turn.renderedAt = Date.now();
+      enrichMarkdown(turn.textEl);
     }
   }
   function appendText(value) {
@@ -2059,6 +2184,7 @@
         const markdown = String(ev.markdown || "");
         turn.chars += markdown.length;
         textBlock()._markdown = markdown; textBlock().innerHTML = md(markdown);
+        enrichMarkdown(textBlock());
         if (ev.path) sysLine(`Handoff saved to ${ev.path}`);
         if (ev.status !== "completed") sysLine(String(ev.error || `Handoff ${ev.status}`), true);
         speak(ev.status === "completed" ? "Handoff ready" : `Handoff ${ev.status}`);
@@ -2804,6 +2930,7 @@
         if (it.text) {
           const commentary = it.commentary || it.tools?.length;
           const text = el("div", commentary ? "text commentary" : "text final", md(it.text));
+          enrichMarkdown(text);
           text._markdown = it.text; m.appendChild(text);
           // A restored answer is still an answer. Reloading the window used to strip Copy, rate,
           // branch and retry from everything above the fold, which read as the panel losing them.

@@ -1374,6 +1374,78 @@ def unit_tests(tmp: Path):
                 "tool_profile"} & _LIVE_SAFE),
           sorted({"model", "base_url", "subscription_engine", "sandbox"} & _LIVE_SAFE))
 
+    # An editor saves the whole settings form, so the one key the user moved arrives surrounded by
+    # two dozen untouched ones. Gating on key NAMES rejected the save on a neighbour, which is why
+    # context_size stayed unchangeable mid-turn even after it was declared live-safe.
+    class _UnchangedCfg:
+        data = {"context_size": 65536, "model": "deepseek-v4-pro:cloud", "api_mode": "auto",
+                "sandbox": False, "subagent_model": "", "max_parallel_tasks": 4}
+        def get(self, key, default=None): return self.data.get(key, default)
+    _gate = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
+    _gate.config = _UnchangedCfg()
+    _form = {"context_size": 1048576, "model": "deepseek-v4-pro:cloud", "api_mode": "auto",
+             "sandbox": False, "subagent_model": "", "max_parallel_tasks": 4}
+    _blocked = sorted(k for k, v in _form.items()
+                      if k not in _LIVE_SAFE and not _gate._config_unchanged(k, v))
+    _moved = sorted(k for k, v in {**_form, "model": "glm-5.3:cloud"}.items()
+                    if k not in _LIVE_SAFE and not _gate._config_unchanged(k, v))
+    check("a whole-form save may raise the context window mid-turn when nothing else moved",
+          _blocked == [] and _moved == ["model"], (_blocked, _moved))
+    check("re-sending an identical value is not treated as a change",
+          _gate._config_unchanged("sandbox", False)
+          and _gate._config_unchanged("max_parallel_tasks", 4.0)
+          and _gate._config_unchanged("subagent_model", "")
+          and not _gate._config_unchanged("context_size", 1048576))
+
+    # ---- a standing goal survives a turn that stopped on its own -----------------------------
+    # A goal is the instruction to work unattended. The loop guard ending the turn used to end the
+    # goal too, leaving nothing running until a person pressed Resume -- which defeats the point.
+    import threading as _resume_th
+    from dgc.goals import AUTO_RESUME_MAX as _AUTO_MAX, auto_resume_prompt as _auto_prompt
+    class _ResumeUI:
+        def __init__(self): self.notes = []
+        def info(self, text, *a, **k): self.notes.append(("info", text))
+        def error(self, text, *a, **k): self.notes.append(("error", text))
+    class _ResumeAgent:
+        goal = "ship the release"; goal_status = "active"; _last_turn_error = "stopped — looping"
+    def _resume_backend():
+        be = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
+        be.agent = _ResumeAgent(); be.ui = _ResumeUI()
+        be._queue = []; be._goal_auto_resumes = 0
+        be._turn_lock = _resume_th.RLock()
+        be._turn_state_lock = lambda: be._turn_lock
+        return be
+    _be = _resume_backend()
+    _restarted = _be._maybe_auto_resume_goal(failed=True, cancelled=False)
+    check("a goal that stopped on its own is continued automatically",
+          _restarted and len(_be._queue) == 1 and _be._queue[0][3] == "resume",
+          _be._queue)
+    check("the restart tells the model why, so it changes approach instead of repeating",
+          "looping" in _be._queue[0][0] and "same arguments" in _be._queue[0][0])
+    # Bounded: changing approach twice and still failing is a human's problem, not a retry loop.
+    _be._queue.clear(); _be._goal_auto_resumes = _AUTO_MAX
+    check("consecutive automatic restarts are capped",
+          not _be._maybe_auto_resume_goal(failed=True, cancelled=False)
+          and not _be._queue
+          and any(kind == "error" for kind, _ in _be.ui.notes))
+    _cancel_be = _resume_backend()
+    check("a user cancel is never overridden by an automatic restart",
+          not _cancel_be._maybe_auto_resume_goal(failed=True, cancelled=True)
+          and not _cancel_be._queue)
+    _ok_be = _resume_backend(); _ok_be._goal_auto_resumes = 2
+    check("a turn that finished resets the retry budget",
+          not _ok_be._maybe_auto_resume_goal(failed=False, cancelled=False)
+          and _ok_be._goal_auto_resumes == 0)
+    _paused_be = _resume_backend(); _paused_be.agent.goal_status = "paused"
+    check("a paused goal is left paused",
+          not _paused_be._maybe_auto_resume_goal(failed=True, cancelled=False))
+    _queued_be = _resume_backend(); _queued_be._queue.append(("real work", None, None, "prompt"))
+    check("queued work supersedes an automatic retry",
+          not _queued_be._maybe_auto_resume_goal(failed=True, cancelled=False)
+          and len(_queued_be._queue) == 1)
+    check("the restart instruction is bounded and never empty",
+          len(_auto_prompt("x" * 5000)) < 1200 and bool(_auto_prompt("").strip()))
+
     # ---- a blocked repeat hands back what it already had --------------------------------------
     # Refusing a repeat with "you already got the same result" is useless when the result is no
     # longer in the model's context: compaction can drop it mid-turn, re-reading is then rational,
@@ -10294,9 +10366,27 @@ def test_extension_vsix_guard():
         "extension/media/codicon.css", "extension/licenses/CODICONS-CODE-MIT.txt",
         "extension/licenses/CODICONS-CC-BY-4.0.txt",
         "extension/licenses/MARKDOWN-LICENSES.txt", "extension/dist/markdown.js",
+        "extension/licenses/MERMAID-LICENSES.txt", "extension/dist/mermaid.js",
     }
     check("VSIX validator has an exact reviewed member allowlist",
-          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 21)
+          guard.EXPECTED_MEMBERS == expected_members and len(expected_members) == 23)
+    # The diagram renderer is the one member allowed past the general size ceiling, and the only
+    # one exempt from the `key = "value"` heuristic -- it is 5MB of minified third-party code that
+    # bundles a tokeniser. Both exemptions are BY NAME, so an unexpected large file, or a real
+    # credential in a first-party file, still fails. This check exists so neither can be widened
+    # into a blanket exemption without someone noticing.
+    check("size and heuristic exemptions are scoped to the named vendored bundle",
+          guard.MEMBER_SIZE_LIMITS == {"extension/dist/mermaid.js": 6 * 1024 * 1024}
+          and guard.VENDORED_MEMBERS == frozenset({"extension/dist/mermaid.js"})
+          and guard.DEFAULT_MEMBER_SIZE_LIMIT == 4 * 1024 * 1024,
+          (guard.MEMBER_SIZE_LIMITS, guard.VENDORED_MEMBERS))
+    _fake_secret = b'x = {token: "ghp_' + b"a" * 30 + b'"}'
+    _scan_failed = False
+    try:
+        guard._scan_credentials("extension/dist/mermaid.js", _fake_secret, [])
+    except guard.ValidationError:
+        _scan_failed = True
+    check("a vendored bundle is still scanned for real credential shapes", _scan_failed)
 
     def write_archive(path, *, duplicate=False, symlink=False, secret=False):
         with _zipfile.ZipFile(path, "w") as archive:

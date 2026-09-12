@@ -2,7 +2,7 @@
   "name": "dgc",
   "displayName": "Vibe DGC \u2014 coding agent for your own models",
   "description": "Run the DGC coding agent against a local, native cloud, or compatible model endpoint inside VS Code and Cursor.",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "publisher": "vibedgc",
   "license": "PolyForm-Noncommercial-1.0.0",
   "icon": "icon.png",
@@ -541,10 +541,11 @@
     "highlight.js": "11.12.0",
     "jsdom": "^30.0.1",
     "markdown-it": "15.0.1",
+    "mermaid": "^12.0.0",
     "ovsx": "1.1.1",
     "typescript": "^5.4.0"
   },
   "overrides": {
-    "qs": "^6.16.0"
+    "lodash-es": "^4.18.1"
   }
 }
