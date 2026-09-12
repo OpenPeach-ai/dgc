@@ -36,6 +36,15 @@ async function main() {
     outfile: "dist/markdown.js", minify: production, sourcemap: false,
     legalComments: "inline",
   });
+  // Mermaid is ~5MB bundled, so it is a separate file the webview loads only when a diagram
+  // actually appears. Keeping it out of main.js means a panel that never renders one never
+  // parses it. dist/ is generated, so the blob is built here rather than committed.
+  await esbuild.build({
+    entryPoints: ["src/mermaid-entry.mts"], bundle: true, format: "iife",
+    platform: "browser", target: "chrome108",
+    outfile: "dist/mermaid.js", minify: true, sourcemap: false,
+    legalComments: "inline",
+  });
   const ctx = await esbuild.context({
     entryPoints: ["src/extension.ts"],
     bundle: true,

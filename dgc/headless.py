@@ -463,6 +463,7 @@ class Backend:
         self._turn_n = 0
         # ordered (prompt, images, typed context[, kind]) -- steering splices 3-tuples in
         self._queue: list[tuple] = []
+        self._goal_auto_resumes = 0   # consecutive automatic goal restarts after a failed turn
         self._steer_payloads: dict[str, tuple] = {}
         self._model_list_lock = threading.Lock()
 
@@ -533,6 +534,19 @@ class Backend:
             time.sleep(0.05)
         return not self._busy()
 
+    def _config_unchanged(self, key: str, value) -> bool:
+        """True when a submitted setting already holds this value, so applying it is a no-op."""
+        get = getattr(self.config, "get", None)
+        current = (get(key, None) if callable(get)
+                   else getattr(self.config, "data", {}).get(key))
+        if isinstance(current, bool) or isinstance(value, bool):
+            return bool(current) is bool(value)
+        if isinstance(current, (int, float)) and isinstance(value, (int, float)):
+            return float(current) == float(value)
+        if current is None:
+            return value in ("", None)
+        return str(current) == str(value)
+
     def _busy(self) -> bool:
         lock = self._turn_state_lock()
         with lock:
@@ -553,6 +567,8 @@ class Backend:
     def _start_turn(self, text: str, images=None, context=None, *, delivery="queue",
                     request_id="", kind: str = "prompt") -> tuple[str, int]:
         """Start or queue one turn atomically; return (started|queued|full, pending count)."""
+        if kind == "prompt":
+            self._goal_auto_resumes = 0    # a person took the wheel; the retry budget starts over
         lock = self._turn_state_lock()
         with lock:
             if getattr(self, "_foreground_worker", None) is not None:
@@ -703,6 +719,10 @@ class Backend:
                     est = self.agent.estimate_tokens()
                 except Exception:
                     est = 0
+                # Decided BEFORE the worker can retire: enqueueing here means the idle check below
+                # keeps this worker alive, and turn_end is still published before the resume's
+                # turn_start. Doing it after would strand the follow-up with no worker to run it.
+                self._maybe_auto_resume_goal(failed, cancelled)
                 with self._turn_state_lock():
                     idle = not self._queue
                     if idle and self._worker is current:
@@ -723,6 +743,42 @@ class Backend:
             with self._turn_state_lock():
                 if self._worker is current:
                     self._worker = None
+
+    def _maybe_auto_resume_goal(self, failed: bool, cancelled: bool) -> bool:
+        """Keep a standing goal running after a turn stops on its own.
+
+        A goal is the instruction to work unattended, so a recoverable stop -- the loop guard
+        above all -- must not silently end it and wait for someone to press Resume. The resume
+        carries the failure text so the next attempt changes approach instead of repeating the
+        call that failed, and consecutive resumes are capped: if changing approach twice does not
+        help, a person needs to look rather than DGC burning the window retrying.
+        """
+        from .goals import AUTO_RESUME_MAX, auto_resume_prompt
+        if cancelled:                      # the user stopped this turn; that decision stands
+            self._goal_auto_resumes = 0
+            return False
+        if not failed:
+            self._goal_auto_resumes = 0    # progress resets the budget
+            return False
+        if not (getattr(self.agent, "goal", "")
+                and getattr(self.agent, "goal_status", "none") == "active"):
+            return False
+        used = getattr(self, "_goal_auto_resumes", 0)
+        reason = str(getattr(self.agent, "_last_turn_error", "") or "")
+        if used >= AUTO_RESUME_MAX:
+            self.ui.error(
+                f"the standing goal stopped {used + 1} times in a row and DGC has stopped "
+                "retrying. Look at the last error, then resume the goal when it is addressed.")
+            return False
+        with self._turn_state_lock():
+            if self._queue:                # real work is already waiting; it supersedes a retry
+                return False
+            self._goal_auto_resumes = used + 1
+            self._queue.append((auto_resume_prompt(reason), None, None, "resume"))
+        self.ui.info(
+            f"the goal stopped — continuing it automatically "
+            f"({used + 1} of {AUTO_RESUME_MAX})")
+        return True
 
     def _start_foreground_worker(self, operation, *, label: str = "operation") -> bool:
         """Reserve a non-prompt foreground slot while stdin decisions/cancellation stay live."""
@@ -2156,7 +2212,13 @@ class Backend:
         elif t == "set_config":
             from .subscriptions import ENGINE_KEYS as _sub_keys
             if self._busy():
-                unsafe = sorted(set(dict(cmd.get("values") or {})) - _LIVE_SAFE_CONFIG_KEYS)
+                # An editor saves the whole settings form, so ~25 keys ride along with the one the
+                # user actually moved. Rejecting on key NAMES made every mid-turn save fail on an
+                # untouched neighbour -- which is what made `context_size` unchangeable even after
+                # it was declared live-safe. Only a value that would really move the route waits.
+                unsafe = sorted(
+                    key for key, value in dict(cmd.get("values") or {}).items()
+                    if key not in _LIVE_SAFE_CONFIG_KEYS and not self._config_unchanged(key, value))
                 if unsafe:
                     self.em.emit("command_rejected", command=t, reason="turn_in_progress",
                                  message=f"{unsafe[0]} cannot change while a turn is running; "

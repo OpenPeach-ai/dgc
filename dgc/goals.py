@@ -188,6 +188,25 @@ class ReportFilter:
 # filled with the text the user typed days ago and the model read it as a new request. The
 # objective already sits in the system prompt for as long as the goal stands; what the model
 # actually needs is to be told to carry on.
+# A standing goal exists so work continues without a person watching, so a turn that stops on a
+# recoverable fault must not end the goal -- it must change approach and carry on. The reason is
+# quoted verbatim because the most common stop is the loop guard, whose own advice ("repeating the
+# same prompt will loop again") is exactly what the model needs to read before it tries again.
+AUTO_RESUME_MAX = 2          # consecutive automatic resumes before DGC stops and waits for a human
+
+
+def auto_resume_prompt(reason: str) -> str:
+    """The instruction that restarts a standing goal after a turn stopped on its own."""
+    detail = " ".join(str(reason or "").split())[:600] or "the turn stopped before finishing"
+    return (
+        f"The previous attempt at this goal stopped early: {detail}\n\n"
+        "Do not repeat whatever stopped it. Check the todos and the most recent work, then take "
+        "the first unfinished step a DIFFERENT way -- a narrower step, a different tool, or read "
+        "something you have not read yet. If you cannot make progress, record what is blocking "
+        "you in the todos and move to the next step, or mark the goal blocked and say why. Never "
+        "reissue the call that just failed with the same arguments.")
+
+
 RESUME_PROMPT = (
     "Continue the standing goal from where the previous session stopped. Check the todos and the "
     "most recent work before acting, and pick up the first unfinished step rather than starting "

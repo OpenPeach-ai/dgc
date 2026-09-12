@@ -52,6 +52,20 @@ function relativeLuminance(hex) {
   return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
 }
 
+function hue(hex) {
+  const [r, g, b] = hex.match(/[0-9a-f]{2}/gi).map((part) => parseInt(part, 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), span = max - min;
+  if (!span) { return 0; }
+  const raw = max === r ? ((g - b) / span) % 6 : max === g ? (b - r) / span + 2 : (r - g) / span + 4;
+  return (raw * 60 + 360) % 360;
+}
+
+// Degrees apart on the colour wheel, the short way round.
+function hueDistance(one, two) {
+  const gap = Math.abs(hue(one) - hue(two)) % 360;
+  return gap > 180 ? 360 - gap : gap;
+}
+
 function contrastRatio(foreground, background) {
   const light = Math.max(relativeLuminance(foreground), relativeLuminance(background));
   const dark = Math.min(relativeLuminance(foreground), relativeLuminance(background));
@@ -2345,5 +2359,108 @@ test("scrolling back through a run does not strand you at the top of it", () => 
   pill.click();
   assert.equal(top, 4000, "the pill returns you to the end");
   assert.equal(pill.hidden, true);
+  assert.deepEqual(errors, []);
+});
+
+test("picking a context-size preset saves that window", () => {
+  const { errors, send, doc, posted } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "event", event: { type: "config", context_size: 65536, model: "deepseek-v4-pro:cloud" } });
+  send({ type: "settings_open", providers: [], models: [] });
+
+  const preset = doc.getElementById("s-context_size_preset");
+  const custom = doc.getElementById("s-context_size");
+  assert.ok(preset && custom, "the context size control exists");
+  assert.equal(preset.value, "65536", "the stored window is preselected");
+  assert.equal(custom.value, "65536", "and mirrored into the number input");
+
+  preset.value = "1048576";
+  preset.dispatchEvent(new doc.defaultView.Event("change", { bubbles: true }));
+  doc.getElementById("set-save").click();
+
+  const saved = posted.filter((m) => m.type === "saveSettings").pop();
+  assert.ok(saved, "save posts the settings");
+  assert.equal(String(saved.values.context_size), "1048576",
+    "the chosen preset is what gets saved");
+  assert.deepEqual(errors, []);
+});
+
+test("a mermaid fence becomes a diagram, and survives a runtime that never arrives", () => {
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "draw it" });
+  event({ type: "text_delta", text: "Here:\n\n```mermaid\ngraph TD;\n  A-->B;\n```\n" });
+  event({ type: "stream_end" });
+
+  const fence = doc.querySelector('pre.code[data-language="mermaid"]');
+  assert.ok(fence, "the fence is rendered as a code block first");
+  // The test DOM has no mermaid URI, so the loader must decline rather than hang or throw. The
+  // source stays on screen either way: a diagram that cannot be drawn must not delete the text.
+  assert.equal(fence.dataset.mermaid, "pending");
+  assert.match(fence.textContent, /graph TD/, "the source is never discarded");
+  assert.deepEqual(errors, [], "an absent mermaid runtime raises no error");
+});
+
+test("removed lines read as removed, not as the auto-mode olive", () => {
+  // --err went olive for auto mode. Diff polarity rode on it, so every deletion count turned
+  // green -- the one colour that means the opposite of what a "-12" is saying.
+  assert.match(mainCss, /--del:\s*#[0-9A-Fa-f]{6}/, "deletions need their own token");
+  for (const rule of [/\.diff \.del-stat \{ color: var\(--del-text\)/,
+                      /\.change-del \{ color: var\(--del-text\)/,
+                      /\.diff \.del \{[^}]*background: var\(--del-soft\)/]) {
+    assert.match(mainCss, rule, `diff deletions must not use --err: ${rule}`);
+  }
+  const delText = rootHex("--del-text");
+  for (const background of ["--fallback-bg", "--fallback-surface", "--fallback-surface2",
+                            "--fallback-code"]) {
+    assert.ok(contrastRatio(delText, rootHex(background)) >= 4.5,
+      `--del-text against ${background} must clear normal-text contrast`);
+  }
+  // Red and the auto-mode olive must stay far apart, or the fix is cosmetic only. Contrast ratio
+  // is the wrong instrument here -- it compares luminance, and these two are deliberately close
+  // in luminance so both read on the same surfaces. Hue is what a reader is actually telling
+  // apart, so that is what is asserted.
+  assert.ok(hueDistance(delText, rootHex("--err-text")) >= 60,
+    "the deletion colour must be clearly distinct in hue from the auto/error colour");
+  assert.ok(hueDistance(delText, rootHex("--good")) >= 60,
+    "and from the addition colour it sits next to in every diff header");
+});
+
+test("a picker menu is clamped by the composer, not by the button that opens it", () => {
+  // The mode trigger sits ~100px from the left edge. Anchored to itself, its 310px card grew
+  // straight off the left of the panel and was cut. Anchoring every menu to #cbox means the
+  // composer's own gutters bound it at any panel width.
+  assert.match(mainCss, /\.picker \{ position: static; \}/,
+    "a trigger must not be the menu's containing block");
+  assert.match(mainCss, /\.cf-left \.cmenu \{ left: 0; \}/);
+  assert.match(mainCss, /\.cf-right \.cmenu \{ right: 0; \}/);
+  assert.doesNotMatch(mainCss, /\.cmenu \{ right: -\d+px; \}/,
+    "the narrow-width offset hacks existed only to drag per-trigger menus back on screen");
+  assert.doesNotMatch(mainCss, /#modelmenu \{ right: -\d+px; \}/);
+  assert.match(mainCss, /#cbox \{ position: relative;/,
+    "#cbox must stay the positioned ancestor every menu resolves against");
+});
+
+test("a rating announces whether it is applied", () => {
+  const { errors, send, doc } = makeDom();
+  const event = ev => send({ type: "event", event: ev });
+  event({ type: "ready", capabilities: {} });
+  event({ type: "turn_start", turn_id: "one", prompt: "explain it" });
+  event({ type: "text_delta", text: "Here is the explanation." });
+  event({ type: "stream_end" });
+  event({ type: "turn_end", reason: "completed" });
+
+  const up = doc.querySelector(".ract-up"), down = doc.querySelector(".ract-down");
+  assert.ok(up && down, "a finished answer can be rated");
+  assert.equal(up.getAttribute("aria-pressed"), "false", "nothing is rated to begin with");
+  up.click();
+  assert.equal(up.getAttribute("aria-pressed"), "true", "the applied rating says so");
+  assert.equal(down.getAttribute("aria-pressed"), "false");
+  down.click();
+  assert.equal(up.getAttribute("aria-pressed"), "false", "switching sides clears the other");
+  assert.equal(down.getAttribute("aria-pressed"), "true");
+  down.click();
+  assert.equal(down.getAttribute("aria-pressed"), "false", "and a rating can be taken back");
   assert.deepEqual(errors, []);
 });

@@ -871,6 +871,21 @@ does not report usage cannot enforce a token budget; DGC pauses instead of conti
 with unknown usage. The goal review shows the reported usage and any budget pause.
 Ending one work cycle or finishing one milestone is not whole-goal completion.
 
+## When a turn stops on its own
+
+A goal is the instruction to keep working without someone watching, so a turn that
+stops on a recoverable fault does not end the goal. The most common one is the loop
+guard: a model that calls the same tool with identical arguments six times without
+using the result is looping, and DGC stops that turn. It then restarts the goal
+itself, passing the reason forward so the next attempt takes a different step rather
+than reissuing the call that failed.
+
+Consecutive automatic restarts are capped at two. If changing approach twice does not
+help, DGC stops and says so, because a third identical failure is a signal for a person
+to look — usually a more capable model for that step, or a narrower instruction — not a
+reason to spend the rest of the context window retrying. Any prompt you send resets the
+budget, and cancelling a turn yourself is never overridden: that decision stands.
+
 ## Autonomous gate
 
 On native local/API routes, `--autonomous-gate "<cmd>"` bounds an autonomous run by a real check command: the
@@ -969,6 +984,20 @@ CLI; the extension updates through your editor.
   says what it does when you hover or focus it.
 - Scrolling back through a long run puts a **Latest** pill over the end of the transcript; it
   turns purple and reads **New** when the model has written something you have not seen.
+
+## What an answer can show
+
+- **Diagrams.** A ```mermaid fence renders as the diagram it describes, drawn in the panel's own
+  colours and type. The source stays underneath behind **Show source**, so Copy still gives you
+  the markup. A diagram DGC cannot parse keeps its code block rather than being replaced by an
+  error, because a diagram that will not draw must not delete the text around it.
+- **Code**, syntax-highlighted, with a Copy button. A fence longer than 24 lines folds, so one
+  long file cannot push the answer off the screen.
+- **Tables**, also with a Copy button, which gives you the model's Markdown rather than the
+  rendered DOM.
+- **Links**, marked with where they point — GitHub, the Marketplace, a docs site, a file in this
+  workspace. A file link opens it at the right line. Nothing is fetched to work this out, so a
+  URL a model mentions is never disclosed to anyone by the act of rendering it.
 
 ## When a turn finishes
 
@@ -1346,7 +1375,10 @@ Useful keys:
 - `context_size` — the requested operating window. Known model selections apply a
   memory-conscious recommendation; authoritative provider metadata clamps impossible values but
   never silently expands a local Ollama allocation. Long sessions compact at
-  `compact_threshold` of the effective value.
+  `compact_threshold` of the effective value. It is one of the settings that may change while a
+  turn is running, because it only shapes the next request: an editor saving the whole settings
+  form does not have to wait for the turn to end unless a value that moves the execution route —
+  the provider, the model, the sandbox, a delegation engine — actually changed.
 - `search_timeout` — bounded 1–60 second lifetime for internal `grep`/`glob` discovery. DGC uses
   ripgrep without a shell when available and a link-safe bounded fallback otherwise.
 - `session_redaction` — on by default. Durable transcripts, checkpoint conversation blobs, goals,

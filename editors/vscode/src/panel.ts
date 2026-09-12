@@ -3452,6 +3452,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
     const css = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.css"));
     const js = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "main.js"));
     const markdown = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "markdown.js"));
+    // Mermaid is fetched by the webview only when a diagram is actually rendered, so its ~5MB is
+    // never parsed by a panel that shows none. The URI travels as data, not as a script tag.
+    const mermaid = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "dist", "mermaid.js"));
     const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "codicon.css"));
     const csp = `default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data:;`;
     const draftScope = this.draftScope();
@@ -3462,7 +3465,7 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <title>DGC</title>
 <link rel="stylesheet" href="${codicons}">
 <link rel="stylesheet" href="${css}">
-</head><body>
+</head><body data-mermaid-src="${mermaid}">
 <header id="phead"><span class="pm"><svg class="mk" viewBox="0 0 90 90" fill="currentColor" aria-hidden="true"><path d="M32 24 L20 30 L13 72 L25 66 Z"/><path d="M54 18 L42 24 L35 72 L47 66 Z"/><path d="M76 24 L64 30 L57 66 L69 60 Z"/></svg>DGC<span class="cur" aria-hidden="true"></span></span><button type="button" id="thread-title" class="thread-title" title="Current chat — click to rename" aria-label="Current chat: New chat. Click to rename">New chat</button><button type="button" class="pd" id="pmodel" title="Model — click to change" aria-label="Change model">dgc</button></header>
 <main id="log" role="log" aria-live="off" aria-label="DGC conversation"></main>
 <button type="button" id="to-latest" title="Jump to the newest message" aria-label="Jump to the newest message" hidden><span class="codicon codicon-arrow-down" aria-hidden="true"></span><span id="to-latest-label">Latest</span></button>

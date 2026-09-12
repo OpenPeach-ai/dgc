@@ -32,6 +32,7 @@ STATIC_MEMBERS = {
     "extension/licenses/CODICONS-CODE-MIT.txt": "licenses/CODICONS-CODE-MIT.txt",
     "extension/licenses/CODICONS-CC-BY-4.0.txt": "licenses/CODICONS-CC-BY-4.0.txt",
     "extension/licenses/MARKDOWN-LICENSES.txt": "licenses/MARKDOWN-LICENSES.txt",
+    "extension/licenses/MERMAID-LICENSES.txt": "licenses/MERMAID-LICENSES.txt",
 }
 GENERATED_MEMBERS = {
     "[Content_Types].xml",
@@ -39,7 +40,19 @@ GENERATED_MEMBERS = {
     "extension/dist/build.json",
     "extension/dist/extension.js",
     "extension/dist/markdown.js",
+    "extension/dist/mermaid.js",
 }
+# Bundles built from third-party dependencies rather than from DGC's own source. They are still
+# allowlisted by name and still scanned for every real credential shape; what they are exempt from
+# is the low-signal `key = "value"` heuristic below, which exists to catch a hand-written secret
+# and matches a great deal of minified code that merely resembles one. Mermaid bundles chevrotain,
+# a tokeniser whose generated parsers are full of `token:"..."`, none of it a secret.
+VENDORED_MEMBERS = frozenset({"extension/dist/mermaid.js"})
+# Mermaid's renderer is 5MB minified and is the one member allowed past the general ceiling. The
+# cap is per member and by name, so an unexpected file of any size still fails.
+MEMBER_SIZE_LIMITS = {"extension/dist/mermaid.js": 6 * 1024 * 1024}
+DEFAULT_MEMBER_SIZE_LIMIT = 4 * 1024 * 1024
+TOTAL_UNCOMPRESSED_LIMIT = 16 * 1024 * 1024
 EXPECTED_MEMBERS = frozenset(STATIC_MEMBERS) | GENERATED_MEMBERS
 TEXT_SUFFIXES = frozenset({".css", ".js", ".json", ".md", ".svg", ".txt", ".xml", ".vsixmanifest"})
 SECRET_NAME = re.compile(r"(?:api[_-]?key|auth|password|passwd|pat|secret|token)", re.I)
@@ -114,6 +127,8 @@ def _scan_credentials(member: str, raw: bytes, environment_values: list[bytes]) 
         raise ValidationError(f"{member}: contains a private environment-file path")
     if re.search(r"(?:/home/[^/\s]+|/Users/[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)", text):
         raise ValidationError(f"{member}: contains a developer-machine path")
+    if member in VENDORED_MEMBERS:
+        return          # see VENDORED_MEMBERS: every high-signal check above still ran
     for match in SECRET_ASSIGNMENT.finditer(text):
         if not _looks_like_placeholder(match.group(2)):
             raise ValidationError(f"{member}: contains a literal value for {match.group(1)}")
@@ -268,13 +283,14 @@ def validate_artifact(
                 raise ValidationError(f"{path.name}: unexpected compression for {info.filename}")
             if info.flag_bits & 0x1:
                 raise ValidationError(f"{path.name}: encrypted members are forbidden")
-            if info.file_size > 4 * 1024 * 1024:
+            if info.file_size > MEMBER_SIZE_LIMITS.get(
+                    info.filename, DEFAULT_MEMBER_SIZE_LIMIT):
                 raise ValidationError(f"{path.name}: oversized member {info.filename}")
             total_size += info.file_size
             raw = archive.read(info)
             members[info.filename] = raw
             _scan_credentials(info.filename, raw, environment_values)
-        if total_size > 8 * 1024 * 1024:
+        if total_size > TOTAL_UNCOMPRESSED_LIMIT:
             raise ValidationError(f"{path.name}: oversized uncompressed VSIX")
 
     for member, relative_source in STATIC_MEMBERS.items():

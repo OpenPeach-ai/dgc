@@ -23,3 +23,12 @@ Copyright © Microsoft Corporation.
 15.0.1 and its browser dependencies: entities, linkify-it, mdurl, punycode.js, and uc.micro.
 Exact dependency versions are locked in `package-lock.json`. Their copyright notices and licenses
 are included in `licenses/MARKDOWN-LICENSES.txt`.
+
+## Diagram renderer
+
+`dist/mermaid.js` bundles [mermaid](https://github.com/mermaid-js/mermaid) 12.0.0 and the 62
+browser packages it draws with — d3 and its modules, dagre-d3-es, cytoscape, elkjs, chevrotain,
+katex, dompurify, roughjs and the rest. It is a separate file from `dist/extension.js` and is
+fetched by the panel only when an answer actually contains a diagram. Exact dependency versions
+are locked in `package-lock.json`. Every package's copyright notice and license is reproduced in
+`licenses/MERMAID-LICENSES.txt`.
