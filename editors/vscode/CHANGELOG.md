@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.2 — 2026-09-12
+
+- **DGC is now open source under the Apache License 2.0**, replacing PolyForm Noncommercial. Use it commercially, inside a company, on client work, with no separate agreement — and with an explicit grant of the patent rights contributors hold in the work.
+- **The panel comes back on its own when its backend dies.** `dgc serve` is a plain child of the extension host, so an extension update, a window reload or a host crash takes it down with them — and the panel kept pointing at the dead process, so every later command wrote to a closed pipe and the only way out was finding **DGC: Restart Backend**. DGC now clears the dead backend and starts a replacement itself, bounded to three restarts in two minutes so a backend that genuinely cannot start is not respawned forever.
+- **A goal interrupted that way picks itself back up.** A restored goal is deliberately paused — right when you deliberately reopen an old chat, wrong when the runner was killed under it seconds ago. DGC now tells those apart and continues the work, while a goal you paused yourself is never revived behind your back.
+- In auto mode the model pill takes the auto colour too, instead of staying purple inside an olive composer.
+- Pairs with DGC CLI 0.37.1; editor protocol v11 is unchanged.
+
 ## 0.22.1 — 2026-09-12
 
 - **Saving a setting mid-run no longer fails on one you did not touch.** The settings form posts every field, so `base_url`, `api_key` and `model` arrived on every Save whether or not you changed them — and DGC asked to move the model route each time, which the CLI rightly refuses while a turn is running. Raising the context window during a run reported a model error and looked like it had not applied. The route is now only re-sent when it actually differs.

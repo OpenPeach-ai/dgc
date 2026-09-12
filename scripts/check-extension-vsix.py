@@ -141,7 +141,7 @@ def _validate_package(package: dict, source_package: dict, version: str) -> None
         "name": "dgc",
         "publisher": "vibedgc",
         "version": version,
-        "license": "PolyForm-Noncommercial-1.0.0",
+        "license": "Apache-2.0",
         "main": "./dist/extension.js",
         "homepage": "https://vibedgc.com",
     }

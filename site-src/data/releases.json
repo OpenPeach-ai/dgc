@@ -4,10 +4,20 @@
   "cli_releases_last_14_days": 14,
   "cli": [
     {
+      "version": "0.37.1",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
+      "status": "current",
+      "notes": [
+        "DGC is now open source under the Apache License 2.0, replacing PolyForm Noncommercial. It may be used commercially, inside a company and on client work with no separate agreement, and the licence grants the patent rights contributors hold in the work. Its obligations are the ordinary ones: keep the licence and copyright notice with copies, and state significant changes.",
+        "A standing goal that DGC has stopped retrying is marked blocked rather than left active. Leaving it active was a lie the clock told \u2014 the goal card kept counting while nothing was running and nothing was going to run. Blocked stops the clock and carries the reason into the goal review."
+      ]
+    },
+    {
       "version": "0.37.0",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "A standing goal survives a turn that stops on its own. The point of a goal is that work continues without someone watching, but the loop guard ending a turn ended the goal with it \u2014 nothing ran until a person pressed Resume. DGC now restarts the goal itself, carrying the reason forward so the model changes approach instead of reissuing the call that failed, and caps consecutive restarts at two: if changing approach twice does not help, a person needs to look rather than DGC spending the context window retrying.",
         "Settings you are allowed to change mid-turn now actually change. An editor saves the whole settings form, so the one value you moved arrives surrounded by two dozen untouched ones \u2014 and the mid-turn gate rejected the save on a neighbour. Raising the context window during a run was refused because `subagent_api_mode` came along for the ride. Only a value that would really move the execution route waits for the turn to end now.",
@@ -312,10 +322,22 @@
   ],
   "extension": [
     {
+      "version": "0.22.2",
+      "date": "2026-09-12",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
+      "status": "current",
+      "notes": [
+        "The panel recovers on its own when its backend dies. dgc serve is a plain child of the extension host, so an extension update or a window reload takes it down \u2014 and the panel kept pointing at the dead process until someone found DGC: Restart Backend. It now starts a replacement itself, bounded to three restarts in two minutes.",
+        "A goal interrupted by that death picks itself back up, while a goal you paused yourself is never revived behind your back.",
+        "In auto mode the model pill takes the auto colour instead of staying purple inside an olive composer.",
+        "Apache License 2.0; editor protocol v11 unchanged; pairs with DGC 0.37.1."
+      ]
+    },
+    {
       "version": "0.22.1",
       "date": "2026-09-12",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "Saving a setting while a turn runs no longer fails on a setting you did not touch: the form posts every field, so DGC asked to move the model route on every Save \u2014 which the CLI refuses mid-turn. Raising the context window during a run reported a model error and looked like it had not applied.",
         "A selected settings tab and the Ultra model control are a filled pill with nothing under them; the accent line beneath a tinted background read as a second, heavier element.",

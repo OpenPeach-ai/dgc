@@ -85,7 +85,7 @@ npm run test:host        # installed VS Code: activation, commands, handshake, r
 `DGC_VSCODE_EXECUTABLE` to the editor's real Electron executable when it is not available at
 `/usr/share/code/code`.
 
-Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · PolyForm Noncommercial.
+Built by Mohit Kalra · [vibedgc.com](https://vibedgc.com) · Apache License 2.0.
 
 ### File changes in a chat
 

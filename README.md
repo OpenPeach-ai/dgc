@@ -359,4 +359,4 @@ DGC is a coding agent that runs shell commands and edits files on your machine. 
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 Mohit Kalra. Commercial licensing is available from the author.
+[Apache License 2.0](LICENSE) © 2026 Mohit Kalra.

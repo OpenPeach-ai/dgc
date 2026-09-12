@@ -1408,6 +1408,9 @@ def unit_tests(tmp: Path):
         def error(self, text, *a, **k): self.notes.append(("error", text))
     class _ResumeAgent:
         goal = "ship the release"; goal_status = "active"; _last_turn_error = "stopped — looping"
+        def __init__(self): self.transitions = []
+        def update_goal(self, status, *, reason="", evidence=None):
+            self.transitions.append((status, reason)); self.goal_status = status; return True
     def _resume_backend():
         be = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
         be.agent = _ResumeAgent(); be.ui = _ResumeUI()
@@ -1424,10 +1427,18 @@ def unit_tests(tmp: Path):
           "looping" in _be._queue[0][0] and "same arguments" in _be._queue[0][0])
     # Bounded: changing approach twice and still failing is a human's problem, not a retry loop.
     _be._queue.clear(); _be._goal_auto_resumes = _AUTO_MAX
+    _be.agent.goal_status = "active"; _be._emit_goal = lambda *a, **k: None
     check("consecutive automatic restarts are capped",
           not _be._maybe_auto_resume_goal(failed=True, cancelled=False)
           and not _be._queue
           and any(kind == "error" for kind, _ in _be.ui.notes))
+    # Leaving it "active" kept the goal card's clock counting while nothing was running and
+    # nothing was going to run. Blocked is what it is, and blocked stops the clock.
+    check("giving up marks the goal blocked, so its clock stops and says why",
+          _be.agent.transitions
+          and _be.agent.transitions[-1][0] == "blocked"
+          and "looping" in _be.agent.transitions[-1][1],
+          _be.agent.transitions)
     _cancel_be = _resume_backend()
     check("a user cancel is never overridden by an automatic restart",
           not _cancel_be._maybe_auto_resume_goal(failed=True, cancelled=True)
