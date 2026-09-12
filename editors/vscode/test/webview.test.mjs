@@ -2464,3 +2464,28 @@ test("a rating announces whether it is applied", () => {
   assert.equal(down.getAttribute("aria-pressed"), "false", "and a rating can be taken back");
   assert.deepEqual(errors, []);
 });
+
+test("the Extensions tab is not a one-way door", () => {
+  // Opening Skills from Settings has to close Settings for the surface to take the panel. Without
+  // remembering where it came from there was no route back to the Extensions tab at all.
+  const { errors, send, doc, posted } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "settings_open", providers: [], models: [], section: "extensions" });
+  assert.equal(doc.querySelector('.set-section[data-section="extensions"]').hidden, false);
+
+  const opener = doc.querySelector('.set-section[data-section="extensions"] [data-open-surface]');
+  assert.ok(opener, "the Extensions tab opens a feature surface");
+  opener.click();
+  assert.equal(doc.getElementById("settings").hidden, true, "settings yields the panel");
+  assert.equal(posted.at(-1).type, "slash");
+
+  // The host answers the slash by taking the panel with that surface.
+  send({ type: "surface_open", surface: opener.dataset.openSurface });
+  assert.equal(doc.getElementById("surface").hidden, false, "the surface is showing");
+  doc.getElementById("surface-close").click();
+  assert.equal(doc.getElementById("surface").hidden, true);
+  const back = posted.at(-1);
+  assert.equal(back.type, "openSettings", "closing it asks for settings again");
+  assert.equal(back.section, "extensions", "and lands on the tab it came from");
+  assert.deepEqual(errors, []);
+});
