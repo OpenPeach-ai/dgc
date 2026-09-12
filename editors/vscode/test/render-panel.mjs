@@ -49,6 +49,23 @@ await send({ type: "tool_call", call_id: "c2", name: "edit_file", args: { path: 
 await send({ type: "tool_result", call_id: "c2", name: "edit_file", output: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n", is_diff: true, diff: "--- a/src/clamp.py\n+++ b/src/clamp.py\n@@ -1,2 +1,2 @@\n def clamp(v, lo, hi):\n-    return min(lo, max(hi, v))\n+    return max(lo, min(hi, v))\n" });
 await send({ type: "tool_call", call_id: "c3", name: "write_file", args: { path: "tests/test_clamp.py" }, summary: "tests/test_clamp.py" });
 await send({ type: "tool_result", call_id: "c3", name: "write_file", output: "wrote 9 lines" });
+if (process.argv.includes("--chips")) {
+  const out = process.argv[2] || "/tmp/panel.png";
+  await page.evaluate(() => {
+    const input = document.getElementById("input");
+    const fire = (text, items) => {
+      const ev = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", { value: { items: items || [], getData: () => text } });
+      input.dispatchEvent(ev);
+    };
+    fire("q".repeat(7400));
+    input.value = "Refactor this to use the new clamp helper";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: out, fullPage: false });
+  console.log("shot:", out); await browser.close(); process.exit(0);
+}
 if (process.argv.includes("--composer")) {
   const out = process.argv[2] || "/tmp/panel.png";
   // A realistic worst case: a long local model name, high effort, and auto mode.

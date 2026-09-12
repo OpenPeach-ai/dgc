@@ -173,7 +173,11 @@ body {
 .text code { font-family: var(--mono); font-size: .88em; background: var(--surface2); color: var(--text); padding: .12em .4em; border-radius: var(--r-sm); }
 .text .md-heading { display: inline-block; margin-top: var(--sp-1); }
 .text .md-h1, .text .md-h2 { font-size: 1.08em; }
-.text.commentary { color: var(--muted); font-size: var(--t-sm); line-height: 1.55; }
+/* What the model says between tool groups is the thread a reader follows through the turn --
+   "let me read the remaining core files, and why" is a real answer, not an aside. It used to
+   be dimmed and a step smaller, which read as unimportant. Same colour and size as any other
+   prose; the final answer is separated by space, not by making everything else quieter. */
+.text.commentary { color: var(--text); }
 .text.final { margin-top: var(--sp-1); }
 .md-table-wrap { max-width: 100%; overflow-x: auto; margin: var(--sp-2) 0; }
 .md-table { width: 100%; border-collapse: collapse; color: var(--text); font: var(--w-reg) var(--t-sm)/1.45 var(--sans); white-space: normal; }
@@ -373,7 +377,26 @@ footer { display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; flex-direct
 .rail-icon-button:hover { border-color: var(--border); background: var(--surface2); color: var(--text); }
 .rail-icon-button .codicon { font-size: var(--t-sm); }
 #queued { padding: 0 var(--sp-1); font: var(--w-reg) var(--t-xs)/1.45 var(--sans); color: var(--faint); }
-#attachments { display: flex; gap: var(--sp-1); flex-wrap: wrap; padding: 0 var(--sp-1); max-height: min(104px, 20vh); overflow-y: auto; overscroll-behavior: contain; }
+/* Inside the composer, above the text field: the attachments belong to the message being
+   written, so they live in the same box as the words. */
+#attachments { display: flex; gap: var(--sp-1); flex-wrap: wrap; padding: var(--sp-2) var(--sp-3) 0; max-height: min(104px, 20vh); overflow-y: auto; overscroll-behavior: contain; }
+#attachments:empty { display: none; }
+/* A folded paste keeps its own affordance: the subtitle is the way back into the text field. */
+#attachments .chip-action {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  color: var(--accent-text); font: inherit; text-decoration: underline;
+  text-underline-offset: 2px; flex: 0 0 auto;
+}
+#attachments .chip-action:hover { color: var(--text); }
+#attachments .pasted-chip { gap: var(--sp-2); }
+/* The Add menu opens upward from the composer, like the model and mode pickers beside it. */
+.add-picker { position: relative; }
+#addmenu { min-width: 232px; }
+#addmenu .mrow { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
+#addmenu .mrow-label { flex: 1 1 auto; min-width: 0; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#addmenu .mrow-hint { flex: 0 0 auto; color: var(--faint);
+  font: var(--w-reg) var(--t-xs)/1 var(--mono); }
 #attachments .chip { font: var(--w-reg) var(--t-xs)/1 var(--sans); background: var(--surface2); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--sp-1) var(--sp-2); display: inline-flex; gap: var(--sp-1); align-items: center; min-width: 0; max-width: 100%; box-sizing: border-box; }
 #attachments .chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #attachments .chip .x { cursor: pointer; border: 0; padding: 0 0; background: transparent; color: var(--faint); line-height: 1; flex: 0 0 auto; }

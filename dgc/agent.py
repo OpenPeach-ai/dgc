@@ -1720,7 +1720,8 @@ class Agent(GoalLifecycle):
             "",
             "# Response cadence",
             RESPONSE_GUIDANCE,
-            "- Before the first grouped tool calls, give one brief preamble stating the immediate action.",
+            "- Before EACH group of tool calls, not just the first, give one short line on what you "
+            "are doing and why.",
             "- Do not narrate trivial reads or repeat the prompt or tool cards.",
             "- After tools finish, continue with the next needed calls. Do not wait for permission unless the "
             "harness explicitly presents an approval request.",
