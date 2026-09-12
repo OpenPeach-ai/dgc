@@ -3117,7 +3117,19 @@
     }
     else if (msg.type === "open_goal_review") openGoalReview();
     else if (msg.type === "workflow_draft") prepareWorkflowDraft(msg.name);
-    else if (msg.type === "backend_exit") { sessionReady = !draftScope; endTurn("error"); expireOpenRequests(); for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false); renderUnconfirmedDrafts(); sysLine("dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true); setSending(false); }
+    else if (msg.type === "backend_exit") {
+      sessionReady = !draftScope; endTurn("error"); expireOpenRequests();
+      for (const id of [...pendingPrompts.keys()]) rejectPrompt(id, false);
+      renderUnconfirmedDrafts();
+      // The goal clock is driven from this side: it keeps adding elapsed time for as long as the
+      // goal reads active-and-running. With the backend gone nothing will ever say otherwise, so
+      // it counted time against a dead process. Freeze it where it stopped.
+      if (goalState.text) setGoalState({ ...goalState, running: false });
+      sysLine(msg.recovering
+        ? "dgc backend stopped\u2009\u2014\u2009reconnecting and picking the work back up"
+        : "dgc backend exited" + (msg.code ? " (code " + msg.code + ")" : ""), true);
+      setSending(false);
+    }
   });
   loadDraftState();
   window.addEventListener("pagehide", persistDraft);

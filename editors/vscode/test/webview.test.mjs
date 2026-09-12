@@ -2511,3 +2511,32 @@ test("auto mode colours the model pill too, not just the box around it", () => {
     /#cbox\[data-mode="auto"\] \.model-control\.ultra #effortname \{ color: var\(--err-text\)/,
     "including the reasoning label inside it");
 });
+
+test("the goal clock stops when the backend does", async () => {
+  // The clock is driven from the webview: it adds wall-clock time for as long as the goal reads
+  // active-and-running. When the backend dies nothing ever says otherwise, so it kept counting
+  // against a dead process -- the turn was over and the timer was still going up.
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "event", event: { type: "goal_changed", goal: "ship the release", status: "active",
+                                 elapsed_seconds: 30, details: { running: true } } });
+  const clock = () => doc.getElementById("goal-time").textContent;
+  assert.match(clock(), /^\d+:\d\d$/, "the goal card shows a clock");
+
+  await new Promise((r) => setTimeout(r, 1100));
+  send({ type: "backend_exit", code: 0, recovering: true });
+  const frozen = clock();
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.equal(clock(), frozen, "it does not keep counting once the backend is gone");
+  assert.match(doc.getElementById("log").textContent, /reconnecting and picking the work back up/,
+    "and the line says the work is being recovered, not that it died");
+  assert.deepEqual(errors, []);
+});
+
+test("an unrecoverable backend exit still says so plainly", () => {
+  const { errors, send, doc } = makeDom();
+  send({ type: "event", event: { type: "ready", capabilities: {} } });
+  send({ type: "backend_exit", code: 1, recovering: false });
+  assert.match(doc.getElementById("log").textContent, /dgc backend exited \(code 1\)/);
+  assert.deepEqual(errors, []);
+});
