@@ -15994,19 +15994,24 @@ def test_ollama_adapter():
             metadata_tool_rejected = True
         text_only_result = text_only.chat(
             [{"role": "user", "content": "hello"}], reasoning_effort="high")
-        try:
-            text_only.chat([{"role": "user", "content": [{
-                "type": "image_url",
-                "image_url": {"url": "data:image/png;base64,QUJD"},
-            }]}])
-            metadata_vision_rejected = False
-        except _llm.LLMError:
-            metadata_vision_rejected = True
+        # An image a model cannot read is withheld from the request, not a reason to fail the
+        # turn. Failing stranded the run: the image stays in the conversation, so every later turn
+        # -- and every attempt to resume a standing goal -- re-sent it and died the same way.
+        text_only.chat([{"role": "user", "content": [{
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,QUJD"},
+        }]}])
+        vision_messages = text_only_posts[-1][1].get("messages", [])
+        metadata_vision_rejected = (
+            getattr(text_only, "dropped_images", 0) == 1
+            and not any(message.get("images") for message in vision_messages)
+            and any("cannot read images" in str(message.get("content", ""))
+                    for message in vision_messages))
     finally:
         _llm.requests.post = original_post
-    text_only_payload = text_only_posts[-1][1]
+    text_only_payload = text_only_posts[1][1]      # the plain turn, before the image one
     check("authoritative Ollama metadata avoids an unsupported native generation",
-          metadata_tool_rejected and len(text_only_posts) == 2
+          metadata_tool_rejected and len(text_only_posts) == 3   # show, text turn, image turn
           and text_only_posts[0][0].endswith("/api/show")
           and text_only_posts[1][0].endswith("/api/chat")
           and "tools" not in text_only_payload and "think" not in text_only_payload

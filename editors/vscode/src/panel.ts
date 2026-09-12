@@ -3541,7 +3541,9 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 
     <section class="set-section" data-section="agents" hidden>
     <div class="set-group">Sub-agents <span class="set-hint">run <code>task</code> sub-agents on a different model / host — blank = inherit main</span></div>
-    <label>Sub-agent model
+    <label>Provider preset <span class="set-hint">fills the host below; leave the fields blank to inherit the main model</span>
+      <select id="s-subagent_provider"><option value="">choose a preset\u2026</option></select></label>
+      <label>Sub-agent model
       <input id="s-subagent_model" type="text" spellcheck="false" placeholder="inherit main"></label>
     <label>Sub-agent host URL
       <input id="s-subagent_base_url" type="text" spellcheck="false" placeholder="inherit main host"></label>
