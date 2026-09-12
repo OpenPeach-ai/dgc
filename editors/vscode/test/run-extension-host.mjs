@@ -68,7 +68,7 @@ const sendConfig = (requestId) => send({ type: "config", request_id: requestId,
   subscription_effort: subscriptionEffort,
   subscription_engines: [{ key: "codex", label: "Codex (ChatGPT subscription)",
     model_hints: [], supports_effort: true }] });
-send({ type: "ready", version: "fixture", protocol_version: 10,
+send({ type: "ready", version: "fixture", protocol_version: 11,
   capabilities: { correlated_state_requests: true, history_snapshot: true, goal_inputs: true, question_forms: true,
     workflows: true, composer_selections: true, workspace_inspection: true, chat_inspection: true }, session_id: currentSession,
   model: "fixture", mode: "default", think: "off", base_url: "http://127.0.0.1:1/v1",

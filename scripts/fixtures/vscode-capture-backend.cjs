@@ -65,7 +65,7 @@ const sendConfig = (requestId) => send({
 send({
   type: "ready",
   version: "capture-fixture",
-  protocol_version: 10,
+  protocol_version: 11,
   capabilities: { correlated_state_requests: true, workspace_inspection: true, chat_inspection: true },
   session_id: "capture-chat",
   model: "deterministic protocol fixture",

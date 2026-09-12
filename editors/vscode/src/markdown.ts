@@ -18,7 +18,9 @@ for (const [name, grammar] of Object.entries({ javascript, typescript, python, j
 
 /** Render model output without executable HTML, automatic network requests, or webview navigation.
  * Links are inert buttons; the extension host validates them again on an explicit user click. */
-const parser = new MarkdownIt({ html: false, linkify: false, typographer: false, breaks: false });
+// linkify is safe here precisely because a link is never an anchor: link_open below turns every
+// one into an inert button that the extension host re-validates on click.
+const parser = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: false });
 const escape = parser.utils.escapeHtml;
 
 export type LinkTarget = { kind: "external" | "file"; target: string; line?: number };
@@ -99,8 +101,55 @@ function codeBlock(content: string, info: string): string {
   return `<pre class="code" data-language="${escape(language)}"><span class="code-language">${escape(language)}</span><button type="button" class="copy" data-c="${escape(encodeURIComponent(content))}" aria-label="Copy code">Copy</button><code>${highlighted}</code></pre>`;
 }
 
-parser.renderer.rules.table_open = () => '<div class="md-table-wrap"><table class="md-table">';
+// A table is the one block a reader reliably wants out of the panel and into a document, and it
+// was the only block with no copy path. The source is stashed the same way a code fence stashes
+// its own, so the copy is the model's markdown rather than the rendered DOM.
+parser.renderer.rules.table_open = (tokens, index) => {
+  const source = tableSource(tokens, index);
+  const copy = source
+    ? `<button type="button" class="copy" data-c="${escape(encodeURIComponent(source))}" aria-label="Copy table">Copy</button>`
+    : "";
+  return `<div class="md-table-wrap">${copy}<table class="md-table">`;
+};
 parser.renderer.rules.table_close = () => "</table></div>";
+
+function tableSource(tokens: any[], index: number): string {
+  // markdown-it does not keep the raw table text, so rebuild it from the inline tokens. Good
+  // enough to paste into another markdown document, which is the whole point of the button.
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let headerRows = 0;
+  for (let i = index; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token.type === "table_close") break;
+    if (token.type === "tr_open") row = [];
+    else if (token.type === "tr_close") { rows.push(row); if (token.level === 2) headerRows = rows.length; }
+    else if (token.type === "inline") row.push(String(token.content || "").replace(/\|/g, "\\|"));
+  }
+  if (!rows.length) return "";
+  const width = Math.max(...rows.map(r => r.length));
+  const line = (cells: string[]) =>
+    "| " + Array.from({ length: width }, (_, i) => cells[i] ?? "").join(" | ") + " |";
+  const out = [line(rows[0]), "| " + Array.from({ length: width }, () => "---").join(" | ") + " |"];
+  for (const rest of rows.slice(Math.max(1, headerRows || 1))) out.push(line(rest));
+  return out.join("\n");
+}
+
+// GitHub-style task lists. "- [ ] step" rendered as the literal characters, which made every
+// checklist answer look broken.
+parser.renderer.rules.list_item_open = (tokens, index, options, _env, self) => {
+  const inline = tokens[index + 2];
+  const text = inline && inline.type === "inline" ? String(inline.content || "") : "";
+  const task = /^\[([ xX])\]\s+/.exec(text);
+  if (!task) return self.renderToken(tokens, index, options);
+  const checked = task[1].toLowerCase() === "x";
+  inline.content = text.slice(task[0].length);
+  if (inline.children && inline.children.length && inline.children[0].type === "text") {
+    inline.children[0].content = String(inline.children[0].content).replace(/^\[[ xX]\]\s+/, "");
+  }
+  return `<li class="task-item"><input type="checkbox" disabled${checked ? " checked" : ""} `
+    + `aria-label="${checked ? "done" : "not done"}">`;
+};
 
 export function render(source: string): string {
   // JSON can carry lone UTF-16 surrogates; URI encoding in copy controls must not crash a turn.
