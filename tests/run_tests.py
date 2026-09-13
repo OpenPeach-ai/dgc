@@ -1422,6 +1422,35 @@ def unit_tests(tmp: Path):
           _dropped)
     check("an ordinary event is written untouched",
           _kept["type"] == "text_delta" and _kept["text"] == "a normal event")
+    # The agent writes scaffolding into the transcript so the MODEL reads it -- the standing-goal
+    # reminder (which embeds the whole objective), the open-todo nudge. Replaying a restored session
+    # rendered those as chat bubbles, pasting the user's entire goal spec back at them as a prompt
+    # they never sent.
+    class _HistEm:
+        def __init__(self): self.frames = []
+        def emit(self, _t, /, **f): self.frames.append(f)
+    class _HistAgent:
+        session_file = None
+        messages = [
+            {"role": "system", "content": "you are dgc"},
+            {"role": "user", "content": "build the thing"},
+            {"role": "user", "content": "<system-reminder>\nStanding goal for this session:\n"
+                                        + "BUILD A POLISHED APP " * 200 + "\n</system-reminder>"},
+            {"role": "assistant", "content": "on it"},
+            {"role": "user", "content": "<system-reminder>\nYou're stopping but these todos are "
+                                        "still open: x\n</system-reminder>"},
+            {"role": "user", "content": "carry on"},
+        ]
+    _hist_be = _headless_mod2.Backend.__new__(_headless_mod2.Backend)
+    _hist_be.em = _HistEm(); _hist_be.agent = _HistAgent()
+    _hist_items = _headless_mod2.Backend._history(_hist_be)
+    _hist_users = [i for i in _hist_items if i.get("role") == "user"]
+    check("agent scaffolding never replays as something the user typed",
+          [i["text"] for i in _hist_users] == ["build the thing", "carry on"],
+          [i["text"][:50] for i in _hist_users])
+    check("and the goal spec it embedded does not leak into the transcript",
+          not any("BUILD A POLISHED APP" in i.get("text", "") for i in _hist_items))
+
     # Recall paging must bound the FRAME, not just the row count: 200 rows x 20,000 chars is about
     # 4MB before escaping, and an over-ceiling frame is shrunk to an EMPTY page -- the user scrolls
     # back past the summary and sees nothing at all.
