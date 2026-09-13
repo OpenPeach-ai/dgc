@@ -397,6 +397,21 @@ def check_css_minifier(errors: list[str]) -> None:
             errors.append(f"CSS minifier {label}: output is not idempotent")
 
 
+def check_docs_renderer(errors: list[str]) -> None:
+    """Keep examples literal while rendering the reference's Markdown structure."""
+    docs = _load_script("dgc_docs_renderer_check", ROOT / "scripts" / "generate-docs-site.py")
+    sample = "## Operations\n\n| Tool | Result |\n| --- | --- |\n| `read` | *Page* |\n\n    <snapshot>\n      literal * and **\n"
+    rendered, _ = docs.render_markdown(sample)
+    for expected in ('class="docs-table"', 'tabindex="0"', '<th scope="col">Tool</th>',
+                     '<td><em>Page</em></td>', '<pre><code>&lt;snapshot&gt;\n  literal * and **</code></pre>'):
+        if expected not in rendered:
+            errors.append(f"docs renderer omitted structured/literal content: {expected!r}")
+    mixed = docs.inline('*Plan mode* and `*.py` and [source](https://example.com/a*b*)')
+    if ('<em>Plan mode</em>' not in mixed or '<code>*.py</code>' not in mixed
+            or 'href="https://example.com/a*b*"' not in mixed):
+        errors.append("docs emphasis rendering changed literal code or a link destination")
+
+
 def check_asset_revision_contract(errors: list[str]) -> None:
     """Pin revisions to emitted bytes, including changes caused only by the transformer."""
     source = ".sample { color: red; }"
@@ -1352,6 +1367,7 @@ def main(argv: list[str] | None = None) -> int:
     check_website_intake_retired(errors)
     check_blog_retired(errors)
     check_css_minifier(errors)
+    check_docs_renderer(errors)
     check_asset_revision_contract(errors)
     check_leak_pattern_contract(errors)
     check_css(errors)

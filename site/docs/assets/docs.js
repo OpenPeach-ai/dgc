@@ -21,8 +21,10 @@
 
   // ----- sidebar search / filter -----
   var input = document.getElementById('docsearch');
-  var links = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar a[data-title]'));
-  var groups = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar .grp'));
+  // Both layouts use the same search: the desktop sidebar is hidden on mobile,
+  // where its matching links appear in the Browse docs dialog instead.
+  var links = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar a[data-title], .docs-menu a[data-title]'));
+  var groups = Array.prototype.slice.call(document.querySelectorAll('.docs-sidebar .grp, .docs-menu .grp'));
   function filter(){
     var q = (input.value || '').trim().toLowerCase();
     links.forEach(function(a){

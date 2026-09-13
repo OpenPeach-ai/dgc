@@ -345,7 +345,7 @@ def social_sources(bench: dict[str, Any]) -> dict[str, str]:
         if item is subject:
             circles.append(
                 f'<circle cx="{x:.1f}" cy="445" r="12" fill="#7C5CFF" stroke="#A78BFA" stroke-width="2"/>'
-                f'<text x="{x:.1f}" y="490" text-anchor="middle" fill="#A78BFA" font-family="monospace" font-size="17">'
+                f'<text x="{x:.1f}" y="490" text-anchor="middle" fill="#6543DC" font-family="monospace" font-size="17">'
                 f'{html.escape(str(item["name"]))} {item["pass_at_2"]:.1f}</text>'
                 f'<circle cx="{x:.1f}" cy="445" r="5" fill="#fff" opacity=".2"/>'
             )

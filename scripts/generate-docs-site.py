@@ -62,12 +62,38 @@ def slug(text: str) -> str:
     return re.sub(r"-{2,}", "-", s)
 
 
+def docs_href(page: str = "index") -> str:
+    """Keep documentation navigation valid from both hosts and clean URLs.
+
+    Relative ``getting-started.html`` resolves outside the docs directory from
+    vibedgc.com/docs, while /docs/... redirects to the main host when visited on
+    docs.vibedgc.com. Canonical URLs work on either host; the local preview
+    server rebases navigation to its own /docs routes without changing metadata.
+    """
+    return f"{DOCS_SITE}/{'' if page == 'index' else page}"
+
+
 def inline(text: str) -> str:
     """Escape, then re-apply the inline markdown subset the docs actually use."""
+    fragments: list[str] = []
+
+    def protect(markup: str) -> str:
+        fragments.append(markup)
+        return f"\x00{len(fragments) - 1}\x00"
+
     out = html.escape(text, quote=True)
-    out = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", out)
+    # Code and link destinations are literal: emphasis must never change their
+    # asterisks, including globs and URL path patterns in the reference pages.
+    out = re.sub(r"`([^`]+)`", lambda m: protect(f"<code>{m.group(1)}</code>"), out)
+    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
+                 lambda m: protect(f'<a href="{m.group(2)}">{m.group(1)}</a>'), out)
     out = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", out)
-    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', out)
+    out = re.sub(r"(?<!\*)\*(?![\s*])([^*]+?)(?<!\s)\*(?!\*)",
+                 lambda m: f"<em>{m.group(1)}</em>", out)
+    # A link label can contain a protected code fragment. Restore in reverse
+    # order so nested placeholders are expanded without touching literal HTML.
+    for index in range(len(fragments) - 1, -1, -1):
+        out = out.replace(f"\x00{index}\x00", fragments[index])
     return out
 
 
@@ -92,6 +118,14 @@ def render_markdown(md: str) -> tuple[str, list[tuple[str, str]]]:
             out.append("</ul>")
             items.clear()
 
+    def codeblock(code: list[str]) -> str:
+        body = html.escape("\n".join(code), quote=False)
+        return ('<div class="codeblock"><button class="copy-btn" type="button" '
+                f'aria-label="Copy code">Copy</button><pre><code>{body}</code></pre></div>')
+
+    def table_cells(line: str) -> list[str]:
+        return [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+
     while i < len(lines):
         line = lines[i]
         if line.startswith("```"):
@@ -101,10 +135,44 @@ def render_markdown(md: str) -> tuple[str, list[tuple[str, str]]]:
             while i < len(lines) and not lines[i].startswith("```"):
                 code.append(lines[i]); i += 1
             i += 1
-            body = html.escape("\n".join(code), quote=False)
-            out.append('<div class="codeblock"><button class="copy-btn" type="button" '
-                       f'aria-label="Copy code">Copy</button><pre><code>{body}</code></pre></div>')
+            out.append(codeblock(code))
             continue
+        # The browser guide uses Markdown's four-space code blocks for prompt,
+        # snapshot, error and permission examples. They start after a blank line
+        # and must retain their indentation rather than becoming a paragraph.
+        if line.startswith("    ") and not para and not items:
+            code = []
+            while i < len(lines):
+                if lines[i].startswith("    "):
+                    code.append(lines[i][4:])
+                elif not lines[i].strip():
+                    code.append("")
+                else:
+                    break
+                i += 1
+            while code and not code[-1]:
+                code.pop()
+            out.append(codeblock(code))
+            continue
+        if line.strip().startswith("|") and i + 1 < len(lines):
+            headers = table_cells(line)
+            separators = table_cells(lines[i + 1])
+            if len(headers) == len(separators) and all(
+                    re.fullmatch(r":?-{3,}:?", cell) for cell in separators):
+                flush_para(); flush_list()
+                label = html.escape(f"{toc[-1][1]} table" if toc else "Documentation table", quote=True)
+                out.append(f'<div class="docs-table" role="region" aria-label="{label}" tabindex="0">'
+                           '<table><thead><tr>')
+                out.extend(f'<th scope="col">{inline(cell)}</th>' for cell in headers)
+                out.append('</tr></thead><tbody>')
+                i += 2
+                while i < len(lines) and lines[i].strip().startswith("|"):
+                    cells = table_cells(lines[i])
+                    cells = (cells + [""] * len(headers))[:len(headers)]
+                    out.append('<tr>' + ''.join(f'<td>{inline(cell)}</td>' for cell in cells) + '</tr>')
+                    i += 1
+                out.append('</tbody></table></div>')
+                continue
         m = re.match(r"^(#{1,3})\s+(.*)$", line)
         if m:
             flush_para(); flush_list()
@@ -149,12 +217,12 @@ def sidebar(order: list[tuple[str, str, str]], current: str) -> str:
         parts.append(f'<div class="grp-h">{html.escape(group)}</div>')
         if group == "Getting started":
             act = ' aria-current="page" class="active"' if current == "index" else ' class=""'
-            parts.append(f'<a href="index.html"{act} data-title="Overview" '
+            parts.append(f'<a href="{docs_href()}"{act} data-title="Overview" '
                          f'data-desc="every page, grouped">Overview</a>')
         for t in titles:
             s, d = by_title[t]
             act = ' aria-current="page" class="active"' if current == s else ' class=""'
-            parts.append(f'<a href="{s}.html"{act} data-title="{html.escape(t, quote=True)}" '
+            parts.append(f'<a href="{docs_href(s)}"{act} data-title="{html.escape(t, quote=True)}" '
                          f'data-desc="{html.escape(d, quote=True)}">{html.escape(t)}</a>')
         parts.append("</div>")
     return "\n".join(parts)
@@ -210,14 +278,14 @@ def build() -> dict[str, str]:
         prev_link = next_link = ""
         if idx > 0:
             pt, ps, _ = order[idx - 1]
-            prev_link = (f'<a class="prev" href="{ps}.html"><div class="k">← Previous</div>'
+            prev_link = (f'<a class="prev" href="{docs_href(ps)}"><div class="k">← Previous</div>'
                          f'<div class="t">{html.escape(pt)}</div></a>')
         else:
-            prev_link = ('<a class="prev" href="index.html"><div class="k">← Previous</div>'
+            prev_link = (f'<a class="prev" href="{docs_href()}"><div class="k">← Previous</div>'
                          '<div class="t">Overview</div></a>')
         if idx < len(order) - 1:
             nt, ns, _ = order[idx + 1]
-            next_link = (f'<a class="next" href="{ns}.html"><div class="k">Next →</div>'
+            next_link = (f'<a class="next" href="{docs_href(ns)}"><div class="k">Next →</div>'
                          f'<div class="t">{html.escape(nt)}</div></a>')
         pager = ('      <nav class="pager" aria-label="Pagination">\n'
                  + prev_link + ("\n" + next_link if next_link else "") + "\n</nav>")
@@ -249,7 +317,7 @@ def build_index(order, group_of) -> str:
         "context it needs; optional remote integrations receive the requests you direct to them.</p>",
         '<div class="dhome-start"><div><div class="s-t">New to DGC?</div>'
         '<div class="s-d">Install it, launch it, and connect a model — about five minutes.</div></div>'
-        '<a class="s-b" href="getting-started.html">Start here →</a></div>',
+        f'<a class="s-b" href="{docs_href("getting-started")}">Start here →</a></div>',
     ]
     toc: list[str] = []
     for group, titles in GROUPS:
@@ -261,12 +329,12 @@ def build_index(order, group_of) -> str:
         for t in titles:
             d = desc_of[t]
             d = d[0].upper() + d[1:] if d else d
-            body.append(f'  <a class="dhome-card" href="{slug_of[t]}.html">'
+            body.append(f'  <a class="dhome-card" href="{docs_href(slug_of[t])}">'
                         f'<div class="t">{html.escape(t)}</div>'
                         f'<div class="d">{inline(d)}.</div></a>')
         body.append("</div>")
     body.append('      <nav class="pager" aria-label="Pagination">\n'
-                '<a class="next solo" href="getting-started.html"><div class="k">Next →</div>'
+                f'<a class="next solo" href="{docs_href("getting-started")}"><div class="k">Next →</div>'
                 '<div class="t">Getting started</div></a>\n</nav>')
     return shell("Overview", "Everything DGC does, grouped — start here, then go deep on the part you need.",
                  "index", sidebar(order, "index"), "\n".join(body), "\n".join(toc))

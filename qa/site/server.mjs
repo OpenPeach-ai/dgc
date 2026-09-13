@@ -13,6 +13,8 @@ const portIndex = process.argv.indexOf("--port");
 const port = Number(portIndex === -1 ? 4173 : process.argv[portIndex + 1]);
 const hostIndex = process.argv.indexOf("--host");
 const host = hostIndex === -1 ? "127.0.0.1" : process.argv[hostIndex + 1];
+// Review both public hosts through one local origin without changing deployed HTML.
+const localLinks = process.argv.includes("--local-links");
 
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
   throw new Error("--port must be an integer between 0 and 65535");
@@ -40,6 +42,8 @@ const MIME = new Map([
 const COMPRESSIBLE = new Set([".css", ".html", ".js", ".json", ".svg", ".txt", ".webmanifest", ".xml"]);
 
 function routeFile(pathname) {
+  pathname = pathname.replace(/\/index\.html$/, "/").replace(/\.html$/, "");
+  if (pathname.length > 1) pathname = pathname.replace(/\/$/, "");
   if (routes.has(pathname)) {
     if (pathname === "/") return "index.html";
     if (["/docs", "/vscode"].includes(pathname)) {
@@ -47,12 +51,30 @@ function routeFile(pathname) {
     }
     return `${pathname.slice(1)}.html`;
   }
+  if (pathname === "/docs/404") return "docs/404.html";
+  if (pathname === "/404") return "404.html";
   return pathname.replace(/^\/+/, "");
 }
 
+function previewNavigation(source) {
+  return source.replace(/(<(?:a|area)\b[^>]*?\bhref=)(["'])(.*?)\2/gi,
+    (match, prefix, quote, href) => {
+      let url;
+      try { url = new URL(href.replaceAll("&amp;", "&")); } catch { return match; }
+      if (!["https:", "http:"].includes(url.protocol)) return match;
+      if (!["vibedgc.com", "www.vibedgc.com", "docs.vibedgc.com"].includes(url.hostname)) return match;
+      const path = url.hostname === "docs.vibedgc.com"
+        ? `/docs${url.pathname === "/" ? "" : url.pathname}` : url.pathname;
+      const target = `${path}${url.search}${url.hash}`.replaceAll("&", "&amp;");
+      return `${prefix}${quote}${target}${quote}`;
+    });
+}
+
 function sendFile(request, response, file, status = 200) {
-  const size = statSync(file).size;
   const extension = extname(file).toLowerCase();
+  const preview = localLinks && extension === ".html"
+    ? Buffer.from(previewNavigation(readFileSync(file, "utf8"))) : null;
+  const size = preview?.length ?? statSync(file).size;
   const contentType = MIME.get(extension) || "application/octet-stream";
   const range = request.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
   const headers = {
@@ -61,7 +83,7 @@ function sendFile(request, response, file, status = 200) {
     "Content-Type": contentType,
   };
 
-  if (range && status === 200) {
+  if (range && status === 200 && !preview) {
     const requestedStart = range[1] === "" ? 0 : Number(range[1]);
     const requestedEnd = range[2] === "" ? size - 1 : Number(range[2]);
     const start = Math.max(0, Math.min(requestedStart, size - 1));
@@ -76,7 +98,7 @@ function sendFile(request, response, file, status = 200) {
   }
 
   if (COMPRESSIBLE.has(extension) && /(?:^|,)\s*gzip(?:\s*;|\s*,|$)/i.test(request.headers["accept-encoding"] || "")) {
-    const body = gzipSync(readFileSync(file), {level: 9});
+    const body = gzipSync(preview ?? readFileSync(file), {level: 9});
     response.writeHead(status, {
       ...headers,
       "Content-Encoding": "gzip",
@@ -89,6 +111,7 @@ function sendFile(request, response, file, status = 200) {
 
   response.writeHead(status, {...headers, "Content-Length": size});
   if (request.method === "HEAD") return response.end();
+  if (preview) return response.end(preview);
   return createReadStream(file).pipe(response);
 }
 
@@ -130,7 +153,7 @@ const server = createServer((request, response) => {
     sendFile(request, response, file);
     return;
   }
-  sendFile(request, response, resolve(SITE, "404.html"), 404);
+  sendFile(request, response, resolve(SITE, pathname.startsWith("/docs/") ? "docs/404.html" : "404.html"), 404);
 });
 
 server.listen(port, host, () => {
