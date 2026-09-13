@@ -1315,7 +1315,14 @@ class Backend:
                                     if isinstance(p, dict) and p.get("type") == "text"))) + " 📷"
                 else:
                     text = display_prompt(_strip_editor_context(str(content)))
-                if text.startswith("<tool_results>"):
+                # Scaffolding the AGENT wrote into the transcript so the model would read it --
+                # the standing-goal reminder (which embeds the whole objective), the open-todo
+                # nudge, the reasoning-budget note. The user typed none of it, and replaying a
+                # restored session as chat bubbles pasted their entire goal spec back at them as
+                # though they had just sent it.
+                if text.startswith("<tool_results>") or text.startswith("<system-reminder>"):
+                    continue
+                if isinstance(content, str) and content.lstrip().startswith("<system-reminder>"):
                     continue
                 items.append({"role": "user", "text": text})
             elif role == "assistant":
