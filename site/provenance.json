@@ -1,16 +1,16 @@
 {
   "build": {
     "python": "3.12.3",
-    "source_date_epoch": 1789237560
+    "source_date_epoch": 1789280147
   },
   "schema_version": 1,
   "source": {
-    "commit": "1c51a7c50b49232788da71300576896b33f532e2",
+    "commit": "bb2c1740551592f6eaff06ae15f6b9ccd79541f8",
     "repository": "https://github.com/OpenPeach-ai/dgc"
   },
   "subject": {
-    "bytes": 713171,
+    "bytes": 714974,
     "name": "dgc.tar.gz",
-    "sha256": "182d01ab9c487c98bbbc91a053c98759413b1ecb505bff5fcd6953d4f60ff6c8"
+    "sha256": "ad12aed7a4a669494ffad0f036a0337a240fd0707f6ec183a8f24b5c6f22e273"
   }
 }
