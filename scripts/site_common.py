@@ -192,6 +192,7 @@ def site_asset_revision(*, css_minifier: Callable[[str], str] | None = None) -> 
     )
     raw_sources = (
         (SRC / "assets" / "site.js").read_bytes(),
+        (SRC / "assets" / "hero-mesh.js").read_bytes(),
         (ROOT / "scripts" / "docs-assets" / "docs.js").read_bytes(),
     )
     return emitted_asset_revision(css_sources, raw_sources, css_minifier=transform)

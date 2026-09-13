@@ -18,6 +18,13 @@ for (const route of REPRESENTATIVE_ROUTES) {
     await page.emulateMedia({reducedMotion: "reduce"});
     await page.goto(route, {waitUntil: "domcontentloaded"});
     await settle(page);
+    if (route === "/") {
+      // CSS animation disabling does not freeze a WebGL RAF loop. Wait for
+      // the reduced-motion frame (or its no-WebGL fallback) before capture.
+      await page.waitForFunction(() => ["static", "fallback"].includes(
+        document.querySelector("canvas[data-hero-mesh]")?.dataset.meshState,
+      ));
+    }
     // Chromium full-page capture does not paint off-screen content skipped by
     // content-visibility:auto. Force paint only in this capture context so the
     // baseline contains every real section instead of intrinsic-size blanks.

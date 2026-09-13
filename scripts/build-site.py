@@ -447,7 +447,8 @@ def build_outputs() -> dict[str, str | bytes]:
             # also need the complete palette, spacing and motion tokens.
             source = deferred_css_source()
         outputs[f"assets/{name}"] = minify_css(source)
-    outputs["assets/site.js"] = (SRC / "assets" / "site.js").read_bytes()
+    for name in ("site.js", "hero-mesh.js"):
+        outputs[f"assets/{name}"] = (SRC / "assets" / name).read_bytes()
     return outputs
 
 

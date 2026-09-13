@@ -13,6 +13,22 @@
   }
 
   const initialize = () => {
+  // Load the homepage-only decoration after the full layout is ready. Shader
+  // compilation stays out of the first paint and other routes never request it.
+  const mesh = document.querySelector('canvas[data-hero-mesh]');
+  if (mesh) {
+    const loadMesh = () => {
+      if (mesh.dataset.meshLoaded) return;
+      mesh.dataset.meshLoaded = 'true';
+      const script = document.createElement('script');
+      script.src = mesh.dataset.meshSrc;
+      script.async = true;
+      script.onerror = () => { mesh.dataset.meshState = 'fallback'; };
+      document.head.append(script);
+    };
+    if (document.documentElement.dataset.stylesReady === 'true') loadMesh();
+    else addEventListener('dgc:styles-ready', loadMesh, {once:true});
+  }
   const header = document.querySelector('[data-site-header]');
   const onScroll = () => header?.classList.toggle('scrolled', scrollY > 8);
   addEventListener('scroll', onScroll, {passive:true}); requestAnimationFrame(onScroll);

@@ -131,7 +131,7 @@ class PageParser(HTMLParser):
         data = {name: value or "" for name, value in attrs}
         if data.get("id"):
             self.ids.append(data["id"])
-        for attr in ("href", "src", "poster", "data-src"):
+        for attr in ("href", "src", "poster", "data-src", "data-mesh-src"):
             if data.get(attr):
                 self.refs.append((tag, attr, data[attr]))
         for attr in ("srcset", "data-srcset"):
@@ -472,8 +472,10 @@ def check_asset_revisions(parsed: dict[Path, PageParser], errors: list[str]) -> 
     """Keep HTML and mutable shared assets in lockstep across deployments."""
     # Tokens and route-specific critical CSS are inlined. Their bytes participate in the
     # shared revision emitted on the deferred full stylesheet and site script.
-    expected = {"/assets/site.css", "/assets/site.js"}
     for page, parser in parsed.items():
+        expected = {"/assets/site.css", "/assets/site.js"}
+        if page == SITE / "index.html":
+            expected.add("/assets/hero-mesh.js")
         found: dict[str, str] = {}
         docs_revision = ""
         for _tag, _attr, raw in parser.refs:
