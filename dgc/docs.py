@@ -134,6 +134,12 @@ can be restored to the draft. Subscription CLI mode changes apply to the next la
 - **Enter** insert `@path` into the prompt · **c** insert the plain path · **i / Tab** inspect · **J / K** scroll the preview
 - **?** all keys · **q** return to DGC · **Ctrl+C** still stops the agent
 
+## Diff pane (`/diff`)
+- **j / k · ↑ ↓** move · **Enter / l** open the diff under the cursor · **h / Esc** back to the file list
+- **Space / v** start or end a line selection · **Enter** attach the selection to your prompt · **a** attach the whole hunk
+- **J / K** next / previous file without leaving the diff · **g / G** top / bottom · **PgUp / PgDn** page
+- **r** re-read git now · **Tab** list ⇄ diff on a narrow terminal · **?** all keys · **q** return to DGC
+
 ## Navigate
 - **PageUp / PageDn** — scroll the transcript · **End** — jump to the latest
 - click **◆ Thought** — expand the reasoning · click the token count — context details
@@ -955,6 +961,54 @@ from a read-only `git status` that never runs filters or transports.
 - Writes stay inside the project. Browsing above the root is read-only, except in **auto** mode, which asks first.
 - The project root itself is never an operand. Trash, delete, rename, and move refuse it and every folder above it, in every mode, so browsing up to the parent and pressing **d** cannot throw the project away.
 - Trees over 5,000 entries or 512 MB are refused rather than half-copied; use the shell for those.
+""".strip()),
+    ("Diff pane", "every changed file, its counts and its diff, live under the transcript", """
+# Diff pane
+
+`/diff` opens a live view of everything that has changed in the working tree, in the **focus
+pane** under the transcript — the agent keeps streaming above it. It is the answer to "what has
+DGC actually changed so far?" without leaving the conversation, and it turns any lines you pick
+into part of your next prompt.
+
+## Open it
+
+- `/diff` lists every changed file · `/diff src/auth.py` opens straight into that file's diff.
+- The pane folds away whenever DGC needs your answer (a permission, a prompt, a picker) and
+  returns when you have answered. **q** or **Esc** closes it; **Ctrl+C** still stops the agent.
+- It works during a turn. The list re-reads Git every two seconds while it is open, so the
+  model's edits appear as they land; **r** re-reads immediately.
+
+## What it shows
+
+The data is Git's, read-only: the working tree against `HEAD`, plus staged and untracked files —
+exactly what `git status` calls changed. Each file carries its added and removed line counts
+(**+12 −3**), a flag for **?** untracked, **D** deleted and **S** staged, and the header sums
+the whole change set. Wide terminals show the file list and the selected diff side by side; a
+narrow terminal shows one at a time and **Tab** swaps them. The diff is a unified diff with three
+lines of context, new-side line numbers in the gutter, and hunk headers you can jump between.
+
+## Move
+
+- **j / k** or **↑ ↓** move through files, then through diff lines · **Enter** or **l** opens the diff · **h** or **Esc** returns to the list
+- **J / K** step to the next or previous file's diff without leaving the diff
+- **g / G** top and bottom · **PgUp / PgDn** page · **Ctrl+D / Ctrl+U** half a page
+
+## Put lines in your prompt
+
+- **Space** (or **v**) starts a selection at the cursor; move to extend it; **Space** again or
+  **Esc** drops it.
+- **Enter** with a selection inserts it into the composer as a fenced `diff` block, headed by
+  the file path and the new-side line range — so "why did you change these three lines?" can
+  quote exactly those three lines. Nothing else about the file enters the model's context.
+- **a** attaches the whole hunk under the cursor the same way.
+- One insertion is capped at 120 lines; the header says when it was clipped.
+
+## What it will not do
+
+- It never writes, stages, commits or runs a shell command; it only reads Git.
+- Diffs over 4,000 rows are clipped; binary files show as `bin` with no diff.
+- It is not the review: `/review` and the editor's **Changes** view stay the place to approve or
+  undo a turn. `/diff` is for looking and asking while the work is still moving.
 """.strip()),
     ("In your editor", "the VS Code and Cursor panel, and what a finished turn gives you", """
 # In your editor

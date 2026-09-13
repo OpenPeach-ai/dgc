@@ -90,6 +90,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("expandall", "expand every collapsed tool output", _T),
     CommandSpec("files", "browse, pick, and manage files in the focus pane while the agent works", _T,
                 accepts_args=True, usage="files [PATH]", available_while_running=True),
+    CommandSpec("diff", "every changed file with its line counts and diff, live; select lines for your next prompt", _T,
+                accepts_args=True, usage="diff [PATH]", available_while_running=True),
     CommandSpec("eta", "how long the running turn still needs · /eta stats shows calibration", _TC,
                 accepts_args=True, usage="eta [stats]", available_while_running=True),
     CommandSpec("notify", "ping when this turn finishes · /notify on|off keeps it on", _T,

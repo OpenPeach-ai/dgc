@@ -1,17 +1,28 @@
 {
   "refreshed_at": "2026-09-10T17:05:24Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 14,
+  "cli_releases_last_14_days": 15,
   "cli": [
+    {
+      "version": "0.38.0",
+      "date": "2026-09-13",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.0",
+      "status": "current",
+      "notes": [
+        "/diff: every changed file, its counts and its diff, live under the transcript. The focus pane gains a second occupant beside /files: a read-only view of the working tree against HEAD — staged and untracked files included — with +/− line counts per file, the set summed in the header, and a unified diff with new-side line numbers. It re-reads Git every two seconds while open, so the model's edits appear as they land, and it never writes, stages or runs a shell command.",
+        "Lines you select in a diff become part of your next prompt. Space starts a selection, Enter attaches it to the composer as a fenced diff block headed by the file and line range, and a takes the whole hunk — so \"why did you change these two lines?\" quotes exactly those two lines and nothing else about the file enters the model's context. Wide terminals show the list and the diff side by side; narrow ones swap between them with Tab.",
+        "Documented on its own page (Diff pane), in the keyboard cheatsheet, and in the slash-command reference; /diff PATH opens straight into one file."
+      ]
+    },
     {
       "version": "0.37.3",
       "date": "2026-09-13",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.3",
-      "status": "current",
+      "status": "past",
       "notes": [
-        "The backend keeps its own crash log. An editor gets dgc serve's stderr on a pipe and may do nothing with it \u2014 DGC's own extension dropped every byte of it \u2014 and an ACP or third-party front-end owes us nothing at all, so a backend that dies unattended left no evidence anywhere. `dgc serve` now writes ~/.dgc/logs/serve.log itself: start, exit reason, command failures with tracebacks, and a full stack dump of every thread on a segfault, abort or SIGTERM \u2014 the deaths that produce no Python traceback at all.",
-        "Reopening a session no longer pastes your own goal back at you. The agent writes scaffolding into the transcript so the MODEL reads it \u2014 the standing-goal reminder, which embeds the entire objective, and the open-todo nudge. Those are user-role messages, so replaying a restored session rendered them as chat bubbles: the whole goal spec appeared as a prompt nobody sent.",
-        "Scrolling back into the compacted archive is bounded by frame size, not just by row count. A page was clamped to 200 rows of up to 20,000 characters each \u2014 about 4MB before JSON escaping, and past the protocol's 4MB frame ceiling once real transcript punctuation is escaped. An over-ceiling page was reduced to an empty one, so scrolling past the summary showed nothing. Pages now fill to a byte budget and report exactly where they stopped, so the next page resumes there."
+        "The backend keeps its own crash log. An editor gets dgc serve's stderr on a pipe and may do nothing with it — DGC's own extension dropped every byte of it — and an ACP or third-party front-end owes us nothing at all, so a backend that dies unattended left no evidence anywhere. `dgc serve` now writes ~/.dgc/logs/serve.log itself: start, exit reason, command failures with tracebacks, and a full stack dump of every thread on a segfault, abort or SIGTERM — the deaths that produce no Python traceback at all.",
+        "Reopening a session no longer pastes your own goal back at you. The agent writes scaffolding into the transcript so the MODEL reads it — the standing-goal reminder, which embeds the entire objective, and the open-todo nudge. Those are user-role messages, so replaying a restored session rendered them as chat bubbles: the whole goal spec appeared as a prompt nobody sent.",
+        "Scrolling back into the compacted archive is bounded by frame size, not just by row count. A page was clamped to 200 rows of up to 20,000 characters each — about 4MB before JSON escaping, and past the protocol's 4MB frame ceiling once real transcript punctuation is escaped. An over-ceiling page was reduced to an empty one, so scrolling past the summary showed nothing. Pages now fill to a byte budget and report exactly where they stopped, so the next page resumes there."
       ]
     },
     {
@@ -21,7 +32,7 @@
       "status": "past",
       "notes": [
         "The backend can no longer emit a frame that gets it killed. A protocol event larger than the 4MB ceiling is refused by the editor as a protocol violation, and nothing measured the WIRE size before sending: a screenshot is capped at 4MB of PNG, which is about 5.6MB once base64 and JSON-escaped, so any screenshot over 3MB breached it. Frames are now bounded at the writer, and a batch of screenshots is split into frames that fit rather than sent as one oversized event.",
-        "An event too large to send keeps its envelope instead of being replaced wholesale. A frame carrying a correlation id is a question, not a notification \u2014 replacing an approval request with a generic error left the editor nothing to answer and the turn waiting on a decision that could never arrive."
+        "An event too large to send keeps its envelope instead of being replaced wholesale. A frame carrying a correlation id is a question, not a notification — replacing an approval request with a generic error left the editor nothing to answer and the turn waiting on a decision that could never arrive."
       ]
     },
     {
@@ -31,7 +42,7 @@
       "status": "past",
       "notes": [
         "DGC is now open source under the Apache License 2.0, replacing PolyForm Noncommercial. It may be used commercially, inside a company and on client work with no separate agreement, and the licence grants the patent rights contributors hold in the work. Its obligations are the ordinary ones: keep the licence and copyright notice with copies, and state significant changes.",
-        "A standing goal that DGC has stopped retrying is marked blocked rather than left active. Leaving it active was a lie the clock told \u2014 the goal card kept counting while nothing was running and nothing was going to run. Blocked stops the clock and carries the reason into the goal review."
+        "A standing goal that DGC has stopped retrying is marked blocked rather than left active. Leaving it active was a lie the clock told — the goal card kept counting while nothing was running and nothing was going to run. Blocked stops the clock and carries the reason into the goal review."
       ]
     },
     {
@@ -40,10 +51,10 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
       "status": "past",
       "notes": [
-        "A standing goal survives a turn that stops on its own. The point of a goal is that work continues without someone watching, but the loop guard ending a turn ended the goal with it \u2014 nothing ran until a person pressed Resume. DGC now restarts the goal itself, carrying the reason forward so the model changes approach instead of reissuing the call that failed, and caps consecutive restarts at two: if changing approach twice does not help, a person needs to look rather than DGC spending the context window retrying.",
-        "Settings you are allowed to change mid-turn now actually change. An editor saves the whole settings form, so the one value you moved arrives surrounded by two dozen untouched ones \u2014 and the mid-turn gate rejected the save on a neighbour. Raising the context window during a run was refused because `subagent_api_mode` came along for the ride. Only a value that would really move the execution route waits for the turn to end now.",
+        "A standing goal survives a turn that stops on its own. The point of a goal is that work continues without someone watching, but the loop guard ending a turn ended the goal with it — nothing ran until a person pressed Resume. DGC now restarts the goal itself, carrying the reason forward so the model changes approach instead of reissuing the call that failed, and caps consecutive restarts at two: if changing approach twice does not help, a person needs to look rather than DGC spending the context window retrying.",
+        "Settings you are allowed to change mid-turn now actually change. An editor saves the whole settings form, so the one value you moved arrives surrounded by two dozen untouched ones — and the mid-turn gate rejected the save on a neighbour. Raising the context window during a run was refused because `subagent_api_mode` came along for the ride. Only a value that would really move the execution route waits for the turn to end now.",
         "An image sent to a model that cannot read images no longer strands the run: the image is dropped for that request with a note the model can act on, instead of failing the turn and leaving the attachment in history where every resume failed the same way.",
-        "A blocked repeat hands back the result it already had. Refusing a repeated tool call with \u201cyou already got this\u201d is useless once compaction has dropped the result \u2014 re-reading is then the rational move and refusing deadlocks the turn.",
+        "A blocked repeat hands back the result it already had. Refusing a repeated tool call with “you already got this” is useless once compaction has dropped the result — re-reading is then the rational move and refusing deadlocks the turn.",
         "Editor protocol v11: the editor can page back into what compaction archived, so scrolling up past the summary shows the turns rather than stopping at it."
       ]
     },
@@ -53,8 +64,8 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.1",
       "status": "past",
       "notes": [
-        "Ollama cloud models work again. Selecting one and taking a turn failed with \u201cOllama response returned malformed JSON\u201d, which made every cloud model unusable. A local Ollama labels a streaming response application/x-ndjson; the cloud serves the same newline-delimited stream as application/json \u2014 the identical header it uses for a single object \u2014 so the header cannot decide the shape. The body is read once and its shape decides; a body that is genuinely malformed still fails loudly.",
-        "A resumed chat no longer opens with a summary you never wrote. Compaction hands the model its own history back as a user message and an acknowledgement, which is how a long run stays inside its window \u2014 but the editor rendered those as chat, so a resumed goal looked as though it had restarted. They are one quiet marker now, with the summary behind a disclosure, which is also the honest reason scrolling up stops where it does."
+        "Ollama cloud models work again. Selecting one and taking a turn failed with “Ollama response returned malformed JSON”, which made every cloud model unusable. A local Ollama labels a streaming response application/x-ndjson; the cloud serves the same newline-delimited stream as application/json — the identical header it uses for a single object — so the header cannot decide the shape. The body is read once and its shape decides; a body that is genuinely malformed still fails loudly.",
+        "A resumed chat no longer opens with a summary you never wrote. Compaction hands the model its own history back as a user message and an acknowledgement, which is how a long run stays inside its window — but the editor rendered those as chat, so a resumed goal looked as though it had restarted. They are one quiet marker now, with the summary behind a disclosure, which is also the honest reason scrolling up stops where it does."
       ]
     },
     {
@@ -64,7 +75,7 @@
       "status": "shipped",
       "notes": [
         "Resuming a standing goal continues the work instead of replaying it. The objective used to be re-submitted as a fresh prompt, so text you wrote days ago reappeared in the chat and the model read it as a new request. Every frontend now asks the backend to resume, and the backend reactivates the goal and tells the model to pick up the first unfinished step.",
-        "A reopened session keeps its checklist. Todos were held in memory only, so closing the editor lost what was done, what was in progress and what was still pending \u2014 exactly what a resumed goal needs. They are saved with the session now and restored with it.",
+        "A reopened session keeps its checklist. Todos were held in memory only, so closing the editor lost what was done, what was in progress and what was still pending — exactly what a resumed goal needs. They are saved with the session now and restored with it.",
         "Asking for a new chat while a turn is running starts one. It used to be refused outright; it now cancels the run, waits for it to actually stop, and then resets, so the abandoned turn cannot write into the new session.",
         "Editor protocol v10 adds resume_goal and labels a resumed turn, so the panel can show what happened rather than inventing a user message."
       ]
@@ -75,11 +86,11 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.35.0",
       "status": "shipped",
       "notes": [
-        "A browser tool, so the agent can look at a page that has to actually run \u2014 a deployed site, a local dev server, anything JavaScript builds. It opens a URL, reads the page as roles and names it can act on, finds elements, clicks and types with real input events, and reports console messages and failed network responses. It drives a Chrome you already have over the DevTools Protocol, so DGC still ships three dependencies and never downloads a browser.",
-        "The page is read from the DOM rather than the accessibility tree. That is not a detail: content-visibility drops off-screen sections from the accessibility tree entirely, so a snapshot built the obvious way silently misses content that is plainly there \u2014 measured on this project's own changelog, where text present twice was reported zero times.",
+        "A browser tool, so the agent can look at a page that has to actually run — a deployed site, a local dev server, anything JavaScript builds. It opens a URL, reads the page as roles and names it can act on, finds elements, clicks and types with real input events, and reports console messages and failed network responses. It drives a Chrome you already have over the DevTools Protocol, so DGC still ships three dependencies and never downloads a browser.",
+        "The page is read from the DOM rather than the accessibility tree. That is not a detail: content-visibility drops off-screen sections from the accessibility tree entirely, so a snapshot built the obvious way silently misses content that is plainly there — measured on this project's own changelog, where text present twice was reported zero times.",
         "Screenshots reach both of you. The model sees the image when it accepts image input, and DGC checks rather than assumes; the editor panel shows it in the conversation as a thumbnail that expands in place and then opens full size.",
         "There is no operation for running arbitrary JavaScript in a page, and there is a test that fails if one ever appears. Navigation is permission-gated per host, page content comes back marked untrusted, and each session browses in a throwaway profile that never sees your real cookies or logged-in sessions.",
-        "Finished tool activity now reads as a sentence \u2014 \u201cRead 3 files and searched code\u201d rather than a tally of function names."
+        "Finished tool activity now reads as a sentence — “Read 3 files and searched code” rather than a tally of function names."
       ]
     },
     {
@@ -88,7 +99,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.34.0",
       "status": "shipped",
       "notes": [
-        "/branch (or /fork) continues a conversation in a new chat and leaves the one you came from exactly where it was. Everything so far comes with you \u2014 the transcript, the standing goal, the todos, the recovery points \u2014 so trying a second approach costs you nothing and does not overwrite the first. The editor offers the same thing under a finished answer.",
+        "/branch (or /fork) continues a conversation in a new chat and leaves the one you came from exactly where it was. Everything so far comes with you — the transcript, the standing goal, the todos, the recovery points — so trying a second approach costs you nothing and does not overwrite the first. The editor offers the same thing under a finished answer.",
         "Editor protocol v8 adds fork_session, so an editor can branch a chat through the same backend that runs it. A branch that cannot be saved is not a branch: the session identity is restored rather than left pointing at a file nothing ever wrote.",
         "A documentation page for the editor: what the panel does, what a finished turn gives you, and how to keep the CLI and the extension in step."
       ],
@@ -100,9 +111,9 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.33.1",
       "status": "shipped",
       "notes": [
-        "A standing goal is stated to the model in full once per context \u2014 and again after a compaction, which starts a fresh one \u2014 instead of being repeated on every turn. Restating it each turn charged the context window for the whole objective again and again: a 4,000-character goal cost about a third of a 32k window after ten turns and four fifths after twenty-five. An extra goal turn now costs about a hundred tokens rather than two thousand.",
-        "Because the objective no longer repeats, the length limit is a share of the window rather than a fixed number: a quarter of your context, leaving three quarters for the work. A 32k session allows about 32,000 characters where it allowed 4,000, and a 128k one about 131,000 \u2014 raise the context size and the allowance rises with it. A refused objective now says how long it actually is and what this session allows, and gives the text back to the composer instead of discarding it behind a message that expires. A goal restored from a saved session is no longer silently shortened either.",
-        "Picking a command that takes an argument \u2014 /goal, /notes, /files, /copy \u2014 now attaches it to the composer as a chip and waits for you to type, instead of firing the moment you select it; a command that takes nothing still runs immediately. Skills already worked this way, and a resolved /command or $skill now fills as a chip so it reads as an attachment rather than part of the sentence."
+        "A standing goal is stated to the model in full once per context — and again after a compaction, which starts a fresh one — instead of being repeated on every turn. Restating it each turn charged the context window for the whole objective again and again: a 4,000-character goal cost about a third of a 32k window after ten turns and four fifths after twenty-five. An extra goal turn now costs about a hundred tokens rather than two thousand.",
+        "Because the objective no longer repeats, the length limit is a share of the window rather than a fixed number: a quarter of your context, leaving three quarters for the work. A 32k session allows about 32,000 characters where it allowed 4,000, and a 128k one about 131,000 — raise the context size and the allowance rises with it. A refused objective now says how long it actually is and what this session allows, and gives the text back to the composer instead of discarding it behind a message that expires. A goal restored from a saved session is no longer silently shortened either.",
+        "Picking a command that takes an argument — /goal, /notes, /files, /copy — now attaches it to the composer as a chip and waits for you to type, instead of firing the moment you select it; a command that takes nothing still runs immediately. Skills already worked this way, and a resolved /command or $skill now fills as a chip so it reads as an attachment rather than part of the sentence."
       ],
       "headline": "goals that do not eat the context window"
     },
@@ -112,8 +123,8 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.33.0",
       "status": "shipped",
       "notes": [
-        "Context notes: DGC now keeps a searchable trace of what a project has already learned, and it outlives the context window. A command that failed, an edit that did not apply, a test suite that passed \u2014 each is recorded as the work happens, by the harness rather than the model, so it behaves the same on every local endpoint. The notes are per project, so a run spread over days accumulates one trace.",
-        "The point of keeping them is not to have them. After a compaction \u2014 the moment this history used to be lost \u2014 a bounded digest of requirements, decisions and recent failures rides into the fresh context, and when a step touches a file that has failed before, that history is attached to the result the agent reads. An agent that cannot see its own failed attempts repeats them; now it can.",
+        "Context notes: DGC now keeps a searchable trace of what a project has already learned, and it outlives the context window. A command that failed, an edit that did not apply, a test suite that passed — each is recorded as the work happens, by the harness rather than the model, so it behaves the same on every local endpoint. The notes are per project, so a run spread over days accumulates one trace.",
+        "The point of keeping them is not to have them. After a compaction — the moment this history used to be lost — a bounded digest of requirements, decisions and recent failures rides into the fresh context, and when a step touches a file that has failed before, that history is attached to the result the agent reads. An agent that cannot see its own failed attempts repeats them; now it can.",
         "Read the trace yourself with /notes, /notes <query>, or dgc notes from a shell; the agent searches it with a read-only notes tool that is allowed in plan mode. Notes are bounded, redacted like a saved session, and off with /notes off. They are not the /recall archive, which stays your raw scrollback and still never re-enters the model's context."
       ],
       "headline": "context notes that survive compaction"
@@ -125,10 +136,10 @@
       "status": "shipped",
       "notes": [
         "dgc -p for scripts. Piped input joins the prompt (git diff | dgc -p \"review this\"; -p - reads it whole), --output-format json streams the dgc serve events and ends with one result object (ok, text, session_id, usage), --output FILE saves the answer and --print-session-id gives you the id for --resume. A -p run never waits on a menu: a tool that would ask is denied with the exact --allow-tool rule to pre-approve, and a plan is reported rather than executed. --add-dir, --allow-tool and --sandbox on|off|read-only apply to that run only.",
-        "The classic REPL runs your subscription too, and the terminal explains itself. dgc --classic now runs a connected Claude, Codex, Qwen, Kimi or Copilot subscription\u2019s turns (it used to fall back to the native model silently), and every front-end shares one delegated-turn path. A fresh install\u2019s first failure says what to do in dgc doctor\u2019s words instead of a raw 404 or Connection refused; /trust and dgc trust list every trusted folder and revoke one, and the gate warns before trusting your home directory; the welcome screen shows its tip at last.",
-        "A composer and a transcript that behave. A paste of five lines or more collapses to [Pasted text #1 +N lines] and expands when sent; past answers and diffs reflow when the terminal is resized instead of staying wrapped at the old width. Editor protocol v7 lets VS Code and Cursor approve against a step\u2019s summary and diff and deny with a note (extension 0.18.0)."
+        "The classic REPL runs your subscription too, and the terminal explains itself. dgc --classic now runs a connected Claude, Codex, Qwen, Kimi or Copilot subscription’s turns (it used to fall back to the native model silently), and every front-end shares one delegated-turn path. A fresh install’s first failure says what to do in dgc doctor’s words instead of a raw 404 or Connection refused; /trust and dgc trust list every trusted folder and revoke one, and the gate warns before trusting your home directory; the welcome screen shows its tip at last.",
+        "A composer and a transcript that behave. A paste of five lines or more collapses to [Pasted text #1 +N lines] and expands when sent; past answers and diffs reflow when the terminal is resized instead of staying wrapped at the old width. Editor protocol v7 lets VS Code and Cursor approve against a step’s summary and diff and deny with a note (extension 0.18.0)."
       ],
-      "headline": "scriptable -p \u00b7 classic subscriptions \u00b7 protocol v7"
+      "headline": "scriptable -p · classic subscriptions · protocol v7"
     },
     {
       "version": "0.31.1",
@@ -136,9 +147,9 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.31.1",
       "status": "shipped",
       "notes": [
-        "Close two holes a side-by-side with Claude Code and Codex found. A cloned repository\u2019s .dgc/permissions.json was in force before the trust gate ran, and under dgc -p the gate never runs at all; a project\u2019s own rules now load only once its folder is trusted, and the gate says so. dgc update --help piped the installer into bash instead of printing help; every subcommand now answers --help before anything runs, and flags given with -p, such as --model, apply to that run only instead of silently becoming your default.",
+        "Close two holes a side-by-side with Claude Code and Codex found. A cloned repository’s .dgc/permissions.json was in force before the trust gate ran, and under dgc -p the gate never runs at all; a project’s own rules now load only once its folder is trusted, and the gate says so. dgc update --help piped the installer into bash instead of printing help; every subcommand now answers --help before anything runs, and flags given with -p, such as --model, apply to that run only instead of silently becoming your default.",
         "Text gets out. Ctrl+Y or /copy puts the last reply on your system clipboard through the terminal (OSC 52, so it works over SSH and inside tmux); /copy code takes the last code block, /copy N an earlier reply and /copy all the whole conversation. /export writes the session as Markdown outside the project tree (also dgc export ID), /select hands the mouse to your terminal for drag-select, and /mouse off remembers that. During a turn, a command that has to wait, such as /model, is refused visibly instead of being sent to the model as a prompt.",
-        "A quieter, clearer screen. An idle DGC no longer repaints twelve times a second, which cost a quarter of a core, and the streaming answer is re-parsed at most every 80 ms. A file read folds to one line with its length, a failed step says so on its header and shows its output in readable text, long output keeps its head and its tail so a test runner\u2019s verdict stays visible, diffs carry their +/\u2212 count, tabs render as indentation, and the header shows the working directory and branch. (0.31.1 corrects a Python 3.10/3.11 syntax error in that renderer; the 0.31.0 tag was never served by the site.)"
+        "A quieter, clearer screen. An idle DGC no longer repaints twelve times a second, which cost a quarter of a core, and the streaming answer is re-parsed at most every 80 ms. A file read folds to one line with its length, a failed step says so on its header and shows its output in readable text, long output keeps its head and its tail so a test runner’s verdict stays visible, diffs carry their +/− count, tabs render as indentation, and the header shows the working directory and branch. (0.31.1 corrects a Python 3.10/3.11 syntax error in that renderer; the 0.31.0 tag was never served by the site.)"
       ],
       "headline": "clipboard, export and trust-gated rules"
     },
@@ -149,7 +160,7 @@
       "status": "shipped",
       "notes": [
         "Stop a redraw costing the whole session. Every stored transcript entry was re-parsed into display fragments on every frame, so one keystroke paid for the entire scrollback and the terminal grew slower the longer you worked. Entries are now reused until something they are derived from changes, the cursor marker splits only the entry on its line, and lines are counted once while the frame is assembled. On a 200-turn session a frame fell from about 130 ms to under 5 ms.",
-        "Show command and skill tokens as commands while you type. A trailing /goal, /plan, /review or /init is applied as a verb to the text before it, so \u201cSet this as your /goal\u201d ran the goal command instead of sending that sentence, which read as the prompt being silently truncated. Only names that actually resolve are marked, so paths and ordinary words stay plain.",
+        "Show command and skill tokens as commands while you type. A trailing /goal, /plan, /review or /init is applied as a verb to the text before it, so “Set this as your /goal” ran the goal command instead of sending that sentence, which read as the prompt being silently truncated. Only names that actually resolve are marked, so paths and ordinary words stay plain.",
         "Keep an active standing goal on a row above the composer with its objective, state and work time, the same view the editor already had. Document /copy, which hands the mouse back to your terminal so you can select and copy transcript text, and Shift+drag, which does it without leaving scroll mode."
       ],
       "headline": "faster terminal redraw"
@@ -171,7 +182,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.30.1",
       "status": "shipped",
       "notes": [
-        "Add /files: a file explorer in the focus pane under the transcript \u2014 Miller columns, previews, copy/cut/paste, rename, trash with undo, Enter inserts @path \u2014 while the agent keeps working. Writes follow the permission mode and stay inside the project.",
+        "Add /files: a file explorer in the focus pane under the transcript — Miller columns, previews, copy/cut/paste, rename, trash with undo, Enter inserts @path — while the agent keeps working. Writes follow the permission mode and stay inside the project.",
         "Show a calibrated turn ETA range in the status line, per-project and measured (/eta stats); /notify pings the terminal when a turn finishes. Promote the hidden arcade's pane into a shared focus-pane host.",
         "Fix the /files natural sort raising when a folder mixes digit-leading and letter-leading names; the focus pane now closes itself on an occupant error instead of taking the transcript down. Test suite runs hermetically with a canonical temporary HOME."
       ]
@@ -349,7 +360,7 @@
       "status": "current",
       "notes": [
         "A finished goal stops being a pinned goal: a completed objective stayed on the rail with a play button, so the obvious next click resumed work that was already done. Paused and blocked goals still offer Resume.",
-        "The backend's log survives when nobody is watching \u2014 an output channel only reaches disk once opened, which is never the case for an unattended run. stderr and the exit reason are also appended, timestamped, to backend.log in the extension's log directory.",
+        "The backend's log survives when nobody is watching — an output channel only reaches disk once opened, which is never the case for an unattended run. stderr and the exit reason are also appended, timestamped, to backend.log in the extension's log directory.",
         "Editor protocol v11 unchanged; pairs with DGC 0.37.3."
       ]
     },
@@ -360,9 +371,9 @@
       "status": "past",
       "notes": [
         "When the backend dies you can now find out why: its stderr was forwarded to a webview message type nothing handled, so every traceback was silently discarded. It goes to a DGC Backend output channel now, with the exit code or signal beside it.",
-        "A killed backend is distinguished from one that stopped cleanly \u2014 the line collapsed both, because exit code 0 is falsy in JavaScript and the signal was thrown away at the listener.",
+        "A killed backend is distinguished from one that stopped cleanly — the line collapsed both, because exit code 0 is falsy in JavaScript and the signal was thrown away at the listener.",
         "The panel recovers on its own when its backend dies, and a goal interrupted that way picks itself back up; the goal clock stops instead of counting against a dead process.",
-        "A sharper icon: the tile was a 128\u00d7128 raster of the full lockup \u2014 the smallest size the marketplace accepts, upscaled on every high-DPI screen, with a wordmark unreadable at the size extension lists render. It is now the DGC mark alone, from the vector source at 512\u00d7512.",
+        "A sharper icon: the tile was a 128×128 raster of the full lockup — the smallest size the marketplace accepts, upscaled on every high-DPI screen, with a wordmark unreadable at the size extension lists render. It is now the DGC mark alone, from the vector source at 512×512.",
         "Editor protocol v11 unchanged; pairs with DGC 0.37.2."
       ]
     },
@@ -372,7 +383,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.1",
       "status": "past",
       "notes": [
-        "The panel recovers on its own when its backend dies. dgc serve is a plain child of the extension host, so an extension update or a window reload takes it down \u2014 and the panel kept pointing at the dead process until someone found DGC: Restart Backend. It now starts a replacement itself, bounded to three restarts in two minutes.",
+        "The panel recovers on its own when its backend dies. dgc serve is a plain child of the extension host, so an extension update or a window reload takes it down — and the panel kept pointing at the dead process until someone found DGC: Restart Backend. It now starts a replacement itself, bounded to three restarts in two minutes.",
         "A goal interrupted by that death picks itself back up, while a goal you paused yourself is never revived behind your back.",
         "In auto mode the model pill takes the auto colour instead of staying purple inside an olive composer.",
         "Apache License 2.0; editor protocol v11 unchanged; pairs with DGC 0.37.1."
@@ -384,9 +395,9 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.0",
       "status": "past",
       "notes": [
-        "Saving a setting while a turn runs no longer fails on a setting you did not touch: the form posts every field, so DGC asked to move the model route on every Save \u2014 which the CLI refuses mid-turn. Raising the context window during a run reported a model error and looked like it had not applied.",
+        "Saving a setting while a turn runs no longer fails on a setting you did not touch: the form posts every field, so DGC asked to move the model route on every Save — which the CLI refuses mid-turn. Raising the context window during a run reported a model error and looked like it had not applied.",
         "A selected settings tab and the Ultra model control are a filled pill with nothing under them; the accent line beneath a tinted background read as a second, heavier element.",
-        "Opening the chat in the secondary side bar no longer leaves the activity-bar copy stuck on \u201cDGC is open in the secondary side bar\u201d \u2014 whichever copy you look at becomes the live chat.",
+        "Opening the chat in the secondary side bar no longer leaves the activity-bar copy stuck on “DGC is open in the secondary side bar” — whichever copy you look at becomes the live chat.",
         "Pairs with DGC 0.37.0; editor protocol v11 unchanged."
       ]
     },
@@ -397,7 +408,7 @@
       "status": "past",
       "notes": [
         "Diagrams render: a mermaid fence becomes the diagram it describes, in the panel's own colours, with the source kept behind a Show source toggle. One the parser rejects keeps its code block rather than being replaced by an error graphic.",
-        "The permission-mode menu is no longer cut off by the left edge of the panel \u2014 menus anchor to the composer instead of to the button that opens them, so the panel's gutters bound them at every width.",
+        "The permission-mode menu is no longer cut off by the left edge of the panel — menus anchor to the composer instead of to the button that opens them, so the panel's gutters bound them at every width.",
         "Removed lines read as removed again: diff polarity had been riding on the same colour as auto mode, so every deletion count turned green.",
         "Editor protocol v11; requires DGC 0.37.0."
       ]
@@ -408,7 +419,7 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.1",
       "status": "past",
       "notes": [
-        "A compacted conversation shows as \u201cEarlier conversation summarised to keep it in context\u201d rather than as a message nobody sent and an answer nobody gave. The summary is still there, behind a disclosure.",
+        "A compacted conversation shows as “Earlier conversation summarised to keep it in context” rather than as a message nobody sent and an answer nobody gave. The summary is still there, behind a disclosure.",
         "Editor protocol v10, unchanged from 0.21.0; this build pairs with DGC 0.36.1."
       ]
     },
@@ -418,10 +429,10 @@
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.36.0",
       "status": "shipped",
       "notes": [
-        "A quieter panel. Selection and focus were carrying 2px purple rails, filled accent blocks and 3px glows; they are structural now \u2014 a lifted surface for what is chosen, a firm border for what is focused \u2014 and a focused field borrows your editor's own focus colour instead of our brand purple. Purple is kept for the send button, links and live status.",
+        "A quieter panel. Selection and focus were carrying 2px purple rails, filled accent blocks and 3px glows; they are structural now — a lifted surface for what is chosen, a firm border for what is focused — and a focused field borrows your editor's own focus colour instead of our brand purple. Purple is kept for the send button, links and live status.",
         "Editor protocol v10. The extension and the CLI negotiate on exact equality, so this build pairs with DGC 0.36.0; if your editor's marketplace has not caught up, https://vibedgc.com/vscode/dgc.vsix is always the build that matches.",
         "The composer no longer breaks under a long model name. In auto mode the footer overflowed and carried the Send button outside the box; it is two zones now, with what the turn may do on the left and which model does it on the right, wrapping to a second row when it must.",
-        "The model selector lost its chip icon, and reasoning profiles are spelled out \u2014 Extra High, not Xhigh.",
+        "The model selector lost its chip icon, and reasoning profiles are spelled out — Extra High, not Xhigh.",
         "A resumed goal shows as a resumed goal, not as a prompt you never typed."
       ]
     },
@@ -445,7 +456,7 @@
         "A finished answer ends with what it changed: the files this turn touched, each with its counts and its diff, and Undo and Review. Undo puts those files back as they were before the turn and rewinds the conversation with them, identifying the turn by the prompt that opened its recovery point and refusing rather than guessing.",
         "Under it: copy the answer, rate it (kept in this workspace and sent nowhere), branch into a new chat, run the prompt again, or edit and resend. Requires CLI 0.34.0; editor protocol v8.",
         "Scrolling up mid-turn no longer throws the view to the top. The transcript is a column flex layout, so a block whose rendering the browser skipped collapsed to nothing and the page got shorter under the scrollbar; an eight-turn chat reported 2,140px of scroll height for 5,169px of content. Blocks now hold their measured height, and a Latest pill floats over the end while you are away from it.",
-        "Every control says what it is: one hover label in the panel's own type and surfaces, shown on keyboard focus too, replacing the operating system's tooltip \u2014 which was slow, unstyled, and missing entirely on twenty buttons.",
+        "Every control says what it is: one hover label in the panel's own type and surfaces, shown on keyboard focus too, replacing the operating system's tooltip — which was slow, unstyled, and missing entirely on twenty buttons.",
         "One design language throughout: five font sizes and four weights instead of thirteen and seven, one spacing unit, one control height, and monospace kept for code rather than used as decoration. Settings are rows instead of a column of full-width dropdowns."
       ]
     },
@@ -455,8 +466,8 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "shipped",
       "notes": [
-        "DGC: Show Context Notes \u2014 what this project has already learned, across sessions. The agent searches the same trace itself, so after a compaction it can see which fixes already failed. Needs CLI 0.33.0; editor protocol v7 is unchanged, so this is not a lockstep upgrade.",
-        "The chat is offered in the secondary side bar as well as the activity bar \u2014 open it in either and the same conversation follows.",
+        "DGC: Show Context Notes — what this project has already learned, across sessions. The agent searches the same trace itself, so after a compaction it can see which fixes already failed. Needs CLI 0.33.0; editor protocol v7 is unchanged, so this is not a lockstep upgrade.",
+        "The chat is offered in the secondary side bar as well as the activity bar — open it in either and the same conversation follows.",
         "An older CLI is offered the fix rather than only told about it: Update DGC CLI, then Restart Backend."
       ]
     },
@@ -466,7 +477,7 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "shipped",
       "notes": [
-        "Approve against the change: the permission card shows the step\u2019s summary and, for an edit, the diff it would apply, instead of raw JSON; Deny can carry a note the model reads as the reason. Editor protocol v7 \u2014 requires DGC CLI 0.32.0.",
+        "Approve against the change: the permission card shows the step’s summary and, for an edit, the diff it would apply, instead of raw JSON; Deny can carry a note the model reads as the reason. Editor protocol v7 — requires DGC CLI 0.32.0.",
         "The agent sees the errors it made: each prompt carries diagnostics for every file this chat touched, not just the focused one. Add File to Chat from the explorer and tab context menus, or drag a file into the chat; palette entries that need a running backend appear once it is connected.",
         "No more first-run dead ends: Add Selection waits for the panel instead of dropping the selection when the view was never opened; changing dgc.command restarts the backend; the install prompt offers Retry and no longer latches every command to a no-op after one dismissal."
       ]
@@ -477,8 +488,8 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "shipped",
       "notes": [
-        "Keep the autonomous gate and every model route under the user\u2019s control: DGC: Autonomous Gate, DGC: Base Url, DGC: Subagent Base Url and DGC: Fallback Base Url are now machine-scoped, so a cloned repository\u2019s .vscode/settings.json can no longer point the panel\u2019s model traffic at its own server or disable the gate. A workspace value for any of them is ignored.",
-        "Stop fighting VS Code\u2019s own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts.",
+        "Keep the autonomous gate and every model route under the user’s control: DGC: Autonomous Gate, DGC: Base Url, DGC: Subagent Base Url and DGC: Fallback Base Url are now machine-scoped, so a cloned repository’s .vscode/settings.json can no longer point the panel’s model traffic at its own server or disable the gate. A workspace value for any of them is ignored.",
+        "Stop fighting VS Code’s own keys: focus the panel with Ctrl/Cmd+Alt+D (was Ctrl+Escape, the terminal toggle), add the selection with Ctrl/Cmd+Alt+I (was Ctrl+I, inline chat) and cycle the mode with Ctrl/Cmd+Alt+M (was Ctrl+Shift+M, the Problems panel). The bindings stay out of the terminal, so a shell keeps its shortcuts.",
         "Pairs with CLI 0.31.0; editor protocol v6 is unchanged, so CLI 0.30.0 and newer keep working exactly as before."
       ]
     },
@@ -499,8 +510,8 @@
       "url": "https://marketplace.visualstudio.com/items?itemName=vibedgc.dgc",
       "status": "shipped",
       "notes": [
-        "Show the turn ETA beside the elapsed timer while a native turn runs \u2014 a calibrated range such as `~2\u20134 min left \u00b7 3/5 tasks` from the additive protocol-v6 turn_eta event, hidden on older CLIs.",
-        "Add DGC: Notify On Turn End \u2014 a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.",
+        "Show the turn ETA beside the elapsed timer while a native turn runs — a calibrated range such as `~2–4 min left · 3/5 tasks` from the additive protocol-v6 turn_eta event, hidden on older CLIs.",
+        "Add DGC: Notify On Turn End — a notification with a Show action when a turn longer than 20 seconds finishes while the DGC panel is not visible.",
         "Recommend CLI 0.30.0 for the turn ETA; protocol v6 compatibility is retained. The /files focus pane is a terminal feature; the editor keeps its native explorer."
       ]
     },
