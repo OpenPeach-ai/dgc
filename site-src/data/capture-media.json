@@ -12,30 +12,30 @@
         "edit_file",
         "bash"
       ],
-      "duration_seconds": 47.5,
-      "duration_label": "0:48",
-      "provenance": "Actual current DGC 0.37.3 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "duration_seconds": 47.466,
+      "duration_label": "0:47",
+      "provenance": "Actual current DGC 0.38.0 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
       "model_route": "local Ollama · qwen2.5:14b",
-      "time_compression": 1,
+      "time_compression": 1.0,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
           "path": "assets/cli-capture.webm",
-          "sha256": "bc64c6a9ee9f4ea1c1b3fed2e267f17facc9f3dee95547dd01c3bb891b985d4c",
-          "bytes": 2032273,
+          "sha256": "a44aedf61a48ef91bd5fc6fc09e67bc501b874051efa4143eff40f3b220162b8",
+          "bytes": 2035048,
           "codec": "vp9",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.466
         },
         "mp4": {
           "path": "assets/cli-capture.mp4",
-          "sha256": "7f074061efa895abe0682e1f4567d7a65e3b50299f265918d0b9898cf3dc02e0",
-          "bytes": 506346,
+          "sha256": "db561459cf7274de3bb9b3fc54cc914c2bdf31665d5c7793d0f8e6f68a5c85ff",
+          "bytes": 505633,
           "codec": "h264",
           "width": 1280,
           "height": 720,
-          "duration_seconds": 47.5
+          "duration_seconds": 47.466667
         },
         "poster": {
           "path": "assets/cli-capture-poster.jpg",
