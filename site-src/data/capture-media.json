@@ -14,9 +14,9 @@
       ],
       "duration_seconds": 47.466,
       "duration_label": "0:47",
-      "provenance": "Actual current DGC 0.38.0 full-screen TUI \u00b7 real local Ollama run \u00b7 qwen2.5:14b \u00b7 disposable controlled fixture \u00b7 one-line code edit \u00b7 python3 -m unittest -v passed 3/3 \u00b7 real time, no speed adjustment \u00b7 no user config or session persisted.",
-      "model_route": "local Ollama \u00b7 qwen2.5:14b",
-      "time_compression": 1.0,
+      "provenance": "Actual current DGC 0.38.0 full-screen TUI · real local Ollama run · qwen2.5:14b · disposable controlled fixture · one-line code edit · python3 -m unittest -v passed 3/3 · real time, no speed adjustment · no user config or session persisted.",
+      "model_route": "local Ollama · qwen2.5:14b",
+      "time_compression": 1,
       "sandbox_backend": "bwrap",
       "files": {
         "webm": {
@@ -63,17 +63,17 @@
       "source_unchanged_through_current_head": true,
       "duration_seconds": 30.8,
       "duration_label": "0:31",
-      "provenance": "Actual extension surface \u00b7 deterministic protocol fixture \u00b7 real disposable-file edit and unittest run \u00b7 not a live model session \u00b7 real time, no speed adjustment.",
+      "provenance": "Actual extension surface · deterministic protocol fixture · real disposable-file edit and unittest run · not a live model session · real time, no speed adjustment.",
       "vscode_version": "1.107.1",
-      "extension_version": "0.22.4",
-      "packaged_extension_source_commit": "3eb773f6985618e39c74b775ae032719dfc12d37",
-      "extension_vsix_sha256": "0291988b3650cccd191e4901e74f4daf35ccd95c150cd573a8e63a93190a244b",
+      "extension_version": "0.23.0",
+      "packaged_extension_source_commit": "470b3cf1b33b858c9464472c7851e41731b93221",
+      "extension_vsix_sha256": "89fbd1c97e671115355d2691b275a310a2d671182051c1b02e1c1d45e9219584",
       "time_compression": 1,
       "files": {
         "webm": {
           "path": "assets/editor-capture.webm",
-          "sha256": "dbc520379bad30aa765c665047e55be06561a88a521175551171ba0aa7e425a9",
-          "bytes": 1487190,
+          "sha256": "6b7b1c2cb956216001660d4515a5a352672c8c7af08cdaedb02fc34bbdc19c79",
+          "bytes": 1659637,
           "codec": "vp9",
           "width": 1440,
           "height": 900,
@@ -81,8 +81,8 @@
         },
         "mp4": {
           "path": "assets/editor-capture.mp4",
-          "sha256": "32c99716fa2424e5ffc57fdd36e8c4f38af998ea305109be67a0e307292f7289",
-          "bytes": 507664,
+          "sha256": "a413b92abd68db34a7d3e5911317bb2a1ab520324d98ffa29021df4f83732e58",
+          "bytes": 632948,
           "codec": "h264",
           "width": 1440,
           "height": 900,
@@ -90,16 +90,16 @@
         },
         "poster": {
           "path": "assets/editor-capture-poster.jpg",
-          "sha256": "014f9723c383e87d60da86eab79de2f4fadc2d178522b965408ebae3718265e0",
-          "bytes": 147969,
+          "sha256": "192cbf9d14ead19d21b3796120c038aa61ae42298f94cedada079750a59ddf1e",
+          "bytes": 160206,
           "codec": "mjpeg",
           "width": 1440,
           "height": 900
         },
         "preview": {
           "path": "assets/editor-capture-poster-720.jpg",
-          "sha256": "ebe175938eee00feb0930ee504b292f1c8da9f2572f7ccccd089997010298ac4",
-          "bytes": 37494,
+          "sha256": "ab3fa672ceeb36801c01d8abd8071d6169106071a652749cb21e9b1ebab3bf89",
+          "bytes": 39884,
           "codec": "mjpeg",
           "width": 720,
           "height": 450
