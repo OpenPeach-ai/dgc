@@ -352,20 +352,23 @@ h4{font-size:15px;line-height:1.35}
 .focus-browser{display:grid;grid-template-columns:160px 210px minmax(0,1fr);min-height:270px;background:var(--bg)}.focus-parent,.focus-file-list,.focus-preview{padding:16px;border-right:1px solid var(--line);min-width:0}.focus-col-label{display:block;color:var(--muted);font-size:9px;letter-spacing:.08em;margin-bottom:16px}.focus-parent>span:not(.focus-col-label){color:var(--text)}.focus-parent small{display:block;font-size:9px;margin-top:8px;color:var(--muted)}.focus-file-list button{display:flex;justify-content:space-between;align-items:center;width:100%;padding:8px;border:0;border-radius:4px;background:transparent;color:var(--text-2);font:inherit;text-align:left;cursor:pointer;font-size:11px;gap:4px}.focus-file-list button[aria-pressed=true]{background:var(--raised);color:var(--text)}.focus-file-list button>span{font-size:8px;color:var(--good)}.focus-preview{border-right:0}.focus-preview pre{margin:0;font:400 11px/1.8 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-2)}.focus-pane-keys{display:flex;gap:24px;padding:10px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:9px}.focus-composer{display:flex;align-items:center;gap:12px;padding:18px 24px;background:var(--surface);border-top:1px solid var(--line);color:var(--text-2);min-height:66px}.focus-composer>span:first-child{color:var(--lavender)}
 @media(max-width:760px){.focus-parent{display:none}.focus-browser{grid-template-columns:135px minmax(0,1fr);min-height:290px}.focus-file-list,.focus-preview{padding:12px 8px}.focus-file-list button{padding:8px 6px;font-size:10px}.focus-file-list button>span{display:none}.focus-transcript{padding:20px 16px;min-height:185px;font-size:11px}.focus-preview pre{font-size:10px}.focus-pane-heading{padding:10px 12px;font-size:8px}.focus-pane-keys{gap:12px;padding:10px 12px;font-size:8px}.focus-composer{padding:16px;font-size:10px}.focus-demo .demo-controls{font-size:9px}.focus-demo .demo-controls>span{width:100%}}
 
-/* Kinetic three-cut mark: fine trails gather into the logo, then fan out again. */
-.kinetic-mark{right:max(12px,calc((100vw - 1440px)/2));top:36px;perspective:1000px}
-.kinetic-mark>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg);animation:mark-turn 14s var(--ease) infinite}
-.slash-trail{transform:translate(var(--trail-x),var(--trail-y));animation:trail-gather 12s cubic-bezier(.45,0,.3,1) infinite;animation-delay:calc(var(--layer)*-80ms);will-change:transform}
-.slash-front{animation:mark-breathe 12s cubic-bezier(.45,0,.3,1) infinite;transform-origin:45px 45px}
-.slash-cut{animation:cut-fill 12s ease-in-out infinite}.slash-cut-1{animation-delay:-.18s}.slash-cut-2{animation-delay:-.36s}
-@keyframes trail-gather{0%,100%{transform:translate(var(--trail-x),var(--trail-y));opacity:.65}42%,58%{transform:translate(calc(var(--trail-x)*.08),calc(var(--trail-y)*.08));opacity:.2}75%{transform:translate(calc(var(--trail-x)*.65),calc(var(--trail-y)*1.25));opacity:.5}}
-@keyframes mark-breathe{0%,100%{transform:translate(0,0)}45%,55%{transform:translate(-3px,2px)}75%{transform:translate(2px,-1px)}}
-@keyframes mark-turn{0%,100%{transform:rotate(-4deg) rotateY(-8deg)}50%{transform:rotate(1deg) rotateY(8deg)}}
-@keyframes cut-fill{0%,20%,80%,100%{fill:#fff}44%,56%{fill:#7c5cff}}
+/* A crisp logo holds between short, synchronized glitches and a soft contour echo. */
+.kinetic-mark{right:max(12px,calc((100vw - 1440px)/2));top:36px;--glitch-cycle:8s}
+.kinetic-mark>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg)}
+.slash-trail{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12));animation:trail-glitch var(--glitch-cycle) ease-in-out infinite}
+.slash-front{animation:mark-glitch var(--glitch-cycle) steps(1,end) infinite;transform-origin:45px 45px}
+.slash-cut{fill:var(--mark)}
+.slash-ghost{opacity:0;filter:blur(.45px);animation:ghost-glitch var(--glitch-cycle) steps(1,end) infinite}
+.slash-slice{opacity:0;animation:slice-glitch var(--glitch-cycle) steps(1,end) infinite;--slice-shift:2.4px}
+.slash-slice-lower{--slice-shift:-1.8px;animation-delay:70ms}
+@keyframes mark-glitch{0%,17%,25%,100%{transform:translate(0,0);filter:blur(0)}18%{transform:translate(.65px,-.12px);filter:blur(.12px)}19.5%{transform:translate(-.85px,.18px);filter:blur(.16px)}21.5%{transform:translate(.4px,0);filter:blur(0)}23%{transform:translate(-.2px,0);filter:blur(.06px)}}
+@keyframes trail-glitch{0%,16%,30%,100%{transform:translate(calc(var(--trail-x)*.12),calc(var(--trail-y)*.12))}20%{transform:translate(calc(var(--trail-x)*.38),calc(var(--trail-y)*.18))}23%{transform:translate(calc(var(--trail-x)*.06),calc(var(--trail-y)*.06))}}
+@keyframes ghost-glitch{0%,17%,25%,100%{opacity:0;transform:translate(0,0)}18%{opacity:.18;transform:translate(-1.6px,.2px)}19.5%{opacity:.12;transform:translate(1.4px,-.15px)}21.5%{opacity:.08;transform:translate(-.7px,0)}23%{opacity:0}}
+@keyframes slice-glitch{0%,18%,24%,100%{opacity:0;transform:translateX(0)}19.5%{opacity:.7;transform:translateX(var(--slice-shift))}21.5%{opacity:.4;transform:translateX(calc(var(--slice-shift)*-.45))}23%{opacity:0}}
 @media(max-width:1200px){.kinetic-mark{right:-100px;width:500px}}
 @media(max-width:1040px){.kinetic-mark{right:-135px;top:34px;width:420px}}
-@media(max-width:760px){.kinetic-mark{right:-110px;top:-26px;width:310px;opacity:.22}.kinetic-mark>svg{transform:rotate(-4deg)}.slash-trail{will-change:auto}}
-@media(prefers-reduced-motion:reduce){.kinetic-mark>svg,.slash-trail,.slash-front,.slash-cut{animation:none}.kinetic-mark>svg{transform:rotate(-4deg)}.slash-cut{fill:#fff}.slash-trail{will-change:auto}}
+@media(max-width:760px){.kinetic-mark{right:-110px;top:-26px;width:310px;opacity:.22}}
+@media(prefers-reduced-motion:reduce){.slash-trail,.slash-front,.slash-ghost,.slash-slice{animation:none}.slash-front{transform:none;filter:none}.slash-ghost,.slash-slice{display:none}}
 
 /* Focus details share the demo's outer edges, with room for readable explanations. */
 .focus-features{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:42px;row-gap:0;max-width:960px;margin:30px auto 0}

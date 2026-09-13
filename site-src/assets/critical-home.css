@@ -5,6 +5,7 @@
 .hero-copy{max-width:650px}.hero-copy h1{max-width:12ch}
 .hero-copy>.lede{margin-top:24px;max-width:51ch;font-size:17px;color:var(--text-2)}
 .hero-art{position:absolute;right:max(12px,calc((100vw - 1440px)/2));top:36px;width:600px;height:630px;pointer-events:none}
+.hero-art>svg{width:100%;height:100%;overflow:visible;transform:rotate(-4deg)}
 .hero-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:30px}
 .quiet-link{min-height:42px;display:inline-flex;align-items:center;padding:0 10px;color:var(--text-2);font:500 11px/1 var(--mono)}
 .install-panel{position:relative;max-width:650px;margin-top:26px;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden;background:var(--bg)}
