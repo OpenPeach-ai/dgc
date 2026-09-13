@@ -34,6 +34,7 @@ from site_common import (  # noqa: E402
     SITE,
     load_json,
     minify_css,
+    deferred_css_source,
     render_shell,
     site_context,
     substitute,
@@ -134,7 +135,7 @@ def capture_context(data: dict[str, Any]) -> dict[str, str]:
     if data.get("schema_version") != 1 or not isinstance(data.get("captures"), dict):
         raise ValueError("capture-media.json has an unsupported schema")
     context: dict[str, str] = {}
-    for name in ("cli", "editor", "files", "diff"):
+    for name in ("cli", "editor"):
         capture = data["captures"].get(name)
         if not isinstance(capture, dict):
             raise ValueError(f"capture-media.json is missing {name}")
@@ -420,8 +421,6 @@ def build_outputs() -> dict[str, str | bytes]:
             image=image,
             include_announcement=path not in {"404.html", "docs/404.html"},
             noindex=path in {"404.html", "docs/404.html"},
-            preload_image="/assets/hero-graded-poster.jpg" if path == "index.html" else None,
-            preload_mobile_image="/assets/hero-mobile-poster.webp" if path == "index.html" else None,
         )
     release_feed = [{"title": f'DGC {item["version"]}', "date": item["date"], "description": "; ".join(item["notes"]), "url": item["url"]} for item in releases["cli"]]
     outputs["changelog.xml"] = feed("DGC releases", "Reviewed DGC release notes.", release_feed, base=f'{ctx["SITE_URL"]}/changelog.xml')
@@ -438,11 +437,15 @@ def build_outputs() -> dict[str, str | bytes]:
     sitemap_paths = public_paths
     outputs["sitemap.xml"] = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f'<url><loc>{ctx["SITE_URL"]}{path or "/"}</loc></url>' for path in sitemap_paths) + "</urlset>\n"
     outputs["llms.txt"] = "\n".join(["# DGC", "", ctx["TAGLINE"] + ".", "", "## Start", f'- Docs: {ctx["DOCS_URL"]}/', f'- Benchmark: {ctx["SITE_URL"]}/benchmark', f'- Source: {ctx["GITHUB_URL"]}', "", "## Product", "DGC is a coding-agent harness for a local model, compatible API, or supported coding subscription. For native local/API routes, DGC owns context, permissions, tools, execution, verification, sessions, plans, goals, MCP, skills, hooks, and terminal/editor presentation. Subscription routes delegate model and tool execution to the supported vendor CLI while DGC retains its session, SessionStart/Stop hooks, mode mapping, and presentation.", "", "## Documentation"] + [f'- {title}: {ctx["DOCS_URL"]}/{slug(title)}' for _, titles in _docs_groups() for title in titles] + [""])
-    outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#0B0B0D","theme_color":"#0B0B0D","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
+    outputs["site.webmanifest"] = json.dumps({"name":ctx["LONG_NAME"],"short_name":ctx["PRODUCT"],"start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","icons":[{"src":"/icon-512.png","sizes":"512x512","type":"image/png"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png"}]}, separators=(",", ":")) + "\n"
     outputs["routes.json"] = json.dumps({"html": sorted(set(public_paths + docs_paths)), "generated": "build-site.py"}, separators=(",", ":")) + "\n"
     outputs["assets/brand/dgc-brand-kit.zip"] = brand_zip()
     for name in ("tokens.css", "site.css"):
         source = (SRC / "assets" / name).read_text(encoding="utf-8")
+        if name == "site.css":
+            # Critical CSS includes only the first viewport's tokens. Deferred components
+            # also need the complete palette, spacing and motion tokens.
+            source = deferred_css_source()
         outputs[f"assets/{name}"] = minify_css(source)
     outputs["assets/site.js"] = (SRC / "assets" / "site.js").read_bytes()
     return outputs

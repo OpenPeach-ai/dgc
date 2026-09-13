@@ -35,6 +35,13 @@ for (const route of ROUTES) {
     expect(runtime.pageErrors, `${route} raised uncaught page errors`).toEqual([]);
     expect(runtime.httpErrors, `${route} requested failing local resources`).toEqual([]);
 
+    // Applying deferred styles must not replace loaded font faces and fetch them again.
+    const fontRequests = await page.evaluate(() => performance.getEntriesByType("resource")
+      .filter(entry => new URL(entry.name).pathname.endsWith(".woff2"))
+      .map(entry => entry.name));
+    expect(fontRequests.length, `${route} requested a font more than once`)
+      .toBe(new Set(fontRequests).size);
+
     const budget = VIEWPORT_BUDGETS[testInfo.project.name];
     if (budget) {
       const transfer = await readTransferReport(page);

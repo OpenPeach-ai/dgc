@@ -11,6 +11,8 @@ const SITE = resolve(ROOT, "site");
 const routes = new Set(JSON.parse(readFileSync(resolve(SITE, "routes.json"), "utf8")).html);
 const portIndex = process.argv.indexOf("--port");
 const port = Number(portIndex === -1 ? 4173 : process.argv[portIndex + 1]);
+const hostIndex = process.argv.indexOf("--host");
+const host = hostIndex === -1 ? "127.0.0.1" : process.argv[hostIndex + 1];
 
 if (!Number.isInteger(port) || port < 0 || port > 65535) {
   throw new Error("--port must be an integer between 0 and 65535");
@@ -131,10 +133,10 @@ const server = createServer((request, response) => {
   sendFile(request, response, resolve(SITE, "404.html"), 404);
 });
 
-server.listen(port, "127.0.0.1", () => {
+server.listen(port, host, () => {
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
-  process.stdout.write(`DGC site QA server ready at http://127.0.0.1:${actualPort}\n`);
+  process.stdout.write(`DGC site QA server ready at http://${host}:${actualPort}\n`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

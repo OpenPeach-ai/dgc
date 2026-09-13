@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -162,18 +163,29 @@ def emitted_asset_revision(css_sources: tuple[str, ...], raw_sources: tuple[byte
 
 
 def _critical_css_source(route_stylesheet: str) -> str:
-    return "\n".join(
+    source = "\n".join(
         (SRC / "assets" / name).read_text(encoding="utf-8")
         for name in ("tokens.css", "critical-base.css", route_stylesheet)
     )
+    # Full styles retain the complete token set. Inline only tokens used by this route's
+    # first viewport (including dependencies), so brand geometry fits the 10 KiB budget.
+    used = set(re.findall(r"var\((--[\w-]+)", source))
+    return re.sub(r"(--[\w-]+):[^;{}]+;", lambda m: m.group(0) if m.group(1) in used else "", source)
+
+
+def deferred_css_source() -> str:
+    """Keep all theme tokens without replacing the already-loaded inline font faces."""
+    tokens = (SRC / "assets" / "tokens.css").read_text(encoding="utf-8")
+    tokens = re.sub(r"@font-face\s*\{[^}]*\}", "", tokens)
+    return tokens + "\n" + (SRC / "assets" / "site.css").read_text(encoding="utf-8")
 
 
 def site_asset_revision(*, css_minifier: Callable[[str], str] | None = None) -> str:
     """Return one revision for every mutable stylesheet/script emitted by the site."""
     transform = css_minifier or minify_css
-    css_sources = tuple(
-        (SRC / "assets" / name).read_text(encoding="utf-8")
-        for name in ("tokens.css", "site.css")
+    css_sources = (
+        (SRC / "assets" / "tokens.css").read_text(encoding="utf-8"),
+        deferred_css_source(),
     ) + tuple(
         _critical_css_source(name)
         for name in ("critical-home.css", "critical-page.css", "critical-docs.css")
@@ -255,7 +267,7 @@ def head(*, title: str, description: str, path: str, image: str = "/og-card.png"
 <title>{html.escape(full_title)}</title>
 <meta name=\"description\" content=\"{html.escape(description, quote=True)}\">
 {'<meta name="robots" content="noindex,nofollow">' if noindex else ''}
-<meta name=\"theme-color\" content=\"#0B0B0D\">
+<meta name=\"theme-color\" content=\"#ffffff\">
 <link rel=\"canonical\" href=\"{html.escape(canonical, quote=True)}\">
 <meta property=\"og:type\" content=\"{html.escape(kind, quote=True)}\">
 <meta property=\"og:site_name\" content=\"{html.escape(ctx['LONG_NAME'], quote=True)}\">

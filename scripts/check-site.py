@@ -56,16 +56,8 @@ STATIC_PUBLIC_FILES = {
     "icon-512.png", "og-card.png", "og-benchmark.png", "og-docs.png", "og-editor.png",
     "dgc-mark.svg", "dgc-mark-mono.svg",
     "assets/cli-capture-poster.jpg", "assets/cli-capture.mp4", "assets/cli-capture.webm",
-    "assets/files-capture-poster.jpg", "assets/files-capture.mp4", "assets/files-capture.webm",
-    "assets/files-replay.json",
-    "assets/diff-capture-poster.jpg", "assets/diff-capture.mp4", "assets/diff-capture.webm",
-    "assets/diff-replay.json",
     "assets/editor-capture-poster.jpg", "assets/editor-capture-poster-720.jpg",
     "assets/editor-capture.mp4", "assets/editor-capture.webm",
-    "assets/hero-graded-poster.jpg", "assets/hero-mobile-poster.webp", "assets/hero-graded.mp4", "assets/hero-graded.webm",
-    "assets/hero-mobile.mp4", "assets/hero-mobile.webm",
-    "assets/power-graded-poster.jpg", "assets/power-graded.mp4", "assets/power-graded.webm",
-    "assets/sub-graded-poster.jpg", "assets/sub-graded.mp4", "assets/sub-graded.webm",
     "assets/fonts/Geist-OFL.txt", "assets/fonts/JetBrains-Mono-OFL.txt",
     "assets/fonts/geist-medium-latin.woff2", "assets/fonts/geist-regular-latin.woff2",
     "assets/fonts/jetbrains-mono-medium-latin.woff2",
@@ -510,14 +502,13 @@ def check_media(parsed: dict[Path, PageParser], errors: list[str]) -> None:
         errors.append("index.html: missing")
         return
     hero = [video for video in home.videos if "data-hero-video" in video]
-    if (len(hero) != 1 or "autoplay" not in hero[0] or hero[0].get("preload") != "auto"
-            or not all(key in hero[0] for key in ("muted", "loop", "playsinline"))):
-        errors.append("index.html: hero must be muted, looping, inline autoplay with preload=auto")
+    if hero:
+        errors.append("index.html: the CSS brand hero must not load a background video")
     ambient = [video for video in home.videos
                if "data-lazy-video" in video and "data-editor-preview" not in video
                and "data-capture-preview" not in video]
-    if len(ambient) != 2 or any(video.get("preload") != "none" for video in ambient):
-        errors.append("index.html: both ambient section videos must lazy-load with preload=none")
+    if ambient:
+        errors.append("index.html: ambient section videos have been removed")
     for label in ("index.html", "vscode/index.html"):
         page = parsed.get(SITE / label)
         previews = [] if page is None else [
@@ -569,45 +560,6 @@ CAPTURE_MEDIA_FILES = {
             "real time, no speed adjustment", "no user config or session persisted",
         ),
     },
-    "files": {
-        "prefix": "files-capture",
-        "width": 1280,
-        "height": 720,
-        "min_duration": 46.0,
-        "kind": "real_cli_local_model_focus_pane",
-        "required": {
-            "live_model": True,
-            "controlled_fixture": True,
-            "real_time": True,
-            "model_route": "local Ollama · qwen3.8:27b-q4km",
-        },
-        "provenance_terms": (
-            "Actual DGC ", "real local Ollama run", "qwen3.8:27b-q4km",
-            "disposable controlled fixture", "/files opened and driven by real keystrokes",
-            "python3 -m unittest -v passed 3/3", "real time, no speed adjustment",
-            "no user config or session persisted",
-        ),
-    },
-    "diff": {
-        "prefix": "diff-capture",
-        "width": 1280,
-        "height": 720,
-        "min_duration": 46.0,
-        "kind": "real_cli_local_model_focus_pane",
-        "required": {
-            "live_model": True,
-            "controlled_fixture": True,
-            "real_time": True,
-            "model_route": "local Ollama · qwen3.8:27b-q4km",
-        },
-        "provenance_terms": (
-            "Actual DGC ", "real local Ollama run", "qwen3.8:27b-q4km",
-            "disposable controlled fixture", "/diff opened and driven by real keystrokes",
-            "selected and attached to the next prompt",
-            "python3 -m unittest -v passed 3/3", "real time, no speed adjustment",
-            "no user config or session persisted",
-        ),
-    },
     "editor": {
         "prefix": "editor-capture",
         "width": 1440,
@@ -638,16 +590,6 @@ CAPTURE_KEYS = {
         "kind", "live_model", "controlled_fixture", "real_time", "tool_sequence",
         "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
         "sandbox_backend", "files",
-    },
-    "files": {
-        "kind", "live_model", "controlled_fixture", "real_time", "keystrokes",
-        "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
-        "dgc_version", "files",
-    },
-    "diff": {
-        "kind", "live_model", "controlled_fixture", "real_time", "keystrokes",
-        "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
-        "dgc_version", "files",
     },
     "editor": {
         "kind", "live_model", "controlled_fixture", "deterministic_fixture", "real_time",

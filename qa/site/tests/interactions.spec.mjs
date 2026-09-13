@@ -2,68 +2,21 @@ import {expect, test} from "@playwright/test";
 
 import {observeRuntime, settle} from "./support.mjs";
 
-test("eager hero video stays visible when cache-warm reload playback precedes initialization", async ({page}) => {
+test("white hero uses the DGC logo without requesting background media", async ({page}) => {
   const runtime = observeRuntime(page);
-  const heroState = () => page.locator("video[data-hero-video]").evaluate(video => ({
-    autoplay: video.autoplay,
-    currentSrc: new URL(video.currentSrc).pathname,
-    paused: video.paused,
-    preload: video.preload,
-    ready: video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
-    visible: video.parentElement?.classList.contains("video-ready") === true,
-  }));
-  const expectedSource = (page.viewportSize()?.width || 0) <= 800
-    ? "/assets/hero-mobile.webm"
-    : "/assets/hero-graded.webm";
-
+  const backgroundRequests = [];
+  page.on("request", request => {
+    if (/\/(?:hero|sub|power)-(?:graded|mobile)/.test(new URL(request.url()).pathname)) backgroundRequests.push(request.url());
+  });
   await page.goto("/", {waitUntil: "load"});
-  await expect.poll(heroState).toEqual({
-    autoplay: true,
-    currentSrc: expectedSource,
-    paused: false,
-    preload: "auto",
-    ready: true,
-    visible: true,
-  });
-
-  let releaseScript;
-  let signalScriptRequest;
-  const scriptHeld = new Promise(resolve => { releaseScript = resolve; });
-  const scriptRequested = new Promise(resolve => { signalScriptRequest = resolve; });
-  await page.route("**/assets/site.js?*", async route => {
-    signalScriptRequest();
-    await scriptHeld;
-    await route.continue();
-  });
-
-  const reload = page.reload({waitUntil: "load"});
-  let earlyFailure;
-  try {
-    await scriptRequested;
-    await expect.poll(async () => {
-      const state = await heroState();
-      return {paused: state.paused, ready: state.ready};
-    }).toEqual({paused: false, ready: true});
-    expect((await heroState()).visible).toBe(false);
-  } catch (error) {
-    earlyFailure = error;
-  } finally {
-    releaseScript();
-  }
-  await reload;
-  if (earlyFailure) throw earlyFailure;
-
-  await expect.poll(heroState).toEqual({
-    autoplay: true,
-    currentSrc: expectedSource,
-    paused: false,
-    preload: "auto",
-    ready: true,
-    visible: true,
-  });
+  await settle(page);
+  await expect(page.locator(".hero-art .slash-cut")).toHaveCount(3);
+  await expect(page.locator(".hero video, #subscription video, #power video")).toHaveCount(0);
+  expect(await page.locator("body").evaluate(el => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+  await page.locator("#power").scrollIntoViewIfNeeded();
+  expect(backgroundRequests).toEqual([]);
   expect(runtime.consoleErrors).toEqual([]);
   expect(runtime.pageErrors).toEqual([]);
-  expect(runtime.httpErrors).toEqual([]);
 });
 
 test("first pointer intent initializes home controls before its click", async ({page}) => {
@@ -361,11 +314,12 @@ test("direct fragments wait for full styles and align below the sticky header", 
         cls: window.__dgcLayoutShifts.reduce((sum, value) => sum + value, 0),
         top: target?.getBoundingClientRect().top,
         scrollMargin: target ? Number.parseFloat(getComputedStyle(target).scrollMarginTop) : null,
+        bottomLimit: target ? target.getBoundingClientRect().top + scrollY - Math.max(0, document.documentElement.scrollHeight - innerHeight) : null,
       };
     });
     expect(result.cls, path).toBe(0);
     expect(result.top, path).not.toBeNull();
-    expect(Math.abs((result.top || 0) - (result.scrollMargin || 0)), path).toBeLessThan(1);
+    expect(Math.abs((result.top || 0) - Math.max(result.scrollMargin || 0, result.bottomLimit || 0)), path).toBeLessThan(1);
   }
 });
 
@@ -385,8 +339,9 @@ test("late JavaScript cannot miss final fragment alignment after the CSS fail-op
   const result = await page.locator("#work-on-this").evaluate(target => ({
     top: target.getBoundingClientRect().top,
     scrollMargin: Number.parseFloat(getComputedStyle(target).scrollMarginTop),
+    bottomLimit: target.getBoundingClientRect().top + scrollY - Math.max(0, document.documentElement.scrollHeight - innerHeight),
   }));
-  expect(Math.abs(result.top - result.scrollMargin)).toBeLessThan(1);
+  expect(Math.abs(result.top - Math.max(result.scrollMargin, result.bottomLimit))).toBeLessThan(1);
   expect(runtime.consoleErrors).toEqual([]);
   expect(runtime.pageErrors).toEqual([]);
   expect(runtime.httpErrors).toEqual([]);
@@ -545,97 +500,81 @@ test("editor capture autoplays in place and retains an explicit controls dialog"
   expect(runtime.httpErrors).toEqual([]);
 });
 
-test("focus-pane figure replays the real terminal cells as text and keeps its recording dialog", async ({page}) => {
+test("focus-pane scripted demo previews files without loading a recording", async ({page}) => {
+  await page.emulateMedia({reducedMotion: "reduce"});
   const runtime = observeRuntime(page);
-  const replayRequests = [];
+  const media = [];
   page.on("request", request => {
-    if (/files-replay\.json$|files-capture\.(?:webm|mp4)$/.test(new URL(request.url()).pathname)) {
-      replayRequests.push(new URL(request.url()).pathname);
-    }
+    if (/files-replay\.json$|files-capture/.test(new URL(request.url()).pathname)) media.push(request.url());
   });
   await page.goto("/", {waitUntil: "domcontentloaded"});
   await settle(page);
-
-  const opener = page.locator('[data-open-capture="files-capture"]');
-  const replay = opener.locator("pre.term-replay");
-  const poster = opener.locator("img.capture-poster");
-  await expect(replay).toBeHidden();
-  expect(replayRequests).toEqual([]);
-
-  await opener.scrollIntoViewIfNeeded();
-  await expect(replay).toHaveAttribute("data-hydrated", "true");
-  await expect(replay).toBeVisible();
-  await expect(poster).toBeHidden();
-  expect(replayRequests).toEqual(["/assets/files-replay.json"]);
-  await expect.poll(() => replay.evaluate(pre => pre.children.length)).toBe(32);
-  // The replay starts with the prompt being typed; /files opens a few seconds into the session.
-  await expect.poll(() => replay.evaluate(pre => pre.textContent.includes("FILES")), {timeout: 25_000}).toBe(true);
-  const metrics = await replay.evaluate(pre => ({
-    fontSize: parseFloat(getComputedStyle(pre).fontSize),
-    scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
-    spans: pre.querySelectorAll("span").length,
-  }));
-  expect(metrics.fontSize).toBeGreaterThan(4);
-  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
-  expect(metrics.spans).toBeGreaterThan(10);
-  const status = opener.locator("[data-capture-status]");
-  await expect(status).toContainText(/Auto-playing|Motion paused/);
-
-  await opener.click();
-  const capture = page.locator("#files-capture");
-  await expect(capture).toHaveAttribute("open", "");
-  await expect(capture.locator("video")).toHaveAttribute("data-hydrated", "true");
-  await expect(capture.locator("#files-capture-note")).toContainText("actual cells");
-  await capture.locator("[data-close-capture]").click();
-  await expect(capture).not.toHaveAttribute("open", "");
-
+  const demo = page.locator("[data-focus-demo]");
+  await demo.scrollIntoViewIfNeeded();
+  await demo.locator("[data-focus-replay]").click();
+  await demo.locator("[data-focus-next]").click();
+  await demo.locator("[data-focus-file=clamp]").click();
+  await expect(demo.locator("[data-focus-preview]")).toContainText("return max(lower, min(upper, value))");
+  await demo.locator("[data-focus-file=tests]").click();
+  await expect(demo.locator("[data-focus-preview-title]")).toHaveText("test_clamp.py · preview");
+  await demo.locator("[data-focus-next]").click();
+  await expect(demo.locator("[data-focus-composer]")).toContainText("@clamp.py");
+  await demo.locator("[data-focus-next]").click();
+  await expect(demo.locator("[data-focus-state]")).toContainText("Agent finished");
+  await expect(page.locator("#files-capture, [data-open-capture=files-capture]")).toHaveCount(0);
+  expect(media).toEqual([]);
   expect(runtime.consoleErrors).toEqual([]);
   expect(runtime.pageErrors).toEqual([]);
-  expect(runtime.httpErrors).toEqual([]);
 });
 
-test("live-diff figure replays the real terminal cells as text and keeps its recording dialog", async ({page}) => {
+test("scripted tasks update the same checklist and retain completed items", async ({page}) => {
+  await page.emulateMedia({reducedMotion: "reduce"});
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+  const demo = page.locator("[data-scripted-demos]");
+  await demo.scrollIntoViewIfNeeded();
+  await demo.getByRole("tab", {name: "Track tasks"}).click();
+  await demo.locator("[data-demo-replay]").click();
+  const tasks = demo.locator("#demo-panel-tasks");
+  await expect(tasks.locator("[data-demo-task]")).toHaveCount(3);
+  await expect(tasks.locator("[data-task-count]")).toHaveText("0 of 3 complete");
+  for (let i = 0; i < 6; i++) await demo.locator("[data-demo-next]").click();
+  await expect(tasks.locator("[data-task-count]")).toHaveText("3 of 3 complete");
+  await expect(tasks.locator('[data-demo-task][data-state="done"]')).toHaveCount(3);
+  await demo.getByRole("tab", {name: "Track tasks"}).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(demo.getByRole("tab", {name: "Approve a plan"})).toBeFocused();
+  await expect(demo.locator("#demo-panel-plan")).toBeVisible();
+});
+
+test("live-diff scripted demo attaches selected lines without loading a recording", async ({page}) => {
+  await page.emulateMedia({reducedMotion: "reduce"});
   const runtime = observeRuntime(page);
-  const replayRequests = [];
+  const media = [];
   page.on("request", request => {
-    if (/diff-replay\.json$|diff-capture\.(?:webm|mp4)$/.test(new URL(request.url()).pathname)) {
-      replayRequests.push(new URL(request.url()).pathname);
-    }
+    if (/diff-replay\.json$|diff-capture/.test(new URL(request.url()).pathname)) media.push(request.url());
   });
   await page.goto("/", {waitUntil: "domcontentloaded"});
   await settle(page);
-
-  const opener = page.locator('[data-open-capture="diff-capture"]');
-  const replay = opener.locator("pre.term-replay");
-  const poster = opener.locator("img.capture-poster");
-  await expect(replay).toBeHidden();
-  expect(replayRequests).toEqual([]);
-
-  await opener.scrollIntoViewIfNeeded();
-  await expect(replay).toHaveAttribute("data-hydrated", "true");
-  await expect(replay).toBeVisible();
-  await expect(poster).toBeHidden();
-  expect(replayRequests).toEqual(["/assets/diff-replay.json"]);
-  await expect.poll(() => replay.evaluate(pre => pre.children.length)).toBe(32);
-  // The replay starts with the prompt being typed; /diff opens a few seconds into the session.
-  await expect.poll(() => replay.evaluate(pre => pre.textContent.includes("DIFF")), {timeout: 25_000}).toBe(true);
-  const metrics = await replay.evaluate(pre => ({
-    fontSize: parseFloat(getComputedStyle(pre).fontSize),
-    scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
-    spans: pre.querySelectorAll("span").length,
-  }));
-  expect(metrics.fontSize).toBeGreaterThan(4);
-  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
-  expect(metrics.spans).toBeGreaterThan(10);
-
-  await opener.click();
-  const capture = page.locator("#diff-capture");
-  await expect(capture).toHaveAttribute("open", "");
-  await expect(capture.locator("video")).toHaveAttribute("data-hydrated", "true");
-  await expect(capture.locator("#diff-capture-note")).toContainText("actual cells");
-  await capture.locator("[data-close-capture]").click();
-  await expect(capture).not.toHaveAttribute("open", "");
-
+  const demo = page.locator("[data-diff-demo]");
+  await demo.scrollIntoViewIfNeeded();
+  await demo.locator("[data-diff-replay]").click();
+  await expect(demo.locator("[data-diff-empty]")).toBeVisible();
+  await expect(demo.locator("[data-diff-attach]")).toBeDisabled();
+  await demo.locator("[data-diff-next]").click();
+  await expect(demo.locator("[data-diff-code]")).toBeVisible();
+  const added = demo.locator(".diff-added");
+  await added.click();
+  await expect(added).toHaveAttribute("aria-pressed", "true");
+  await expect(demo.locator("[data-diff-selection]")).toContainText("1 line selected");
+  await demo.locator("[data-diff-attach]").click();
+  await expect(demo.locator("[data-diff-composer]")).toContainText("1 diff line attached");
+  await expect(demo.locator("[data-diff-selection]")).toContainText("working tree stays unchanged");
+  await demo.locator("[data-diff-replay]").click();
+  for (let i = 0; i < 3; i++) await demo.locator("[data-diff-next]").click();
+  await expect(demo.locator("[data-diff-composer]")).toContainText("2 diff lines attached");
+  await expect(page.locator("#diff-capture, [data-open-capture=diff-capture]")).toHaveCount(0);
+  expect(media).toEqual([]);
   expect(runtime.consoleErrors).toEqual([]);
   expect(runtime.pageErrors).toEqual([]);
   expect(runtime.httpErrors).toEqual([]);

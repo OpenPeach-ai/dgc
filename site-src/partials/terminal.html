@@ -1,17 +1,83 @@
-<div class="terminal-window reveal" aria-label="Scripted illustration of the DGC terminal interface">
-  <div class="terminal-bar"><i></i><i></i><i></i><span>dgc · scripted interface sequence</span></div>
-  <div class="terminal-body">
-    <div class="terminal-line" style="--delay:.2s"><span class="prompt">·</span> controlled fixture · default permissions</div>
-    <div class="terminal-line" style="--delay:1s"><span class="agent">I’ll inspect the implementation and its tests first.</span></div>
-    <div class="terminal-line" style="--delay:1.8s"><span class="tool">→ read_file</span> clamp.py</div>
-    <div class="terminal-line" style="--delay:2.4s"><span class="tool">→ read_file</span> test_clamp.py</div>
-    <div class="terminal-line" style="--delay:3s"><span class="tool">✎ edit_file</span> clamp.py</div>
-    <div class="terminal-line diff-del" style="--delay:3.6s">− return min(lower, max(upper, value))</div>
-    <div class="terminal-line diff-add" style="--delay:4.2s">+ return max(lower, min(upper, value))</div>
-    <div class="terminal-line" style="--delay:4.9s"><span class="tool">$ bash</span> python3 -m unittest -v</div>
-    <div class="terminal-line" style="--delay:5.6s"><span class="success">✓ 3 tests passed</span></div>
-    <div class="terminal-line" style="--delay:6.3s"><span class="agent">Fixed the clamp bounds and verified the full test module.</span></div>
-    <div class="terminal-line" style="--delay:7s"><span class="prompt">❯</span> <span class="caret" aria-hidden="true"></span></div>
-  </div>
-  <div class="terminal-proof"><span>Illustrative UI sequence—not a transcript.</span><button type="button" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Play real local-model capture · {{CAPTURE_CLI_DURATION_LABEL}} <span aria-hidden="true">↗</span></button></div>
+<div class="terminal-window reveal" data-scripted-demos aria-label="Scripted illustrations of DGC workflows">
+<div class="terminal-bar"><i></i><i></i><i></i><span>dgc · scripted interface sequence</span></div>
+<div class="demo-tabs" role="tablist" aria-label="Explore DGC workflows">
+<button type="button" id="demo-tab-edit" role="tab" aria-controls="demo-panel-edit" aria-selected="true" tabindex="0">Edit & test</button>
+<button type="button" id="demo-tab-tasks" role="tab" aria-controls="demo-panel-tasks" aria-selected="false" tabindex="-1">Track tasks</button>
+<button type="button" id="demo-tab-plan" role="tab" aria-controls="demo-panel-plan" aria-selected="false" tabindex="-1">Approve a plan</button>
+<button type="button" id="demo-tab-diff" role="tab" aria-controls="demo-panel-diff" aria-selected="false" tabindex="-1">Review changes</button>
+<button type="button" id="demo-tab-skill" role="tab" aria-controls="demo-panel-skill" aria-selected="false" tabindex="-1">Use a skill</button>
+<button type="button" id="demo-tab-resume" role="tab" aria-controls="demo-panel-resume" aria-selected="false" tabindex="-1">Resume work</button>
 </div>
+<div class="demo-panel" id="demo-panel-edit" role="tabpanel" aria-labelledby="demo-tab-edit" tabindex="0">
+<p class="demo-caption">A small fix. A complete loop.</p><div class="terminal-body">
+<div class="demo-step"><span class="prompt">❯</span> Fix the clamp bounds and run the tests.</div>
+<div class="demo-step"><span class="agent">I’ll inspect the implementation and its tests first.</span></div>
+<div class="demo-step"><span class="tool">→ read_file</span> clamp.py · test_clamp.py</div>
+<div class="demo-step"><span class="tool">✎ edit_file</span> clamp.py</div>
+<div class="demo-step"><span class="diff-del">− return min(lower, max(upper, value))</span></div>
+<div class="demo-step"><span class="diff-add">+ return max(lower, min(upper, value))</span></div>
+<div class="demo-step"><span class="tool">$ bash</span> python3 -m unittest -v</div>
+<div class="demo-step"><span class="success">✓ 3 tests passed</span></div>
+<div class="demo-step"><span class="agent">Fixed the bounds. Values inside and outside the range now pass.</span></div>
+</div></div>
+<div class="demo-panel" id="demo-panel-tasks" role="tabpanel" aria-labelledby="demo-tab-tasks" tabindex="0" hidden>
+<p class="demo-caption">One checklist, updated as the work moves.</p><div class="terminal-body">
+<div class="demo-checklist"><div class="demo-checklist-title">TASKS <span data-task-count>0 of 3 complete</span></div><ol>
+<li data-demo-task><span data-task-symbol aria-hidden="true">○</span><span>Reproduce the failure</span><small data-task-status>Pending</small></li>
+<li data-demo-task><span data-task-symbol aria-hidden="true">○</span><span>Fix the bounds and add coverage</span><small data-task-status>Pending</small></li>
+<li data-demo-task><span data-task-symbol aria-hidden="true">○</span><span>Run the regression tests</span><small data-task-status>Pending</small></li>
+</ol></div>
+<div class="demo-step" data-task-states="in_progress,pending,pending"><span class="prompt">❯</span> Fix the bug, add coverage, and verify the change.</div>
+<div class="demo-step" data-task-states="in_progress,pending,pending"><span class="tool">→ todo</span> Start by reproducing the failing case.</div>
+<div class="demo-step" data-task-states="in_progress,pending,pending"><span class="tool">→ read_file</span> clamp.py · test_clamp.py</div>
+<div class="demo-step" data-task-states="done,in_progress,pending"><span class="tool">✎ edit_file</span> Correct the bounds and add the regression case.</div>
+<div class="demo-step" data-task-states="done,done,in_progress"><span class="tool">$ bash</span> python3 -m unittest -v</div>
+<div class="demo-step" data-task-states="done,done,done"><span class="success">✓ Verification passed · checklist complete</span></div>
+<div class="demo-step" data-task-states="done,done,done"><span class="agent">Fixed the bug and verified the regression. No pending items.</span></div>
+</div></div>
+<div class="demo-panel" id="demo-panel-plan" role="tabpanel" aria-labelledby="demo-tab-plan" tabindex="0" hidden>
+<p class="demo-caption">Review the approach before the edits begin.</p><div class="terminal-body">
+<div class="demo-step"><span class="prompt">❯</span> /mode plan</div>
+<div class="demo-step"><span class="prompt">❯</span> Plan the auth package refactor.</div>
+<div class="demo-step"><span class="tool">→ read_file</span> src/auth.ts · src/routes.ts</div>
+<div class="demo-step"><span class="agent">Move the helpers, preserve exports, then update the callers.</span></div>
+<div class="demo-step"><span class="tool">→ present_plan</span> Refactor auth into its own package</div>
+<div class="demo-step"><span class="demo-decision">Awaiting your decision · Approve / Revise / Keep researching</span></div>
+<div class="demo-step"><span class="comment">Example choice: approve the proposed plan.</span></div>
+<div class="demo-step"><span class="agent">Plan approved. I’ll start with the helper package.</span></div>
+</div></div>
+<div class="demo-panel" id="demo-panel-diff" role="tabpanel" aria-labelledby="demo-tab-diff" tabindex="0" hidden>
+<p class="demo-caption">Bring the exact lines into the conversation.</p><div class="terminal-body">
+<div class="demo-step"><span class="prompt">❯</span> /diff</div>
+<div class="demo-step"><span class="tool">DIFF</span> Working tree against HEAD</div>
+<div class="demo-step">clamp.py <span class="diff-add">+1</span> <span class="diff-del">−1</span></div>
+<div class="demo-step"><span class="diff-del">− return min(lower, max(upper, value))</span></div>
+<div class="demo-step"><span class="diff-add">+ return max(lower, min(upper, value))</span></div>
+<div class="demo-step"><span class="demo-decision">Space · start selection → ↓ · extend → Enter · attach</span></div>
+<div class="demo-step"><span class="success">✓ 2 selected lines attached to your next prompt</span></div>
+<div class="demo-step"><span class="prompt">❯</span> Why did you change these bounds? <span class="comment">[clamp.py · 2 lines]</span></div>
+</div></div>
+<div class="demo-panel" id="demo-panel-skill" role="tabpanel" aria-labelledby="demo-tab-skill" tabindex="0" hidden>
+<p class="demo-caption">Project guidance, right where you work.</p><div class="terminal-body">
+<div class="demo-step"><span class="prompt">❯</span> /skills</div>
+<div class="demo-step"><span class="tool">SKILLS</span> debug · code-review · write-tests · verify</div>
+<div class="demo-step"><span class="prompt">❯</span> Use the debug skill to investigate this failing test.</div>
+<div class="demo-step"><span class="tool">→ skill</span> debug</div>
+<div class="demo-step"><span class="agent">I’ll reproduce the failure before changing the implementation.</span></div>
+<div class="demo-step"><span class="tool">$ bash</span> python3 -m unittest -v</div>
+<div class="demo-step"><span class="comment">Inspect the failing case → trace the cause → make a bounded fix</span></div>
+<div class="demo-step"><span class="agent">The lower and upper bounds are reversed. I’ll fix that expression.</span></div>
+</div></div>
+<div class="demo-panel" id="demo-panel-resume" role="tabpanel" aria-labelledby="demo-tab-resume" tabindex="0" hidden>
+<p class="demo-caption">Pick up the context and the pending work.</p><div class="terminal-body">
+<div class="demo-step"><span class="prompt">❯</span> /resume</div>
+<div class="demo-step"><span class="tool">SESSIONS</span> Fix clamp bounds · current project</div>
+<div class="demo-step"><span class="comment">Choose the saved session.</span></div>
+<div class="demo-step"><span class="success">✓ Conversation restored · saved task list restored</span></div>
+<div class="demo-step"><span class="success">✓ Reproduce the failure</span></div>
+<div class="demo-step"><span class="success">✓ Fix the bounds</span></div>
+<div class="demo-step"><span class="tool">○ Verify the regression</span></div>
+<div class="demo-step"><span class="prompt">❯</span> Continue with the remaining verification.</div>
+</div></div>
+<div class="demo-controls"><span data-demo-progress role="status" aria-live="polite">Edit &amp; test</span><div><button type="button" data-demo-play>Pause</button><button type="button" data-demo-next>Next step <span aria-hidden="true">→</span></button><button type="button" data-demo-replay>Replay <span aria-hidden="true">↺</span></button></div></div>
+<div class="terminal-proof"><span>Scripted UI illustrations · native local/API workflows.</span><button type="button" data-open-capture="product-capture" aria-controls="product-capture" aria-haspopup="dialog" aria-expanded="false">Play real local-model capture · {{CAPTURE_CLI_DURATION_LABEL}} <span aria-hidden="true">↗</span></button></div></div>

@@ -1,15 +1,5 @@
 (() => {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const heroVideo = document.querySelector('video[data-hero-video]');
-  if (heroVideo) {
-    if (reduce) heroVideo.pause();
-    else {
-      const showHeroVideo = () => heroVideo.parentElement?.classList.add('video-ready');
-      heroVideo.addEventListener('playing', showHeroVideo, {once:true});
-      if (heroVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !heroVideo.paused) requestAnimationFrame(showHeroVideo);
-    }
-  }
-
   const announcement = document.querySelector('[data-announcement]');
   if (announcement) {
     const key = `dgc-announcement-${announcement.dataset.announcement}`;
@@ -178,76 +168,6 @@
     }), {rootMargin:'0px'}); videos.forEach(video => vio.observe(video));
   } else videos.forEach(hydrateVideo);
 
-  // Terminal-cell replays: the real session's cells (from tmux) rendered as text, so the
-  // animation is sharp at any zoom and a few kilobytes instead of a blurry upscaled video.
-  const BASIC = ['#000000','#cd3131','#0dbc79','#e5e510','#2472c8','#bc3fbc','#11a8cd','#e5e5e5',
-                 '#666666','#f14c4c','#23d18b','#f5f543','#3b8eea','#d670d6','#29b8db','#ffffff'];
-  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const ansiRow = line => {
-    const st = {fg:'', bg:'', b:false, d:false, inv:false}; let out = '';
-    const parts = line.split(/\x1b\[([0-9;]*)m/);
-    const emit = text => {
-      if (!text) return;
-      let fg = st.fg, bg = st.bg; if (st.inv) { [fg, bg] = [bg || '#f5f5f5', fg || '#08080a']; }
-      const style = (fg ? `color:${fg};` : '') + (bg ? `background:${bg};` : '') + (st.b ? 'font-weight:500;' : '') + (st.d ? 'opacity:.62;' : '');
-      const text2 = esc(text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''));
-      out += style ? `<span style="${style}">${text2}</span>` : text2;
-    };
-    for (let i = 0; i < parts.length; i++) {
-      if (i % 2 === 0) { emit(parts[i]); continue; }
-      const c = parts[i] === '' ? [0] : parts[i].split(';').map(Number);
-      for (let k = 0; k < c.length; k++) {
-        const n = c[k];
-        if (n === 0) Object.assign(st, {fg:'', bg:'', b:false, d:false, inv:false});
-        else if (n === 1) st.b = true; else if (n === 2) st.d = true; else if (n === 22) { st.b = false; st.d = false; }
-        else if (n === 7) st.inv = true; else if (n === 27) st.inv = false;
-        else if (n === 39) st.fg = ''; else if (n === 49) st.bg = '';
-        else if (n >= 30 && n <= 37) st.fg = BASIC[n - 30]; else if (n >= 90 && n <= 97) st.fg = BASIC[n - 82];
-        else if (n >= 40 && n <= 47) st.bg = BASIC[n - 40]; else if (n >= 100 && n <= 107) st.bg = BASIC[n - 92];
-        else if ((n === 38 || n === 48) && c[k + 1] === 2) { const v = `rgb(${c[k+2]|0},${c[k+3]|0},${c[k+4]|0})`; if (n === 38) st.fg = v; else st.bg = v; k += 4; }
-        else if ((n === 38 || n === 48) && c[k + 1] === 5) { const idx = c[k+2]|0; const v = idx < 16 ? BASIC[idx] : idx >= 232 ? `rgb(${8+(idx-232)*10},${8+(idx-232)*10},${8+(idx-232)*10})` : (() => { const q = idx - 16, r = Math.floor(q/36), g = Math.floor((q%36)/6), b = q%6, m = x => x ? 55 + x*40 : 0; return `rgb(${m(r)},${m(g)},${m(b)})`; })(); if (n === 38) st.fg = v; else st.bg = v; k += 2; }
-      }
-    }
-    return out;
-  };
-  const replays = [...document.querySelectorAll('pre[data-replay]')];
-  const hydrateReplay = async pre => {
-    if (pre.dataset.hydrated) return; pre.dataset.hydrated = 'true';
-    const card = pre.closest('.capture-card'); const poster = card?.querySelector('.capture-poster');
-    const captureStatus = card?.querySelector('[data-capture-status]');
-    const setStatus = playing => { if (!captureStatus) return; captureStatus.textContent = playing ? captureStatus.dataset.playing : captureStatus.dataset.paused; captureStatus.parentElement?.classList.toggle('is-paused', !playing); };
-    let data; try { data = await (await fetch(pre.dataset.replay, {credentials:'omit'})).json(); } catch { setStatus(false); return; }
-    const cols = data.cols || 126, rows = data.rows || 32, frames = data.frames || [];
-    if (!frames.length) { setStatus(false); return; }
-    // Materialise every frame's full row set once (deltas applied), then render lazily by frame.
-    const full = []; let cur = [];
-    for (const f of frames) { if (f.full) cur = f.full.slice(); else for (const [i, row] of Object.entries(f.d || {})) cur[Number(i)] = row; full.push(cur.slice()); }
-    const lines = []; for (let r = 0; r < rows; r++) { const div = document.createElement('div'); pre.appendChild(div); lines.push(div); }
-    const html = new Map(); const rowHtml = (fi, r) => { const key = fi * 1000 + r; let v = html.get(key); if (v === undefined) { v = ansiRow(full[fi][r] || ''); html.set(key, v); } return v; };
-    let shown = -1;
-    const show = fi => { if (fi === shown) return; for (let r = 0; r < rows; r++) { if (shown < 0 || full[fi][r] !== full[shown][r]) lines[r].innerHTML = rowHtml(fi, r); } shown = fi; };
-    const fit = () => { const w = pre.clientWidth || card?.clientWidth || 960; pre.style.fontSize = `${(w / cols / 0.6).toFixed(3)}px`; };
-    fit(); if ('ResizeObserver' in window) new ResizeObserver(fit).observe(pre);
-    pre.hidden = false; if (poster) poster.hidden = true;
-    const duration = (data.duration_seconds || frames[frames.length - 1].t) + 1.8;   // hold the ending, then loop
-    if (reduce) { show(Math.max(0, Math.floor(frames.length * 0.6))); setStatus(false); return; }
-    let t0 = 0, raf = 0, running = false, pointer = 0;
-    const tick = now => { if (!running) return; if (!t0) t0 = now; const t = ((now - t0) / 1000) % duration; if (t < (frames[pointer]?.t ?? 0)) pointer = 0; while (pointer + 1 < frames.length && frames[pointer + 1].t <= t) pointer++; show(pointer); raf = requestAnimationFrame(tick); };
-    const start = () => { if (running) return; running = true; t0 = 0; pointer = 0; raf = requestAnimationFrame(tick); setStatus(true); };
-    const stop = () => { running = false; cancelAnimationFrame(raf); setStatus(false); };
-    show(0);
-    if ('IntersectionObserver' in window) new IntersectionObserver(es => es.forEach(e => e.isIntersecting ? start() : stop()), {threshold:.15}).observe(pre); else start();
-  };
-  // Observe the visible card, not the still-hidden <pre>: a display:none target never intersects.
-  if ('IntersectionObserver' in window) {
-    const rio = new IntersectionObserver(entries => entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-      const pre = entry.target.matches('pre[data-replay]') ? entry.target : entry.target.querySelector('pre[data-replay]');
-      if (pre) hydrateReplay(pre); rio.unobserve(entry.target);
-    }), {rootMargin:'200px'});
-    replays.forEach(pre => rio.observe(pre.closest('.capture-card') || pre));
-  } else replays.forEach(hydrateReplay);
-
   const images = [...document.querySelectorAll('img[data-lazy-image]')];
   const hydrateImage = image => {
     if (image.dataset.sizes) { image.sizes = image.dataset.sizes; delete image.dataset.sizes; }
@@ -261,6 +181,174 @@
       hydrateImage(image); iio.unobserve(image);
     }), {rootMargin:'0px'}); images.forEach(image => iio.observe(image));
   } else images.forEach(hydrateImage);
+
+  document.querySelectorAll('[data-diff-demo]').forEach(demo => {
+    const rows = [...demo.querySelectorAll('[data-diff-line]')];
+    const play = demo.querySelector('[data-diff-play]');
+    const next = demo.querySelector('[data-diff-next]');
+    const attach = demo.querySelector('[data-diff-attach]');
+    const steps = [
+      ['Watch changes arrive', 'I’ll inspect the bounds and make the smallest fix.', '→ read_file'],
+      ['Review the actual change', 'The bounds were reversed. I’ve corrected the expression.', '✎ edit_file'],
+      ['Select the lines you want to discuss', 'The regression tests are running. You can review the change below.', '$ bash · running tests'],
+      ['Ask with the exact context', 'All three tests passed. The selected lines are in your next prompt.', '✓ verified'],
+    ];
+    let step = reduce ? 3 : 0, paused = reduce, visible = false, timer;
+    const selected = new Set();
+    const selection = () => {
+      rows.forEach((row, i) => row.setAttribute('aria-pressed', String(selected.has(i))));
+      demo.querySelector('[data-diff-selection]').textContent = selected.size
+        ? `${selected.size} ${selected.size === 1 ? 'line' : 'lines'} selected · attach to your next prompt`
+        : step === 3 ? 'Selected lines attached · your working tree stays unchanged' : 'Read-only view · click a changed line to select it';
+      attach.disabled = selected.size === 0;
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!paused && visible && !document.hidden && step < 3) timer = setTimeout(() => { step++; render(); schedule(); }, 2600);
+    };
+    const render = () => {
+      demo.querySelector('[data-diff-transcript]').textContent = steps[step][1];
+      demo.querySelector('[data-diff-tool]').textContent = steps[step][2];
+      demo.querySelector('[data-diff-state]').textContent = step ? 'Working tree against HEAD · 1 file · +1 −1' : 'Working tree against HEAD · no changes yet';
+      demo.querySelector('[data-diff-empty-list]').hidden = step > 0;
+      demo.querySelector('[data-diff-empty]').hidden = step > 0;
+      demo.querySelector('[data-diff-file]').hidden = step === 0;
+      demo.querySelector('[data-diff-code]').hidden = step === 0;
+      selected.clear(); if (step === 2) { selected.add(0); selected.add(1); }
+      selection();
+      demo.querySelector('[data-diff-composer]').textContent = step === 3 ? 'Why these bounds? [clamp.py · 2 diff lines attached]' : 'Ask DGC about a change…';
+      demo.querySelector('[data-diff-progress]').textContent = `Step ${step + 1} of 4 · ${steps[step][0]}`;
+      play.textContent = step === 3 ? 'Play again' : paused ? 'Play' : 'Pause'; next.disabled = step === 3;
+    };
+    rows.forEach((row, i) => row.addEventListener('click', () => {
+      paused = true; selected.has(i) ? selected.delete(i) : selected.add(i); selection(); play.textContent = step === 3 ? 'Play again' : 'Play'; schedule();
+    }));
+    attach.addEventListener('click', () => {
+      if (!selected.size) return;
+      const count = selected.size; paused = true; step = 3; render();
+      demo.querySelector('[data-diff-composer]').textContent = `Explain this change. [clamp.py · ${count} diff ${count === 1 ? 'line' : 'lines'} attached]`;
+      schedule();
+    });
+    play.addEventListener('click', () => { if (step === 3) { step = 0; paused = false; } else paused = !paused; render(); schedule(); });
+    next.addEventListener('click', () => { paused = true; step = Math.min(step + 1, 3); render(); schedule(); });
+    demo.querySelector('[data-diff-replay]').addEventListener('click', () => { step = 0; paused = reduce; render(); schedule(); });
+    document.addEventListener('visibilitychange', schedule);
+    if ('IntersectionObserver' in window) new IntersectionObserver(entries => { visible = entries[0].isIntersecting; schedule(); }, {threshold:.2}).observe(demo);
+    else visible = true;
+    render(); schedule();
+  });
+
+  document.querySelectorAll('[data-focus-demo]').forEach(demo => {
+    const fileButtons = [...demo.querySelectorAll('[data-focus-file]')];
+    const previews = {
+      readme: ['README.md', '# Clamp example\n\nKeep a value within a range.\n\nRun the tests:\npython3 -m unittest -v'],
+      clamp: ['clamp.py', 'def clamp(value, lower, upper):\n    """Keep value within the bounds."""\n    return max(lower, min(upper, value))'],
+      tests: ['test_clamp.py', 'def test_lower_bound(self):\n    self.assertEqual(clamp(-5, 0, 10), 0)\n\ndef test_upper_bound(self):\n    self.assertEqual(clamp(15, 0, 10), 10)'],
+    };
+    const steps = [
+      ['Browse while it works', 'I’ll read the implementation and tests, then fix the bounds.', '→ read_file', 'clamp.py · test_clamp.py', 'readme'],
+      ['Preview a file', 'The bounds are reversed. I’ll correct the expression.', '✎ edit_file', 'clamp.py', 'clamp'],
+      ['Add context to your next prompt', 'The fix is in place. I’m running the regression tests.', '$ bash', 'python3 -m unittest -v', 'clamp'],
+      ['Ready for your next question', 'Fixed the bounds. All three regression tests passed.', '✓ verified', '3 / 3 tests', 'clamp'],
+    ];
+    const play = demo.querySelector('[data-focus-play]');
+    const next = demo.querySelector('[data-focus-next]');
+    let step = reduce ? 3 : 0, selected = '', paused = reduce, visible = false, timer;
+    const showFile = key => {
+      selected = key;
+      fileButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.focusFile === key)));
+      demo.querySelector('[data-focus-preview-title]').textContent = previews[key][0] + ' · preview';
+      demo.querySelector('[data-focus-preview]').textContent = key === 'clamp' && step === 0
+        ? previews[key][1].replace('max(lower, min(upper, value))', 'min(lower, max(upper, value))') : previews[key][1];
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!paused && visible && !document.hidden && step < 3) timer = setTimeout(() => { step++; render(); schedule(); }, 2600);
+    };
+    const render = () => {
+      const current = steps[step];
+      demo.querySelector('[data-focus-transcript]').textContent = current[1];
+      demo.querySelector('[data-focus-tool]').textContent = current[2];
+      demo.querySelector('[data-focus-target]').textContent = current[3];
+      demo.querySelector('[data-focus-state]').textContent = step === 3 ? 'Agent finished · keep browsing' : 'Agent working above · browse below';
+      demo.querySelector('[data-focus-changed]').hidden = step < 1;
+      demo.querySelector('[data-focus-composer]').textContent = step >= 2 ? '@clamp.py Explain these bounds.' : 'Ask DGC anything…';
+      demo.querySelector('[data-focus-progress]').textContent = `Step ${step + 1} of 4 · ${current[0]}`;
+      play.textContent = step === 3 ? 'Play again' : paused ? 'Play' : 'Pause'; next.disabled = step === 3;
+      showFile(current[4]);
+    };
+    fileButtons.forEach(button => button.addEventListener('click', () => { paused = true; render(); showFile(button.dataset.focusFile); schedule(); }));
+    play.addEventListener('click', () => { if (step === 3) { step = 0; paused = false; } else paused = !paused; render(); schedule(); });
+    next.addEventListener('click', () => { paused = true; step = Math.min(step + 1, 3); render(); schedule(); });
+    demo.querySelector('[data-focus-replay]').addEventListener('click', () => { step = 0; paused = reduce; render(); schedule(); });
+    document.addEventListener('visibilitychange', schedule);
+    if ('IntersectionObserver' in window) new IntersectionObserver(entries => { visible = entries[0].isIntersecting; schedule(); }, {threshold:.2}).observe(demo);
+    else visible = true;
+    render(); schedule();
+  });
+
+  // Scripted illustrations are separate from the real terminal-cell recordings above.
+  document.querySelectorAll('[data-scripted-demos]').forEach(demo => {
+    const tabs = [...demo.querySelectorAll('[role=tab]')];
+    const panels = [...demo.querySelectorAll('[role=tabpanel]')];
+    const play = demo.querySelector('[data-demo-play]');
+    const next = demo.querySelector('[data-demo-next]');
+    const status = demo.querySelector('[data-demo-progress]');
+    let index = 0, step = 0, paused = reduce, visible = false, timer;
+    const lines = () => [...panels[index].querySelectorAll('.demo-step')];
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!paused && visible && !document.hidden && step < lines().length - 1) {
+        timer = setTimeout(() => { step++; render(); schedule(); }, 1500);
+      }
+    };
+    const render = () => {
+      const steps = lines();
+      steps.forEach((line, n) => {
+        line.classList.toggle('is-future', n > step);
+        line.setAttribute('aria-hidden', String(n > step));
+      });
+      const states = steps[step]?.dataset.taskStates?.split(',');
+      if (states) {
+        panels[index].querySelectorAll('[data-demo-task]').forEach((task, n) => {
+          task.dataset.state = states[n];
+          task.querySelector('[data-task-symbol]').textContent = states[n] === 'done' ? '✓' : states[n] === 'in_progress' ? '◉' : '○';
+          task.querySelector('[data-task-status]').textContent = states[n] === 'done' ? 'Done' : states[n] === 'in_progress' ? 'In progress' : 'Pending';
+        });
+        panels[index].querySelector('[data-task-count]').textContent = `${states.filter(s => s === 'done').length} of ${states.length} complete`;
+      }
+      const done = step === steps.length - 1;
+      play.textContent = done ? 'Play again' : paused ? 'Play' : 'Pause';
+      next.disabled = done;
+      status.textContent = `${tabs[index].textContent} · ${done ? 'Complete' : `Step ${step + 1} of ${steps.length}`}`;
+    };
+    const select = (n, focus = false) => {
+      index = n; step = reduce ? lines().length - 1 : 0; paused = reduce;
+      tabs.forEach((tab, i) => { tab.setAttribute('aria-selected', String(i === index)); tab.tabIndex = i === index ? 0 : -1; });
+      panels.forEach((panel, i) => { panel.hidden = i !== index; });
+      if (focus) tabs[index].focus();
+      render(); schedule();
+    };
+    tabs.forEach((tab, n) => {
+      tab.addEventListener('click', () => select(n));
+      tab.addEventListener('keydown', event => {
+        const target = event.key === 'ArrowLeft' ? index - 1 : event.key === 'ArrowRight' ? index + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : null;
+        if (target === null) return;
+        event.preventDefault(); select((target + tabs.length) % tabs.length, true);
+      });
+    });
+    play.addEventListener('click', () => {
+      if (step === lines().length - 1) { step = 0; paused = false; } else paused = !paused;
+      render(); schedule();
+    });
+    next.addEventListener('click', () => { paused = true; step = Math.min(step + 1, lines().length - 1); render(); schedule(); });
+    demo.querySelector('[data-demo-replay]').addEventListener('click', () => { step = 0; paused = reduce; render(); schedule(); });
+    document.addEventListener('visibilitychange', schedule);
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(entries => { visible = entries[0].isIntersecting; schedule(); }, {threshold:.2}).observe(demo);
+    } else visible = true;
+    select(0);
+  });
 
   document.querySelectorAll('[data-artifact-tabs]').forEach(browser => {
     const tabs = [...browser.querySelectorAll('[role=tab]')]; const panes = [...browser.querySelectorAll('[role=tabpanel]')];
