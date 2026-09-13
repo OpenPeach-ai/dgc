@@ -1,0 +1,18 @@
+<figure class="instrument capture-figure capture-figure--compact reveal" aria-labelledby="fig7-title">
+  <figcaption class="figure-title" id="fig7-title"><span class="figure-id">FIG.7 · Live diff</span><span>Actual CLI · {{CAPTURE_DIFF_DURATION_LABEL}} · real cells, real time</span><span class="figure-state">/diff while a turn runs</span></figcaption>
+  <span class="crop tl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
+  <button class="capture-card capture-card--replay" type="button" data-open-capture="diff-capture" aria-controls="diff-capture" aria-haspopup="dialog" aria-expanded="false" aria-label="Open the {{CAPTURE_DIFF_DURATION_LABEL}} DGC live-diff screen recording with controls">
+    <img class="capture-poster" src="/assets/diff-capture-poster.jpg" width="1280" height="720" loading="lazy" decoding="async" alt="">
+    <pre class="term-replay" data-replay="/assets/diff-replay.json" data-cols="126" data-rows="32" hidden aria-hidden="true"></pre>
+    <span class="capture-shade" aria-hidden="true"></span>
+    <span class="capture-live" aria-hidden="true"><i></i><span data-capture-status data-playing="Auto-playing · {{CAPTURE_DIFF_DURATION_LABEL}}" data-paused="Motion paused · {{CAPTURE_DIFF_DURATION_LABEL}}">Auto-playing · {{CAPTURE_DIFF_DURATION_LABEL}}</span></span>
+    <span class="capture-expand" aria-hidden="true">Open controls ↗</span>
+  </button>
+  <p class="capture-caption">{{CAPTURE_DIFF_PROVENANCE}}</p>
+</figure>
+
+<dialog class="capture-dialog" id="diff-capture" data-capture-dialog aria-labelledby="diff-capture-title" aria-describedby="diff-capture-note">
+  <div class="capture-head"><span class="micro" id="diff-capture-title">DGC · /diff in the focus pane during a real turn · {{CAPTURE_DIFF_DURATION_LABEL}}</span><button type="button" data-close-capture aria-label="Close live-diff capture">×</button></div>
+  <video controls playsinline preload="none" data-capture-video data-poster="/assets/diff-capture-poster.jpg" aria-describedby="diff-capture-note"><source data-src="/assets/diff-capture.webm" type="video/webm"><source data-src="/assets/diff-capture.mp4" type="video/mp4"></video>
+  <p id="diff-capture-note">{{CAPTURE_DIFF_PROVENANCE}}</p>
+</dialog>

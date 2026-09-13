@@ -594,6 +594,53 @@ test("focus-pane figure replays the real terminal cells as text and keeps its re
   expect(runtime.httpErrors).toEqual([]);
 });
 
+test("live-diff figure replays the real terminal cells as text and keeps its recording dialog", async ({page}) => {
+  const runtime = observeRuntime(page);
+  const replayRequests = [];
+  page.on("request", request => {
+    if (/diff-replay\.json$|diff-capture\.(?:webm|mp4)$/.test(new URL(request.url()).pathname)) {
+      replayRequests.push(new URL(request.url()).pathname);
+    }
+  });
+  await page.goto("/", {waitUntil: "domcontentloaded"});
+  await settle(page);
+
+  const opener = page.locator('[data-open-capture="diff-capture"]');
+  const replay = opener.locator("pre.term-replay");
+  const poster = opener.locator("img.capture-poster");
+  await expect(replay).toBeHidden();
+  expect(replayRequests).toEqual([]);
+
+  await opener.scrollIntoViewIfNeeded();
+  await expect(replay).toHaveAttribute("data-hydrated", "true");
+  await expect(replay).toBeVisible();
+  await expect(poster).toBeHidden();
+  expect(replayRequests).toEqual(["/assets/diff-replay.json"]);
+  await expect.poll(() => replay.evaluate(pre => pre.children.length)).toBe(32);
+  // The replay starts with the prompt being typed; /diff opens a few seconds into the session.
+  await expect.poll(() => replay.evaluate(pre => pre.textContent.includes("DIFF")), {timeout: 25_000}).toBe(true);
+  const metrics = await replay.evaluate(pre => ({
+    fontSize: parseFloat(getComputedStyle(pre).fontSize),
+    scrollWidth: pre.scrollWidth, clientWidth: pre.clientWidth,
+    spans: pre.querySelectorAll("span").length,
+  }));
+  expect(metrics.fontSize).toBeGreaterThan(4);
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
+  expect(metrics.spans).toBeGreaterThan(10);
+
+  await opener.click();
+  const capture = page.locator("#diff-capture");
+  await expect(capture).toHaveAttribute("open", "");
+  await expect(capture.locator("video")).toHaveAttribute("data-hydrated", "true");
+  await expect(capture.locator("#diff-capture-note")).toContainText("actual cells");
+  await capture.locator("[data-close-capture]").click();
+  await expect(capture).not.toHaveAttribute("open", "");
+
+  expect(runtime.consoleErrors).toEqual([]);
+  expect(runtime.pageErrors).toEqual([]);
+  expect(runtime.httpErrors).toEqual([]);
+});
+
 test("editor capture preview selects the viewport-sized source", async ({page}) => {
   const posterRequests = [];
   page.on("request", request => {

@@ -1150,6 +1150,22 @@ class TUI:
             return
         self._mount_pane(occupant, "files · Enter inserts @path · q returns to DGC")
 
+    def _open_diff(self, arg: str = "") -> None:
+        """Open the /diff panel in the focus pane (or jump it to a changed file)."""
+        from .diffpane import DiffPane
+        current = self._pane if getattr(self._pane, "kind", "") == "diff" else None
+        if current is not None:
+            if arg.strip():
+                current._pending_start = arg.strip()
+                current.refresh()
+            else:
+                current.refresh()
+            self._pane_render_cache = None
+            self._invalidate()
+            return
+        occupant = DiffPane(self.config.project_root, host=self._files_host(), start=arg.strip() or None)
+        self._mount_pane(occupant, "diff · Enter opens a file · Space selects lines · q returns to DGC")
+
     def _files_host(self):
         """The narrow surface the explorer may touch: composer, mode, flash, changed paths."""
         tui = self
@@ -1258,7 +1274,8 @@ class TUI:
                     close()
                 except Exception:
                     pass
-            self._flash("back to work" if getattr(occupant, "kind", "") == "game" else "files closed")
+            kind = getattr(occupant, "kind", "")
+            self._flash("back to work" if kind == "game" else f"{kind or 'pane'} closed")
             self._invalidate()
 
     def _pause_pane(self, reason: str) -> None:
@@ -1275,7 +1292,8 @@ class TUI:
         if not self._pane_visible():
             return 0
         self._sync_width()
-        cap = 18 if getattr(self._pane, "kind", "") == "files" else 16
+        kind = getattr(self._pane, "kind", "")
+        cap = 22 if kind == "diff" else 18 if kind == "files" else 16
         target = min(cap, max(10, (self._height * 3) // 5))
         # The pane temporarily folds the task pane, so reserve header/chrome + four real transcript
         # rows. Tasks remain live in memory and reappear unchanged when the pane closes.
@@ -4030,6 +4048,8 @@ class TUI:
             self._open_bored_menu()
         elif cmd == "files":
             self._open_files(rest)
+        elif cmd == "diff":
+            self._open_diff(rest)
         elif cmd == "eta":
             self._show_eta(rest)
         elif cmd == "notify":

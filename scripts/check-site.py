@@ -58,6 +58,8 @@ STATIC_PUBLIC_FILES = {
     "assets/cli-capture-poster.jpg", "assets/cli-capture.mp4", "assets/cli-capture.webm",
     "assets/files-capture-poster.jpg", "assets/files-capture.mp4", "assets/files-capture.webm",
     "assets/files-replay.json",
+    "assets/diff-capture-poster.jpg", "assets/diff-capture.mp4", "assets/diff-capture.webm",
+    "assets/diff-replay.json",
     "assets/editor-capture-poster.jpg", "assets/editor-capture-poster-720.jpg",
     "assets/editor-capture.mp4", "assets/editor-capture.webm",
     "assets/hero-graded-poster.jpg", "assets/hero-mobile-poster.webp", "assets/hero-graded.mp4", "assets/hero-graded.webm",
@@ -586,6 +588,26 @@ CAPTURE_MEDIA_FILES = {
             "no user config or session persisted",
         ),
     },
+    "diff": {
+        "prefix": "diff-capture",
+        "width": 1280,
+        "height": 720,
+        "min_duration": 46.0,
+        "kind": "real_cli_local_model_focus_pane",
+        "required": {
+            "live_model": True,
+            "controlled_fixture": True,
+            "real_time": True,
+            "model_route": "local Ollama · qwen3.8:27b-q4km",
+        },
+        "provenance_terms": (
+            "Actual DGC ", "real local Ollama run", "qwen3.8:27b-q4km",
+            "disposable controlled fixture", "/diff opened and driven by real keystrokes",
+            "selected and attached to the next prompt",
+            "python3 -m unittest -v passed 3/3", "real time, no speed adjustment",
+            "no user config or session persisted",
+        ),
+    },
     "editor": {
         "prefix": "editor-capture",
         "width": 1440,
@@ -622,6 +644,11 @@ CAPTURE_KEYS = {
         "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
         "dgc_version", "files",
     },
+    "diff": {
+        "kind", "live_model", "controlled_fixture", "real_time", "keystrokes",
+        "duration_seconds", "duration_label", "provenance", "model_route", "time_compression",
+        "dgc_version", "files",
+    },
     "editor": {
         "kind", "live_model", "controlled_fixture", "deterministic_fixture", "real_time",
         "tool_sequence", "real_plan_button_click", "visible_editor_matches_diff",
@@ -654,7 +681,7 @@ def check_capture_manifest(errors: list[str]) -> None:
         return
     captures = manifest.get("captures")
     if not isinstance(captures, dict) or set(captures) != set(CAPTURE_MEDIA_FILES):
-        errors.append("capture-media.json: CLI, focus-pane and editor capture sets must all be declared")
+        errors.append("capture-media.json: CLI, focus-pane, live-diff and editor capture sets must all be declared")
         return
 
     declared: dict[str, str] = {}
@@ -676,9 +703,9 @@ def check_capture_manifest(errors: list[str]) -> None:
         if slug == "cli" and isinstance(provenance, str) \
                 and f"Actual current DGC {VERSION}" not in provenance:
             errors.append("capture-media.json: CLI provenance is not for the current release")
-        if slug == "files" and (capture.get("dgc_version") != VERSION or not isinstance(provenance, str)
-                                or f"Actual DGC {VERSION} " not in provenance):
-            errors.append("capture-media.json: focus-pane capture is not for the current release")
+        if slug in ("files", "diff") and (capture.get("dgc_version") != VERSION or not isinstance(provenance, str)
+                                          or f"Actual DGC {VERSION} " not in provenance):
+            errors.append(f"capture-media.json: {slug} capture is not for the current release")
         if not isinstance(provenance, str) or re.search(r"permission denied|denied|loop|retry", provenance, re.I):
             errors.append(f"capture-media.json: {slug}.provenance contains denied/retry evidence")
         factor = capture.get("time_compression")
@@ -715,7 +742,7 @@ def check_capture_manifest(errors: list[str]) -> None:
         expected_kinds = {"webm", "mp4", "poster"}
         if slug == "editor":
             expected_kinds.add("preview")
-        if slug == "files":
+        if slug in ("files", "diff"):
             expected_kinds.add("replay")
         if not isinstance(files, dict) or set(files) != expected_kinds:
             errors.append(
@@ -733,16 +760,16 @@ def check_capture_manifest(errors: list[str]) -> None:
             file_specs.append(
                 ("preview", "assets/editor-capture-poster-720.jpg", "mjpeg", 720, 450, False)
             )
-        if slug == "files":
+        if slug in ("files", "diff"):
             replay = files.get("replay")
-            replay_path = SITE / "assets" / "files-replay.json"
+            replay_path = SITE / "assets" / f"{slug}-replay.json"
             try:
                 raw_replay = replay_path.read_bytes()
                 payload = json.loads(raw_replay.decode("utf-8"))
                 frames = payload.get("frames") if isinstance(payload, dict) else None
                 if (not isinstance(replay, dict)
                         or set(replay) != {"path", "sha256", "bytes", "frames", "cols", "rows", "duration_seconds"}
-                        or replay.get("path") != "assets/files-replay.json"
+                        or replay.get("path") != f"assets/{slug}-replay.json"
                         or replay.get("sha256") != hashlib.sha256(raw_replay).hexdigest()
                         or replay.get("bytes") != len(raw_replay)
                         or not isinstance(frames, list) or len(frames) < 40
@@ -751,11 +778,11 @@ def check_capture_manifest(errors: list[str]) -> None:
                         or not (isinstance(frames[0], dict) and isinstance(frames[0].get("full"), list)
                                 and len(frames[0]["full"]) == payload.get("rows"))
                         or len(raw_replay) > 1_500_000):
-                    errors.append("capture-media.json: files.replay disagrees with assets/files-replay.json")
+                    errors.append(f"capture-media.json: {slug}.replay disagrees with assets/{slug}-replay.json")
                 elif any(not isinstance(f, dict) or ("full" not in f and not isinstance(f.get("d"), dict)) for f in frames):
-                    errors.append("capture-media.json: files.replay frames are malformed")
+                    errors.append(f"capture-media.json: {slug}.replay frames are malformed")
             except (OSError, UnicodeError, ValueError) as exc:
-                errors.append(f"capture-media.json: files.replay could not be validated ({exc})")
+                errors.append(f"capture-media.json: {slug}.replay could not be validated ({exc})")
         for kind, expected_path, codec, width, height, is_video in file_specs:
             record = files.get(kind)
             if not isinstance(record, dict):

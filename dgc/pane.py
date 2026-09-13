@@ -1,11 +1,11 @@
 """The focus pane: one renderer-neutral frame contract shared by every occupant of the split under
-the transcript (the hidden arcade and the ``/files`` explorer).
+the transcript (the hidden arcade, the ``/files`` explorer and the ``/diff`` panel).
 
 A pane occupant owns no terminal, process, or model resources.  prompt_toolkit remains the sole
 renderer and input owner, so agent output keeps streaming above the pane while it is visible.
 
 Occupant protocol (duck-typed; see :class:`PaneOccupant`):
-  ``kind`` (``game`` | ``files``), ``key``, ``paused``, ``text_input`` (letters are content, so Q/P/R
+  ``kind`` (``game`` | ``files`` | ``diff``), ``key``, ``paused``, ``text_input`` (letters are content, so Q/P/R
   are not commands), ``raw_text_input`` (every printable character is content and must keep its case),
   ``handle_key(key) -> exit|changed|ignored``, ``handle_text(text) -> bool``, ``advance() -> revision``,
   ``snapshot(width, height) -> PaneFrame``, ``pause(reason)``, ``resume()``, ``hint_chips()``.
@@ -135,6 +135,22 @@ def _style(role: str, theme) -> str:
         "file-prompt-label": f"bold {theme.accent_bright}",
         "file-confirm": f"bold {theme.warn}",
         "file-meta": theme.muted,
+        # /diff panel
+        "diff-meta": theme.muted,
+        "diff-rule": theme.border_strong,
+        "diff-path": theme.text,
+        "diff-untracked": theme.muted,
+        "diff-cursor": f"bold {theme.text_strong} on {theme.accent_dim}",
+        "diff-add-count": f"bold {theme.diff_add}",
+        "diff-del-count": f"bold {theme.diff_del}",
+        "diff-hunk": f"bold {theme.accent_bright}",
+        "diff-lineno": theme.faint,
+        "diff-add": theme.diff_add,
+        "diff-del": theme.diff_del,
+        "diff-ctx": theme.text,
+        "diff-sel": f"bold {theme.text_strong} on {theme.surface2}",
+        "diff-sel-add": f"bold {theme.diff_add} on {theme.surface2}",
+        "diff-sel-del": f"bold {theme.diff_del} on {theme.surface2}",
     }
     return styles.get(role, theme.text)
 
