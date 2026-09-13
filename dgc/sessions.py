@@ -378,7 +378,9 @@ def metrics_of(path, project_root) -> dict:
     return _load_metrics(path, project_root)
 
 
-TODO_STATUSES = ("pending", "in_progress", "done")
+# Mirrors dgc.tools.TODO_STATUSES (sessions imports no tool code): a save that flattened a
+# blocked row to pending made a parked item draw reminders again after every resume.
+TODO_STATUSES = ("pending", "in_progress", "done", "blocked")
 
 
 def save(path: Path, messages: list, project_root, name: str | None = None,

@@ -10793,6 +10793,25 @@ def test_benchmark_integrity():
               and {section.get("name") for section in _prompt_probe.get("system_sections", [])}
                   >= {"# Environment", "# How to work", "# Response cadence",
                       "# Permission mode: auto"})
+        # The probe reports section sizes only; read the cadence section itself off the same
+        # isolated agent the probe measures, so the two restored bullets cannot silently go again.
+        with _tf.TemporaryDirectory(prefix="dgc-prompt-cadence-") as _cadence_root:
+            _cadence_agent = _PS.Agent(_PS._isolated_config(_P(_cadence_root)), _PS._QuietUI())
+            try:
+                _cadence_prompt = _cadence_agent.system_prompt()
+            finally:
+                _cadence_agent.mcp.stop_all()
+        _cadence = _cadence_prompt.split("# Response cadence", 1)[-1].split("\n# ", 1)[0]
+        check("response cadence keeps both restored bullets verbatim",
+              "# Response cadence" in _cadence_prompt
+              and "Before EACH group of tool calls, not just the first" in _cadence
+              and "Do not narrate trivial reads or repeat the prompt or tool cards" in _cadence)
+        from dgc.tools import TOOL_SCHEMAS as _todo_tool_schemas
+        _todo_schema = next(t["function"] for t in _todo_tool_schemas if t["function"]["name"] == "todo")
+        _todo_schema_text = json.dumps(_todo_schema)
+        check("todo tool schema stays slim (no length/count bounds, description <= 90 chars)",
+              not any(key in _todo_schema_text for key in ('"minLength"', '"maxLength"', '"maxItems"'))
+              and len(_todo_schema["description"]) <= 90)
         check("runtime overhead probe reports deterministic nearest-rank distributions",
               _RM.summarize_ms([4, 1, 3, 2]) == {
                   "samples": 4, "median_ms": 2.5, "p95_ms": 4.0, "mean_ms": 2.5})
@@ -13603,13 +13622,13 @@ def test_editor_approval_gate():
 
     root = _Path(_tempfile.mkdtemp(prefix="dgc-gate-")).resolve()
     (root / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
-    check("protocol v11 carries tool images, and only as an array",
+    check("protocol v12 carries tool images, and only as an array",
           _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                            "images": ["data:image/png;base64,AAAA"], "caption": "shot"}) is None
           and _EP.event_error({"type": "tool_images", "seq": 0, "call_id": "c1",
                                "images": "data:image/png;base64,AAAA"}) is not None)
-    check("protocol v11 declares the summary, the diff and the denial note",
-          _EP.PROTOCOL_VERSION == 11
+    check("protocol v12 declares the summary, the diff and the denial note",
+          _EP.PROTOCOL_VERSION == 12
           and _EP.event_error({"type": "permission_request", "seq": 0, "id": "r1", "name": "edit_file",
                                "args": {}, "suggested_rule": "Edit", "choices": [], "summary": "app.py",
                                "diff": "--- a\n+++ b"}) is None
@@ -19048,6 +19067,7 @@ def test_surfaced_feature_commands():
                 if isinstance(node, ast.Constant) and isinstance(node.value, str)}
     tui_routes = route_literals(TUI._handle_slash)
     classic_routes = route_literals(CLI.handle_slash)
+    check("todo routes in both terminal handlers", "todo" in tui_routes and "todo" in classic_routes)
 
     # (A) code-action — advertised on classic/TUI/editor, and its editor action has a panel route.
     ca = resolve_command("code-action", "tui")

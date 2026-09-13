@@ -160,6 +160,8 @@ BUILTIN_COMMANDS: tuple[CommandSpec, ...] = (
                 aliases=("feedback", "report", "issue")),
     CommandSpec("update", "update DGC to the latest version",
                 frozenset({"tui", "classic", "editor"}), "update"),
+    CommandSpec("todo", "drop the session checklist the model left behind", _TC,
+                accepts_args=True, usage="todo clear"),
     CommandSpec("clear", "clear the transcript", _TCE, "clear"),
     # A private TUI easter egg: reserved and routable, but intentionally absent from command
     # palettes, completions, help, editor metadata, and every non-interactive surface.

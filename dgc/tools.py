@@ -49,6 +49,21 @@ MAX_BASH_OUT_VERIFY = 50000      # verify/test runs keep more, tail-weighted —
                                  # assertions + pass/fail summary at the END, which a head-biased window elides (#7)
 MAX_BASH_RETAIN_CHARS = 2_000_000
 MAX_BASH_RETAINED_RESULTS = 16
+MAX_TODOS = 100                  # checklist rows the editor protocol and session store carry
+MAX_TODO_CHARS = 500             # per-row content; longer text is truncated, not rejected
+TODO_STATUSES = ("pending", "in_progress", "done", "blocked")
+# Local models and ACP clients write the statuses they have seen elsewhere ("completed",
+# "in progress", "todo"). Normalise before validating so a done mark always lands; anything
+# outside this table is a real error and names the row.
+_TODO_STATUS_SYNONYMS = {
+    "pending": "pending", "todo": "pending", "open": "pending", "not_started": "pending",
+    "not started": "pending", "waiting": "pending",
+    "in_progress": "in_progress", "in-progress": "in_progress", "in progress": "in_progress",
+    "doing": "in_progress", "active": "in_progress", "started": "in_progress", "working": "in_progress",
+    "done": "done", "completed": "done", "complete": "done", "finished": "done", "closed": "done",
+    "resolved": "done",
+    "blocked": "blocked", "stuck": "blocked",
+}
 
 _TEST_CMD_RE = re.compile(
     r"\b(pytest|py\.test|unittest|nose2?|tox|cargo\s+test|go\s+test|jest|vitest|mocha|ctest|"
@@ -222,11 +237,12 @@ TOOL_SCHEMAS = [
                                                    "Omit to list the most recent notes."},
          "file": {"type": "string", "description": "Only notes about this file"},
          "limit": {"type": "integer", "description": "How many notes (default 8, max 25)"}}, []),
-    _fn("todo", "Replace the full checklist; retain completed steps and update statuses as work progresses.",
-        {"todos": {"type": "array", "maxItems": 100, "items": {"type": "object", "properties": {
-            "content": {"type": "string", "minLength": 1, "maxLength": 500},
-            "status": {"type": "string", "enum": ["pending", "in_progress", "done"]}},
-            "required": ["content", "status"]}}}, ["todos"]),
+    # The executor bounds rows/content and requires both fields with row-indexed errors, so the wire
+    # schema carries none of that: every keyword here is paid for on every request (prompt gate).
+    _fn("todo", "Replace the whole checklist, keeping done steps.",
+        {"todos": {"type": "array", "items": {"type": "object", "properties": {
+            "content": {"type": "string"},
+            "status": {"type": "string", "enum": list(TODO_STATUSES)}}}}}, ["todos"]),
     _fn("skill", "Load a skill (reusable instruction package) by name. Use when a listed skill matches the task.",
         {"name": {"type": "string"}, "args": {"type": "string", "default": ""}}, ["name"]),
     _fn("add_skill", "Install a skill from a URL (a raw SKILL.md, or a GitHub link to one). Use when the "
@@ -3217,29 +3233,40 @@ def notes_tool(args: dict, ctx) -> str:
 
 
 def todo(args: dict, ctx) -> str:
-    # Validate before replacing state: malformed/local-model tool output must not erase a plan
-    # or emit a checklist too large for the editor protocol and session persistence.
+    # Validate the whole replacement before touching state: malformed local-model output must not
+    # erase a plan, and the list must stay within what the editor protocol and session store carry.
+    # Errors name the 1-based row so a model fixing a 40-item list knows which one to change.
     rows = args.get("todos")
-    if not isinstance(rows, list) or len(rows) > 100:
-        return "error: todos must be an array of at most 100 tasks"
+    if not isinstance(rows, list):
+        return "error: todos must be an array of {content, status} rows"
+    if len(rows) > MAX_TODOS:
+        return f"error: todos has {len(rows)} rows; at most {MAX_TODOS} are kept — merge or drop finished steps"
     normalized = []
-    for item in rows:
+    for index, item in enumerate(rows, 1):
         if not isinstance(item, dict):
-            return "error: each todo must have content and status"
-        content, status = item.get("content"), item.get("status")
-        if not isinstance(content, str) or not content.strip() or len(content) > 500:
-            return "error: todo content must contain 1-500 characters"
-        if status not in ("pending", "in_progress", "done"):
-            return "error: todo status must be pending, in_progress, or done"
-        normalized.append({"content": content.strip(), "status": status})
+            return f"error: todo row {index} must be an object with content and status"
+        content = item.get("content")
+        content = content.strip() if isinstance(content, str) else ""
+        if not content:
+            return f"error: todo row {index} has empty content"
+        raw_status = item.get("status")
+        # A row without a status is a step not yet started; only a non-empty, unrecognised
+        # status is a mistake worth bouncing the whole list for.
+        status_text = str(raw_status).strip().lower() if raw_status is not None else ""
+        status = _TODO_STATUS_SYNONYMS.get(status_text) if status_text else "pending"
+        if status is None:
+            preview = content[:40] + ("…" if len(content) > 40 else "")
+            return (f"error: todo row {index} ({preview!r}) has unknown status {raw_status!r}; "
+                    f"use one of {', '.join(TODO_STATUSES)}")
+        normalized.append({"content": content[:MAX_TODO_CHARS], "status": status})
     ctx.todos = normalized
     if ctx.on_todo:
         ctx.on_todo(ctx.todos)
     if not ctx.todos:
         return "todo list cleared"
+    marks = {"done": "x", "in_progress": "~", "blocked": "!"}
     return "todo list updated:\n" + "\n".join(
-        f"[{'x' if t['status'] == 'done' else '~' if t['status'] == 'in_progress' else ' '}] {t['content']}"
-        for t in ctx.todos)
+        f"[{marks.get(t['status'], ' ')}] {t['content']}" for t in ctx.todos)
 
 
 def skill_tool(args: dict, ctx) -> str:

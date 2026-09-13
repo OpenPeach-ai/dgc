@@ -62,7 +62,7 @@ _BUSY_MUTATIONS = {
     # `set_config` is not here: a setting that only shapes the NEXT request is safe to change while
     # a turn runs, and refusing all of them meant a user could not raise the context window without
     # abandoning the work that made them want to. The handler gates the unsafe keys itself.
-    "set_model", "set_think", "clear_session", "resume_session",
+    "set_model", "set_think", "clear_session", "resume_session", "clear_todos",
     "delete_session", "rewind", "compact", "set_workspace_roots", "set_goal", "start_goal",
     "resolve_retained_task", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "generate_handoff", "name_session",
     "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command",
@@ -74,7 +74,7 @@ _OPTIONALLY_CORRELATED_COMMANDS = frozenset({
     "set_workspace_roots", "set_mode", "set_model", "set_think", "set_goal", "get_goal",
     "get_plan", "new_session", "clear_session", "resume_session", "list_sessions", "get_recall",
     "delete_session", "fork_session", "list_checkpoints", "rewind", "list_retained_tasks",
-    "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config",
+    "resolve_retained_task", "compact", "list_artifacts", "stop_artifact", "set_config", "clear_todos",
     "get_config", "status", "name_session", "reload_skills", "set_skill_enabled", "create_skill", "install_skill", "get_skill", "list_docs", "get_doc",
     "list_mcp_servers", "upsert_mcp_server", "remove_mcp_server", "reload_mcp_servers",
     "list_mcp_context", "get_mcp_context", "set_mcp_enabled", "reconnect_mcp_server", "mcp_command", "get_history",
@@ -1277,6 +1277,18 @@ class Backend:
             "text": getattr(self.agent, "goal", ""), "status": getattr(self.agent, "goal_status", "none"),
             "elapsed_seconds": self._goal_elapsed_seconds()}
 
+    def _emit_history(self, request_id: str | None = None) -> None:
+        """Replay the transcript together with the checklist that belongs to it.
+
+        Every path that repopulates a panel -- resume, reload, rewind -- comes through here, so
+        the list the editor shows is the one the completion gate enforces. A snapshot without it
+        left the panel blank while the backend still reminded the model about the items.
+        """
+        todos = getattr(self.agent, "todos", None) or []
+        self.em.emit("history", items=self._history(),
+                     todos=redact_value(list(todos), secret_values(self.config)),
+                     **_request_fields(request_id))
+
     def _history(self) -> list:
         """A display transcript of the current conversation (for resuming in a UI)."""
         items = []
@@ -2138,16 +2150,25 @@ class Backend:
                              session_id=Path(path).stem,
                              name=str(self.agent.session_name or ""),
                              **_request_fields(request_id))
-                self.em.emit("history", items=self._history(),
-                             todos=redact_value(self.agent.todos, secret_values(self.config)))
+                self._emit_history()
                 self._emit_context()
                 self._emit_goal()
             else:
                 self.em.emit("error", message="no session to resume",
                              **_request_fields(request_id))
         elif t == "get_history":
-            self.em.emit("history", items=self._history(), request_id=cmd["request_id"],
-                         todos=redact_value(self.agent.todos, secret_values(self.config)))
+            self._emit_history(cmd["request_id"])
+        elif t == "clear_todos":
+            # A list the model left behind, or a resumed session brought back, used to have no
+            # exit short of a new chat: every later turn was reminded about it. Clear it through
+            # the agent's own callback so the ETA estimator and every frontend see the same
+            # empty list; the `todos` event is the acknowledgement. The clear is saved with the
+            # session; when that save fails the list is still empty here, so say so rather than
+            # reject a command that did take effect.
+            if not self.agent.clear_todos():
+                self.em.emit("error", message=getattr(self.agent, "_last_persist_error", "")
+                             or "todo list cleared, but the session could not be saved",
+                             **_request_fields(request_id))
 
         elif t == "get_recall":
             # Compaction folds older turns into a summary and drops them from the live message
@@ -2222,7 +2243,7 @@ class Backend:
             self.em.emit("rewound", ok=ok, files_restored=nfiles,
                          **_request_fields(request_id))
             if ok:
-                self.em.emit("history", items=self._history())
+                self._emit_history()
                 self._emit_context()
         elif t == "list_retained_tasks":
             self._emit_retained_tasks(request_id)

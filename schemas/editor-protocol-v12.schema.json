@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vibedgc:editor-protocol:v11",
-  "title": "DGC editor protocol v11",
+  "$id": "urn:vibedgc:editor-protocol:v12",
+  "title": "DGC editor protocol v12",
   "description": "A DGC editor command or backend event frame.",
   "oneOf": [
     {
@@ -2593,6 +2593,9 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "todos": {
+              "type": "array"
             }
           },
           "required": [
@@ -4090,6 +4093,21 @@
           "required": [
             "type",
             "index"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "clear_todos"
+            },
+            "request_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": false
         },

@@ -1,13 +1,24 @@
 {
   "refreshed_at": "2026-09-10T17:05:24Z",
   "source": "https://github.com/OpenPeach-ai/dgc/releases",
-  "cli_releases_last_14_days": 15,
+  "cli_releases_last_14_days": 16,
   "cli": [
+    {
+      "version": "0.38.1",
+      "date": "2026-09-13",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.1",
+      "status": "current",
+      "notes": [
+        "The task list has one owner. The todo tool replaced the tool context's list while the agent kept a stale copy, so a new chat could inherit the previous chat's unfinished tasks and a standing goal could accept a completion report over pending work. The context list is canonical now; a replacement is validated as a whole — bounded, row-indexed errors, common status synonyms accepted, over-long text truncated — so a malformed local-model call cannot erase a plan; task text passes session redaction; and a new blocked status lets the model park a step honestly instead of pretending it is pending or done.",
+        "Finishing with open todos is a visible notice, not a failure. After its two reminders DGC completes the turn and names what remains (blocked steps excluded) rather than ending the turn as an error: a hard stop there would have paused every standing goal at each cycle boundary, made dgc -p exit 1 for finished work, and failed every later turn of a resumed session that still carried an old list. A standing goal whose only open steps are blocked now ends as blocked with those steps named. /todo clear drops a list the model left behind, and the clear is persisted.",
+        "Editor protocol v12, shipped together with extension 0.23.0: history snapshots carry the checklist, so a resumed or reloaded editor shows the same tasks the backend enforces (the rewind path included), and a clear_todos command backs the editor's Clear button. Also: the offscreen renderer respects the terminal height under TERM=dumb, and the response-cadence instructions that a token-budget squeeze had silently removed are back."
+      ]
+    },
     {
       "version": "0.38.0",
       "date": "2026-09-13",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.0",
-      "status": "current",
+      "status": "past",
       "notes": [
         "/diff: every changed file, its counts and its diff, live under the transcript. The focus pane gains a second occupant beside /files: a read-only view of the working tree against HEAD — staged and untracked files included — with +/− line counts per file, the set summed in the header, and a unified diff with new-side line numbers. It re-reads Git every two seconds while open, so the model's edits appear as they land, and it never writes, stages or runs a shell command.",
         "Lines you select in a diff become part of your next prompt. Space starts a selection, Enter attaches it to the composer as a fenced diff block headed by the file and line range, and a takes the whole hunk — so \"why did you change these two lines?\" quotes exactly those two lines and nothing else about the file enters the model's context. Wide terminals show the list and the diff side by side; narrow ones swap between them with Tab.",
@@ -354,10 +365,21 @@
   ],
   "extension": [
     {
+      "version": "0.23.0",
+      "date": "2026-09-13",
+      "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.38.1",
+      "status": "current",
+      "notes": [
+        "Editor protocol v12; requires DGC CLI 0.38.1. A mismatched pair is refused at the handshake with a message that says which side to update, instead of failing on the first event.",
+        "One session checklist above the composer, with a Clear button, replaces the task card per turn: it never scrolls you away from what you were reading, restores with the session, empties with a new chat, and shows blocked steps distinctly.",
+        "Setup text no longer advertises protocol v7 / CLI 0.32.0."
+      ]
+    },
+    {
       "version": "0.22.4",
       "date": "2026-09-13",
       "url": "https://github.com/OpenPeach-ai/dgc/releases/tag/v0.37.3",
-      "status": "current",
+      "status": "past",
       "notes": [
         "A finished goal stops being a pinned goal: a completed objective stayed on the rail with a play button, so the obvious next click resumed work that was already done. Paused and blocked goals still offer Resume.",
         "The backend's log survives when nobody is watching — an output channel only reaches disk once opened, which is never the case for an unattended run. stderr and the exit reason are also appended, timestamped, to backend.log in the extension's log directory.",

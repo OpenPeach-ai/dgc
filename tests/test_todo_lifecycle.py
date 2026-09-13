@@ -1,18 +1,80 @@
 """Checklist state must agree across tools, goal completion, session reset and display."""
+import contextlib
 import copy
+import os
+import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from dgc import sessions
-from dgc.agent import Agent
-from dgc.config import Config, DEFAULTS
-from dgc.editor_protocol import event_error
-from dgc.headless import Backend
-from dgc.llm import ChatResult, ToolCall
-from dgc.tools import execute
+# Run standalone (python -m unittest tests.test_todo_lifecycle) this module must be as hermetic as
+# tests/run_tests.py: an Agent takes its workspace lease under HOME/.dgc/locks and the system
+# prompt loads ~/.dgc memory and skills. Redirect HOME before any dgc module computes USER_HOME.
+# When dgc is already imported (run_tests.py, or another test module loaded first) that
+# redirection must already have happened: verify it against the account's real home, loudly,
+# rather than assume whoever imported dgc did it.
+
+
+def _real_account_home() -> Path:
+    try:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=False)
+    except (ImportError, KeyError, AttributeError):        # no passwd database (Windows)
+        return Path(os.path.expanduser("~")).resolve(strict=False)
+
+
+if "dgc.config" in sys.modules:
+    _user_home = Path(sys.modules["dgc.config"].USER_HOME).resolve(strict=False)
+    _account_home = _real_account_home()
+    if _user_home == _account_home or _account_home in _user_home.parents:
+        raise RuntimeError(
+            "tests/test_todo_lifecycle.py needs HOME redirected before dgc is imported — run it "
+            "through tests/run_tests.py or with HOME=<tmp>")
+else:
+    _ISOLATED_HOME = tempfile.TemporaryDirectory(prefix="dgc-todo-tests-home-")
+    os.environ["HOME"] = os.path.realpath(_ISOLATED_HOME.name)
+    os.environ["USERPROFILE"] = os.environ["HOME"]
+    os.environ.pop("XDG_CONFIG_HOME", None)
+    os.environ.pop("XDG_DATA_HOME", None)
+
+from dgc import sessions  # noqa: E402
+from dgc.agent import Agent  # noqa: E402
+from dgc.config import Config, DEFAULTS  # noqa: E402
+from dgc.editor_protocol import event_error  # noqa: E402
+from dgc.headless import Backend  # noqa: E402
+from dgc.llm import ChatResult, ToolCall  # noqa: E402
+from dgc.tools import MAX_TODO_CHARS, execute  # noqa: E402
+
+_REMINDER = "You're stopping but these todos are still open"
+
+
+class RecordingUI:
+    """The AgentUI seam as a recorder: notices, errors and checklist pushes are kept, everything
+    else is a no-op. It carries none of the markers the agent duck-types a terminal on (a Rich
+    console, the TUI flash line, `non_interactive`) so a test opts into that shape explicitly."""
+    non_interactive = False
+
+    def __init__(self):
+        self.infos, self.errors, self.todo_lists = [], [], []
+
+    def info(self, message):
+        self.infos.append(message)
+
+    def error(self, message):
+        self.errors.append(message)
+
+    def on_todo(self, todos):
+        self.todo_lists.append(list(todos))
+
+    def notices(self):
+        return [message for message in self.infos if message.startswith("finished with")]
+
+    def __getattr__(self, name):
+        if name.startswith("_") or name == "console":
+            raise AttributeError(name)
+        return lambda *args, **kwargs: None
 
 
 class TodoLifecycleTests(unittest.TestCase):
@@ -31,10 +93,8 @@ class TodoLifecycleTests(unittest.TestCase):
                         max_turns=8, thinking="off")
         cfg._stored_secrets, cfg._env_secret_keys = {}, set()
         cfg.permissions = {"allow": [], "ask": [], "deny": []}
-        class UI:
-            def __getattr__(self, name):
-                return lambda *args, **kwargs: None
-        self.agent = Agent(cfg, UI())
+        self.ui = RecordingUI()
+        self.agent = Agent(cfg, self.ui)
         self.agent.session_file = sessions.new_path(self.root)
         self.addCleanup(self.agent.mcp.stop_all)
         self.events = []
@@ -47,6 +107,21 @@ class TodoLifecycleTests(unittest.TestCase):
 
     def update(self, rows):
         return execute("todo", {"todos": rows}, self.agent.ctx)
+
+    def reminders(self) -> int:
+        return sum(1 for m in self.agent.messages if _REMINDER in str(m.get("content", "")))
+
+    @staticmethod
+    def script(*results):
+        """A model that answers with `results` in order, then repeats the last one."""
+        calls = []
+
+        def chat(messages, **kwargs):
+            calls.append(messages)
+            return results[min(len(calls), len(results)) - 1]
+        return chat, calls
+
+    # --- one canonical list -------------------------------------------------------------------
 
     def test_goal_and_tool_use_the_same_current_checklist(self):
         self.update([{"content": "Check the result", "status": "pending"}])
@@ -63,16 +138,94 @@ class TodoLifecycleTests(unittest.TestCase):
                 self.assertEqual(self.agent.ctx.todos, [])
                 self.assertEqual(self.agent.todos, [])
 
-    def test_goal_cannot_accept_a_completion_report_with_pending_tasks(self):
-        self.agent.set_goal("Finish all required work")
-        self.update([{"content": "Required check", "status": "pending"}])
-        def step(_prompt):
-            self.agent._handle_call(ToolCall("report", "update_goal", {
-                "status": "completed", "summary": "Claimed complete", "evidence": ["Claim"]}))
-            return True
-        self.agent._run_turn = step
-        self.agent.run_turn("Continue")
-        self.assertNotEqual(self.agent.goal_status, "completed")
+    def test_agent_clear_todos_empties_the_list_and_tells_the_frontend(self):
+        self.update([{"content": "Stale", "status": "pending"}])
+        held = self.agent.ctx.todos
+        self.agent.clear_todos()
+        self.assertEqual(self.agent.todos, [])
+        self.assertIs(self.agent.ctx.todos, held)          # cleared in place: the context list is canonical
+        self.assertEqual(self.ui.todo_lists[-1], [])
+
+    def test_clear_todos_is_saved_so_a_resumed_session_stays_empty(self):
+        self.update([{"content": "Stale", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        self.assertTrue(self.agent._persist())
+        saved = self.agent.session_file
+        self.assertIs(self.agent.clear_todos(), True)
+        self.assertEqual(self.ui.todo_lists[-1], [])
+        self.agent.reset()
+        self.agent.load_session(saved)
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual(self.agent.ctx.todos, [])
+
+    def test_clear_todos_reports_a_failed_save_but_still_clears(self):
+        self.update([{"content": "Stale", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "Plan it"})
+        with patch.object(self.agent, "_persist", return_value=False) as persist:
+            self.assertIs(self.agent.clear_todos(), False)
+        persist.assert_called_once()
+        self.assertEqual(self.agent.todos, [])
+        # Nothing saved yet (no turns): there is no record to update, so the clear is simply true.
+        self.agent.messages.clear()
+        self.update([{"content": "Again", "status": "pending"}])
+        with patch.object(self.agent, "_persist") as persist:
+            self.assertIs(self.agent.clear_todos(), True)
+        persist.assert_not_called()
+        self.assertEqual(self.agent.todos, [])
+
+    # --- the tool: validation, normalisation, bounds ------------------------------------------
+
+    def test_invalid_tool_payload_is_atomic_and_bounded(self):
+        before = [{"content": "Keep this task", "status": "pending"}]
+        for value in (None, "not a list", [None], [{"content": "", "status": "pending"}],
+                      [{"status": "pending"}], [{"content": "Task", "status": "invented"}],
+                      before * 101):
+            with self.subTest(value=str(value)[:60]):
+                self.update(before)
+                self.assertTrue(self.update(value).startswith("error:"))
+                self.assertEqual(self.agent.ctx.todos, before)
+        self.assertEqual(self.update([]), "todo list cleared")
+
+    def test_a_row_without_a_status_is_a_pending_step(self):
+        # A local model often omits the field on a fresh step; only a non-empty, unrecognised
+        # status is worth bouncing the whole list for.
+        for rows in ([{"content": "Task"}], [{"content": "Task", "status": None}],
+                     [{"content": "Task", "status": ""}], [{"content": "Task", "status": "  "}]):
+            with self.subTest(rows=rows):
+                self.assertTrue(self.update(rows).startswith("todo list updated:"))
+                self.assertEqual(self.agent.ctx.todos, [{"content": "Task", "status": "pending"}])
+        self.assertIn("unknown status 'invented'",
+                      self.update([{"content": "Task", "status": "invented"}]))
+
+    def test_todo_errors_name_the_row_and_preview_its_content(self):
+        long_row = "Second row with a description that runs well past forty characters"
+        error = self.update([{"content": "ok", "status": "pending"}, {"content": long_row, "status": "invented"}])
+        self.assertIn("row 2", error)
+        self.assertIn(repr(long_row[:40] + "…"), error)
+        self.assertIn("'invented'", error)
+        self.assertIn("pending, in_progress, done, blocked", error)
+        self.assertIn("row 2", self.update([{"content": "ok", "status": "done"}, None]))
+        self.assertIn("row 1", self.update([{"content": "   ", "status": "pending"}]))
+        self.assertIn("101 rows", self.update([{"content": "x", "status": "done"}] * 101))
+        self.assertEqual(self.agent.ctx.todos, [])         # every rejection left the list untouched
+
+    def test_todo_statuses_normalise_common_synonyms(self):
+        result = self.update([
+            {"content": "A", "status": "Completed"}, {"content": "B", "status": "in progress"},
+            {"content": "C", "status": " TODO "}, {"content": "D", "status": "stuck"},
+            {"content": "E", "status": "finished"}, {"content": "F", "status": "doing"},
+            {"content": "G", "status": "not started"}, {"content": "H", "status": "blocked"}])
+        self.assertEqual([t["status"] for t in self.agent.ctx.todos],
+                         ["done", "in_progress", "pending", "blocked", "done", "in_progress", "pending", "blocked"])
+        self.assertEqual(result.splitlines()[1:5], ["[x] A", "[~] B", "[ ] C", "[!] D"])
+        self.assertEqual(self.ui.todo_lists[-1], self.agent.ctx.todos)
+
+    def test_overlong_todo_content_is_truncated_not_rejected(self):
+        result = self.update([{"content": "  " + "x" * (MAX_TODO_CHARS + 100), "status": "pending"}])
+        self.assertTrue(result.startswith("todo list updated:"))
+        self.assertEqual(self.agent.ctx.todos[0]["content"], "x" * MAX_TODO_CHARS)
+
+    # --- persistence --------------------------------------------------------------------------
 
     def test_saved_checklist_redacts_credentials_like_the_transcript(self):
         token = "sk-proj-todo-secret-fixture-0123456789"
@@ -98,21 +251,24 @@ class TodoLifecycleTests(unittest.TestCase):
         self.assertEqual(self.events[-1].get("todos"), rows)
         self.assertEqual(self.events[-1]["request_id"], "reload")
 
-    def test_invalid_tool_payload_is_atomic_and_bounded(self):
-        before = [{"content": "Keep this task", "status": "pending"}]
-        for value in (None, "not a list", [None], [{"content": "", "status": "pending"}],
-                      [{"content": "Task", "status": "invented"}],
-                      [{"content": "x" * 501, "status": "pending"}], before * 101):
-            with self.subTest(value=str(value)[:60]):
-                self.update(before)
-                self.assertTrue(self.update(value).startswith("error:"))
-                self.assertEqual(self.agent.ctx.todos, before)
-        self.assertEqual(self.update([]), "todo list cleared")
+    def test_blocked_status_survives_save_and_resume(self):
+        # A blocked item is parked deliberately; a save that flattens it to pending would make it
+        # draw reminders again after every resume. (sessions.TODO_STATUSES must carry "blocked".)
+        rows = [{"content": "Needs the upstream fix", "status": "blocked"}]
+        self.update(rows)
+        self.agent.messages.append({"role": "user", "content": "Park it"})
+        self.assertTrue(self.agent._persist())
+        saved = self.agent.session_file
+        self.agent.reset()
+        self.agent.load_session(saved)
+        self.assertEqual(self.agent.todos, rows)
 
     def test_acp_resume_replays_the_current_plan(self):
         from dgc.acp import ACPServer
+        # ACP plan entries know pending | in_progress | completed: a blocked step shows as pending.
         self.update([{"content": "Inspect", "status": "done"},
-                     {"content": "Verify", "status": "in_progress"}])
+                     {"content": "Verify", "status": "in_progress"},
+                     {"content": "Wait for the upstream fix", "status": "blocked"}])
         self.agent.messages.append({"role": "user", "content": "Finish the work"})
         self.assertTrue(self.agent._persist())
         server, wire = ACPServer(), []
@@ -129,15 +285,448 @@ class TodoLifecycleTests(unittest.TestCase):
                  and row["params"]["update"].get("sessionUpdate") == "plan"]
         self.assertEqual(plans, [{"sessionUpdate": "plan", "entries": [
             {"content": "Inspect", "priority": "medium", "status": "completed"},
-            {"content": "Verify", "priority": "medium", "status": "in_progress"}]}])
+            {"content": "Verify", "priority": "medium", "status": "in_progress"},
+            {"content": "Wait for the upstream fix", "priority": "medium", "status": "pending"}]}])
 
-    def test_repeated_final_answers_do_not_complete_with_unresolved_tasks(self):
+    # --- completion semantics -----------------------------------------------------------------
+
+    def test_two_ignored_reminders_then_the_turn_completes_with_a_notice(self):
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("plan", "todo", {"todos": [
+                {"content": "Run the required check", "status": "pending"}]})]),
+            ChatResult(content="All done."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Finish the checklist"))
+        self.assertEqual(len(calls), 4)                    # tool call, two reminders, the accepted final
+        self.assertEqual(self.reminders(), 2)
+        self.assertEqual(self.agent._last_turn_error, "")
+        self.assertEqual(self.ui.errors, [])
+        self.assertEqual(self.ui.notices(), ["finished with 1 open todo: Run the required check"])
+        self.assertEqual(self.agent.ctx.todos[0]["status"], "pending")   # kept, never cleared for the model
+
+    def test_a_turn_that_did_no_work_gets_no_reminder_but_still_the_notice(self):
+        # Restored on resume or left by an earlier turn: a one-line question must not cost two
+        # extra model round-trips, and must not fail.
         self.update([{"content": "Run the required check", "status": "pending"}])
-        with patch.object(self.agent.client, "chat", return_value=ChatResult(content="All done.")) as chat:
-            self.assertFalse(self.agent.run_turn("Finish the checklist"))
-        self.assertEqual(chat.call_count, 3)
-        self.assertIn("unfinished", self.agent._last_turn_error)
-        self.assertEqual(self.agent.ctx.todos[0]["status"], "pending")
+        chat, calls = self.script(ChatResult(content="The answer is 42."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Quick question: what is 6 × 7?"))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.reminders(), 0)
+        self.assertEqual(self.ui.notices(), ["finished with 1 open todo: Run the required check"])
+        self.assertEqual(self.ui.errors, [])
+
+    def test_blocked_items_draw_no_reminder_and_no_notice(self):
+        self.update([{"content": "Wait for the upstream fix", "status": "blocked"}])
+        chat, calls = self.script(
+            ChatResult(tool_calls=[ToolCall("w", "write_file", {"path": "a.txt", "content": "x\n"})]),
+            ChatResult(content="Done."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Write the file"))
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.reminders(), 0)
+        self.assertFalse(any("Still pending" in str(m.get("content", "")) for m in self.agent.messages))
+        self.assertEqual(self.ui.notices(), [])
+        self.assertEqual(self.agent.ctx.todos[0]["status"], "blocked")
+
+    def test_terminal_notice_points_at_todo_clear(self):
+        import inspect
+        import dgc.cli
+        import dgc.tui
+        # The markers below are the real classes' own attributes; a rename there must fail here.
+        self.assertIn("self._flash_msg", inspect.getsource(dgc.tui.TUI.__init__))
+        self.assertIn("self.console", inspect.getsource(dgc.cli.UI.__init__))
+        self.update([{"content": "Run the required check", "status": "pending"}])
+        chat, _ = self.script(ChatResult(content="All done."))
+        cases = (("classic REPL", {"console": object()}, True),
+                 ("dgc -p", {"console": object(), "non_interactive": True}, False),
+                 ("TUI", {"_flash_msg": ""}, True),
+                 ("editor/ACP", {}, False))
+        for label, markers, expected in cases:
+            with self.subTest(surface=label):
+                for name in ("console", "_flash_msg", "non_interactive"):
+                    self.ui.__dict__.pop(name, None)
+                self.ui.__dict__.update(markers)
+                self.ui.infos.clear()
+                with patch.object(self.agent.client, "chat", side_effect=chat):
+                    self.assertTrue(self.agent.run_turn("Anything else?"))
+                notice, = self.ui.notices()
+                self.assertEqual(notice.endswith(" · /todo clear to drop them"), expected, notice)
+
+    def test_notice_names_at_most_three_items_each_capped(self):
+        first = "A" * 80
+        self.update([{"content": c, "status": s} for c, s in (
+            (first, "pending"), ("Second", "in_progress"), ("Third", "pending"),
+            ("Parked", "blocked"), ("Fourth", "pending"), ("Finished", "done"))])
+        chat, _ = self.script(ChatResult(content="All done."))
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Wrap up"))
+        self.assertEqual(self.ui.notices(),
+                         ["finished with 4 open todos: " + "A" * 59 + "…, Second, Third, …"])
+
+    # --- standing goals -----------------------------------------------------------------------
+
+    def test_goal_refuses_a_completion_report_while_items_are_open(self):
+        self.assertTrue(self.agent.set_goal("Finish all required work"))
+        self.update([{"content": "Required check", "status": "pending"},
+                     {"content": "Parked", "status": "blocked"}])
+
+        prompts = []
+
+        def step(prompt):
+            prompts.append(prompt)
+            self.agent._handle_call(ToolCall("report", "update_goal", {
+                "status": "completed", "summary": "Claimed complete", "evidence": ["Claim"]}))
+            return True
+        self.agent._run_turn = step
+        self.agent.run_turn("Continue")
+        # The report is refused every cycle and the NEXT cycle's prompt says which step refused it
+        # (never a second user turn in a row); with no tool progress the stall guard then ends the
+        # goal on its own terms.
+        self.assertEqual(self.agent.goal_status, "blocked")
+        snapshot = self.agent.goal_snapshot()
+        self.assertEqual(snapshot["cycles"], 3)
+        self.assertTrue(snapshot["reason"].startswith("Three consecutive goal cycles"), snapshot["reason"])
+        self.assertEqual(len(prompts), 3)
+        self.assertNotIn("not accepted", prompts[0])
+        refusals = [text for text in prompts[1:] if "completion report for the goal was not accepted" in text]
+        self.assertEqual(len(refusals), 2, prompts)
+        for message in refusals:
+            self.assertIn("Required check", message)
+            self.assertNotIn("Parked", message)             # a blocked step is not what refused it
+            self.assertIn("Continue the active goal", message, "the note rides in the cycle prompt")
+        self.assertNotIn("not accepted", " ".join(str(m.get("content", "")) for m in self.agent.messages),
+                         "the refusal is never appended as a message of its own")
+        self.assertEqual([t["status"] for t in self.agent.ctx.todos], ["pending", "blocked"])
+
+    def test_goal_ends_blocked_naming_the_steps_when_only_blocked_items_remain(self):
+        self.assertTrue(self.agent.set_goal("Finish all required work"))
+        self.update([{"content": "Inspect", "status": "done"},
+                     {"content": "Needs the upstream fix", "status": "blocked"},
+                     {"content": "Needs a credential", "status": "blocked"}])
+
+        def step(_prompt):
+            self.agent._handle_call(ToolCall("report", "update_goal", {
+                "status": "completed", "summary": "Everything I could do is done", "evidence": ["a.txt"]}))
+            return True
+        self.agent._run_turn = step
+        self.agent.run_turn("Continue")
+        # Not the stall guard's "no distinct tool progress": the real cause, on the first cycle.
+        self.assertEqual(self.agent.goal_status, "blocked")
+        snapshot = self.agent.goal_snapshot()
+        self.assertEqual(snapshot["cycles"], 1)
+        self.assertIn("steps the model marked blocked: Needs the upstream fix; Needs a credential",
+                      snapshot["reason"])
+        self.assertIn("/todo clear", snapshot["reason"])
+        self.assertEqual(snapshot["evidence"], ["a.txt"])
+        self.assertTrue(any("steps the model marked blocked" in message for message in self.ui.infos))
+        self.assertFalse(any("completion report for the goal was not accepted" in str(m.get("content", ""))
+                             for m in self.agent.messages))
+        self.assertEqual([t["status"] for t in self.agent.ctx.todos], ["done", "blocked", "blocked"])
+
+    def test_standing_goal_continues_past_open_items_at_a_cycle_boundary(self):
+        self.assertTrue(self.agent.set_goal("Finish all required work"))
+        self.update([{"content": "Required check", "status": "pending"}])
+        status_at_cycle_two, calls = [], []
+
+        def chat(messages, **kwargs):
+            calls.append(messages)
+            last = str(messages[-1].get("content", ""))
+            if "Continue the active goal" in last:      # cycle 2 opens with the item still open
+                status_at_cycle_two.append(self.agent.goal_status)
+                return ChatResult(tool_calls=[
+                    ToolCall("mark", "todo", {"todos": [{"content": "Required check", "status": "done"}]}),
+                    ToolCall("report", "update_goal", {"status": "completed", "summary": "All steps done",
+                                                       "evidence": ["a.txt written and checked"]})])
+            if len(calls) == 1:                         # cycle 1 does real work…
+                return ChatResult(tool_calls=[ToolCall("w", "write_file", {"path": "a.txt", "content": "x\n"})])
+            return ChatResult(content="All done.")      # …then ignores the reminders and the goal nudge
+        with patch.object(self.agent.client, "chat", side_effect=chat):
+            self.assertTrue(self.agent.run_turn("Start the work"))
+        self.assertEqual(status_at_cycle_two, ["active"])  # open items did not pause the goal
+        self.assertEqual(self.agent.goal_status, "completed")
+        self.assertEqual(self.agent.goal_snapshot()["cycles"], 2)
+        self.assertEqual(self.reminders(), 2)
+        self.assertEqual(self.ui.notices(), ["finished with 1 open todo: Required check"])
+        self.assertEqual(self.ui.errors, [])
+
+
+class ChecklistProtocolTests(unittest.TestCase):
+    """The checklist on the wire and in the terminals: `clear_todos`, history snapshots, replays."""
+
+    def setUp(self):
+        from dgc.headless import HeadlessUI
+        from dgc.protocol import PendingRequests
+        directory = tempfile.TemporaryDirectory(prefix="dgc-todo-protocol-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        scoped = patch.object(sessions, "SESSIONS_DIR", self.root / "sessions")
+        scoped.start()
+        self.addCleanup(scoped.stop)
+        cfg = object.__new__(Config)
+        cfg.project_root, cfg.project_dir, cfg._persist = self.root, self.root / ".dgc", False
+        cfg.data = copy.deepcopy(DEFAULTS)
+        cfg.data.update(base_url="http://localhost.invalid/v1", model="fixture", mode="auto",
+                        hooks={}, mcp_servers={}, suggest=False, artifact_autostart=False,
+                        max_turns=8, thinking="off")
+        cfg._stored_secrets, cfg._env_secret_keys = {}, set()
+        cfg.permissions = {"allow": [], "ask": [], "deny": []}
+        self.config = cfg
+        # A real HeadlessUI, so whatever the agent's own todo callback does reaches the wire the
+        # way `dgc serve` sends it, rather than a stub that swallows the call.
+        self.events = []
+        emitter = types.SimpleNamespace(
+            emit=lambda event_type, **data: self.events.append({"type": event_type, **data}))
+        self.ui = HeadlessUI(emitter, PendingRequests(), 300.0)
+        self.agent = Agent(cfg, self.ui)
+        self.agent.session_file = sessions.new_path(self.root)
+        self.addCleanup(self.agent.mcp.stop_all)
+        self.backend = object.__new__(Backend)
+        self.backend.agent, self.backend.config, self.backend.em = self.agent, cfg, emitter
+        self.backend._busy = lambda: False
+        self.backend._emit_context = lambda *args: None
+        self.backend._emit_goal = lambda *args: None
+
+    def update(self, rows):
+        return execute("todo", {"todos": rows}, self.agent.ctx)
+
+    def saved_session_with(self, rows):
+        """Persist a session holding `rows`, then leave the agent empty and pointing elsewhere."""
+        self.agent.session_file = sessions.new_path(self.root)
+        self.update(rows)
+        self.agent.messages.append({"role": "user", "content": "Finish the work"})
+        self.assertTrue(self.agent._persist())
+        saved = self.agent.session_file
+        self.agent.reset()
+        self.agent.session_file = sessions.new_path(self.root)
+        self.events.clear()
+        return saved
+
+    def tui(self):
+        """A real TUI over this agent, built the way the /diff smoke test builds one: pipe input
+        and a dummy output under create_app_session, without running the application loop. The
+        agent keeps the UI it was built with (as `TUI(config, agent=cli.agent)` does in `dgc`)."""
+        from prompt_toolkit.application.current import create_app_session
+        from prompt_toolkit.data_structures import Size
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        from dgc.tui import TUI
+
+        class Output(DummyOutput):
+            def get_size(self):
+                return Size(rows=30, columns=120)
+
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        pipe = stack.enter_context(create_pipe_input())
+        stack.enter_context(create_app_session(input=pipe, output=Output()))
+        return TUI(self.config, agent=self.agent)
+
+    def recording_cli(self, calls):
+        from dgc.cli import CLI
+
+        class Recorder:
+            def __getattr__(self, name):
+                return lambda *args, **kwargs: calls.append((name, args))
+
+        cli = object.__new__(CLI)
+        cli.agent, cli.config, cli.ui = self.agent, self.config, Recorder()
+        return cli
+
+    def test_clear_todos_empties_the_checklist_and_answers_with_the_todos_event(self):
+        from dgc.editor_protocol import command_error
+        self.update([{"content": "Left behind", "status": "pending"},
+                     {"content": "Half done", "status": "in_progress"}])
+        self.events.clear()
+        self.assertIsNone(command_error({"type": "clear_todos"}))
+        self.assertIsNone(command_error({"type": "clear_todos", "request_id": "drop"}))
+        self.backend.dispatch({"type": "clear_todos", "request_id": "drop"})
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual(self.agent.ctx.todos, [])
+        self.assertEqual(self.events, [{"type": "todos", "todos": []}])
+        self.assertIsNone(event_error({"seq": 0, **self.events[0]}))
+
+    def test_clear_todos_is_refused_while_a_turn_runs(self):
+        from dgc.headless import _BUSY_MUTATIONS
+        self.assertIn("clear_todos", _BUSY_MUTATIONS)
+        self.update([{"content": "Mid-turn", "status": "in_progress"}])
+        self.events.clear()
+        self.backend._busy = lambda: True
+        self.backend.dispatch({"type": "clear_todos", "request_id": "busy"})
+        self.assertEqual([event["type"] for event in self.events], ["command_rejected"])
+        self.assertEqual(self.events[0]["reason"], "turn_in_progress")
+        self.assertEqual(self.events[0]["request_id"], "busy")
+        self.assertEqual(self.agent.todos, [{"content": "Mid-turn", "status": "in_progress"}])
+
+    def test_every_history_snapshot_carries_the_redacted_checklist(self):
+        # The token becomes a known secret only AFTER the session was saved, so the file holds it
+        # in clear text and the redaction under test is the one on the outgoing frame.
+        token = "fixture-passphrase-history-ab12cd34ef56"
+        saved = self.saved_session_with([{"content": "Rotate " + token, "status": "in_progress"}])
+        self.config.data["api_key"] = token
+        self.backend.dispatch({"type": "resume_session", "path": saved.name, "request_id": "resume"})
+        self.backend.dispatch({"type": "get_history", "request_id": "reload"})
+        with patch.object(self.agent, "rewind", return_value=(1, 0)):
+            self.backend.dispatch({"type": "rewind", "index": 0, "request_id": "rewind"})
+        self.assertIn(token, self.agent.todos[0]["content"])
+        snapshots = [event for event in self.events if event["type"] == "history"]
+        self.assertEqual(len(snapshots), 3)
+        for snapshot in snapshots:
+            self.assertIsNone(event_error({"seq": 0, **snapshot}))
+            self.assertEqual([t["status"] for t in snapshot["todos"]], ["in_progress"])
+            self.assertIn("Rotate", snapshot["todos"][0]["content"])
+            self.assertNotIn(token, snapshot["todos"][0]["content"])
+        self.assertNotIn("request_id", snapshots[0])
+        self.assertEqual(snapshots[1]["request_id"], "reload")
+        self.assertEqual([event["type"] for event in self.events][-2:], ["rewound", "history"])
+        # The TUI's pinned rail is another frontend view of the same list: seeded from the
+        # restored agent when the session is built, repainted by _render_history — both redacted.
+        from dgc.tui import AgentSession
+        seeded = list(AgentSession(self.config, self.ui, agent=self.agent)._todos)
+        ui = self.tui()
+        ui._render_history()
+        for label, rail in (("seeded", seeded), ("rendered", ui.active._todos)):
+            with self.subTest(rail=label):
+                self.assertEqual([t["status"] for t in rail], ["in_progress"])
+                self.assertIn("Rotate", rail[0]["content"])
+                self.assertNotIn(token, rail[0]["content"])
+
+    def test_clear_todos_reports_a_failed_save_over_the_wire_but_the_list_is_empty(self):
+        self.update([{"content": "Left behind", "status": "pending"}])
+        self.agent.messages.append({"role": "user", "content": "hi"})     # a session worth saving
+        self.events.clear()
+        with patch.object(self.agent, "_persist", return_value=False):
+            self.agent._last_persist_error = "session file: disk full"
+            self.backend.dispatch({"type": "clear_todos", "request_id": "clear-1"})
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual([e["type"] for e in self.events], ["todos", "error"])
+        self.assertEqual(self.events[0]["todos"], [])
+        self.assertEqual(self.events[1]["request_id"], "clear-1")
+        self.assertIn("disk full", self.events[1]["message"])
+
+    def test_the_todo_tool_paints_the_tui_rail_when_the_agent_was_built_for_another_ui(self):
+        # `dgc` builds the Agent against the classic UI, then hands it to the TUI, which only
+        # reassigns agent.ui. The callback must follow that reassignment or the Tasks rail never
+        # moves while the classic console gets painted behind the full-screen app.
+        ui = self.tui()
+        before = len(self.events)
+        self.update([{"content": "Live", "status": "in_progress"}])
+        self.assertEqual([t["content"] for t in ui.active._todos], ["Live"])
+        self.assertEqual(self.events[before:], [], "the UI the agent was built with is no longer painted")
+
+    def test_classic_resume_prints_the_checklist_after_the_resumed_line_and_only_when_present(self):
+        token = "fixture-passphrase-classic-ab12cd34ef56"
+        self.saved_session_with([{"content": "Ship " + token, "status": "pending"}])
+        self.config.data["api_key"] = token
+        calls = []
+        cli = self.recording_cli(calls)
+        with patch("dgc.menu.select", return_value=0):
+            cli._resume_cmd()
+        names = [name for name, _ in calls]
+        self.assertIn("on_todo", names)
+        resumed = next(i for i, (name, args) in enumerate(calls)
+                       if name == "info" and "resumed session" in str(args[0]))
+        self.assertLess(resumed, names.index("on_todo"))
+        replayed = next(args for name, args in calls if name == "on_todo")[0]
+        self.assertEqual(replayed[0]["status"], "pending")
+        self.assertIn("Ship", replayed[0]["content"])
+        self.assertNotIn(token, replayed[0]["content"])
+        self.agent.reset()
+        calls.clear()
+        cli._show_restored_todos()
+        self.assertEqual(calls, [])
+
+    def test_todo_clear_slash_command_empties_the_terminal_checklist(self):
+        from dgc.commands import resolve_command
+        spec = resolve_command("todo", "tui")
+        self.assertEqual(spec.surfaces, {"tui", "classic"})
+        self.assertFalse(spec.available_while_running)
+        self.assertEqual(spec.usage, "todo clear")
+        self.assertIsNone(resolve_command("todo", "editor"))
+        self.update([{"content": "Stale", "status": "pending"}])
+        self.events.clear()
+        calls = []
+        cli = self.recording_cli(calls)
+        self.assertTrue(cli.handle_slash("/todo clear"))
+        self.assertEqual(self.agent.todos, [])
+        # The clear goes through the agent's own callback (in the real REPL its UI is the CLI's),
+        # so the frontend seam receives the empty list exactly once.
+        self.assertEqual(self.events, [{"type": "todos", "todos": []}])
+        self.assertIn(("info", ("todo list cleared",)), calls)
+        calls.clear()
+        cli.handle_slash("/todo")
+        self.assertEqual(calls, [("error", ("usage: /todo clear",))])
+        cli.handle_slash("/todo everything")
+        self.assertEqual(calls[-1], ("error", ("usage: /todo clear",)))
+
+    def test_tui_session_seeds_its_pinned_checklist_from_the_restored_agent(self):
+        from dgc.tui import AgentSession
+        rows = [{"content": "Inspect", "status": "done"}, {"content": "Verify", "status": "pending"}]
+        saved = self.saved_session_with(rows)
+        self.assertEqual(AgentSession(self.config, self.ui, agent=self.agent)._todos, [])
+        self.agent.load_session(saved)
+        session = AgentSession(self.config, self.ui, agent=self.agent)
+        self.assertEqual(session._todos, rows)
+        self.assertIsNot(session._todos, self.agent.todos)   # the pane copies, never aliases
+
+    def test_tui_todo_clear_empties_the_agent_list_and_the_pinned_rail(self):
+        ui = self.tui()
+        self.update([{"content": "Stale", "status": "pending"}])
+        ui._todos = list(self.agent.todos)
+        self.events.clear()
+        self.assertTrue(ui._handle_slash("/todo clear"))
+        self.assertEqual(self.agent.todos, [])
+        self.assertEqual(self.agent.ctx.todos, [])
+        self.assertEqual(ui.active._todos, [])
+        self.assertEqual(ui._flash_msg, "todo list cleared")
+        # The checklist callback follows agent.ui, so the TUI rail — not the UI the agent was
+        # built with — is what gets painted; nothing reaches the old emitter.
+        self.assertEqual(self.events, [])
+        self.update([{"content": "Kept", "status": "pending"}])
+        ui._todos = list(self.agent.todos)
+        ui._handle_slash("/todo nonsense")
+        self.assertEqual(self.agent.todos, [{"content": "Kept", "status": "pending"}])
+        self.assertEqual(ui.active._todos, [{"content": "Kept", "status": "pending"}])
+        self.assertEqual(ui._flash_msg, "usage: /todo clear")
+
+    def test_tui_render_history_restores_a_copy_of_the_saved_checklist(self):
+        rows = [{"content": "Inspect", "status": "done"}, {"content": "Verify", "status": "pending"}]
+        saved = self.saved_session_with(rows)
+        ui = self.tui()
+        self.assertEqual(ui.active._todos, [])
+        self.agent.load_session(saved)
+        ui._render_history()
+        self.assertEqual(ui.active._todos, rows)
+        self.assertIsNot(ui.active._todos, self.agent.todos)
+        ui.active._todos[1]["status"] = "done"               # the rail never writes through
+        self.assertEqual(self.agent.todos[1]["status"], "pending")
+
+    def test_acp_load_replays_only_a_non_empty_checklist_and_redacts_it(self):
+        from dgc.acp import ACPServer
+        token = "fixture-passphrase-acp-ab12cd34ef56"
+
+        def plans_after_loading(sid):
+            server, wire = ACPServer(), []
+            server._write = wire.append
+            with patch("dgc.acp.Config", return_value=self.config), \
+                    patch.object(server, "_session_inputs", return_value={}):
+                server._dispatch({"id": 1, "method": "initialize", "params": {"protocolVersion": 1}})
+                server._dispatch({"id": 2, "method": "session/load", "params": {
+                    "cwd": str(self.root), "sessionId": sid}})
+            for state in server._sessions.values():
+                self.addCleanup(state.agent.mcp.stop_all)
+            return [row["params"]["update"] for row in wire
+                    if row.get("method") == "session/update"
+                    and row["params"]["update"].get("sessionUpdate") == "plan"]
+
+        self.assertEqual(plans_after_loading(self.saved_session_with([]).stem), [])
+        with_list = self.saved_session_with([{"content": "Rotate " + token, "status": "pending"}])
+        self.config.data["api_key"] = token
+        plans = plans_after_loading(with_list.stem)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0]["entries"][0]["status"], "pending")
+        self.assertIn("Rotate", plans[0]["entries"][0]["content"])
+        self.assertNotIn(token, plans[0]["entries"][0]["content"])
 
 
 if __name__ == "__main__":

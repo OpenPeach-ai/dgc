@@ -21,6 +21,7 @@ DIAMOND_O = _g("◇", "o")
 SQUARE = _g("□", "[ ]")      # pending todo 
 PLAY = _g("▶", ">")          # in-progress todo
 CHECK = _g("✓", "+")         # success
+BLOCKED = _g("⊘", "!")       # blocked todo (parked with a reason)
 CROSS = _g("✗", "x")         # failure / denied
 DOT = _g("·", ".")
 MIDDOT = _g("·", "-")        # inline separator

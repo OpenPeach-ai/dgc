@@ -435,6 +435,37 @@ class GoalLifecycle:
             self._refresh_system()
             return False
 
+    def _gate_completion_report(self, report: dict) -> dict | None:
+        """Hold a "completed" report against the checklist it claims to have finished.
+
+        Every open step blocked: the goal ends *blocked* naming those steps, so the user sees the
+        real cause and can resume or `/todo clear`. Some step still pending or in progress: the
+        report is refused and the model is told which steps refused it — dropping it silently
+        left the stall guard to end the goal with a reason about tool progress that was not the
+        cause.
+        """
+        open_items = [item for item in self.todos if item.get("status") != "done"]
+        if not open_items:
+            return report
+
+        def names(items):
+            return "; ".join(str(item.get("content", ""))[:80] for item in items[:8])
+
+        if all(item.get("status") == "blocked" for item in open_items):
+            reason = ("The goal cannot finish: steps the model marked blocked: " + names(open_items)
+                      + ". Resolve them and resume the goal, or /todo clear to drop them.")
+            self.ui.info(reason)
+            return {**report, "status": "blocked", "summary": reason}
+        refusing = [item for item in open_items if item.get("status") != "blocked"]
+        # Carried into the next cycle's prompt rather than appended as its own user message: the
+        # cycle prompt is the next user turn, and two user turns in a row is what providers
+        # refuse or silently merge.
+        self._goal_refusal_note = (
+            "Your completion report for the goal was not accepted: these checklist steps are "
+            "still open: " + names(refusing) + ". Finish them and mark each done with the `todo` "
+            "tool, or mark a step blocked and say why, before reporting completion again.")
+        return None
+
     def _run_goal_steps(self, prompt: str, step, *, external: bool = False):
         """Continue only an explicitly active goal, with cancellation and durable cycle boundaries.
 
@@ -493,9 +524,8 @@ class GoalLifecycle:
                             return {**result, "ok": False} if isinstance(result, dict) else False
                         return result
                     return finish("paused", result, reason=reason)
-                if report and report["status"] == "completed" and any(
-                        item.get("status") != "done" for item in self.todos):
-                    report = None
+                if report and report["status"] == "completed":
+                    report = self._gate_completion_report(report)
                 if report and report["status"] != "active":
                     return finish(report["status"], result, reason=report["summary"], evidence=report["evidence"])
                 if self.goal_status != "active":
@@ -522,7 +552,10 @@ class GoalLifecycle:
                     return {**result, "ok": False} if isinstance(result, dict) else False
                 self._notify_goal()
                 self.ui.info(f"Continuing goal · work cycle {details['cycles'] + 1}")
-                prompt = ("Continue the active goal from the current session state. Take the next concrete "
+                refusal = str(getattr(self, "_goal_refusal_note", "") or "")
+                self._goal_refusal_note = ""
+                prompt = ((refusal + "\n\n") if refusal else "") + (
+                          "Continue the active goal from the current session state. Take the next concrete "
                           "step; preserve finished work and existing permissions. If fully achieved, "
                           "report completion with evidence; if externally blocked, report the blocker.\n\n"
                           "Goal: " + self.goal)

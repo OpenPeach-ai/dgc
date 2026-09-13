@@ -1141,6 +1141,10 @@ DGC ends an answer with what it changed and what you can do about it.
   them. It finds the recovery point by the prompt that opened it and refuses if it can no longer
   identify it, because an undo that guesses loses work you did not ask it to.
 - **Copy** takes the whole answer as Markdown.
+- **Tasks** — the checklist the model keeps sits above the composer and updates as it works:
+  □ pending · ▶ in progress · ✓ done · ⊘ blocked. It comes back when you reopen the session;
+  **Clear** drops it (the terminal's `/todo clear`). Finishing with open tasks is reported, not
+  treated as a failed turn.
 - **Rate** records a thumb up or down for this workspace. It is stored locally and sent nowhere.
 - **Branch** continues in a new chat from this point. The conversation comes with you and the
   chat you branched from keeps everything it had, so you can try a second approach without

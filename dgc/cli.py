@@ -491,7 +491,8 @@ class UI:
         self.stop_working()
         if not todos:
             return
-        marks = {"done": "[green]☑[/green]", "in_progress": f"[{BRAND}]◐[/]", "pending": f"[{DIM}]☐[/]"}
+        marks = {"done": "[green]☑[/green]", "in_progress": f"[{BRAND}]◐[/]", "pending": f"[{DIM}]☐[/]",
+                 "blocked": "[red]⊘[/red]"}
         section(self.console, "todos")
         for t in todos:
             self.console.print(
@@ -1048,6 +1049,19 @@ class CLI:
             self.agent.reset()
             self.agent.session_file = sessions_mod.new_path(cfg.project_root)
             self.ui.info("new session started" if cmd == "new" else "conversation cleared")
+        elif cmd == "todo":
+            # The checklist outlives the turn that wrote it. `/todo clear` is the exit for a list
+            # the model left behind or a resumed session brought back, short of a new chat.
+            if rest.strip().lower() == "clear":
+                # Through the agent's own callback (its UI is this one), so the ETA estimator
+                # and the terminal see the same empty list.
+                if self.agent.clear_todos():
+                    self.ui.info("todo list cleared")
+                else:
+                    self.ui.error(self.agent._last_persist_error
+                                  or "todo list cleared, but the session could not be saved")
+            else:
+                self.ui.error("usage: /todo clear")
         elif cmd == "rewind":
             pts = self.agent.checkpoints.listing()
             if not pts:
@@ -1190,6 +1204,12 @@ class CLI:
             cfg.set("search_url", url)
         self.ui.info(f"web search → {meta['label']}")
 
+    def _show_restored_todos(self) -> None:
+        """Replay a resumed session's checklist, redacted like the transcript it came with."""
+        todos = self.agent.todos
+        if todos:
+            self.ui.on_todo(redact_value(list(todos), secret_values(self.config)))
+
     def _resume_cmd(self) -> None:
         items = sessions_mod.listing(
             self.config.project_root, redact_secrets=secret_values(self.config))
@@ -1203,9 +1223,9 @@ class CLI:
         if si is None:
             return
         n = self.agent.load_session(items[si][0])
-        self.ui.on_todo(self.agent.todos)
         self.ui.info(f"resumed session ({n} messages)"
                      + (f" — {self.agent.session_name}" if self.agent.session_name else ""))
+        self._show_restored_todos()
 
     def _set_model(self, model: str) -> None:
         self.config.set("model", model)
@@ -2218,8 +2238,8 @@ def main(argv: list[str] | None = None) -> int | None:
         p = sessions_mod.latest(config.project_root)
         if p:
             n = cli.agent.load_session(p)
-            cli.ui.on_todo(cli.agent.todos)
             cli.ui.info(f"resumed session ({n} messages) — {p.name}")
+            cli._show_restored_todos()
             cli.agent.compact_resumed_session()
         else:
             cli.ui.info("no previous session here — starting fresh")
@@ -2228,8 +2248,8 @@ def main(argv: list[str] | None = None) -> int | None:
         p = sessions_mod.by_id(config.project_root, args.resume)
         if p:
             n = cli.agent.load_session(p)
-            cli.ui.on_todo(cli.agent.todos)
             cli.ui.info(f"resumed session ({n} messages) — {p.stem}")
+            cli._show_restored_todos()
             cli.agent.compact_resumed_session()
         else:
             cli.ui.info(f"no session '{args.resume}' in this project — starting fresh")
@@ -2244,7 +2264,7 @@ def main(argv: list[str] | None = None) -> int | None:
             si = select("Resume a session", labels)
             if si is not None:
                 cli.agent.load_session(items[si][0])
-                cli.ui.on_todo(cli.agent.todos)
+                cli._show_restored_todos()
                 cli.agent.compact_resumed_session()
             else:
                 cli.agent.session_file = sessions_mod.new_path(config.project_root)

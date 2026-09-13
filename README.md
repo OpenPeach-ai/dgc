@@ -132,7 +132,7 @@ narrow rule only when the action arguments contain no detected credential.
   Delegated subscription turns are text-only and reject pending image attachments.
 - **Model fallback** — set `fallback_model` (and optional `fallback_base_url`) and DGC retries there if the primary model errors. Put another host's credential in `DGC_FALLBACK_API_KEY`; DGC never forwards the main provider key there, auto-detects its transport, and honors a `fallback_api_mode` override.
 - **Custom slash-commands** — drop a Markdown prompt template in `.dgc/commands/*.md` and call it as `/name`; project commands appear in the classic/TUI/editor/ACP catalogs. Names begin with a lowercase letter/digit, then use lowercase letters/digits or `._-` (1–64 characters). Built-in names and aliases are reserved, catalogs/templates are bounded, and symlinked command directories or files are rejected.
-- **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension through a generated protocol-v11 command/event contract with bounded frames and strict wire ordering. Permission, plan, option, and MCP decisions are exactly ID-correlated and first-response-wins; control frames bypass prompt backpressure, while expired, duplicate, mismatched, and post-restart responses fail closed. Typed `/skills` and `/handoff` routes render inert bounded metadata/Markdown and never forward built-in slash text to the model. Pasted images are count/byte bounded in the webview and revalidated by media signature before provider use; remote image URLs are rejected. Live multi-root changes are acknowledged and coalesced across active turns so added folders gain access and removed folders lose their session grant; editor context and `@file` mentions keep visible labels separate from typed canonical paths across roots. `dgc acp` speaks bounded UTF-8 Agent Client Protocol JSON-RPC over stdio, limits prompt blocks/text/images, and frames embedded resources as untrusted data.
+- **Editor & ACP integration** — `dgc serve` backs the VS Code / Cursor extension through a generated protocol-v12 command/event contract with bounded frames and strict wire ordering. Permission, plan, option, and MCP decisions are exactly ID-correlated and first-response-wins; control frames bypass prompt backpressure, while expired, duplicate, mismatched, and post-restart responses fail closed. Typed `/skills` and `/handoff` routes render inert bounded metadata/Markdown and never forward built-in slash text to the model. Pasted images are count/byte bounded in the webview and revalidated by media signature before provider use; remote image URLs are rejected. Live multi-root changes are acknowledged and coalesced across active turns so added folders gain access and removed folders lose their session grant; editor context and `@file` mentions keep visible labels separate from typed canonical paths across roots. `dgc acp` speaks bounded UTF-8 Agent Client Protocol JSON-RPC over stdio, limits prompt blocks/text/images, and frames embedded resources as untrusted data.
 - **Mid-turn steering and queueing** — in the full-screen terminal, a follow-up typed during a native
   model turn is injected at its next tool boundary. During a delegated subscription turn or direct
   `!` shell command—or once final response ownership has closed—the text is retained in a count/size-bounded per-session FIFO and
@@ -162,6 +162,7 @@ Tab / →              accept the ghost-text next-prompt suggestion
 /view-plan           reopen the plan saved in plan mode
 /files [PATH]        file explorer in the focus pane · Enter inserts @path
 /diff [PATH]         every changed file, its counts and its diff, live · select lines for your prompt
+/todo clear          drop the checklist the model left behind
 /eta [stats]         how long the running turn still needs · calibration
 /notify [on|off]     ping when the turn finishes
 /goal <objective>    run objective · pause | resume | review | clear
@@ -188,8 +189,8 @@ For a configured MCP server, a `dgc serve` controller sends
 `{"type":"list_mcp_tools","request_id":"catalog-1","offset":0,"limit":50}` and then
 `{"type":"call_mcp_tool","request_id":"invoke-1","call_id":"call-1","name":"mcp__server__tool","arguments":{}}`.
 Answer any emitted `permission_request` with its existing ID and a typed `permission_response`;
-completion is the correlated `mcp_call_complete` event. The generated protocol-v11 JSON Schema is
-`schemas/editor-protocol-v11.schema.json` and is also bundled in the installed Python package.
+completion is the correlated `mcp_call_complete` event. The generated protocol-v12 JSON Schema is
+`schemas/editor-protocol-v12.schema.json` and is also bundled in the installed Python package.
 `dgc protocol describe --compact` reports its SHA-256, byte limits, required/optional fields, every
 headless command/event, and the exact discoverable TUI/classic/editor slash catalogs without loading configuration
 or contacting a model. `dgc protocol schema` prints the installed schema; validate fixture or captured

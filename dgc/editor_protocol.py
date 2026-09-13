@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 
-PROTOCOL_VERSION = 11
+PROTOCOL_VERSION = 12
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAX_PENDING_BYTES = 4 * 1024 * 1024
@@ -376,6 +376,9 @@ COMMAND_FIELDS: dict[str, dict[str, dict]] = {
     "delete_session": {"path": _S(), "request_id": _S(False)},
     "list_checkpoints": {"request_id": _S(False)},
     "rewind": {"index": _I(), "request_id": _S(False)},
+    # v12: the checklist is session state the user can drop without starting a new chat. The
+    # backend answers with the existing `todos` event carrying an empty list.
+    "clear_todos": {"request_id": _S(False)},
     "list_retained_tasks": {"request_id": _S(False)},
     "resolve_retained_task": {
         "id": _S(), "action": _f("string", enum=("apply", "drop")), "confirm": _B(False),
@@ -598,16 +601,20 @@ export function dgcCommandError(value: unknown): string | undefined {{
 '''
 
 
-def write_generated(root: Path) -> tuple[Path, Path, Path]:
-    schema_path = root / "schemas" / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json"
-    package_schema_path = (root / "dgc" / "schemas"
-                           / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json")
-    ts_path = root / "editors" / "vscode" / "src" / "protocol.generated.ts"
-    schema_path.parent.mkdir(parents=True, exist_ok=True)
-    package_schema_path.parent.mkdir(parents=True, exist_ok=True)
-    ts_path.parent.mkdir(parents=True, exist_ok=True)
+def generated_artifacts(root: Path) -> dict[Path, str]:
+    """Every checked-in artifact derived from this module, with the text it must hold."""
     generated_schema = schema_text()
-    schema_path.write_text(generated_schema)
-    package_schema_path.write_text(generated_schema)
-    ts_path.write_text(typescript_source())
+    return {
+        root / "schemas" / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json": generated_schema,
+        root / "dgc" / "schemas" / f"editor-protocol-v{PROTOCOL_VERSION}.schema.json": generated_schema,
+        root / "editors" / "vscode" / "src" / "protocol.generated.ts": typescript_source(),
+    }
+
+
+def write_generated(root: Path) -> tuple[Path, Path, Path]:
+    artifacts = generated_artifacts(root)
+    for path, text in artifacts.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    schema_path, package_schema_path, ts_path = artifacts
     return schema_path, package_schema_path, ts_path

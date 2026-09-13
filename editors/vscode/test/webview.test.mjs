@@ -123,12 +123,20 @@ function makeDom(options = {}) {
   return { dom, errors, posted, send, doc: dom.window.document, savedState: () => savedState };
 }
 
-test("session tasks update across turns, restore without a phantom turn, and clear with the chat", () => {
+// The session checklist is one fixed slot between the transcript and the composer. It is not a
+// card inside a turn: it updates in place across turns, restores on resume without inventing a
+// running turn, empties with the chat, and never moves a reader who has scrolled up.
+test("the session checklist lives in one slot above the composer and updates in place across turns", () => {
   const { doc, send, errors } = makeDom();
+  const slot = doc.getElementById("tasks"), log = doc.getElementById("log");
+  const count = () => doc.getElementById("tasks-count").textContent;
   const tasks = [{ content: "Inspect", status: "done" }, { content: "Verify <script>", status: "pending" }];
   const event = data => send({ type: "event", event: data });
+  assert.equal(slot.hidden, true, "an empty checklist takes no room");
   event({ type: "history", items: [], todos: tasks });
-  assert.match(doc.querySelector(".todos").textContent, /1\/2/);
+  assert.equal(slot.hidden, false);
+  assert.equal(count(), "1/2");
+  assert.equal(log.querySelector(".todos"), null, "the checklist is not a card in the transcript");
   assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0, "restoring tasks is read-only");
   event({ type: "turn_start", prompt: "Continue" });
   event({ type: "todos", todos: tasks });
@@ -136,15 +144,99 @@ test("session tasks update across turns, restore without a phantom turn, and cle
   event({ type: "turn_start", prompt: "Finish" });
   event({ type: "todos", todos: tasks.map(t => ({ ...t, status: "done" })) });
   event({ type: "turn_end", reason: "completed" });
-  assert.equal(doc.querySelectorAll(".todos").length, 1, "only the current session checklist remains");
-  assert.match(doc.querySelector(".todos").textContent, /2\/2/);
-  assert.match(doc.querySelector(".todos").textContent, /Verify <script>/);
-  assert.equal(doc.querySelector(".todos script"), null);
+  assert.equal(doc.querySelectorAll(".todos").length, 1, "one checklist, however many turns updated it");
+  assert.equal(log.querySelector(".todos"), null, "and still none in the transcript");
+  assert.equal(count(), "2/2");
+  assert.match(slot.textContent, /Verify <script>/);
+  assert.equal(slot.querySelector("script"), null, "task text is escaped");
   event({ type: "session", kind: "new", session_id: "next-chat" });
-  assert.equal(doc.querySelectorAll(".todos").length, 0);
+  assert.equal(slot.hidden, true, "a new chat starts with no tasks");
+  assert.equal(doc.getElementById("tasks-list").children.length, 0);
   event({ type: "todos", todos: tasks });
+  assert.equal(slot.hidden, false);
   event({ type: "todos", todos: [] });
-  assert.equal(doc.querySelectorAll(".todos").length, 0);
+  assert.equal(slot.hidden, true, "an empty list from the backend empties the slot");
+  // Reload or resume after a rewind: the snapshot's list comes back without a phantom turn.
+  event({ type: "session", kind: "resumed", session_id: "next-chat" });
+  event({ type: "history", items: [{ role: "user", text: "Earlier" }], todos: tasks });
+  assert.equal(slot.hidden, false);
+  assert.equal(count(), "1/2");
+  assert.equal(doc.querySelectorAll(".thinking:not(.done)").length, 0);
+  // A resumed session whose checklist was cleared (or never had one) empties the slot too.
+  event({ type: "session", kind: "resumed", session_id: "next-chat" });
+  event({ type: "history", items: [], todos: [] });
+  assert.equal(slot.hidden, true, "a snapshot with no tasks empties the slot");
+  assert.equal(doc.getElementById("tasks-list").children.length, 0);
+  assert.equal(count(), "0/0");
+  assert.deepEqual(errors, []);
+});
+
+test("blocked tasks get their own glyph and do not count as done", () => {
+  const { doc, send, errors } = makeDom();
+  send({ type: "event", event: { type: "todos", todos: [
+    { content: "Read the config", status: "done" },
+    { content: "Wait for the API key", status: "blocked" },
+    { content: "Ship it", status: "in_progress" },
+    { content: "Skipped", status: "cancelled" },
+    { content: "Nothing yet", status: "pending" },
+    { content: "Hostile status", status: "constructor" },   // an inherited key is not a status
+  ] } });
+  const rows = [...doc.querySelectorAll("#tasks-list .t")];
+  assert.deepEqual(rows.map(r => r.className), ["t done", "t block", "t doing", "t cancel", "t pend", "t pend"]);
+  assert.deepEqual(rows.map(r => r.querySelector(".ti").textContent), ["\u2713", "\u2298", "\u25B6", "\u2717", "\u25A1", "\u25A1"]);
+  assert.equal(rows[1].querySelector(".ti").getAttribute("aria-label"), "blocked");
+  assert.equal(doc.getElementById("tasks-count").textContent, "1/6", "blocked and in-progress items are still open");
+  assert.doesNotMatch(doc.getElementById("tasks").innerHTML, /undefined/);
+  assert.deepEqual(errors, []);
+});
+
+test("Clear asks the backend to drop the checklist and waits while a turn runs", () => {
+  const { doc, send, posted, errors } = makeDom();
+  const event = data => send({ type: "event", event: data });
+  const button = doc.getElementById("tasks-clear");
+  const cleared = () => posted.filter(m => m.type === "clear_todos");
+  event({ type: "todos", todos: [{ content: "Inspect", status: "pending" }] });
+  assert.equal(button.disabled, false);
+  button.click();
+  assert.equal(cleared().length, 1, "the button posts the backend command itself");
+  assert.deepEqual(Object.keys(cleared()[0]), ["type"], "and nothing else rides along");
+  assert.equal(doc.getElementById("tasks").hidden, false, "the click alone does not empty the slot");
+  event({ type: "turn_start", prompt: "Go" });
+  assert.equal(button.disabled, true, "the backend refuses the command while a turn runs");
+  button.click();
+  assert.equal(cleared().length, 1, "a disabled button posts nothing");
+  event({ type: "turn_end", reason: "completed" });
+  assert.equal(button.disabled, false);
+  // The backend answers with an empty `todos` event; that is what empties the slot.
+  event({ type: "todos", todos: [] });
+  assert.equal(doc.getElementById("tasks").hidden, true);
+  assert.deepEqual(errors, []);
+});
+
+test("a checklist update never moves a reader who scrolled up, and is not 'new' transcript content", () => {
+  const { dom, doc, send, errors } = makeDom();
+  const log = doc.getElementById("log"), pill = doc.getElementById("to-latest");
+  const event = data => send({ type: "event", event: data });
+  let top = 0;   // jsdom has no layout, so stand in for a transcript taller than its viewport
+  Object.defineProperty(log, "scrollHeight", { configurable: true, get: () => 4000 });
+  Object.defineProperty(log, "clientHeight", { configurable: true, get: () => 500 });
+  Object.defineProperty(log, "scrollTop", { configurable: true, get: () => top, set: (v) => { top = v; } });
+  event({ type: "turn_start", turn_id: "t1", prompt: "Work through the list" });
+  event({ type: "text_delta", text: "Starting.\n" });
+  assert.equal(top, 4000, "a reader at the tail follows the run");
+  log.dispatchEvent(new dom.window.Event("wheel"));   // the user scrolls back to re-read
+  top = 1200;
+  log.dispatchEvent(new dom.window.Event("scroll"));
+  assert.equal(pill.hidden, false);
+  event({ type: "todos", todos: [{ content: "Inspect", status: "done" }, { content: "Fix", status: "in_progress" }] });
+  assert.equal(top, 1200, "the slot sits outside the transcript; it must not yank the reader back down");
+  assert.equal(doc.getElementById("to-latest-label").textContent, "Latest",
+    "a checklist tick is not new content in the transcript");
+  assert.equal(pill.classList.contains("unread"), false);
+  event({ type: "text_delta", text: "More.\n" });
+  assert.equal(top, 1200, "and follow mode stays off afterwards");
+  assert.equal(doc.getElementById("to-latest-label").textContent, "New");
+  event({ type: "turn_end", reason: "completed" });
   assert.deepEqual(errors, []);
 });
 

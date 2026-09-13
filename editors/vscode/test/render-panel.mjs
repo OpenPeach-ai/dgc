@@ -7,6 +7,7 @@
 //   npm run shot -- /tmp/ask.png --permission          an open approval card
 //   npm run shot -- /tmp/tip.png --tip=#btn-add        a hover label
 //   npm run shot -- /tmp/new.png --latest              the jump-to-latest pill
+//   npm run shot -- /tmp/tasks.png --tasks             the session checklist slot (+ -long.png)
 //
 // It writes <out>.png and <out>-typed.png (the composer with text in it) and prints the computed
 // font, control height and background of the elements a restyle is most likely to break. It is a
@@ -231,6 +232,61 @@ if (process.argv.includes("--steps")) {
   await page.waitForTimeout(300);
   await page.screenshot({ path: out, fullPage: false });
   console.log("shot:", out); await browser.close(); process.exit(0);
+}
+if (process.argv.includes("--tasks")) {
+  // The session checklist is a fixed slot in the footer, not a card in the transcript. Check
+  // that it sits between the log and the composer, that the log itself did not grow, that
+  // Clear waits for the turn, and that a long list scrolls inside the slot instead of pushing
+  // the composer off the panel.
+  const out = process.argv[2] || "/tmp/tasks.png";
+  const before = await page.evaluate(() => document.getElementById("log").scrollHeight);
+  await send({ type: "todos", todos: [
+    { content: "Read src/clamp.py and the existing test", status: "done" },
+    { content: "Swap the min/max order in clamp()", status: "done" },
+    { content: "Add a regression test for the inverted bounds", status: "in_progress" },
+    { content: "Run the suite on Windows \u2014 no runner is available here", status: "blocked" },
+    { content: "Update the changelog", status: "pending" },
+  ] });
+  await page.waitForTimeout(300);
+  const probe = (before) => page.evaluate((before) => {
+    const slot = document.getElementById("tasks"), log = document.getElementById("log");
+    const s = slot.getBoundingClientRect(), l = log.getBoundingClientRect();
+    const c = document.getElementById("cbox").getBoundingClientRect();
+    return { hidden: slot.hidden, rows: slot.querySelectorAll(".t").length,
+             count: document.getElementById("tasks-count").textContent,
+             inLog: !!log.querySelector(".todos"),
+             belowLog: Math.round(s.top) >= Math.round(l.bottom), aboveComposer: Math.round(s.bottom) <= Math.round(c.top),
+             logGrew: log.scrollHeight - before, slotHeight: Math.round(s.height),
+             clearDisabled: document.getElementById("tasks-clear").disabled,
+             glyphs: [...slot.querySelectorAll(".ti")].map((g) => g.textContent).join(" ") };
+  }, before);
+  const running = await probe(before);
+  console.log("RUNNING " + JSON.stringify(running));
+  await send({ type: "text_delta", text: "Two of five steps are done; the Windows run is blocked on a runner.\n" });
+  await send({ type: "turn_end", turn_id: "t1", reason: "completed", token_estimate: 240 });
+  await page.waitForTimeout(300);
+  const finished = await probe(before);
+  console.log("FINISHED " + JSON.stringify(finished));
+  await page.screenshot({ path: out, fullPage: false });
+  // Sixty rows: the list scrolls inside the slot instead of pushing the composer off the panel.
+  await send({ type: "todos", todos: Array.from({ length: 60 }, (_, i) =>
+    ({ content: `Step ${i + 1}`, status: i < 20 ? "done" : "pending" })) });
+  await page.waitForTimeout(200);
+  const long = await page.evaluate(() => {
+    const list = document.getElementById("tasks-list");
+    const box = document.getElementById("cbox").getBoundingClientRect();
+    return { listScrolls: list.scrollHeight > list.clientHeight, listHeight: Math.round(list.getBoundingClientRect().height),
+             composerVisible: box.bottom <= window.innerHeight };
+  });
+  console.log("LONG " + JSON.stringify(long));
+  await page.screenshot({ path: out.replace(/\.png$/, "-long.png"), fullPage: false });
+  // logGrew may be negative: a transcript that does not overflow reports its own box as its
+  // scrollHeight, and the slot takes viewport height from that box the way the rails do. What
+  // must never happen is the log gaining content.
+  const ok = !running.hidden && !running.inLog && running.belowLog && running.aboveComposer && running.logGrew <= 0
+    && running.rows === 5 && running.clearDisabled && !finished.clearDisabled && long.listScrolls && long.composerVisible;
+  console.log("shot:", out, ok ? "PASS" : "FAIL");
+  await browser.close(); process.exit(ok ? 0 : 1);
 }
 if (process.argv.includes("--latest")) {
   const out = process.argv[2] || "/tmp/panel.png";

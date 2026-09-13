@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.0 — 2026-09-13
+
+- **Editor protocol v12; requires DGC CLI 0.38.1.** The `history` snapshot now carries the session checklist and there is a `clear_todos` command, so the extension and the CLI move together — a mismatched pair says which side to update at the handshake.
+- **One checklist for the session, above the composer.** Tasks used to be a card appended to the transcript on every turn, so a long piece of work left a trail of stale cards showing earlier states. There is now a single list in a fixed slot between the transcript and the composer, with a **Clear** button for a list the model left behind, and updating it never moves your scroll position. No more per-turn task cards.
+- **A step can be blocked.** `blocked` is a first-class task status, drawn distinctly and excluded from the finish gate, so a model that cannot complete a step can say so instead of leaving it pending forever.
+- **The checklist survives resume and reload.** Reopening a chat, or reloading the panel, restores the list as it stood; a new or cleared chat starts with none.
+
 ## 0.22.4 — 2026-09-13
 
 - **A finished goal stops being a pinned goal.** A completed objective stayed on the rail with a play button, so the obvious next click resumed work that was already done — and did exactly that to a real goal. Paused and blocked goals still offer Resume; completed ones unpin, and the transcript keeps the record.

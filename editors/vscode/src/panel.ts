@@ -1695,6 +1695,11 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
         this.mcpUrls.clear();
         be.send({ type: "cancel" });
         break;
+      case "clear_todos":
+        // The backend answers with an empty `todos` event, which is what empties the slot in
+        // the webview; while a turn runs it refuses, and the webview keeps the button disabled.
+        be.send({ type: "clear_todos" });
+        break;
       case "pauseGoal":
         await this.pauseGoal();
         break;
@@ -3834,6 +3839,10 @@ export class DgcViewProvider implements vscode.WebviewViewProvider {
 <div id="pop" class="pop" role="listbox" aria-label="Suggestions"></div>
 <div id="queued" role="status" aria-live="polite"></div>
 <footer>
+  <section id="tasks" class="todos" role="region" aria-label="Session tasks" hidden>
+    <div class="thead">Tasks <span id="tasks-count">0/0</span><button type="button" id="tasks-clear" class="rail-text-action" title="Drop every item from this chat’s checklist">Clear</button></div>
+    <div id="tasks-list"></div>
+  </section>
   <button type="button" id="workspace-changes" class="rail-text-action" title="Review all workspace changes since the last Git commit">Workspace changes</button>
   <div id="composer-rail" aria-label="Current work" hidden>
     <section id="changesbar" class="rail-item" aria-label="Changes in this chat" hidden>

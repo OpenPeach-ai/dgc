@@ -2593,9 +2593,6 @@
             },
             "request_id": {
               "type": "string"
-            },
-            "todos": {
-              "type": "array"
             }
           },
           "required": [

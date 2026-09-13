@@ -931,25 +931,32 @@
     expireOpenRequests();
     turn = null;
   }
-  // A checklist belongs to the session, not to a single assistant bubble. Keep one current
-  // projection, and restore it without inventing a running turn or starting a timer.
+  // A checklist belongs to the session, not to a single assistant bubble, so it is not a card
+  // in the transcript. It lives in the `#tasks` slot between the log and the composer, and every
+  // update — a `todos` event mid-turn, or the `history` snapshot on resume and reload — redraws
+  // that one slot without inventing a running turn or starting a timer. Nothing here scrolls the
+  // transcript or touches follow mode: the slot sits outside the scrollport, and a reader who
+  // scrolled up to check something must stay where they are while the list ticks over.
+  const TODO_GLYPHS = {
+    pending:     ["□", "pend",   "pending"],
+    in_progress: ["▶", "doing",  "in progress"],
+    done:        ["✓", "done",   "done"],
+    blocked:     ["⊘", "block",  "blocked"],
+    cancelled:   ["✗", "cancel", "cancelled"],
+  };
   function renderTodos(value) {
-    const rows = (Array.isArray(value) ? value : []).filter(t => t && typeof t.content === "string").slice(0, 100);
-    let card = log.querySelector(".todos");
-    if (!rows.length) { card?.remove(); return; }
-    if (!card) {
-      card = el("div", "todos");
-      card.setAttribute("role", "region");
-      card.setAttribute("aria-label", "Current task list");
-    }
-    const glyph = { pending: ["□", "pend"], in_progress: ["▶", "doing"], done: ["✓", "done"], cancelled: ["✗", "cancel"] };
-    const complete = rows.filter(t => t.status === "done").length;
-    card.innerHTML = `<div class="thead">Tasks <span>${complete}/${rows.length}</span></div>` +
-      rows.map(t => { const g = glyph[t.status] || glyph.pending;
-        return `<div class="t ${g[1]}"><span class="ti">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
-      }).join("");
-    log.appendChild(card);
-    scroll();
+    const rows = (Array.isArray(value) ? value : []).filter((t) => t && typeof t.content === "string").slice(0, 100);
+    const slot = $("tasks"), list = $("tasks-list"), count = $("tasks-count");
+    if (!rows.length) { list.innerHTML = ""; count.textContent = "0/0"; slot.hidden = true; return; }
+    // Blocked items are not done: the counter is the same one the backend's completion gate reads.
+    const complete = rows.filter((t) => t.status === "done").length;
+    count.textContent = `${complete}/${rows.length}`;
+    list.innerHTML = rows.map((t) => {
+      // Own keys only — a status of "constructor" must not fish a function out of the prototype.
+      const g = Object.hasOwn(TODO_GLYPHS, t.status) ? TODO_GLYPHS[t.status] : TODO_GLYPHS.pending;
+      return `<div class="t ${g[1]}"><span class="ti" role="img" aria-label="${g[2]}">${g[0]}</span><span class="tc">${esc(t.content)}</span></div>`;
+    }).join("");
+    slot.hidden = false;
   }
 
   function ensureTurn() { if (!turn) startTurn(); }
@@ -1827,6 +1834,9 @@
         if (["cleared", "new", "resumed"].includes(ev.kind)) {
           discardTurn(); log.innerHTML = ""; queuedCount = 0; renderQueued(); setSending(false);
         }
+        // A fresh chat has no checklist. A resumed one gets its list from the `history`
+        // snapshot that follows, so the slot is left for that event to overwrite.
+        if (ev.kind === "cleared" || ev.kind === "new") renderTodos([]);
         // A branch keeps the conversation on screen — that is the whole point of it.
         if (ev.kind === "forked") {
           sysLine(`Branched into a new chat${ev.name ? ` — ${ev.name}` : ""}. `
@@ -2109,10 +2119,9 @@
         });
         break;
       }
-      case "todos": {
+      case "todos":
         renderTodos(ev.todos);
-        break;
-      }
+        return;   // the transcript did not change: no follow scroll, no "New" on the pill
       case "artifact_ready": {
         ensureTurn();
         const c = el("div", "artifact"); c.dataset.artifactId = String(ev.id || "");
@@ -2278,12 +2287,15 @@
     document.querySelectorAll("[data-skill-mutation]").forEach(button => {
       button.disabled = on; button.title = on ? "Available after this turn finishes" : "";
     });
+    $("tasks-clear").disabled = on;
+    $("tasks-clear").title = on ? "Available after this turn finishes" : "Drop every item from this chat\u2019s checklist";
   }
   function doStop() { queuedCount = 0; renderQueued(); vscode.postMessage({ type: "cancel" }); }
   $("goal-toggle").onclick = () => vscode.postMessage({
     type: goalState.status === "active" ? "pauseGoal" : "resumeGoal",
   });
   $("goal-clear").onclick = () => vscode.postMessage({ type: "clearGoal" });
+  $("tasks-clear").onclick = () => vscode.postMessage({ type: "clear_todos" });
   $("goal-main").onclick = openGoalEditor;
   $("goal-edit").onclick = openGoalEditor;
   $("goal-review-button").onclick = openGoalReview;

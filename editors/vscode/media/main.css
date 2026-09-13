@@ -370,16 +370,23 @@ button.opt.selected { border-color: var(--accent); background: var(--sel); }
 .card.resolved { opacity: .5; box-shadow: none; border-color: var(--border-strong); }
 .card.resolved .btns { display: none; }
 
-/* todos */
+/* tasks — the session checklist. One slot in the footer, between the transcript and the
+   composer, so it neither scrolls away with the log nor lands as a card inside a turn. */
 .todos { border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); font: var(--w-reg) var(--t-sm)/1.6 var(--sans); background: var(--surface); color: var(--text); }
-.todos .thead { color: var(--faint); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 0; }
+.todos .thead { display: flex; align-items: center; gap: var(--sp-1); color: var(--faint); font: var(--w-semi) var(--t-xs)/1.6 var(--sans); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 0; }
 .todos .thead span { color: var(--muted); }
+/* A long list must not push the composer off the panel: the rows scroll, the header stays. */
+#tasks-list { max-height: min(30vh, 200px); overflow-y: auto; overscroll-behavior: contain; }
+#tasks-clear { margin-left: auto; min-height: 20px; font-size: var(--t-xs); letter-spacing: 0; text-transform: none; }
+#tasks-clear:disabled { color: var(--faint); cursor: default; }
 .todos .t { display: flex; gap: var(--sp-2); align-items: baseline; }
 .todos .t .ti { flex: none; width: 12px; text-align: center; }
 .todos .t .tc { min-width: 0; overflow-wrap: anywhere; }
 .todos .t.pend .ti { color: var(--muted); }
 .todos .t.doing { color: var(--text); font-weight: var(--w-semi); } .todos .t.doing .ti { color: #E0A24E; }
 .todos .t.done { color: var(--muted); text-decoration: line-through; } .todos .t.done .ti { color: #57C08A; }
+/* Blocked is a live state, not a finished one: plain text, and the glyph in the panel's alert hue. */
+.todos .t.block { color: var(--text); } .todos .t.block .ti { color: var(--err-text); }
 .todos .t.cancel { color: var(--faint); text-decoration: line-through; } .todos .t.cancel .ti { color: #DC5A64; }
 
 /* system lines */

@@ -48,7 +48,7 @@ from .agent import Agent
 from .commands import (canonical_command_name, command_pairs, command_pairs_with_custom,
                        resolve_command)
 from .config import persisted_mcp_args_safe, valid_remote_mcp_url
-from .redaction import redact_text, secret_values
+from .redaction import redact_text, redact_value, secret_values
 
 # The slash-command palette — name → one-line description. Drives both the `/` menu
 # (a live dropdown above the composer) and the /help listing. Order = most-reached first.
@@ -256,7 +256,9 @@ class AgentSession:
         self.workspace_branch = ""
         self._turn_marks: list[tuple[int, str]] = []
         self._suggestion: str | None = None
-        self._todos: list = list(getattr(self.agent, "todos", []))
+        # The rail is a redacted copy of the agent's list, like every other frontend view of it.
+        self._todos: list = redact_value(list(getattr(self.agent, "todos", []) or []),
+                                         secret_values(self.config))
         self._scroll_off = 0
         self._follow = True                # True = pin to the live bottom; a manual scroll-up drops it
         # a per-session cross-thread blocking request (approve / plan / options)
@@ -2257,8 +2259,11 @@ class TUI:
         """Render markdown into a scrollable reader overlay (shared by /docs and /view-plan)."""
         from rich.text import Text
         w = min(max(46, self._width - 6), 108) - 6           # ~= the panel's inner text width
+        # Both dimensions, like _console(): Rich falls back to 80 columns under TERM=dumb when
+        # only the width is given, so /docs and /view-plan wrapped for a terminal that was not there.
         c = Console(file=io.StringIO(), force_terminal=True, color_system=style_mod.rich_color_system(),
-                    width=max(20, w), highlight=False, theme=render_mod.markdown_theme())
+                    width=max(20, w), height=max(1, getattr(self, "_height", 25)), highlight=False,
+                    theme=render_mod.markdown_theme())
         c.print(render_mod.render_markdown(style_mod.terminal_safe_text(md)))
         ansi = _tui_ansi(c.file.getvalue())
         rows = [{"text": Text.from_ansi(ln), "label": ln} for ln in ansi.split("\n")]
@@ -2796,6 +2801,7 @@ class TUI:
         "pending":     ("SQUARE", "text",  "{text}"),
         "in_progress": ("PLAY",   "warn",  "bold {text}"),
         "done":        ("CHECK",  "ok",    "strike {faint}"),
+        "blocked":     ("BLOCKED", "err",  "{text}"),
         "cancelled":   ("CROSS",  "err",   "strike {faint}"),
     }
 
@@ -4508,6 +4514,22 @@ class TUI:
             self._append(self._rich(f"[bold {th.accent}]report a bug / request a feature[/]\n"
                                     f"  [{th.text}]https://github.com/OpenPeach-ai/dgc/issues[/]  "
                                     f"[{th.faint}](include your `dgc --version`)[/]"))
+        elif cmd == "todo":
+            # The checklist outlives the turn that wrote it. `/todo clear` is the exit for a list
+            # the model left behind or a resumed session brought back, short of a new chat.
+            if rest.strip().lower() == "clear":
+                # Through the agent's own callback, so the ETA estimator and every frontend see
+                # the same empty list; this pane's rail is dropped here as well, as /clear does,
+                # because the agent's callback is bound to the UI the agent was built with.
+                saved = self.agent.clear_todos()
+                self._todos = []
+                if saved:
+                    self._flash("todo list cleared")
+                else:
+                    self.error(self.agent._last_persist_error
+                               or "todo list cleared, but the session could not be saved")
+            else:
+                self._flash("usage: /todo clear")
         elif cmd == "clear":
             from . import sessions as _sess
             sess = self.active
@@ -4799,7 +4821,8 @@ class TUI:
         earlier turns are archived beside the session, so the seam offers them back instead of
         pretending they never happened.
         """
-        self._todos = list(getattr(self.agent, "todos", []))
+        self._todos = redact_value(list(getattr(self.agent, "todos", []) or []),
+                                   secret_values(self.config))
         th = style_mod.theme()
         segments = self._message_rows(self.agent.messages)
         for rows, brief in segments:

@@ -39,7 +39,9 @@ _KIND = {  # DGC tool -> ACP tool-call kind
     "web_fetch": "fetch", "web_search": "fetch",
     "todo": "think", "task": "think", "skill": "other", "save_memory": "other",
 }
-_TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed"}
+# ACP plan entries know pending | in_progress | completed; a blocked step is shown as pending.
+_TODO_STATUS = {"pending": "pending", "in_progress": "in_progress", "done": "completed",
+                "blocked": "pending"}
 MAX_ACP_FRAME_BYTES = 32 * 1024 * 1024
 MAX_ACP_PROMPT_BLOCKS = 256
 MAX_ACP_PROMPT_CHARS = 1_000_000
@@ -332,7 +334,10 @@ class ACPServer:
             agent.load_session(path)
             self._install_state(config.project_root, agent, ui)
             ui.replay(agent.messages)
-            ui.on_todo(agent.todos)
+            # The restored checklist is a plan update like any the todo tool sends; a session
+            # without one gets no empty plan frame.
+            if agent.todos:
+                ui.on_todo(redact_value(agent.todos, secret_values(config)))
             ui.available_commands(custom_command_names(config.project_root))
             self.respond(rid, {"modes": _mode_state(agent),
                                "goal": {"text": agent.goal, "status": agent.goal_status}})
