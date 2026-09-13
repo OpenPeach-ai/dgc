@@ -774,15 +774,93 @@ learns about later is scrubbed from turns archived earlier.
 The archive is bounded (`recall_max_bytes`, 512 KB by default) and drops the oldest turns first
 when it is full, saying so on the same line. Deleting a session deletes it too.
 
-- **/rewind** — restore both the code *and* the conversation to how they were at
-  a chosen turn. Exact conversation prefixes and project-root file snapshots are
-  saved with the private session, so rewind survives resume and context compaction.
-  Direct file-tool and integrated sub-agent changes are captured before mutation;
-  the edit is refused if that durable capture fails. Arbitrary shell writes are not
-  guaranteed rewindable, and approved external-path snapshots last only for the
-  current process so resume never gains ambient authority outside the project.
+- **/rewind** — restore both the code *and* the conversation to how they were at a chosen
+  turn. What a recovery point holds, what it cannot take back, and the editor's Undo are in
+  *Checkpoints & rewind*.
 """.strip()),
 
+    ("Checkpoints & rewind", "what a recovery point holds, /rewind, the editor's Undo, and what cannot come back", """
+# Checkpoints & rewind
+
+Every turn DGC runs itself opens a recovery point. `/rewind` takes the code *and* the
+conversation back to one of them.
+
+## When DGC takes one
+
+- **One per turn, before the model sees your message.** A standing goal that runs several work
+  cycles from one prompt opens one per cycle. A follow-up typed while a turn is running joins
+  that turn and does not open one of its own.
+- **Sub-agents do not open their own.** Their edits are captured into the parent turn's point —
+  as they happen in a shared checkout, or when an isolated worktree is integrated. `/tasks apply`
+  opens a point of its own.
+- **Turns delegated to a subscription CLI open none.** Claude Code, Codex, Qwen, Kimi and Copilot
+  edit files outside DGC's file tools, so there is nothing for DGC to snapshot.
+- **If the point cannot be saved, the turn does not start.** DGC refuses the prompt rather than
+  run a turn it could not take back.
+
+## What a point holds
+
+- **The exact conversation** up to just before that prompt — not a summary, and not a message
+  count that compaction can shift.
+- **Each file's pre-edit state**, taken the first time the turn's file tools (`write_file`,
+  `edit_file`, `multi_edit`, `apply_patch`) touch it: the exact bytes, the permission bits, a
+  symlink's target, or the fact that the file did not exist yet.
+- **Capture comes first.** The snapshot is saved to the session before the tool runs. If it
+  cannot be — the file changed while being read, the snapshot budget is spent, the turn has
+  already captured 4,096 files, the path is not a regular file, or the session could not be
+  re-saved — the edit is refused and the file is untouched.
+
+## Rewind in the terminal
+
+`/rewind` lists every point, oldest first: the opening 70 characters of the prompt as DGC
+received it (a point opened by `/tasks apply` reads *apply retained task ID*) and how many files
+it captured. Pick one and confirm — *Reverts N file(s) and truncates the conversation. This
+cannot be undone.* Files touched at that turn or any later one return to their earliest saved
+state (a file the turn created is deleted; any new directories it was created in are left
+behind), the conversation returns to just before that prompt, and that point and every later one
+are consumed. If any step fails, the files and the point are rolled back and kept.
+
+It always restores both — there is no code-only or conversation-only rewind, and no redo. It is
+refused while a turn is running: stop the turn (**Esc**) or let it finish, then run `/rewind`
+again. `dgc --classic` skips the confirmation. The standing goal, the todos and Context Notes
+stay as they were.
+
+## Undo in the editor
+
+**Undo**, on the files-changed card under an answer that edited files, finds the recovery point
+by the prompt that opened it, asks once, and performs the same rewind. A turn that changed no
+files shows no card — use `/rewind`. If no remaining point was opened by that prompt, Undo
+declines rather than guess; if the same prompt opened more than one point, it takes the most
+recent one — `/rewind` lets you pick another. `/rewind` in the editor lists every point and
+rewinds as soon as you pick one.
+
+## Keep both with /branch
+
+`/branch` (`/fork`) is the non-destructive alternative: a new chat that carries the conversation,
+the standing goal, the todos and the recovery points, while the chat you came from stays as it
+stands (its `/recall` archive of compacted turns stays with it). Nothing is reverted. The editor
+offers it under a finished answer.
+
+## What is not rewindable
+
+- **Shell writes.** `bash`, the Python code-action, MCP tools, `save_memory` (your project's
+  `DGC.md`) and `add_skill` are never snapshotted. A file a shell command changed comes back
+  only to the state a file tool later found it in: if a file tool snapshotted it before the shell
+  ran, the shell's change is undone; if the shell ran first, that change stays.
+- **Files outside the project.** An approved external path is rewindable in the current process
+  only; its snapshot is never saved with the session.
+- **A moved project.** Points are bound to the directory they were saved from and do not load
+  after a move or rename — and the first prompt in the moved directory saves over them, so they
+  are gone for good. Move the project back before resuming if you need them.
+
+## Where they live
+
+Points are saved inside the session itself, re-saved the moment a point opens and the moment a
+file is first captured, so they survive `/resume` and context compaction. There is no time
+limit: the newest 512 points are kept, up to 4,096 files each, within 128 MB of snapshots in
+total. Redaction rewrites the conversation each point holds; file snapshots stay byte-for-byte
+as captured, because they are the rollback data.
+""".strip()),
     ("Training export", "your real sessions → scrubbed fine-tuning JSONL", """
 # Training export
 

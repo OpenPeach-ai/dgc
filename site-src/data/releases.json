@@ -11,7 +11,7 @@
       "notes": [
         "/diff: every changed file, its counts and its diff, live under the transcript. The focus pane gains a second occupant beside /files: a read-only view of the working tree against HEAD — staged and untracked files included — with +/− line counts per file, the set summed in the header, and a unified diff with new-side line numbers. It re-reads Git every two seconds while open, so the model's edits appear as they land, and it never writes, stages or runs a shell command.",
         "Lines you select in a diff become part of your next prompt. Space starts a selection, Enter attaches it to the composer as a fenced diff block headed by the file and line range, and a takes the whole hunk — so \"why did you change these two lines?\" quotes exactly those two lines and nothing else about the file enters the model's context. Wide terminals show the list and the diff side by side; narrow ones swap between them with Tab.",
-        "Documented on its own page (Diff pane), in the keyboard cheatsheet, and in the slash-command reference; /diff PATH opens straight into one file."
+        "Two documentation pages join the guide: Diff pane, and Checkpoints & rewind — the restore points DGC has taken before every edit all along, /rewind for code and conversation, the editor's Undo, and /branch, written up as one feature. /diff also appears in the keyboard cheatsheet and the slash-command reference; /diff PATH opens straight into one file."
       ]
     },
     {
