@@ -1132,13 +1132,30 @@ class Backend:
             self._emit_context()
         return terminal
 
-    def close(self) -> None:
-        """Cancel foreground work and release pending controller decisions on backend exit."""
+    def close(self, grace_s: float = 0.0) -> str:
+        """Stop foreground work and release pending controller decisions on backend exit.
+
+        A turn in flight is given `grace_s` to reach its next safe boundary before it is cancelled
+        outright: the tool that is running finishes, its result is appended, the session is
+        persisted, and the turn ends itself. Losing a pipe then costs seconds of work instead of
+        the whole turn — which is what it cost when the only shutdown we had was an immediate
+        cancel. The wait is bounded because the next backend is already starting and must not find
+        this session held. Returns a short word for the log: idle, landed, or cancelled.
+        """
         inspection = getattr(self, "_editor_inspection", None)
         if inspection is not None:
             inspection.close()
+        self.agent.stopping = True              # the process is going down, nobody pressed stop
+        outcome = "idle"
+        if grace_s > 0 and self._busy():
+            outcome = "cancelled"
+            deadline = time.monotonic() + grace_s
+            while time.monotonic() < deadline:
+                if not self._busy():
+                    outcome = "landed"
+                    break
+                time.sleep(0.1)
         with self._turn_state_lock():
-            self.agent.stopping = True          # the process is going down, nobody pressed stop
             self.agent.cancelled.set()
             self._queue.clear()
             workers = [getattr(self, "_worker", None),
@@ -1150,6 +1167,7 @@ class Backend:
         manager = getattr(self.agent, "mcp", None)
         if manager is not None:
             manager.stop_all()
+        return outcome
 
     def _start_eta_ticker(self, turn_id: str) -> threading.Event:
         """Publish `turn_eta` while the estimate changes; a stopped event ends it before turn_end."""
@@ -2497,6 +2515,12 @@ def _log_crash(handle, label: str, exc: BaseException | None = None) -> None:
         pass
 
 
+# How long a turn gets to reach its next safe boundary when the editor's pipe closes under it.
+# Long enough for a normal tool call to finish and the session to be written; short enough that
+# the replacement backend, which the editor starts within a second or two, never waits on us.
+SHUTDOWN_GRACE_S = 20.0
+
+
 def serve(config: Config) -> None:
     """Run the headless backend: emit `ready`, then loop over stdin commands until EOF/shutdown."""
     crash_log = _open_crash_log(config)
@@ -2567,8 +2591,11 @@ def serve(config: Config) -> None:
         _log_crash(crash_log, f"serve loop ended: {cause}; up {time.monotonic() - started_at:.0f}s, "
                               f"{commands} commands, last {last_command or 'none'!r}, turn running: {busy}")
     finally:
-        backend.close()
-        _log_crash(crash_log, "backend closed cleanly")
+        # An editor asking us to stop is waiting on us; a pipe that closed under a running turn is
+        # not. Only the second case gets the grace period.
+        grace = 0.0 if shutdown_requested else SHUTDOWN_GRACE_S
+        outcome = backend.close(grace_s=grace)
+        _log_crash(crash_log, f"backend closed cleanly (work in flight: {outcome})")
         if crash_log is not None:
             try: crash_log.close()
             except Exception: pass

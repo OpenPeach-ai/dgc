@@ -11,6 +11,8 @@ import os
 import pwd
 import subprocess
 import sys
+import threading
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -160,6 +162,80 @@ class PlanHandoffPromptTests(unittest.TestCase):
         from dgc.presentation import RESPONSE_GUIDANCE
         self.assertIn("finish that part", RESPONSE_GUIDANCE)
         self.assertIn("whether to continue", RESPONSE_GUIDANCE)
+
+
+class GracefulShutdownTests(unittest.TestCase):
+    """A closed pipe should cost seconds of work, not the turn."""
+
+    def backend(self):
+        from dgc.headless import Backend, HeadlessUI, PendingRequests
+        from dgc.protocol import Emitter
+        import io, types
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-grace-")
+        self.addCleanup(tmp.cleanup)
+        cfg = Config()
+        cfg.project_root = Path(tmp.name)
+        cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "default"})
+        events = []
+        emitter = types.SimpleNamespace(
+            emit=lambda t, **d: events.append({"type": t, **d}))
+        ui = HeadlessUI(emitter, PendingRequests(), 300.0)
+        backend = object.__new__(Backend)
+        backend.agent = Agent(cfg, ui)
+        self.addCleanup(backend.agent.mcp.stop_all)
+        backend.config, backend.em = cfg, emitter
+        backend._queue = []
+        backend._worker = None
+        backend._foreground_worker = None
+        backend.pending = PendingRequests()
+        backend._turn_state_lock = lambda: threading.RLock()
+        return backend, events
+
+    def test_an_idle_backend_closes_at_once(self):
+        backend, _ = self.backend()
+        backend._busy = lambda: False
+        start = time.monotonic()
+        self.assertEqual(backend.close(grace_s=5), "idle")
+        self.assertLess(time.monotonic() - start, 1.0)
+        self.assertTrue(backend.agent.stopping)
+
+    def test_work_that_lands_inside_the_grace_is_not_cancelled(self):
+        backend, _ = self.backend()
+        busy = {"value": True}
+        backend._busy = lambda: busy["value"]
+        threading.Timer(0.4, lambda: busy.__setitem__("value", False)).start()
+        self.assertEqual(backend.close(grace_s=5), "landed")
+
+    def test_work_that_overruns_the_grace_is_cancelled(self):
+        backend, _ = self.backend()
+        backend._busy = lambda: True
+        start = time.monotonic()
+        self.assertEqual(backend.close(grace_s=0.5), "cancelled")
+        self.assertGreaterEqual(time.monotonic() - start, 0.5)
+        self.assertTrue(backend.agent.cancelled.is_set())
+
+    def test_the_turn_loop_lands_instead_of_starting_another_request(self):
+        tmp = tempfile.TemporaryDirectory(prefix="dgc-grace-turn-")
+        self.addCleanup(tmp.cleanup)
+        cfg = Config()
+        cfg.project_root = Path(tmp.name)
+        cfg.data.update({"model": "fixture", "base_url": "http://fixture", "mode": "default"})
+        agent = Agent(cfg, QuietUI())
+        self.addCleanup(agent.mcp.stop_all)
+        agent.session_file = sessions.new_path(Path(tmp.name))
+        requests = []
+
+        def fake_chat(*a, **k):
+            requests.append(1)
+            agent.stopping = True                     # the pipe closes while this call is in flight
+            from dgc.llm import ChatResult
+            return ChatResult(content="", tool_calls=[], finish_reason="tool_calls")
+        agent._chat = fake_chat
+        ok = agent.run_turn("do the thing")
+        self.assertFalse(ok)
+        self.assertEqual(len(requests), 1, "no second model request after the pipe closed")
+        self.assertIn("backend was shut down mid-turn", agent._last_turn_error)
+        self.assertIn("saved", agent._last_turn_error)
 
 
 if __name__ == "__main__":

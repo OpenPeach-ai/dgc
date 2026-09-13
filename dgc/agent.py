@@ -2974,6 +2974,18 @@ class Agent(GoalLifecycle):
                         "completion withheld — the turn was cancelled before verification")
                 self.ui.info("turn cancelled")
                 return False
+            if self.stopping:
+                # The editor's pipe closed under us. Everything this turn has done is already in
+                # the transcript and the checkpoint, and run_turn persists on the way out — so the
+                # honest move is to land here rather than start a model request whose answer
+                # nobody will receive, while holding the session the next backend is about to open.
+                if held_final_messages:
+                    withhold_final(
+                        "[Completion withheld by DGC: the backend stopped before verification.]",
+                        "completion withheld — the backend stopped before verification")
+                return self._fail_turn(
+                    "stopped — DGC's backend was shut down mid-turn; the work up to here is saved, "
+                    "and resuming continues from it")
             if deadline is not None and (deadline - time.monotonic()) <= 0.06 * budget:
                 # ~94% of the budget spent → stop before the external kill; restore the last version that
                 # passed so the on-disk files are self-consistent (a mid-grind kill would leave 0 credit).

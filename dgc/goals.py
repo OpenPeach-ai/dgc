@@ -558,6 +558,8 @@ class GoalLifecycle:
                 if not self._persist():
                     self._last_turn_error = self._last_persist_error
                     return {**result, "ok": False} if isinstance(result, dict) else False
+                if self.stopping:                    # the backend is going down between cycles
+                    return finish("paused", result, reason=self._cancel_reason())
                 self._notify_goal()
                 self.ui.info(f"Continuing goal · work cycle {details['cycles'] + 1}")
                 refusal = str(getattr(self, "_goal_refusal_note", "") or "")
