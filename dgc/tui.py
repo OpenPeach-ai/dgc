@@ -351,7 +351,8 @@ class TUI:
     def __init__(self, config, agent=None):
         self._fleet_root = Path(config.project_root).resolve(strict=False)
         self.config = config
-        style_mod.set_theme(config.get("theme", "dark"))
+        from . import termbg
+        termbg.configure(config)
         # the fleet: one active AgentSession now; /dashboard spawns + switches more. Every
         # per-conversation field (agent, blocks, _buf, _turn, _todos, _req, …) is an _active_prop
         # that reads/writes the ACTIVE session, so the rest of the TUI is untouched.
@@ -581,7 +582,7 @@ class TUI:
         ],
         "Display": [
             ("theme", "Theme", "enum", ["auto", "dark", "light"]),
-            ("background", "Background", "enum", ["auto", "dark", "inherit"]),
+            ("background", "Background", "enum", ["auto", "dark", "light", "inherit"]),
             ("show_reasoning", "Show reasoning", "bool"),
             ("preserve_thinking", "Preserve thinking in context", "bool"),
             ("logo_animation", "Animate logo", "bool"),
@@ -663,8 +664,8 @@ class TUI:
             reopen = lambda: self._open_settings_cat(cat)
             self._request_mode(str(val), after=reopen, on_cancel=reopen)
             return
-        elif key == "theme":
-            self._handle_slash(f"/theme {val}")
+        elif key in ("theme", "background"):
+            self._handle_slash(f"/{'bg' if key == 'background' else 'theme'} {val}")
         else:
             self.config.set(key, val)
             if key in self._CLIENT_KEYS:
@@ -3521,6 +3522,14 @@ class TUI:
             return ANSI(f" {style_mod.ansi_fg(th.accent)}{glyphs.ARROW}{style_mod.ANSI_RESET} ")
         return "   "
 
+    def _refresh_appearance(self) -> None:
+        self._ft_cache = {}
+        self._pane_render_cache = None
+        self._live_answer_cache = None
+        if getattr(self, "app", None) is not None:
+            self.app.style = self._pt_style()
+            self.app.invalidate()
+
     def _pt_style(self):
         from prompt_toolkit.styles import Style
         th = style_mod.theme()
@@ -4223,8 +4232,10 @@ class TUI:
                         self._request_mode(val)
                     else:
                         self._flash("mode must be one of: default · acceptEdits · plan · auto")
-                elif key == "theme":                         # route through /theme (repaints)
-                    self._handle_slash(f"/theme {val}")
+                elif key in ("theme", "background"):
+                    if val in ("", "default", "none"):
+                        val = str(DEFAULTS[key])
+                    self._handle_slash(f"/{'bg' if key == 'background' else 'theme'} {val}")
                 else:
                     dflt = DEFAULTS[key]
                     try:
@@ -4274,19 +4285,13 @@ class TUI:
             self._tui_tasks(rest)
         elif cmd in ("bg", "background"):
             val = rest.strip().lower()
-            if val not in ("auto", "dark", "inherit"):
-                self._flash(f"background: {cfg.get('background', 'auto')} — /bg auto|dark|inherit")
+            from . import termbg
+            if not termbg.switch(cfg, val):
+                self._flash(f"background: {cfg.get('background', 'inherit')} — /bg auto|dark|light|inherit")
             else:
-                cfg.set("background", val)
-                from . import termbg
-                if val == "dark":
-                    import sys
-                    sys.stdout.write(f"\x1b]10;{th.text}\x07\x1b]11;{th.bg}\x07"); sys.stdout.flush()
-                    termbg._applied = True; self._flash("background → dark")
-                elif val == "inherit":
-                    termbg.reset(); self._flash("background → inherit")
-                else:
-                    self._flash("background → auto (applies on next launch)")
+                self._refresh_appearance()
+                self._flash(f"background → {cfg.get('background')}"
+                            + (" (applies on next launch)" if val == "auto" else ""))
         elif cmd == "sandbox":
             from . import sandbox
             val = rest.strip().lower()
@@ -4407,8 +4412,13 @@ class TUI:
                 self._flash(f"exported {summary['written']} session(s) → {summary['out']} "
                             f"({summary['skipped']} skipped, secrets scrubbed)")
         elif cmd == "theme":
+            from . import termbg
             val = rest or ("light" if cfg.get("theme") == "dark" else "dark")
-            cfg.set("theme", val); style_mod.set_theme(val); self._flash(f"theme → {val}")
+            if not termbg.switch_theme(cfg, val.lower()):
+                self._flash("choose /theme auto|dark|light")
+            else:
+                self._refresh_appearance()
+                self._flash(f"theme → {val}")
         elif cmd == "context":
             self._open_context_popup()          # the top-right chip's details popup
         elif cmd == "compact":
@@ -6337,8 +6347,8 @@ def _tui_help() -> str:
                           ("/think off|low|medium|high|xhigh", "reasoning effort · subscriptions also max"),
                           ("/ultra on|off", "deepest reasoning + bounded parallel agents")]),
         ("settings", [("/mode <mode>", "default · acceptEdits · plan · auto (Shift+Tab cycles)"),
-                      ("/bg auto|dark|inherit", "background (dark = force on a light terminal)"),
-                      ("/theme dark|light", "colour theme"),
+                      ("/bg auto|dark|light|inherit", "terminal background; restored on exit"),
+                      ("/theme auto|dark|light", "colour theme"),
                       ("/sandbox on|off", "strongest supported OS shell boundary; network off by default"),
                       ("/context", "context usage"), ("/compact", "summarise old turns now")]),
         ("inspect", [("/status", "model · host · mode · context · session"),

@@ -1,10 +1,9 @@
-"""Repaint a light terminal dark for the session — like a full-screen coding TUI does.
+"""Apply a terminal appearance for the session and restore the host's colors on exit.
 
-prompt_toolkit won't reliably fill empty cells with a background, so on a LIGHT terminal (a
-phone SSH client that defaults to white, a light desktop theme) we set the terminal's own
-default colours dark via OSC 10/11 for the duration of the session and reset them on exit.
-An already-dark terminal is left untouched, so we never draw a mismatched dark rectangle.
-Config `background`: auto (detect + repaint only if light) | dark (always) | inherit (never).
+Forced dark/light modes pair the terminal's default foreground and background via OSC
+10/11, so blank cells and prompt_toolkit content share a readable canvas. Inherit leaves
+the host's colors intact. Auto retains the legacy light-terminal darkening on launch.
+Config `background`: auto (darken a light terminal) | dark | light | inherit (never repaint).
 """
 from __future__ import annotations
 
@@ -13,6 +12,46 @@ import sys
 from . import style as style_mod
 
 _applied = False
+_inherited_theme = "dark"
+BACKGROUNDS = ("auto", "dark", "light", "inherit")
+
+
+def configure(config) -> None:
+    """Choose readable colors before the frontend builds its first frame."""
+    global _inherited_theme
+    if not _applied:
+        style_mod.set_theme(config.get("theme", "auto"))
+        _inherited_theme = style_mod.theme().name
+    preferred = str(config.get("background", "inherit"))
+    if preferred in ("dark", "light"):
+        style_mod.set_theme(preferred)
+
+
+def switch(config, preferred: str) -> bool:
+    """Apply a live choice without querying stdin inside the active TUI."""
+    preferred = "light" if preferred == "white" else preferred
+    if preferred not in BACKGROUNDS:
+        return False
+    config.set("background", preferred)
+    reset()
+    requested = str(config.get("theme", "auto"))
+    style_mod.set_theme(preferred if preferred in ("dark", "light") else
+                        (_inherited_theme if requested == "auto" else requested))
+    if preferred in ("dark", "light"):
+        apply(config)
+    return True
+
+
+def switch_theme(config, preferred: str) -> bool:
+    """Keep an explicit canvas and its text palette in sync, without consuming TUI input."""
+    if preferred not in ("auto", "dark", "light"):
+        return False
+    config.set("theme", preferred)
+    if config.get("background") in ("dark", "light"):
+        switch(config, "inherit" if preferred == "auto" else preferred)
+    else:
+        style_mod.set_theme(_inherited_theme if preferred == "auto" else preferred)
+    return True
 
 
 def _terminal_is_light() -> bool:
@@ -51,15 +90,16 @@ def _terminal_is_light() -> bool:
 
 
 def apply(config) -> None:
-    """Set the terminal dark for the session if configured/needed. Idempotent."""
+    """Set both default colors together so forced backgrounds stay readable. Idempotent."""
     global _applied
     if _applied or not (sys.stdout.isatty() and sys.stdin.isatty()):
         return
-    pref = str(config.get("background", "auto")) if config else "auto"
+    pref = str(config.get("background", "inherit")) if config else "inherit"
     if pref == "inherit":
         return
-    force = pref == "dark" or (pref == "auto" and _terminal_is_light())
+    force = pref in ("dark", "light") or (pref == "auto" and _terminal_is_light())
     if force:
+        style_mod.set_theme("light" if pref == "light" else "dark")
         th = style_mod.theme()
         try:
             sys.stdout.write(f"\x1b]10;{th.text}\x07\x1b]11;{th.bg}\x07")

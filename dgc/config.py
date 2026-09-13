@@ -371,7 +371,7 @@ DEFAULTS: dict = {
     "plan_artifact": True,                      # render every proposed plan as a sanitized loopback-only page
     "artifact_in_plan": False,                  # expose the arbitrary project artifact tool in read-only plan
     #                                             mode; independent of the safe automatic plan page
-    "background": "inherit",                    # inherit (never repaint — respect the terminal) | auto | dark
+    "background": "inherit",                    # inherit (respect terminal) | auto | dark | light
     "sandbox": False,                           # OS-confine bash; approval policy remains independent
     "sandbox_network": False,                   # deny sandboxed bash network unless explicitly enabled
     "sandbox_env_allow": [],                    # extra parent env names; runtime injection vars stay blocked

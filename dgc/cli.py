@@ -600,7 +600,8 @@ class ClassicSlashCompleter(Completer):
 class CLI:
     def __init__(self, config: Config, ui=None):
         self.config = config
-        style_mod.set_theme(config.get("theme", "dark"))   # honour the saved theme
+        from . import termbg
+        termbg.configure(config)
         self.ui = ui if ui is not None else UI()
         self.ui._rule_hook = self._add_rule
         self.agent = Agent(config, self.ui)
@@ -1027,11 +1028,18 @@ class CLI:
         elif cmd == "context":
             used, size = self.agent.estimate_tokens(), self._context_window_size()
             self.console.print("  [bold]context[/bold]  ", render.context_bar(used, size), highlight=False)
+        elif cmd in ("bg", "background"):
+            from . import termbg
+            if termbg.switch(cfg, rest.strip().lower()):
+                self.ui.info(f"background → {cfg.get('background')}"
+                             + (" (applies on next launch)" if cfg.get("background") == "auto" else ""))
+            else:
+                self.ui.info(f"background: {cfg.get('background', 'inherit')} · /bg auto|dark|light|inherit")
         elif cmd == "theme":
+            from . import termbg
             if not rest:
-                self.ui.info(f"theme: {style_mod.theme().name}  ·  available: {', '.join(style_mod.THEMES)}")
-            elif style_mod.set_theme(rest.strip()):
-                cfg.set("theme", rest.strip())
+                self.ui.info(f"theme: {style_mod.theme().name}  ·  available: auto, dark, light")
+            elif termbg.switch_theme(cfg, rest.strip().lower()):
                 self.banner()
             else:
                 self.ui.error(f"unknown theme {rest!r} — choose from {', '.join(style_mod.THEMES)}")

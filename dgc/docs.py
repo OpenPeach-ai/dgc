@@ -1531,8 +1531,14 @@ Useful keys:
   **Python code-action** guide. It executes arbitrary code and is gated by the same approval path as
   `bash` (asked in default/acceptEdits, denied in plan), but is not wrapped by `/sandbox`,
   checkpointed, or mutation-tracked for verifier reuse. It is never shown until you opt in.
-- `theme`, `background` — appearance (`background` defaults to *inherit*, never
-  repainting your terminal).
+- `theme`, `background` — appearance. `background` defaults to **inherit**, keeping
+  your terminal's own canvas. `/bg light` (also `/bg white`) sets a white canvas with
+  dark text; `/bg dark` sets a dark canvas with light text. Both apply immediately
+  in the TUI and classic CLI, and restore the terminal's defaults on exit.
+  `/bg inherit` restores the host colors immediately. `/bg auto` takes effect on
+  the next launch and darkens a light terminal. The same choices are in
+  **Settings → Display → Background**. `/theme auto|dark|light` chooses the text
+  palette; when a background is forced, it follows that choice to stay readable.
 - `suggest` — ghost-text next-prompt suggestions (Tab/→ to accept). Auxiliary title/suggestion
   requests wait for fleet-wide idle time and are canceled before foreground work;
   `aux_idle_delay_ms` controls the grace period.
